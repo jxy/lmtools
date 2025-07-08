@@ -70,13 +70,16 @@ func run() error {
 
 	// Configure retry
 	retryConfig := argo.RetryConfig{
-		MaxAttempts:  cfg.Retries,
-		InitialDelay: cfg.BackoffTime,
-		MaxDelay:     30 * time.Second,
-		Multiplier:   2.0,
+		MaxAttempts:       cfg.Retries,
+		InitialDelay:      cfg.BackoffTime,
+		MaxDelay:          30 * time.Second,
+		Multiplier:        2.0,
+		JitterFactor:      0.0, // No jitter by default
+		RespectRetryAfter: true,
+		RequestTimeout:    cfg.RequestTimeout,
 	}
 
-	resp, err := argo.SendRequestWithRetry(ctx, client, req, retryConfig)
+	resp, err := argo.SendRequestWithRetry(ctx, client, req, body, retryConfig)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}

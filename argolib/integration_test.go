@@ -38,9 +38,9 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	client := NewHTTPClient(cfg.Timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
-	resp, err := SendRequest(ctx, client, req)
+	resp, err := SendRequestWithTimeout(ctx, client, req, cfg.Timeout)
 	if err != nil {
-		t.Fatalf("SendRequest(embed) failed: %v", err)
+		t.Fatalf("SendRequestWithTimeout(embed) failed: %v", err)
 	}
 	out, err := HandleResponse(ctx, cfg, resp)
 	if err != nil {
@@ -56,9 +56,9 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRequest(chat) failed: %v", err)
 	}
-	resp, err = SendRequest(ctx, client, req)
+	resp, err = SendRequestWithTimeout(ctx, client, req, cfg.Timeout)
 	if err != nil {
-		t.Fatalf("SendRequest(chat) failed: %v", err)
+		t.Fatalf("SendRequestWithTimeout(chat) failed: %v", err)
 	}
 	out, err = HandleResponse(ctx, cfg, resp)
 	if err != nil {

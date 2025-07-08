@@ -74,16 +74,17 @@ func TestParseFlagsCustom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := Config{
-		Model:       "modelA",
-		StreamChat:  true,
-		LogDir:      defaultLogDir,
-		User:        "alice",
-		System:      "sys",
-		Env:         "dev",
-		Timeout:     10 * time.Minute,
-		LogLevel:    DefaultLogLevel,
-		Retries:     3,               // Default value
-		BackoffTime: 1 * time.Second, // Default value
+		Model:          "modelA",
+		StreamChat:     true,
+		LogDir:         defaultLogDir,
+		User:           "alice",
+		System:         "sys",
+		Env:            "dev",
+		Timeout:        10 * time.Minute,
+		LogLevel:       DefaultLogLevel,
+		Retries:        3,                // Default value
+		BackoffTime:    1 * time.Second,  // Default value
+		RequestTimeout: 10 * time.Minute, // Defaults to Timeout
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("ParseFlags = %+v; want %+v", cfg, want)

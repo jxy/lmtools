@@ -34,8 +34,8 @@ func TestHTTPClientTimeouts(t *testing.T) {
 		t.Fatal("Transport is not *http.Transport")
 	}
 
-	if transport.ResponseHeaderTimeout != 10*time.Second {
-		t.Errorf("ResponseHeaderTimeout = %v; want %v", transport.ResponseHeaderTimeout, 10*time.Second)
+	if transport.ResponseHeaderTimeout != 0 {
+		t.Errorf("ResponseHeaderTimeout = %v; want %v", transport.ResponseHeaderTimeout, 0)
 	}
 
 	if transport.TLSHandshakeTimeout != TLSHandshakeTimeout {

@@ -23,7 +23,7 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 		// Timeout settings
 		TLSHandshakeTimeout:   TLSHandshakeTimeout,
 		ExpectContinueTimeout: ExpectTimeout,
-		ResponseHeaderTimeout: 10 * time.Second,
+		ResponseHeaderTimeout: 0, // Disabled - rely on client/request timeouts instead
 		DisableKeepAlives:     false,
 	}
 
@@ -33,9 +33,18 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// SendRequest sends the HTTP request using the provided client and context.
-// It attaches the context to the request before sending.
-func SendRequest(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
+// SendRequestWithTimeout sends an HTTP request with a timeout if context lacks deadline
+func SendRequestWithTimeout(ctx context.Context, client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, error) {
+	// Check if context already has a deadline
+	_, hasDeadline := ctx.Deadline()
+
+	if !hasDeadline && timeout > 0 {
+		// Create new context with timeout
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	req = req.WithContext(ctx)
 	return client.Do(req)
 }

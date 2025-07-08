@@ -15,18 +15,19 @@ func getDefaultUser() string {
 }
 
 type Config struct {
-	Model       string        // model to use
-	Embed       bool          // whether to run in embed mode
-	StreamChat  bool          // whether to use streaming chat mode
-	PromptChat  bool          // whether to use 'prompt' instead of 'messages' for chat
-	LogDir      string        // directory for log files
-	User        string        // user identifier
-	System      string        // system prompt for chat
-	Env         string        // environment (prod|dev|custom base URL)
-	Timeout     time.Duration // HTTP request timeout
-	LogLevel    string        // log level (info|debug)
-	Retries     int           // number of retry attempts
-	BackoffTime time.Duration // initial retry backoff time
+	Model          string        // model to use
+	Embed          bool          // whether to run in embed mode
+	StreamChat     bool          // whether to use streaming chat mode
+	PromptChat     bool          // whether to use 'prompt' instead of 'messages' for chat
+	LogDir         string        // directory for log files
+	User           string        // user identifier
+	System         string        // system prompt for chat
+	Env            string        // environment (prod|dev|custom base URL)
+	Timeout        time.Duration // HTTP request timeout
+	LogLevel       string        // log level (info|debug)
+	Retries        int           // number of retry attempts
+	BackoffTime    time.Duration // initial retry backoff time
+	RequestTimeout time.Duration // Per-request timeout (enforced per request)
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -63,6 +64,10 @@ func ParseFlags(args []string) (Config, error) {
 	fs.IntVar(&cfg.Retries, "retries", 3, "number of retry attempts for failed requests")
 	fs.DurationVar(&cfg.BackoffTime, "backoff", 1*time.Second, "initial retry backoff time")
 
+	// Request timeout - defaults to 0 which means use the main timeout
+	fs.DurationVar(&cfg.RequestTimeout, "request-timeout", 0,
+		"timeout for individual requests (defaults to --timeout value)")
+
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
@@ -86,6 +91,11 @@ func ParseFlags(args []string) (Config, error) {
 	// Validate user is provided
 	if cfg.User == "" {
 		return cfg, fmt.Errorf("user identifier (-u) is required")
+	}
+
+	// If RequestTimeout is not set (0), default to the main Timeout
+	if cfg.RequestTimeout == 0 {
+		cfg.RequestTimeout = cfg.Timeout
 	}
 
 	return cfg, nil
@@ -118,8 +128,9 @@ Logging:
   -log-level      Log level: %s (default: %q)
 
 Retry:
-  -retries int    Number of retry attempts for failed requests (default: 3)
-  -backoff dur    Initial retry backoff time (default: 1s)
+  -retries int         Number of retry attempts for failed requests (default: 3)
+  -backoff dur         Initial retry backoff time (default: 1s)
+  -request-timeout dur Timeout for individual requests (defaults to --timeout value)
 
 Examples:
   # Chat with default model

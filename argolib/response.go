@@ -14,7 +14,11 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 	if resp.StatusCode != http.StatusOK {
 		// Read limited body for error message
 		limitedBody := io.LimitReader(resp.Body, 1024) // 1KB limit
-		errorData, _ := io.ReadAll(limitedBody)
+		errorData, err := io.ReadAll(limitedBody)
+		if err != nil {
+			Debugf("failed to read error response body: %v", err)
+			errorData = []byte("failed to read error response")
+		}
 		return "", &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       string(errorData),

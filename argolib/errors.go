@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Exit codes
@@ -30,12 +31,34 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
 }
 
+// RetryInfo contains metadata for retry operations
+type RetryInfo struct {
+	After  time.Duration // How long to wait before retry
+	Reason string        // Human-readable reason
+}
+
+// RetryableError represents an error that can be retried
+type RetryableError struct {
+	HTTPStatus int
+	Body       string
+	RetryInfo  RetryInfo
+}
+
+func (e *RetryableError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.HTTPStatus, e.Body)
+}
+
 // IsRetryableError determines if an error should be retried
 func IsRetryableError(err error) bool {
+	var retryErr *RetryableError
+	if errors.As(err, &retryErr) {
+		return retryErr.HTTPStatus >= 500 || retryErr.HTTPStatus == 429 || retryErr.HTTPStatus == 503
+	}
+
 	var httpErr *HTTPError
 	if errors.As(err, &httpErr) {
 		// Retry on server errors and rate limiting
-		return httpErr.StatusCode >= 500 || httpErr.StatusCode == 429
+		return httpErr.StatusCode >= 500 || httpErr.StatusCode == 429 || httpErr.StatusCode == 503
 	}
 
 	// Retry on network errors
