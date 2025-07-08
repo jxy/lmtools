@@ -21,6 +21,9 @@ const (
 	ExitInterrupted  = 130 // Standard for SIGINT
 )
 
+// ErrInterrupted is returned when an operation is interrupted by a signal
+var ErrInterrupted = errors.New("interrupted by signal")
+
 // HTTPError represents an HTTP error response
 type HTTPError struct {
 	StatusCode int
@@ -81,6 +84,11 @@ func GetExitCode(err error) int {
 		case httpErr.StatusCode >= 500:
 			return ExitNetworkError
 		}
+	}
+
+	// Check for interruption
+	if errors.Is(err, ErrInterrupted) {
+		return ExitInterrupted
 	}
 
 	// Check for context errors

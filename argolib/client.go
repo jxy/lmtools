@@ -33,13 +33,31 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// SendRequestWithTimeout sends an HTTP request with a timeout if context lacks deadline
-// Returns the response and a cancel function that should be called after the response body is read
+// SendRequestWithTimeout sends an HTTP request with a timeout if context lacks deadline.
+// Returns the response and a cancel function that should be called after the response body is read.
+//
+// The returned cancelFunc is nil if the supplied ctx already had a deadline.
+// When non-nil, the caller MUST invoke it after finishing with the response body.
+// The cancel function is idempotent but should not be called multiple times.
+//
+// Example usage:
+//
+//	resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 30*time.Second)
+//	if err != nil {
+//	    return err
+//	}
+//	defer func() {
+//	    if cancel != nil {
+//	        cancel()
+//	    }
+//	}()
+//	// Read response body here
 func SendRequestWithTimeout(ctx context.Context, client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, context.CancelFunc, error) {
 	// Check if context already has a deadline
 	_, hasDeadline := ctx.Deadline()
 
 	var cancel context.CancelFunc
+	// Only add timeout if context lacks deadline and timeout is positive
 	if !hasDeadline && timeout > 0 {
 		// Create new context with timeout
 		ctx, cancel = context.WithTimeout(ctx, timeout)

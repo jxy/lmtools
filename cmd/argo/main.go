@@ -80,7 +80,7 @@ func run() error {
 		Multiplier:        2.0,
 		JitterFactor:      0.0, // No jitter by default
 		RespectRetryAfter: true,
-		RequestTimeout:    cfg.RequestTimeout,
+		Timeout:           cfg.RequestTimeout,
 	}
 
 	// Create a cancellable context for the HTTP request
@@ -115,7 +115,7 @@ func run() error {
 		if timeoutCancel != nil {
 			timeoutCancel()
 		}
-		return fmt.Errorf("interrupted by signal: %w", signalCtx.Err())
+		return argo.ErrInterrupted
 	}
 
 	// Defer cleanup of response and context

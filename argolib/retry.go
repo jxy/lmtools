@@ -22,8 +22,28 @@ func closeResponse(r *http.Response) {
 	if r == nil {
 		return
 	}
-	// Drain up to 4KB to allow connection reuse
-	_, err := io.CopyN(io.Discard, r.Body, 4<<10)
+	// Determine how much to drain
+	// If ContentLength is known and reasonable, drain that amount
+	// Otherwise drain up to 512KB to allow connection reuse
+	// Note: Draining stops at 512KB - connections may not be reused for larger bodies
+	// with unknown length, but this prevents arbitrarily large memory consumption
+	const maxDrain int64 = 512 << 10 // 512KB
+
+	// Special case: ContentLength=0 (e.g., HEAD response) needs no draining
+	if r.ContentLength == 0 {
+		if err := r.Body.Close(); err != nil {
+			Debugf("failed to close response body: %v", err)
+		}
+		return
+	}
+
+	drainAmount := maxDrain
+	if r.ContentLength > 0 && r.ContentLength <= maxDrain {
+		drainAmount = r.ContentLength
+	}
+
+	// Drain response body to allow connection reuse
+	_, err := io.CopyN(io.Discard, r.Body, drainAmount)
 	if err != nil && err != io.EOF {
 		Debugf("failed to drain response body: %v", err)
 	}
@@ -40,7 +60,7 @@ type RetryConfig struct {
 	Multiplier        float64
 	JitterFactor      float64       // 0.0-1.0, 0 means no jitter
 	RespectRetryAfter bool          // Honor Retry-After headers
-	RequestTimeout    time.Duration // Timeout for individual requests
+	Timeout           time.Duration // Timeout for individual requests
 }
 
 // DefaultRetryConfig returns default retry configuration
@@ -52,7 +72,7 @@ func DefaultRetryConfig() RetryConfig {
 		Multiplier:        2.0,
 		JitterFactor:      0.0, // No jitter by default
 		RespectRetryAfter: true,
-		RequestTimeout:    0, // 0 means use the client timeout
+		Timeout:           0, // 0 means use the client timeout
 	}
 }
 
@@ -167,7 +187,7 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 		}
 
 		var sendErr error
-		resp, cancel, sendErr = SendRequestWithTimeout(ctx, client, reqClone, retryConfig.RequestTimeout)
+		resp, cancel, sendErr = SendRequestWithTimeout(ctx, client, reqClone, retryConfig.Timeout)
 		lastResp = resp // Always track, even on error
 		lastCancel = cancel
 
@@ -209,6 +229,8 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 		if cancel != nil {
 			cancel()
 		}
+		// We already called cancel() - returning nil prevents callers from double invoking
+		return nil, nil, err
 	}
 
 	return resp, cancel, err
