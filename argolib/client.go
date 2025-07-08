@@ -28,23 +28,25 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 	}
 
 	return &http.Client{
-		Timeout:   timeout,
+		Timeout:   0, // Don't use client timeout, use context timeout instead
 		Transport: transport,
 	}
 }
 
 // SendRequestWithTimeout sends an HTTP request with a timeout if context lacks deadline
-func SendRequestWithTimeout(ctx context.Context, client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, error) {
+// Returns the response and a cancel function that should be called after the response body is read
+func SendRequestWithTimeout(ctx context.Context, client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, context.CancelFunc, error) {
 	// Check if context already has a deadline
 	_, hasDeadline := ctx.Deadline()
 
+	var cancel context.CancelFunc
 	if !hasDeadline && timeout > 0 {
 		// Create new context with timeout
-		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
+		// Don't defer cancel here - let caller handle it after reading response
 	}
 
 	req = req.WithContext(ctx)
-	return client.Do(req)
+	resp, err := client.Do(req)
+	return resp, cancel, err
 }

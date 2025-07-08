@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	argo "lmtools/argolib"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -21,9 +22,12 @@ func main() {
 
 func run() error {
 	// Set up signal handling for graceful shutdown
-	ctx, cancel := signal.NotifyContext(context.Background(),
+	signalCtx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Create a separate context for the actual work
+	ctx := context.Background()
 
 	cfg, err := argo.ParseFlags(os.Args[1:])
 	if err != nil {
@@ -79,13 +83,50 @@ func run() error {
 		RequestTimeout:    cfg.RequestTimeout,
 	}
 
-	resp, err := argo.SendRequestWithRetry(ctx, client, req, body, retryConfig)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
+	// Create a cancellable context for the HTTP request
+	reqCtx, reqCancel := context.WithCancel(ctx)
+	defer reqCancel()
+
+	// Monitor for signals in a separate goroutine
+	done := make(chan struct{})
+	var sendErr error
+	var resp *http.Response
+	var timeoutCancel context.CancelFunc
+
+	go func() {
+		resp, timeoutCancel, sendErr = argo.SendRequestWithRetry(reqCtx, client, req, body, retryConfig)
+		close(done)
+	}()
+
+	// Wait for either completion or signal
+	select {
+	case <-done:
+		if sendErr != nil {
+			return fmt.Errorf("failed to send request: %w", sendErr)
+		}
+	case <-signalCtx.Done():
+		argo.Infof("Received interrupt signal, cancelling request...")
+		reqCancel() // Cancel the HTTP request
+		<-done      // Wait for goroutine to finish
+		// Clean up response if it exists
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		if timeoutCancel != nil {
+			timeoutCancel()
+		}
+		return fmt.Errorf("interrupted by signal: %w", signalCtx.Err())
 	}
+
+	// Defer cleanup of response and context
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			argo.Debugf("failed to close response body: %v", err)
+		if resp != nil && resp.Body != nil {
+			if err := resp.Body.Close(); err != nil {
+				argo.Debugf("failed to close response body: %v", err)
+			}
+		}
+		if timeoutCancel != nil {
+			timeoutCancel()
 		}
 	}()
 

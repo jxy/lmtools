@@ -142,14 +142,20 @@ func RetryWithBackoff(ctx context.Context, cfg RetryConfig, fn func() error) err
 
 // SendRequestWithRetry sends an HTTP request with retry logic
 // The bodyBytes parameter should contain the original request body for POST requests
-func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Request, bodyBytes []byte, retryConfig RetryConfig) (*http.Response, error) {
+func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Request, bodyBytes []byte, retryConfig RetryConfig) (*http.Response, context.CancelFunc, error) {
 	var resp *http.Response
 	var lastResp *http.Response
+	var cancel context.CancelFunc
+	var lastCancel context.CancelFunc
 
 	err := RetryWithBackoff(ctx, retryConfig, func() error {
 		// Clean up previous response if any
 		closeResponse(lastResp)
+		if lastCancel != nil {
+			lastCancel()
+		}
 		lastResp = nil
+		lastCancel = nil
 
 		// Clone request for each attempt
 		reqClone := req.Clone(ctx)
@@ -161,8 +167,9 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 		}
 
 		var sendErr error
-		resp, sendErr = SendRequestWithTimeout(ctx, client, reqClone, retryConfig.RequestTimeout)
+		resp, cancel, sendErr = SendRequestWithTimeout(ctx, client, reqClone, retryConfig.RequestTimeout)
 		lastResp = resp // Always track, even on error
+		lastCancel = cancel
 
 		if sendErr != nil {
 			return sendErr
@@ -190,11 +197,19 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 
 		return nil
 	})
-
 	// Clean up on final failure
-	if err != nil && lastResp != nil && lastResp != resp {
-		closeResponse(lastResp)
+	if err != nil {
+		if lastResp != nil && lastResp != resp {
+			closeResponse(lastResp)
+		}
+		if lastCancel != nil {
+			lastCancel()
+		}
+		// Also cancel the successful cancel if we're returning an error
+		if cancel != nil {
+			cancel()
+		}
 	}
 
-	return resp, err
+	return resp, cancel, err
 }

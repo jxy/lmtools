@@ -69,7 +69,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 		// Send request with retry
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, err := SendRequestWithRetry(ctx, client, req, expectedBody, retryConfig)
+		resp, cancel, err := SendRequestWithRetry(ctx, client, req, expectedBody, retryConfig)
+		if cancel != nil {
+			defer cancel()
+		}
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -103,7 +106,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 		client := NewHTTPClient(5 * time.Second)
 
 		// Should work with nil body
-		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		resp, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		if cancel != nil {
+			defer cancel()
+		}
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -131,7 +137,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
 
-		resp, err := SendRequestWithRetry(ctx, client, req, []byte("test"), retryConfig)
+		resp, cancel, err := SendRequestWithRetry(ctx, client, req, []byte("test"), retryConfig)
+		if cancel != nil {
+			defer cancel()
+		}
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -175,7 +184,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 		start := time.Now()
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		resp, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		if cancel != nil {
+			defer cancel()
+		}
 		elapsed := time.Since(start)
 
 		if err != nil {
@@ -219,7 +231,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		resp, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		if cancel != nil {
+			defer cancel()
+		}
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -253,7 +268,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 
 			ctx := context.Background()
 			client := NewHTTPClient(5 * time.Second)
-			_, _ = SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+			_, cancel, _ := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+			if cancel != nil {
+				cancel()
+			}
 
 			delays = append(delays, time.Since(start))
 		}
@@ -296,7 +314,10 @@ func TestSendRequestWithRetry(t *testing.T) {
 		}()
 
 		start := time.Now()
-		_, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		_, cancel2, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		if cancel2 != nil {
+			cancel2()
+		}
 		elapsed := time.Since(start)
 
 		if err == nil {
@@ -416,7 +437,10 @@ func TestSendRequestWithTimeout(t *testing.T) {
 		client := NewHTTPClient(5 * time.Second)
 
 		// Use a short timeout
-		_, err := SendRequestWithTimeout(ctx, client, req, 100*time.Millisecond)
+		_, cancel, err := SendRequestWithTimeout(ctx, client, req, 100*time.Millisecond)
+		if cancel != nil {
+			defer cancel()
+		}
 
 		if err == nil {
 			t.Fatal("Expected timeout error")
@@ -443,7 +467,10 @@ func TestSendRequestWithTimeout(t *testing.T) {
 		client := NewHTTPClient(5 * time.Second)
 
 		start := time.Now()
-		_, err := SendRequestWithTimeout(ctx, client, req, 1*time.Second) // Try to set longer timeout
+		_, cancel2, err := SendRequestWithTimeout(ctx, client, req, 1*time.Second) // Try to set longer timeout
+		if cancel2 != nil {
+			defer cancel2()
+		}
 		elapsed := time.Since(start)
 
 		if err == nil {
@@ -466,7 +493,10 @@ func TestSendRequestWithTimeout(t *testing.T) {
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
 
-		resp, err := SendRequestWithTimeout(ctx, client, req, 0)
+		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 0)
+		if cancel != nil {
+			defer cancel()
+		}
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
