@@ -2,6 +2,7 @@ package argo
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"os"
@@ -14,7 +15,7 @@ func TestHandleResponseEmbed(t *testing.T) {
 	cfg := Config{Embed: true, LogDir: dir}
 	body := []byte(`{"embedding":"E"}`)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}
-	out, err := HandleResponse(cfg, resp)
+	out, err := HandleResponse(context.Background(), cfg, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -28,8 +29,10 @@ func TestHandleResponseEmbed(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
 	}
-	if !strings.HasSuffix(files[0].Name(), "_embed_output.json") {
-		t.Errorf("got %q; want suffix _embed_output.json", files[0].Name())
+	// Check filename pattern matches new format with PID and random suffix
+	filename := files[0].Name()
+	if !strings.Contains(filename, "_embed_output_") || !strings.HasSuffix(filename, ".json") {
+		t.Errorf("got %q; want filename containing '_embed_output_' and ending with '.json'", filename)
 	}
 }
 
@@ -38,7 +41,7 @@ func TestHandleResponseChat(t *testing.T) {
 	cfg := Config{LogDir: dir}
 	body := []byte(`{"response":"R"}`)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}
-	out, err := HandleResponse(cfg, resp)
+	out, err := HandleResponse(context.Background(), cfg, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,8 +55,10 @@ func TestHandleResponseChat(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
 	}
-	if !strings.HasSuffix(files[0].Name(), "_chat_output.json") {
-		t.Errorf("got %q; want suffix _chat_output.json", files[0].Name())
+	// Check filename pattern matches new format with PID and random suffix
+	filename := files[0].Name()
+	if !strings.Contains(filename, "_chat_output_") || !strings.HasSuffix(filename, ".json") {
+		t.Errorf("got %q; want filename containing '_chat_output_' and ending with '.json'", filename)
 	}
 }
 
@@ -67,7 +72,7 @@ func TestHandleResponseStreamChat(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	out, err := HandleResponse(cfg, resp)
+	out, err := HandleResponse(context.Background(), cfg, resp)
 	if err := w.Close(); err != nil {
 		t.Fatalf("failed to close write pipe: %v", err)
 	}
@@ -93,7 +98,9 @@ func TestHandleResponseStreamChat(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
 	}
-	if !strings.HasSuffix(files[0].Name(), "_stream_chat_output.log") {
-		t.Errorf("got %q; want suffix _stream_chat_output.log", files[0].Name())
+	// Check filename pattern matches new format with PID and random suffix
+	filename := files[0].Name()
+	if !strings.Contains(filename, "_stream_chat_output_") || !strings.HasSuffix(filename, ".log") {
+		t.Errorf("got %q; want filename containing '_stream_chat_output_' and ending with '.log'", filename)
 	}
 }

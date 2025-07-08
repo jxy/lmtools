@@ -23,7 +23,8 @@ func TestCreateTimestampedFile(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("file not created: %v", err)
 	}
-	re := regexp.MustCompile(`^\d{8}T\d{6}_op\.txt$`)
+	// Updated pattern to match new filename format with PID and random suffix
+	re := regexp.MustCompile(`^\d{8}T\d{6}_op_\d+_[a-f0-9]{8}\.txt$`)
 	if !re.MatchString(name) {
 		t.Errorf("filename %q does not match pattern", name)
 	}

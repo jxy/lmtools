@@ -42,7 +42,7 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendRequest(embed) failed: %v", err)
 	}
-	out, err := HandleResponse(cfg, resp)
+	out, err := HandleResponse(ctx, cfg, resp)
 	if err != nil {
 		t.Fatalf("HandleResponse(embed) failed: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendRequest(chat) failed: %v", err)
 	}
-	out, err = HandleResponse(cfg, resp)
+	out, err = HandleResponse(ctx, cfg, resp)
 	if err != nil {
 		t.Fatalf("HandleResponse(chat) failed: %v", err)
 	}

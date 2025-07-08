@@ -10,69 +10,84 @@ import (
 
 var defaultLogDir = os.ExpandEnv("$HOME/tmp/log/argo")
 
+func getDefaultUser() string {
+	return "" // No default, always require -u flag
+}
+
 type Config struct {
-	Model      string        // model to use
-	Embed      bool          // whether to run in embed mode
-	StreamChat bool          // whether to use streaming chat mode
-	PromptChat bool          // whether to use 'prompt' instead of 'messages' for chat
-	LogDir     string        // directory for log files
-	User       string        // user identifier
-	System     string        // system prompt for chat
-	Env        string        // environment (prod|dev|custom base URL)
-	Timeout    time.Duration // HTTP request timeout
-	LogLevel   string        // log level (info|debug)
+	Model       string        // model to use
+	Embed       bool          // whether to run in embed mode
+	StreamChat  bool          // whether to use streaming chat mode
+	PromptChat  bool          // whether to use 'prompt' instead of 'messages' for chat
+	LogDir      string        // directory for log files
+	User        string        // user identifier
+	System      string        // system prompt for chat
+	Env         string        // environment (prod|dev|custom base URL)
+	Timeout     time.Duration // HTTP request timeout
+	LogLevel    string        // log level (info|debug)
+	Retries     int           // number of retry attempts
+	BackoffTime time.Duration // initial retry backoff time
 }
 
 func ParseFlags(args []string) (Config, error) {
 	var cfg Config
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	
+
 	// Set custom usage function
 	fs.Usage = func() {
 		printUsage()
 	}
-	
+
 	// Model Options
 	fs.StringVar(&cfg.Model, "m", "", fmt.Sprintf("model to use (default: %q for chat, %q for embed)\n\t\tChat models: %s\n\t\tEmbed models: %s",
 		DefaultChatModel, DefaultEmbedModel,
 		strings.Join(ChatModels, ", "),
 		strings.Join(EmbedModels, ", ")))
 	fs.BoolVar(&cfg.Embed, "e", false, "enable embed mode instead of chat")
-	
+
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
 	fs.BoolVar(&cfg.PromptChat, "prompt-chat", false, "use 'prompt' field instead of 'messages' for chat")
 	fs.StringVar(&cfg.System, "s", "You are a brilliant assistant.", "system prompt for chat mode")
-	
+
 	// Configuration
 	fs.StringVar(&cfg.Env, "env", "dev", "environment: prod, dev, or custom base URL")
-	fs.StringVar(&cfg.User, "u", "xjin", "user identifier")
+	fs.StringVar(&cfg.User, "u", getDefaultUser(), "user identifier")
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
-	
+
 	// Logging
 	fs.StringVar(&cfg.LogDir, "logDir", defaultLogDir, "directory for log files")
 	fs.StringVar(&cfg.LogLevel, "log-level", DefaultLogLevel, fmt.Sprintf("log level: %s", strings.Join(LogLevels, ", ")))
-	
+
+	// Retry configuration
+	fs.IntVar(&cfg.Retries, "retries", 3, "number of retry attempts for failed requests")
+	fs.DurationVar(&cfg.BackoffTime, "backoff", 1*time.Second, "initial retry backoff time")
+
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
-	
+
 	// Validate environment
 	if !IsValidEnvironment(cfg.Env) {
 		return cfg, fmt.Errorf("invalid env: %q, must be one of: %s, or a custom URL (http://... or https://...)",
 			cfg.Env, strings.Join(Environments, ", "))
 	}
-	
+
 	// Validate log level
 	if err := ValidateLogLevel(cfg.LogLevel); err != nil {
 		return cfg, err
 	}
-	
+
 	// Check invalid flag combinations
 	if cfg.Embed && (cfg.StreamChat || cfg.PromptChat) {
 		return cfg, fmt.Errorf("invalid flag combination: embed mode cannot be used with stream or prompt-chat")
 	}
-	
+
+	// Validate user is provided
+	if cfg.User == "" {
+		return cfg, fmt.Errorf("user identifier (-u) is required")
+	}
+
 	return cfg, nil
 }
 
@@ -95,12 +110,16 @@ Chat Options:
 
 Configuration:
   -env string    Environment: prod, dev, or custom base URL (default: "dev")
-  -u string      User identifier (default: "xjin")
+  -u string      User identifier (required)
   -timeout dur   HTTP request timeout (default: 10m)
 
 Logging:
   -logDir string  Directory for log files (default: %q)
   -log-level      Log level: %s (default: %q)
+
+Retry:
+  -retries int    Number of retry attempts for failed requests (default: 3)
+  -backoff dur    Initial retry backoff time (default: 1s)
 
 Examples:
   # Chat with default model

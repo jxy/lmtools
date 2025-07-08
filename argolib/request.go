@@ -7,13 +7,6 @@ import (
 	"net/http"
 )
 
-const (
-	ProdURL           = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
-	DevURL            = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource"
-	DefaultChatModel  = "gemini25pro"
-	DefaultEmbedModel = "v3large"
-)
-
 type EmbedRequest struct {
 	User   string   `json:"user"`
 	Model  string   `json:"model"`
@@ -32,15 +25,7 @@ type Message struct {
 }
 
 func BuildRequest(cfg Config, input string) (*http.Request, []byte, error) {
-	var urlBase string
-	switch cfg.Env {
-	case "prod":
-		urlBase = ProdURL
-	case "", "dev":
-		urlBase = DevURL
-	default:
-		urlBase = cfg.Env
-	}
+	urlBase := GetBaseURL(cfg.Env)
 
 	model := cfg.Model
 	var (

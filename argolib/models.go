@@ -1,8 +1,37 @@
+// Package argo provides a client library for interacting with the Argo API.
+// It supports both chat and embedding operations with various AI models.
 package argo
 
 import (
 	"fmt"
 	"strings"
+	"time"
+)
+
+// Default models
+const (
+	DefaultChatModel  = "gemini25pro"
+	DefaultEmbedModel = "v3large"
+)
+
+// API endpoints
+const (
+	ProdURL = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
+	DevURL  = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource"
+)
+
+// Input validation constants
+const (
+	MaxInputSizeBytes = 1024 * 1024 // 1MB
+)
+
+// HTTP client configuration constants
+const (
+	MaxIdleConns        = 100
+	MaxIdleConnsPerHost = 100
+	IdleConnTimeout     = 90 * time.Second
+	TLSHandshakeTimeout = 10 * time.Second
+	ExpectTimeout       = 1 * time.Second
 )
 
 // Supported chat models
@@ -95,4 +124,17 @@ func IsValidEnvironment(env string) bool {
 	}
 	// Check if it's a custom URL
 	return strings.HasPrefix(env, "http://") || strings.HasPrefix(env, "https://")
+}
+
+// GetBaseURL returns the base URL for the given environment
+func GetBaseURL(env string) string {
+	switch env {
+	case "prod":
+		return ProdURL
+	case "", "dev":
+		return DevURL
+	default:
+		// Custom URL
+		return env
+	}
 }
