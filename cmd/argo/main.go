@@ -74,7 +74,7 @@ func run() error {
 
 	// Send request with simple retry (direct synchronous call)
 	// Hardcoded backoff time of 1 second
-	resp, err := argo.SimpleRetry(ctx, client, req, body, cfg.Retries, 1*time.Second, cfg.Timeout)
+	resp, err := argo.SimpleRetry(ctx, client, req, body, cfg.Retries, 1*time.Second)
 	// Handle error with response cleanup
 	if err != nil {
 		if resp != nil && resp.Body != nil {

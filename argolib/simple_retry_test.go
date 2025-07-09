@@ -2,7 +2,6 @@ package argo
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +22,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("GET", server.URL, nil)
 
-		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 100*time.Millisecond, 0)
+		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 100*time.Millisecond)
 		if err != nil {
 			t.Fatalf("Expected success, got error: %v", err)
 		}
@@ -50,7 +49,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("POST", server.URL, nil)
 
-		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond, 0)
+		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond)
 		if err != nil {
 			t.Fatalf("Expected success after retries, got error: %v", err)
 		}
@@ -80,7 +79,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("GET", server.URL, nil)
 
-		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond, 0)
+		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond)
 		if err != nil {
 			t.Fatalf("Expected success after retries, got error: %v", err)
 		}
@@ -106,7 +105,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("GET", server.URL, nil)
 
-		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond, 0)
+		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond)
 		if err != nil {
 			t.Fatalf("Expected success (no retry), got error: %v", err)
 		}
@@ -142,7 +141,7 @@ func TestSimpleRetry(t *testing.T) {
 			cancel()
 		}()
 
-		_, err := SimpleRetry(ctx, client, req, nil, 5, 200*time.Millisecond, 0)
+		_, err := SimpleRetry(ctx, client, req, nil, 5, 200*time.Millisecond)
 		if err == nil {
 			t.Fatal("Expected error due to context cancellation")
 		}
@@ -175,7 +174,7 @@ func TestSimpleRetry(t *testing.T) {
 		req, _ := http.NewRequest("GET", server.URL, nil)
 
 		start := time.Now()
-		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 100*time.Millisecond, 0)
+		resp, err := SimpleRetry(context.Background(), client, req, nil, 3, 100*time.Millisecond)
 		elapsed := time.Since(start)
 
 		if err != nil {
@@ -215,7 +214,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("POST", server.URL, nil)
 
-		resp, err := SimpleRetry(context.Background(), client, req, expectedBody, 3, 50*time.Millisecond, 0)
+		resp, err := SimpleRetry(context.Background(), client, req, expectedBody, 3, 50*time.Millisecond)
 		if err != nil {
 			t.Fatalf("Expected success, got error: %v", err)
 		}
@@ -233,29 +232,6 @@ func TestSimpleRetry(t *testing.T) {
 		}
 	})
 
-	t.Run("per-request timeout", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Simulate slow response
-			time.Sleep(200 * time.Millisecond)
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		client := &http.Client{}
-		req, _ := http.NewRequest("GET", server.URL, nil)
-
-		// Use short per-request timeout
-		_, err := SimpleRetry(context.Background(), client, req, nil, 1, 50*time.Millisecond, 100*time.Millisecond)
-		if err == nil {
-			t.Fatal("Expected timeout error")
-		}
-
-		// Should be a timeout error
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("Expected context.DeadlineExceeded, got %v", err)
-		}
-	})
-
 	t.Run("exhausted attempts", func(t *testing.T) {
 		var attempts int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -267,7 +243,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("GET", server.URL, nil)
 
-		_, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond, 0)
+		_, err := SimpleRetry(context.Background(), client, req, nil, 3, 50*time.Millisecond)
 		if err == nil {
 			t.Fatal("Expected error after exhausting attempts")
 		}
@@ -286,7 +262,7 @@ func TestSimpleRetry(t *testing.T) {
 		client := &http.Client{}
 		req, _ := http.NewRequest("GET", "http://example.com", nil)
 
-		_, err := SimpleRetry(context.Background(), client, req, nil, 0, 50*time.Millisecond, 0)
+		_, err := SimpleRetry(context.Background(), client, req, nil, 0, 50*time.Millisecond)
 		if err == nil {
 			t.Fatal("Expected error for maxAttempts = 0")
 		}

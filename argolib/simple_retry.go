@@ -15,7 +15,7 @@ import (
 
 // SimpleRetry performs HTTP request with exponential backoff retry
 func SimpleRetry(ctx context.Context, client *http.Client, req *http.Request,
-	bodyBytes []byte, maxAttempts int, initialDelay, perRequestTimeout time.Duration,
+	bodyBytes []byte, maxAttempts int, initialDelay time.Duration,
 ) (*http.Response, error) {
 	if maxAttempts < 1 {
 		return nil, fmt.Errorf("attempts must be >= 1")
@@ -46,16 +46,8 @@ func SimpleRetry(ctx context.Context, client *http.Client, req *http.Request,
 			}
 		}
 
-		// Create per-attempt timeout context if configured
-		attemptCtx := ctx
-		var cancel context.CancelFunc
-		if perRequestTimeout > 0 {
-			attemptCtx, cancel = context.WithTimeout(ctx, perRequestTimeout)
-			defer cancel() // Always cancel to prevent leaks
-		}
-
 		// Clone request with fresh body
-		reqClone := req.Clone(attemptCtx)
+		reqClone := req.Clone(ctx)
 		if len(bodyBytes) > 0 {
 			reqClone.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			reqClone.ContentLength = int64(len(bodyBytes))
@@ -78,7 +70,9 @@ func SimpleRetry(ctx context.Context, client *http.Client, req *http.Request,
 
 		// Check if response is retryable (5xx, 429, 408, 425)
 		if resp.StatusCode < 500 && resp.StatusCode != 429 && resp.StatusCode != 408 && resp.StatusCode != 425 {
-			// Success or non-retryable error - let caller handle context cancellation
+			// Success or non-retryable error
+			// DON'T cancel context here - response body still needs to be read
+			// The HTTP response body reader will use this context
 			return resp, nil
 		}
 
