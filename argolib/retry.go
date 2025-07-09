@@ -311,20 +311,18 @@ func RetryWithBackoff(ctx context.Context, cfg RetryConfig, fn func() error) err
 // SendRequestWithRetry sends an HTTP request with retry logic
 // The bodyBytes parameter should contain the original request body for POST requests
 // If bodyBytes is nil/empty and req.Body is set, req.GetBody must be set for retries to work
-func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Request, bodyBytes []byte, retryConfig RetryConfig) (*http.Response, context.CancelFunc, error) {
+func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Request, bodyBytes []byte, retryConfig RetryConfig) (*http.Response, error) {
 	// Validate that request body is replayable
 	// Skip validation for empty bodies (nil, NoBody, or zero-length)
 	if req.Body != nil && req.Body != http.NoBody && req.GetBody == nil && len(bodyBytes) == 0 {
 		// Check if this is an empty body that doesn't need replay support
 		// For empty-body detection, we cannot restore the position since req.Body
 		// is just an io.ReadCloser (not necessarily seekable). Document this behavior.
-		return nil, nil, fmt.Errorf("request body not replayable: GetBody not set and no bodyBytes provided")
+		return nil, fmt.Errorf("request body not replayable: GetBody not set and no bodyBytes provided")
 	}
 
 	var resp *http.Response
 	var lastResp *http.Response
-	var cancel context.CancelFunc
-	var lastCancel context.CancelFunc
 
 	// Determine max drain size
 	maxDrain := retryConfig.MaxDrainSize
@@ -333,12 +331,8 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 	}
 
 	err := RetryWithBackoff(ctx, retryConfig, func() error {
-		// Clean up previous response and cancel if any
+		// Clean up previous response if any
 		closeResponseWithLimit(lastResp, maxDrain)
-		if lastCancel != nil {
-			lastCancel()
-			lastCancel = nil
-		}
 		lastResp = nil
 
 		// Set up per-attempt timeout if configured
@@ -348,9 +342,9 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 			parentDeadline, hasDeadline := ctx.Deadline()
 			if !hasDeadline || time.Until(parentDeadline) > retryConfig.Timeout {
 				// Only add timeout if parent doesn't have deadline or our timeout is shorter
-				var attemptCancel context.CancelFunc
-				attemptCtx, attemptCancel = context.WithTimeout(ctx, retryConfig.Timeout)
-				lastCancel = attemptCancel // Save for next iteration or final cleanup
+				var cancel context.CancelFunc
+				attemptCtx, cancel = context.WithTimeout(ctx, retryConfig.Timeout)
+				defer cancel()
 			}
 		}
 
@@ -375,22 +369,8 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 
 		var sendErr error
 		// Use attemptCtx which may have a timeout
-		// Note: We always pass timeout=0 to SendRequestWithTimeout because we handle
-		// timeouts at this layer using attemptCtx. This ensures we don't create
-		// nested timeout contexts.
-		resp, cancel, sendErr = SendRequestWithTimeout(attemptCtx, client, reqClone, 0)
+		resp, sendErr = client.Do(reqClone)
 		lastResp = resp // Always track, even on error
-		// Handle the cancel function to prevent leaks
-		if cancel != nil {
-			if lastCancel != nil {
-				// We have a new cancel function but already have one tracked
-				// Cancel the new one immediately since we're using lastCancel
-				cancel()
-			} else {
-				// Track this cancel for cleanup
-				lastCancel = cancel
-			}
-		}
 
 		if sendErr != nil {
 			return sendErr
@@ -423,20 +403,8 @@ func SendRequestWithRetry(ctx context.Context, client *http.Client, req *http.Re
 		if lastResp != nil && lastResp != resp {
 			closeResponseWithLimit(lastResp, maxDrain)
 		}
-		if lastCancel != nil {
-			lastCancel()
-		}
-		// Also cancel the successful cancel if we're returning an error
-		if cancel != nil {
-			cancel()
-		}
-		// We already called cancel() - returning nil prevents callers from double invoking
-		return nil, nil, err
+		return nil, err
 	}
 
-	// Return lastCancel if cancel is nil to prevent leak
-	if cancel == nil && lastCancel != nil {
-		return resp, lastCancel, err
-	}
-	return resp, cancel, err
+	return resp, err
 }

@@ -87,15 +87,7 @@ func run() error {
 	}
 
 	// Send request with retry (direct synchronous call)
-	resp, timeoutCancel, err := argo.SendRequestWithRetry(ctx, client, req, body, retryConfig)
-
-	// Immediate cleanup of timeout cancel
-	defer func() {
-		if timeoutCancel != nil {
-			timeoutCancel()
-		}
-	}()
-
+	resp, err := argo.SendRequestWithRetry(ctx, client, req, body, retryConfig)
 	// Handle error with response cleanup
 	if err != nil {
 		if resp != nil && resp.Body != nil {

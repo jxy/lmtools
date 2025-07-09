@@ -69,10 +69,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 		// Send request with retry
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, cancel, err := SendRequestWithRetry(ctx, client, req, expectedBody, retryConfig)
-		if cancel != nil {
-			defer cancel()
-		}
+		resp, err := SendRequestWithRetry(ctx, client, req, expectedBody, retryConfig)
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -106,10 +103,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 		client := NewHTTPClient(5 * time.Second)
 
 		// Should work with nil body
-		resp, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
-		if cancel != nil {
-			defer cancel()
-		}
+		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -137,10 +131,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
 
-		resp, cancel, err := SendRequestWithRetry(ctx, client, req, []byte("test"), retryConfig)
-		if cancel != nil {
-			defer cancel()
-		}
+		resp, err := SendRequestWithRetry(ctx, client, req, []byte("test"), retryConfig)
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -184,10 +175,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 		start := time.Now()
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
-		if cancel != nil {
-			defer cancel()
-		}
+		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 		elapsed := time.Since(start)
 
 		if err != nil {
@@ -231,10 +219,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
-		if cancel != nil {
-			defer cancel()
-		}
+		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -268,10 +253,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 
 			ctx := context.Background()
 			client := NewHTTPClient(5 * time.Second)
-			_, cancel, _ := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
-			if cancel != nil {
-				cancel()
-			}
+			_, _ = SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 
 			delays = append(delays, time.Since(start))
 		}
@@ -314,10 +296,7 @@ func TestSendRequestWithRetry(t *testing.T) {
 		}()
 
 		start := time.Now()
-		_, cancel2, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
-		if cancel2 != nil {
-			cancel2()
-		}
+		_, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 		elapsed := time.Since(start)
 
 		if err == nil {
@@ -423,86 +402,7 @@ func TestExtractRetryInfo(t *testing.T) {
 	})
 }
 
-func TestSendRequestWithTimeout(t *testing.T) {
-	t.Run("adds timeout when context has no deadline", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Simulate slow response
-			time.Sleep(200 * time.Millisecond)
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-		ctx := context.Background() // No deadline
-		client := NewHTTPClient(5 * time.Second)
-
-		// Use a short timeout
-		_, cancel, err := SendRequestWithTimeout(ctx, client, req, 100*time.Millisecond)
-		if cancel != nil {
-			defer cancel()
-		}
-
-		if err == nil {
-			t.Fatal("Expected timeout error")
-		}
-
-		if !isTimeoutError(err) {
-			t.Errorf("Expected timeout error, got %v", err)
-		}
-	})
-
-	t.Run("preserves existing context deadline", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(200 * time.Millisecond)
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-
-		// Context with existing deadline
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel()
-
-		client := NewHTTPClient(5 * time.Second)
-
-		start := time.Now()
-		_, cancel2, err := SendRequestWithTimeout(ctx, client, req, 1*time.Second) // Try to set longer timeout
-		if cancel2 != nil {
-			defer cancel2()
-		}
-		elapsed := time.Since(start)
-
-		if err == nil {
-			t.Fatal("Expected timeout error")
-		}
-
-		// Should timeout at ~50ms, not 1s
-		if elapsed > 100*time.Millisecond {
-			t.Errorf("Expected timeout at ~50ms, but took %v", elapsed)
-		}
-	})
-
-	t.Run("no timeout when zero duration", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-		ctx := context.Background()
-		client := NewHTTPClient(5 * time.Second)
-
-		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 0)
-		if cancel != nil {
-			defer cancel()
-		}
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-		resp.Body.Close()
-	})
-}
+// SendRequestWithTimeout tests removed - functionality moved to SendRequestWithRetry timeout handling
 
 func TestCloseResponse(t *testing.T) {
 	t.Run("handles nil response", func(t *testing.T) {
@@ -657,63 +557,8 @@ func isTimeoutError(err error) bool {
 		err == context.DeadlineExceeded
 }
 
-func TestCancelFunctionContract(t *testing.T) {
-	t.Run("cancel function is returned when timeout is added", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Quick response
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("test"))
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-		ctx := context.Background() // No deadline
-		client := NewHTTPClient(5 * time.Second)
-
-		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 1*time.Second)
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-		defer resp.Body.Close()
-
-		// Cancel function should be non-nil when timeout is added
-		if cancel == nil {
-			t.Error("Expected non-nil cancel function when timeout is added")
-		}
-
-		// Should be safe to call cancel multiple times (idempotent)
-		cancel()
-		cancel() // Second call should not panic
-	})
-
-	t.Run("cancel function is nil when context already has deadline", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("test"))
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-
-		// Context with existing deadline
-		ctx, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer ctxCancel()
-
-		client := NewHTTPClient(5 * time.Second)
-
-		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 1*time.Second)
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-		defer resp.Body.Close()
-
-		// Cancel function should be nil when context already has deadline
-		if cancel != nil {
-			t.Error("Expected nil cancel function when context already has deadline")
-		}
-	})
-
-	t.Run("retry preserves cancel function contract", func(t *testing.T) {
+func TestRetryWithTimeoutConfig(t *testing.T) {
+	t.Run("retry with timeout configuration", func(t *testing.T) {
 		var attempts int32
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -740,7 +585,7 @@ func TestCancelFunctionContract(t *testing.T) {
 
 		ctx := context.Background()
 		client := NewHTTPClient(5 * time.Second)
-		resp, finalCancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 		if err != nil {
 			t.Fatalf("SendRequestWithRetry failed: %v", err)
 		}
@@ -750,7 +595,7 @@ func TestCancelFunctionContract(t *testing.T) {
 			t.Fatal("Expected non-nil response")
 		}
 
-		// Read response body before calling cancel
+		// Read response body
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
@@ -759,20 +604,13 @@ func TestCancelFunctionContract(t *testing.T) {
 			t.Errorf("Expected body 'success', got %q", string(body))
 		}
 
-		// Now it's safe to call cancel
-		if finalCancel != nil {
-			finalCancel()
-			// Test idempotency
-			finalCancel()
-		}
-
 		// Verify that we made 3 attempts
 		if atomic.LoadInt32(&attempts) != 3 {
 			t.Errorf("Expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
 		}
 	})
 
-	t.Run("double cancel protection in retry failure", func(t *testing.T) {
+	t.Run("retry failure cleanup", func(t *testing.T) {
 		// Server that always fails
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -792,24 +630,51 @@ func TestCancelFunctionContract(t *testing.T) {
 		client := NewHTTPClient(5 * time.Second)
 
 		// This should fail after all retries
-		_, cancel, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+		_, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 
 		// Error is expected
 		if err == nil {
 			t.Fatal("Expected error after all retries failed")
 		}
-
-		// Cancel should be nil after error cleanup
-		if cancel != nil {
-			t.Error("Expected nil cancel function after retry failure cleanup")
-		}
 	})
 }
 
-func TestTimeoutEdgeCases(t *testing.T) {
-	t.Run("zero timeout with no context deadline", func(t *testing.T) {
+func TestTimeoutHandling(t *testing.T) {
+	t.Run("timeout handling with retry config", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Slow response
+			time.Sleep(200 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		req, _ := http.NewRequest("GET", server.URL, nil)
+		ctx := context.Background()
+		client := NewHTTPClient(5 * time.Second)
+
+		// Use retry config with short timeout
+		retryConfig := RetryConfig{
+			MaxAttempts:  1,
+			InitialDelay: 10 * time.Millisecond,
+			MaxDelay:     100 * time.Millisecond,
+			Multiplier:   2.0,
+			Timeout:      100 * time.Millisecond, // Short timeout
+		}
+
+		_, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
+
+		// Should get timeout error
+		if err == nil {
+			t.Fatal("Expected timeout error")
+		}
+
+		if !isTimeoutError(err) {
+			t.Errorf("Expected timeout error, got %v", err)
+		}
+	})
+
+	t.Run("zero timeout means no timeout", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(100 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -820,138 +685,19 @@ func TestTimeoutEdgeCases(t *testing.T) {
 		client := NewHTTPClient(5 * time.Second)
 
 		// Zero timeout should not add any timeout
-		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 0)
+		retryConfig := RetryConfig{
+			MaxAttempts:  1,
+			InitialDelay: 10 * time.Millisecond,
+			MaxDelay:     100 * time.Millisecond,
+			Multiplier:   2.0,
+			Timeout:      0, // No timeout
+		}
+
+		resp, err := SendRequestWithRetry(ctx, client, req, nil, retryConfig)
 		if err != nil {
 			t.Fatalf("Unexpected error with zero timeout: %v", err)
 		}
 		defer resp.Body.Close()
-
-		// Cancel should be nil when no timeout is added
-		if cancel != nil {
-			t.Error("Expected nil cancel function with zero timeout")
-		}
-	})
-
-	t.Run("negative timeout treated as zero", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-		ctx := context.Background()
-		client := NewHTTPClient(5 * time.Second)
-
-		// Negative timeout should be treated like zero (no timeout)
-		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, -1*time.Second)
-		if err != nil {
-			t.Fatalf("Unexpected error with negative timeout: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if cancel != nil {
-			t.Error("Expected nil cancel function with negative timeout")
-		}
-	})
-
-	t.Run("timeout cancellation during response body read", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			// Write partial response then delay
-			_, _ = w.Write([]byte("partial"))
-			w.(http.Flusher).Flush()
-			time.Sleep(500 * time.Millisecond)
-			_, _ = w.Write([]byte(" response"))
-		}))
-		defer server.Close()
-
-		req, _ := http.NewRequest("GET", server.URL, nil)
-		ctx := context.Background()
-		client := NewHTTPClient(5 * time.Second)
-
-		// Short timeout that expires during body read
-		resp, cancel, err := SendRequestWithTimeout(ctx, client, req, 200*time.Millisecond)
-		if err != nil {
-			t.Fatalf("Request failed before body read: %v", err)
-		}
-
-		// Try to read body - this should fail due to timeout
-		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		// Cancel after body is closed
-		if cancel != nil {
-			cancel()
-		}
-
-		// Body read should have failed or been incomplete
-		if readErr == nil && strings.Contains(string(body), "response") {
-			t.Error("Expected timeout during body read, but got complete response")
-		}
-	})
-
-	t.Run("concurrent requests with different timeouts", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Vary response time based on path
-			if r.URL.Path == "/slow" {
-				time.Sleep(300 * time.Millisecond)
-			}
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		client := NewHTTPClient(5 * time.Second)
-		ctx := context.Background()
-
-		// Start multiple concurrent requests with different timeouts
-		type result struct {
-			path    string
-			timeout time.Duration
-			err     error
-		}
-
-		results := make(chan result, 2)
-
-		// Fast request with long timeout
-		go func() {
-			req, _ := http.NewRequest("GET", server.URL+"/fast", nil)
-			_, cancel, err := SendRequestWithTimeout(ctx, client, req, 1*time.Second)
-			if cancel != nil {
-				defer cancel()
-			}
-			results <- result{"/fast", 1 * time.Second, err}
-		}()
-
-		// Slow request with short timeout
-		go func() {
-			req, _ := http.NewRequest("GET", server.URL+"/slow", nil)
-			_, cancel, err := SendRequestWithTimeout(ctx, client, req, 100*time.Millisecond)
-			if cancel != nil {
-				defer cancel()
-			}
-			results <- result{"/slow", 100 * time.Millisecond, err}
-		}()
-
-		// Collect results
-		var fastResult, slowResult result
-		for i := 0; i < 2; i++ {
-			r := <-results
-			if r.path == "/fast" {
-				fastResult = r
-			} else {
-				slowResult = r
-			}
-		}
-
-		// Fast request should succeed
-		if fastResult.err != nil {
-			t.Errorf("Fast request failed: %v", fastResult.err)
-		}
-
-		// Slow request should timeout
-		if slowResult.err == nil {
-			t.Error("Expected slow request to timeout")
-		}
 	})
 }
 

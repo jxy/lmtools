@@ -5,7 +5,6 @@ package argo
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 // Default models
@@ -23,15 +22,6 @@ const (
 // Input validation constants
 const (
 	MaxInputSizeBytes = 1024 * 1024 // 1MB
-)
-
-// HTTP client configuration constants
-const (
-	MaxIdleConns        = 100
-	MaxIdleConnsPerHost = 100
-	IdleConnTimeout     = 90 * time.Second
-	TLSHandshakeTimeout = 10 * time.Second
-	ExpectTimeout       = 1 * time.Second
 )
 
 // Supported chat models
