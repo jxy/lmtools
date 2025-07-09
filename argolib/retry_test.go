@@ -954,3 +954,237 @@ func TestTimeoutEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestCalculateRetryDelay(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          RetryConfig
+		attempt      int
+		lastErr      error
+		currentDelay time.Duration
+		jitterFactor float64
+		startTime    time.Time
+		wantMinDelay time.Duration
+		wantMaxDelay time.Duration
+	}{
+		{
+			name: "first attempt returns current delay",
+			cfg: RetryConfig{
+				MaxDelay: 30 * time.Second,
+			},
+			attempt:      0,
+			currentDelay: 1 * time.Second,
+			wantMinDelay: 1 * time.Second,
+			wantMaxDelay: 1 * time.Second,
+		},
+		{
+			name: "exponential backoff without jitter",
+			cfg: RetryConfig{
+				Multiplier: 2.0,
+				MaxDelay:   30 * time.Second,
+			},
+			attempt:      1,
+			lastErr:      fmt.Errorf("network error"),
+			currentDelay: 1 * time.Second,
+			jitterFactor: 0,
+			wantMinDelay: 2 * time.Second,
+			wantMaxDelay: 2 * time.Second,
+		},
+		{
+			name: "exponential backoff with jitter",
+			cfg: RetryConfig{
+				Multiplier: 2.0,
+				MaxDelay:   30 * time.Second,
+			},
+			attempt:      1,
+			lastErr:      fmt.Errorf("network error"),
+			currentDelay: 1 * time.Second,
+			jitterFactor: 0.5,
+			wantMinDelay: 1 * time.Second, // 2s * (1 - 0.5) = 1s
+			wantMaxDelay: 3 * time.Second, // 2s * (1 + 0.5) = 3s
+		},
+		{
+			name: "respects max delay",
+			cfg: RetryConfig{
+				Multiplier: 2.0,
+				MaxDelay:   5 * time.Second,
+			},
+			attempt:      1,
+			lastErr:      fmt.Errorf("network error"),
+			currentDelay: 4 * time.Second,
+			jitterFactor: 0,
+			wantMinDelay: 5 * time.Second,
+			wantMaxDelay: 5 * time.Second,
+		},
+		{
+			name: "respects max delay with jitter",
+			cfg: RetryConfig{
+				Multiplier: 2.0,
+				MaxDelay:   5 * time.Second,
+			},
+			attempt:      1,
+			lastErr:      fmt.Errorf("network error"),
+			currentDelay: 4 * time.Second,
+			jitterFactor: 0.5,
+			wantMinDelay: 4 * time.Second, // Could be less due to jitter
+			wantMaxDelay: 5 * time.Second, // But capped at MaxDelay
+		},
+		{
+			name: "retry-after without jitter",
+			cfg: RetryConfig{
+				MaxDelay:          30 * time.Second,
+				MaxRetryAfter:     20 * time.Second,
+				RespectRetryAfter: true,
+			},
+			attempt: 1,
+			lastErr: &RetryableError{
+				HTTPStatus: 429,
+				RetryInfo: RetryInfo{
+					After: 15 * time.Second,
+				},
+			},
+			currentDelay: 1 * time.Second,
+			jitterFactor: 0,
+			wantMinDelay: 15 * time.Second,
+			wantMaxDelay: 15 * time.Second,
+		},
+		{
+			name: "retry-after capped at MaxRetryAfter",
+			cfg: RetryConfig{
+				MaxDelay:          30 * time.Second,
+				MaxRetryAfter:     10 * time.Second,
+				RespectRetryAfter: true,
+			},
+			attempt: 1,
+			lastErr: &RetryableError{
+				HTTPStatus: 429,
+				RetryInfo: RetryInfo{
+					After: 20 * time.Second,
+				},
+			},
+			currentDelay: 1 * time.Second,
+			jitterFactor: 0,
+			wantMinDelay: 10 * time.Second,
+			wantMaxDelay: 10 * time.Second,
+		},
+		{
+			name: "retry-after with jitter",
+			cfg: RetryConfig{
+				MaxDelay:          30 * time.Second,
+				MaxRetryAfter:     20 * time.Second,
+				RespectRetryAfter: true,
+			},
+			attempt: 1,
+			lastErr: &RetryableError{
+				HTTPStatus: 429,
+				RetryInfo: RetryInfo{
+					After: 10 * time.Second,
+				},
+			},
+			currentDelay: 1 * time.Second,
+			jitterFactor: 0.3,
+			wantMinDelay: 7 * time.Second,  // 10s * (1 - 0.3) = 7s
+			wantMaxDelay: 13 * time.Second, // 10s * (1 + 0.3) = 13s
+		},
+		{
+			name: "max elapsed time exceeded",
+			cfg: RetryConfig{
+				MaxDelay:       30 * time.Second,
+				MaxElapsedTime: 5 * time.Second,
+			},
+			attempt:      1,
+			lastErr:      fmt.Errorf("network error"),
+			currentDelay: 10 * time.Second,
+			startTime:    time.Now().Add(-4 * time.Second), // 4 seconds ago
+			wantMinDelay: 0,                                // Will vary based on timing
+			wantMaxDelay: 1 * time.Second,                  // Only 1 second remaining
+		},
+		{
+			name: "max elapsed time already exceeded",
+			cfg: RetryConfig{
+				MaxDelay:       30 * time.Second,
+				MaxElapsedTime: 5 * time.Second,
+			},
+			attempt:      1,
+			lastErr:      fmt.Errorf("network error"),
+			currentDelay: 10 * time.Second,
+			startTime:    time.Now().Add(-10 * time.Second), // 10 seconds ago
+			wantMinDelay: 0,
+			wantMaxDelay: 0, // Signal to stop retrying
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Use current time if not specified
+			if tt.startTime.IsZero() {
+				tt.startTime = time.Now()
+			}
+
+			got := calculateRetryDelay(tt.cfg, tt.attempt, tt.lastErr, tt.currentDelay, tt.jitterFactor, tt.startTime)
+
+			// For tests with jitter or elapsed time constraints, check range
+			if tt.wantMinDelay != tt.wantMaxDelay {
+				if got < tt.wantMinDelay || got > tt.wantMaxDelay {
+					t.Errorf("calculateRetryDelay() = %v, want between %v and %v", got, tt.wantMinDelay, tt.wantMaxDelay)
+				}
+			} else {
+				// For deterministic tests, check exact value
+				if got != tt.wantMinDelay {
+					t.Errorf("calculateRetryDelay() = %v, want %v", got, tt.wantMinDelay)
+				}
+			}
+		})
+	}
+}
+
+func TestCalculateRetryDelayJitterBounds(t *testing.T) {
+	// Test that jitter stays within bounds over many iterations
+	cfg := RetryConfig{
+		Multiplier: 2.0,
+		MaxDelay:   30 * time.Second,
+	}
+
+	baseDelay := 10 * time.Second
+	jitterFactor := 0.5
+	minExpected := time.Duration(float64(baseDelay) * 2 * (1 - jitterFactor))
+	maxExpected := time.Duration(float64(baseDelay) * 2 * (1 + jitterFactor))
+
+	for i := 0; i < 1000; i++ {
+		delay := calculateRetryDelay(cfg, 1, fmt.Errorf("error"), baseDelay, jitterFactor, time.Now())
+		if delay < minExpected || delay > maxExpected {
+			t.Errorf("Iteration %d: delay %v outside expected range [%v, %v]", i, delay, minExpected, maxExpected)
+		}
+	}
+}
+
+func TestCalculateRetryDelayMinimum(t *testing.T) {
+	// Test that delay never goes below 1ms (except for the 0 signal)
+	cfg := RetryConfig{
+		Multiplier: 0.1, // Will create very small delays
+		MaxDelay:   30 * time.Second,
+	}
+
+	// Test with jitter factor of 1.0 (maximum jitter)
+	delay := calculateRetryDelay(cfg, 1, fmt.Errorf("error"), 2*time.Millisecond, 1.0, time.Now())
+	if delay < time.Millisecond {
+		t.Errorf("Expected minimum delay of 1ms, got %v", delay)
+	}
+}
+
+func TestCalculateRetryDelayZeroSignal(t *testing.T) {
+	// Test that 0 is returned when MaxElapsedTime is exceeded
+	cfg := RetryConfig{
+		MaxDelay:       30 * time.Second,
+		MaxElapsedTime: 5 * time.Second,
+		Multiplier:     2.0,
+	}
+
+	// Start time is 10 seconds ago (well past MaxElapsedTime)
+	startTime := time.Now().Add(-10 * time.Second)
+	delay := calculateRetryDelay(cfg, 1, fmt.Errorf("error"), 1*time.Second, 0, startTime)
+
+	if delay != 0 {
+		t.Errorf("Expected 0 to signal MaxElapsedTime exceeded, got %v", delay)
+	}
+}
