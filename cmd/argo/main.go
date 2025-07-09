@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 )
 
 // Exit codes - moved from argolib/errors.go
@@ -75,19 +74,8 @@ func run() error {
 
 	client := argo.NewHTTPClient(cfg.Timeout)
 
-	// Configure retry
-	retryConfig := argo.RetryConfig{
-		MaxAttempts:       cfg.Retries,
-		InitialDelay:      cfg.BackoffTime,
-		MaxDelay:          30 * time.Second,
-		Multiplier:        2.0,
-		JitterFactor:      0.1, // Small jitter to avoid thundering herd
-		RespectRetryAfter: true,
-		Timeout:           cfg.RequestTimeout,
-	}
-
-	// Send request with retry (direct synchronous call)
-	resp, err := argo.SendRequestWithRetry(ctx, client, req, body, retryConfig)
+	// Send request with simple retry (direct synchronous call)
+	resp, err := argo.SimpleRetry(ctx, client, req, body, cfg.Retries, cfg.BackoffTime, cfg.RequestTimeout)
 	// Handle error with response cleanup
 	if err != nil {
 		if resp != nil && resp.Body != nil {
