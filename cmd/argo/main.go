@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	argo "lmtools/argolib"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -12,10 +15,21 @@ import (
 	"time"
 )
 
+// Exit codes - moved from argolib/errors.go
+const (
+	exitSuccess      = 0
+	exitGeneralError = 1
+	exitUsageError   = 2
+	exitNetworkError = 3
+	exitAuthError    = 4
+	exitTimeoutError = 5
+	exitInterrupted  = 130 // Standard for SIGINT
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(argo.GetExitCode(err))
+		os.Exit(getExitCode(err))
 	}
 }
 
@@ -121,4 +135,73 @@ func getOperationName(cfg *argo.Config) string {
 		return "stream_chat_input"
 	}
 	return "chat_input"
+}
+
+// getExitCode returns the appropriate exit code for an error
+// Moved from argolib/errors.go
+func getExitCode(err error) int {
+	if err == nil {
+		return exitSuccess
+	}
+
+	// Check for specific error types
+	var httpErr *argo.HTTPError
+	if errors.As(err, &httpErr) {
+		switch {
+		case httpErr.StatusCode == 401 || httpErr.StatusCode == 403:
+			return exitAuthError
+		case httpErr.StatusCode >= 500:
+			return exitNetworkError
+		}
+	}
+
+	// Check for retryable errors
+	var retryErr *argo.RetryableError
+	if errors.As(err, &retryErr) {
+		switch {
+		case retryErr.HTTPStatus == 401 || retryErr.HTTPStatus == 403:
+			return exitAuthError
+		case retryErr.HTTPStatus >= 500:
+			return exitNetworkError
+		}
+	}
+
+	// Check for interruption
+	if errors.Is(err, argo.ErrInterrupted) {
+		return exitInterrupted
+	}
+
+	// Check for context errors
+	if errors.Is(err, context.Canceled) {
+		return exitInterrupted
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return exitTimeoutError
+	}
+
+	// Check for URL errors (connection refused, etc)
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		// Recursively check the wrapped error
+		return getExitCode(urlErr.Err)
+	}
+
+	// Check for network errors
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return exitTimeoutError
+		}
+		return exitNetworkError
+	}
+
+	// Check for usage errors
+	errStr := err.Error()
+	if strings.Contains(errStr, "invalid") ||
+		strings.Contains(errStr, "required") ||
+		strings.Contains(errStr, "flag") {
+		return exitUsageError
+	}
+
+	return exitGeneralError
 }
