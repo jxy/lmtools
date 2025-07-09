@@ -14,7 +14,7 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/base/embed/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := io.WriteString(w, `{"embedding":"X"}`); err != nil {
+		if _, err := io.WriteString(w, `{"embedding":[[1.0,2.0,3.0]]}`); err != nil {
 			t.Fatalf("failed to write embedding response: %v", err)
 		}
 	})
@@ -46,8 +46,9 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleResponse(embed) failed: %v", err)
 	}
-	if out != "X" {
-		t.Errorf("Embed output = %q; want X", out)
+	expectedOut := "[1,2,3]"
+	if out != expectedOut {
+		t.Errorf("Embed output = %q; want %q", out, expectedOut)
 	}
 
 	// Chat path

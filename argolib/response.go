@@ -33,7 +33,7 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 			return "", fmt.Errorf("failed to log embed response: %w", err)
 		}
 		var embedResp struct {
-			Embedding string `json:"embedding"`
+			Embedding [][]float64 `json:"embedding"`
 		}
 		if err := json.Unmarshal(data, &embedResp); err != nil {
 			// Don't include full data in error to avoid memory issues with large responses
@@ -43,7 +43,16 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 			}
 			return "", fmt.Errorf("failed to unmarshal embed response (preview: %s): %w", dataPreview, err)
 		}
-		return embedResp.Embedding, nil
+		// Convert the embedding array to a string representation
+		if len(embedResp.Embedding) == 0 || len(embedResp.Embedding[0]) == 0 {
+			return "", fmt.Errorf("empty embedding response")
+		}
+		// Marshal the first embedding vector to JSON string
+		embeddingJSON, err := json.Marshal(embedResp.Embedding[0])
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal embedding: %w", err)
+		}
+		return string(embeddingJSON), nil
 	}
 
 	if cfg.StreamChat {

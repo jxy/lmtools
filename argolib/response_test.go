@@ -13,14 +13,15 @@ import (
 func TestHandleResponseEmbed(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{Embed: true, LogDir: dir}
-	body := []byte(`{"embedding":"E"}`)
+	body := []byte(`{"embedding":[[0.1,0.2,0.3]]}`)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}
 	out, err := HandleResponse(context.Background(), cfg, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out != "E" {
-		t.Errorf("out = %q; want %q", out, "E")
+	expectedOut := "[0.1,0.2,0.3]"
+	if out != expectedOut {
+		t.Errorf("out = %q; want %q", out, expectedOut)
 	}
 	files, err := os.ReadDir(dir)
 	if err != nil {
