@@ -48,13 +48,13 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 	}
 
 	if cfg.StreamChat {
-		f, filename, err := CreateTimestampedFile(cfg.LogDir, "stream_chat_output", "log")
+		f, path, err := CreateLogFile(cfg.LogDir, "stream_chat_output")
 		if err != nil {
 			return "", fmt.Errorf("failed to create log file: %w", err)
 		}
 		defer func() {
 			if closeErr := f.Close(); closeErr != nil {
-				fmt.Fprintf(os.Stderr, "failed to close log file %s: %v\n", filename, closeErr)
+				fmt.Fprintf(os.Stderr, "failed to close log file %s: %v\n", path, closeErr)
 			}
 		}()
 
@@ -70,7 +70,7 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 			return "", fmt.Errorf("streaming interrupted: %w", ctx.Err())
 		case err := <-done:
 			if err != nil {
-				return "", fmt.Errorf("error streaming response to stdout and log file %s: %w", filename, err)
+				return "", fmt.Errorf("error streaming response to stdout and log file %s: %w", path, err)
 			}
 			return "", nil
 		}
