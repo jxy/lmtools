@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// SimpleRetry performs HTTP request with exponential backoff retry
-func SimpleRetry(ctx context.Context, client *http.Client, req *http.Request,
+// Retry performs HTTP request with exponential backoff retry
+func Retry(ctx context.Context, client *http.Client, req *http.Request,
 	bodyBytes []byte, maxAttempts int, initialDelay time.Duration,
 ) (*http.Response, error) {
 	if maxAttempts < 1 {
