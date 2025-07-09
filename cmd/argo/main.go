@@ -6,23 +6,19 @@ import (
 	"fmt"
 	"io"
 	argo "lmtools/argolib"
-	"net"
-	"net/url"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
-// Exit codes - moved from argolib/errors.go
+// Exit codes - simplified to 3
 const (
-	exitSuccess      = 0
-	exitGeneralError = 1
-	exitUsageError   = 2
-	exitNetworkError = 3
-	exitAuthError    = 4
-	exitTimeoutError = 5
-	exitInterrupted  = 130 // Standard for SIGINT
+	exitSuccess     = 0   // Success
+	exitError       = 1   // General error
+	exitInterrupted = 130 // Standard for SIGINT
 )
 
 func main() {
@@ -42,8 +38,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("invalid flags: %w", err)
 	}
-	if err := argo.InitLogging(cfg.LogLevel); err != nil {
-		return fmt.Errorf("invalid log-level: %w", err)
+	// Initialize logging with info level (hardcoded)
+	if err := argo.InitLogging("info"); err != nil {
+		return fmt.Errorf("failed to init logging: %w", err)
 	}
 
 	inputBytes, err := io.ReadAll(os.Stdin)
@@ -72,10 +69,12 @@ func run() error {
 		return fmt.Errorf("failed to log request: %w", err)
 	}
 
-	client := argo.NewHTTPClient(cfg.Timeout)
+	// Create HTTP client with timeout
+	client := &http.Client{Timeout: cfg.Timeout}
 
 	// Send request with simple retry (direct synchronous call)
-	resp, err := argo.SimpleRetry(ctx, client, req, body, cfg.Retries, cfg.BackoffTime, cfg.RequestTimeout)
+	// Hardcoded backoff time of 1 second
+	resp, err := argo.SimpleRetry(ctx, client, req, body, cfg.Retries, 1*time.Second, cfg.Timeout)
 	// Handle error with response cleanup
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -87,9 +86,7 @@ func run() error {
 	// Defer response cleanup for success case
 	defer func() {
 		if resp != nil && resp.Body != nil {
-			if err := resp.Body.Close(); err != nil {
-				argo.Debugf("failed to close response body: %v", err)
-			}
+			_ = resp.Body.Close()
 		}
 	}()
 
@@ -118,70 +115,16 @@ func getOperationName(cfg *argo.Config) string {
 }
 
 // getExitCode returns the appropriate exit code for an error
-// Moved from argolib/errors.go
 func getExitCode(err error) int {
 	if err == nil {
 		return exitSuccess
 	}
 
-	// Check for specific error types
-	var httpErr *argo.HTTPError
-	if errors.As(err, &httpErr) {
-		switch {
-		case httpErr.StatusCode == 401 || httpErr.StatusCode == 403:
-			return exitAuthError
-		case httpErr.StatusCode >= 500:
-			return exitNetworkError
-		}
-	}
-
-	// Check for retryable errors
-	var retryErr *argo.RetryableError
-	if errors.As(err, &retryErr) {
-		switch {
-		case retryErr.HTTPStatus == 401 || retryErr.HTTPStatus == 403:
-			return exitAuthError
-		case retryErr.HTTPStatus >= 500:
-			return exitNetworkError
-		}
-	}
-
 	// Check for interruption
-	if errors.Is(err, argo.ErrInterrupted) {
+	if errors.Is(err, argo.ErrInterrupted) || errors.Is(err, context.Canceled) {
 		return exitInterrupted
 	}
 
-	// Check for context errors
-	if errors.Is(err, context.Canceled) {
-		return exitInterrupted
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return exitTimeoutError
-	}
-
-	// Check for URL errors (connection refused, etc)
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		// Recursively check the wrapped error
-		return getExitCode(urlErr.Err)
-	}
-
-	// Check for network errors
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		if netErr.Timeout() {
-			return exitTimeoutError
-		}
-		return exitNetworkError
-	}
-
-	// Check for usage errors
-	errStr := err.Error()
-	if strings.Contains(errStr, "invalid") ||
-		strings.Contains(errStr, "required") ||
-		strings.Contains(errStr, "flag") {
-		return exitUsageError
-	}
-
-	return exitGeneralError
+	// Everything else is a general error
+	return exitError
 }

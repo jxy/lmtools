@@ -1,5 +1,5 @@
 // Package argo provides internal logging utilities.
-// Console: Infof/Debugf. File: LogJSON/CreateLogFile.
+// Console: Infof. File: LogJSON/CreateLogFile.
 // Not intended for external callers.
 package argo
 
@@ -9,56 +9,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 )
 
-type logLevel int32
-
 const (
-	InfoLevel logLevel = iota + 1
-	DebugLevel
+	maxOpLen = 30 // Windows MAX_PATH margin
 )
 
-const (
-	DefaultLogLevel = "info"
-	maxOpLen        = 30 // Windows MAX_PATH margin
-)
-
-var currentLogLevel int32 = int32(InfoLevel)
-
-// InitLogging initializes the logging level and configuration.
+// InitLogging initializes the logging configuration.
 // This function should be called once at program startup.
 func InitLogging(level string) error {
-	lvl := strings.ToLower(level)
-	flags := log.LstdFlags
-	var newLevel logLevel
-	switch lvl {
-	case DefaultLogLevel:
-		newLevel = InfoLevel
-	case "debug":
-		newLevel = DebugLevel
-		flags |= log.Lshortfile
-	default:
-		return fmt.Errorf("invalid log level %q", level)
-	}
-	atomic.StoreInt32(&currentLogLevel, int32(newLevel))
-	log.SetFlags(flags)
+	// Ignore level parameter, always use info level
+	log.SetFlags(log.LstdFlags)
 	log.SetOutput(os.Stderr)
 	return nil
 }
 
 func Infof(format string, args ...interface{}) {
-	if logLevel(atomic.LoadInt32(&currentLogLevel)) >= InfoLevel {
-		log.Printf("[INFO] "+format, args...)
-	}
-}
-
-func Debugf(format string, args ...interface{}) {
-	if logLevel(atomic.LoadInt32(&currentLogLevel)) >= DebugLevel {
-		log.Printf("[DEBUG] "+format, args...)
-	}
+	log.Printf("[INFO] "+format, args...)
 }
 
 // sanitizeOp ensures operation names are safe and reasonable length

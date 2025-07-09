@@ -2,6 +2,7 @@ package argo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -250,8 +251,8 @@ func TestSimpleRetry(t *testing.T) {
 		}
 
 		// Should be a timeout error
-		if !isTimeoutError(err) {
-			t.Errorf("Expected timeout error, got %v", err)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 		}
 	})
 

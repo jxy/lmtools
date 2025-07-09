@@ -56,12 +56,6 @@ var EmbedModels = []string{
 	"v3small",
 }
 
-// Supported log levels
-var LogLevels = []string{
-	"info",
-	"debug",
-}
-
 // Supported environments
 var Environments = []string{
 	"prod",
@@ -92,16 +86,6 @@ func ValidateEmbedModel(model string) error {
 		}
 	}
 	return fmt.Errorf("invalid embed model %q, available models: %s", model, strings.Join(EmbedModels, ", "))
-}
-
-// ValidateLogLevel checks if the provided log level is valid
-func ValidateLogLevel(level string) error {
-	for _, l := range LogLevels {
-		if l == level {
-			return nil
-		}
-	}
-	return fmt.Errorf("invalid log level %q, available levels: %s", level, strings.Join(LogLevels, ", "))
 }
 
 // IsValidEnvironment checks if the provided environment is valid

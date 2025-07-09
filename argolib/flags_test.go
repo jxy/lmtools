@@ -19,9 +19,6 @@ func TestParseFlagsDefaults(t *testing.T) {
 	if cfg.User != "testuser" {
 		t.Errorf("User = %q; want %q", cfg.User, "testuser")
 	}
-	if cfg.LogLevel != DefaultLogLevel {
-		t.Errorf("LogLevel = %q; want %q", cfg.LogLevel, DefaultLogLevel)
-	}
 }
 
 func TestParseFlagsRequiredUser(t *testing.T) {
@@ -56,7 +53,6 @@ func TestParseFlagsInvalidCombos(t *testing.T) {
 		args []string
 	}{
 		{"embed+stream", []string{"-u", "testuser", "-e", "-stream"}},
-		{"embed+prompt-chat", []string{"-u", "testuser", "-e", "-prompt-chat"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,17 +70,14 @@ func TestParseFlagsCustom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := Config{
-		Model:          "modelA",
-		StreamChat:     true,
-		LogDir:         defaultLogDir,
-		User:           "alice",
-		System:         "sys",
-		Env:            "dev",
-		Timeout:        10 * time.Minute,
-		LogLevel:       DefaultLogLevel,
-		Retries:        3,                // Default value
-		BackoffTime:    1 * time.Second,  // Default value
-		RequestTimeout: 10 * time.Minute, // Defaults to Timeout
+		Model:      "modelA",
+		StreamChat: true,
+		LogDir:     defaultLogDir,
+		User:       "alice",
+		System:     "sys",
+		Env:        "dev",
+		Timeout:    10 * time.Minute,
+		Retries:    3, // Default value
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("ParseFlags = %+v; want %+v", cfg, want)

@@ -35,7 +35,7 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRequest(embed) failed: %v", err)
 	}
-	client := NewHTTPClient(cfg.Timeout)
+	client := &http.Client{Timeout: cfg.Timeout}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
 	resp, err := client.Do(req)

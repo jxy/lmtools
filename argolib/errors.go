@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // ErrInterrupted is returned when an operation is interrupted by a signal
@@ -23,33 +22,10 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
 }
 
-// RetryInfo contains metadata for retry operations
-type RetryInfo struct {
-	After  time.Duration // How long to wait before retry
-	Reason string        // Human-readable reason
-}
-
-// RetryableError represents an error that can be retried
-type RetryableError struct {
-	HTTPStatus int
-	Body       string
-	RetryInfo  RetryInfo
-}
-
-func (e *RetryableError) Error() string {
-	return fmt.Sprintf("HTTP %d: %s", e.HTTPStatus, e.Body)
-}
-
 // IsRetryableError determines if an error should be retried
 func IsRetryableError(err error) bool {
 	if err == nil {
 		return false
-	}
-
-	// Check for wrapped RetryableError
-	var retryErr *RetryableError
-	if errors.As(err, &retryErr) {
-		return retryErr.HTTPStatus >= 500 || retryErr.HTTPStatus == 429 || retryErr.HTTPStatus == 503
 	}
 
 	// Check for HTTPError
@@ -105,9 +81,7 @@ func IsRetryableError(err error) bool {
 	return false
 }
 
-// Errorf creates a formatted error and logs it
+// Errorf creates a formatted error
 func Errorf(format string, args ...interface{}) error {
-	err := fmt.Errorf(format, args...)
-	Debugf("[ERROR] %v", err)
-	return err
+	return fmt.Errorf(format, args...)
 }
