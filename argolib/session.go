@@ -123,14 +123,22 @@ func CreateSibling(sessionPath, messageID string) (string, error) {
 		sessionPath = filepath.Join(GetSessionsDir(), sessionPath)
 	}
 
-	// Use session lock to prevent concurrent sibling creation
-	return WithSessionLockT(sessionPath, func() (string, error) {
-		siblingPath, err := GetNextSiblingPath(sessionPath, messageID)
+	// Get the anchor point for creating siblings (implements bubble-up logic)
+	anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
+
+	// Get the root session for locking to prevent any concurrent sibling creation
+	// within the same session tree
+	rootSession := GetRootSession(sessionPath)
+
+	// Use session lock at the root level to prevent concurrent sibling creation
+	return WithSessionLockT(rootSession, func() (string, error) {
+		// Re-calculate the sibling path inside the lock to ensure consistency
+		siblingPath, err := GetNextSiblingPath(anchorPath, anchorID)
 		if err != nil {
 			return "", fmt.Errorf("failed to get sibling path: %w", err)
 		}
 
-		fullPath := filepath.Join(sessionPath, siblingPath)
+		fullPath := filepath.Join(anchorPath, siblingPath)
 		if err := os.MkdirAll(fullPath, 0o750); err != nil {
 			return "", fmt.Errorf("failed to create sibling directory: %w", err)
 		}

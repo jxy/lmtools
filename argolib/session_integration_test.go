@@ -341,12 +341,10 @@ func TestNestedBranches(t *testing.T) {
 		}
 
 		// Expected lineage for level 2:
-		// - Level 0 Message 0
-		// - Level 0 Message 1
-		// - Level 2 Message 0 (Level 1 Message 0 is excluded as sibling point)
+		// With bubble-up, this creates a sibling at the parent level
+		// So it's a sibling of 0001, containing only messages before 0001
 		expectedContent := []string{
 			"Level 0 - Message 0",
-			"Level 0 - Message 1",
 			"Level 2 - Message 0",
 		}
 
@@ -388,10 +386,9 @@ func TestNestedBranches(t *testing.T) {
 			t.Fatalf("Failed to get level 3 lineage: %v", err)
 		}
 
-		// Expected: Level 0 messages 0,1 and Level 3 message 0
+		// Expected: With bubble-up, level 3 is also a sibling of 0001
 		expectedLevel3 := []string{
 			"Level 0 - Message 0",
-			"Level 0 - Message 1",
 			"Level 3 - Message 0",
 		}
 
@@ -488,8 +485,9 @@ func TestSessionTreeBuilding(t *testing.T) {
 			t.Fatalf("Failed to find siblings for 0001: %v", err)
 		}
 
-		if len(siblings) != 2 {
-			t.Errorf("Expected 2 siblings for message 0001, got %d", len(siblings))
+		// With bubble-up, the nested branch creates another sibling of 0001
+		if len(siblings) != 3 {
+			t.Errorf("Expected 3 siblings for message 0001 (including bubbled-up), got %d", len(siblings))
 		}
 
 		siblings, err = findSiblings(session.Path, "0003")
@@ -501,14 +499,14 @@ func TestSessionTreeBuilding(t *testing.T) {
 			t.Errorf("Expected 1 sibling for message 0003, got %d", len(siblings))
 		}
 
-		// Verify nested structure
+		// With bubble-up, no nested siblings are created
 		nestedSiblings, err := findSiblings(branch1.Path, "0000")
 		if err != nil {
 			t.Fatalf("Failed to find nested siblings: %v", err)
 		}
 
-		if len(nestedSiblings) != 1 {
-			t.Errorf("Expected 1 nested sibling, got %d", len(nestedSiblings))
+		if len(nestedSiblings) != 0 {
+			t.Errorf("Expected 0 nested siblings (bubbled up), got %d", len(nestedSiblings))
 		}
 	})
 }

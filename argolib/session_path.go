@@ -2,6 +2,7 @@ package argo
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -126,11 +127,17 @@ func GetMessagePath(sessionPath, messageID string) string {
 func ParseMessageID(messageIDPath string) (sessionPath string, messageID string) {
 	// First check if it's already an absolute path
 	if filepath.IsAbs(messageIDPath) {
+		// Check if it's a directory (session path without message ID)
+		if info, err := os.Stat(messageIDPath); err == nil && info.IsDir() {
+			return messageIDPath, ""
+		}
+
 		// Split by path separator and find the message ID
 		parts := strings.Split(messageIDPath, string(filepath.Separator))
 		for i := len(parts) - 1; i >= 0; i-- {
-			if _, err := strconv.ParseUint(parts[i], 16, 64); err == nil {
-				// Found the message ID
+			// Use strict validation for message IDs
+			if isValidMessageID(parts[i]) {
+				// Found a valid message ID
 				messageID = parts[i]
 				// Reconstruct the session path using platform-agnostic methods
 				sessionPath = filepath.Join(parts[:i]...)
@@ -139,6 +146,17 @@ func ParseMessageID(messageIDPath string) (sessionPath string, messageID string)
 					// Reconstruct absolute path
 					sessionPath = filepath.Join(string(filepath.Separator), sessionPath)
 				}
+
+				// Special check: if this is a direct child of sessions dir and the path exists as a directory,
+				// it's a session ID, not a message ID
+				if filepath.Base(filepath.Dir(sessionPath)) == "sessions" {
+					// Check if this path exists as a directory
+					if info, err := os.Stat(messageIDPath); err == nil && info.IsDir() {
+						// It's a session directory
+						return messageIDPath, ""
+					}
+				}
+
 				return sessionPath, messageID
 			}
 		}
@@ -154,7 +172,7 @@ func ParseMessageID(messageIDPath string) (sessionPath string, messageID string)
 
 	// Last part should be message ID
 	lastPart := parts[len(parts)-1]
-	if _, err := strconv.ParseUint(lastPart, 16, 64); err == nil {
+	if isValidMessageID(lastPart) {
 		messageID = lastPart
 		// Join the rest as session path
 		sessionPath = filepath.Join(GetSessionsDir(), strings.Join(parts[:len(parts)-1], "/"))
@@ -184,4 +202,79 @@ func SanitizeSessionID(id string) string {
 	id = strings.ReplaceAll(id, ".", "")
 	id = strings.ReplaceAll(id, " ", "")
 	return id
+}
+
+// isValidMessageID checks if a string is a valid message ID (4+ hex chars)
+func isValidMessageID(id string) bool {
+	if len(id) < 4 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidSessionID checks if a string could be a valid session ID
+func isValidSessionID(id string) bool {
+	// Session IDs are hex strings of varying lengths
+	if id == "" {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// GetRootSession returns the root session directory from any nested path
+func GetRootSession(sessionPath string) string {
+	// Parse the session path to get the root directory
+	rootDir, _ := ParseSessionPath(sessionPath)
+	return rootDir
+}
+
+// GetAnchorForBranching determines the appropriate location for creating a sibling
+// If we're already in a sibling directory, it bubbles up through ALL sibling directories
+// until it reaches a non-sibling directory or the root
+func GetAnchorForBranching(sessionPath string, messageID string) (anchorPath string, anchorID string) {
+	// Parse the session path to understand its structure
+	rootDir, components := ParseSessionPath(sessionPath)
+
+	// Start from the end and bubble up through all sibling directories
+	lastOriginalMsgID := messageID
+	bubbledComponents := components // Start with all components
+
+	// Iterate from the last component backwards
+	for i := len(components) - 1; i >= 0; i-- {
+		isSib, originalMsgID, _ := IsSiblingDir(components[i])
+
+		if isSib {
+			// This is a sibling directory, remember the original message ID
+			lastOriginalMsgID = originalMsgID
+			// Continue bubbling up by removing this component
+			bubbledComponents = components[:i]
+		} else {
+			// Not a sibling directory, stop bubbling here
+			break
+		}
+	}
+
+	// Reconstruct the anchor path
+	if len(bubbledComponents) == 0 {
+		// Bubbled all the way to root
+		anchorPath = rootDir
+	} else {
+		// Reconstruct path from remaining components
+		anchorPath = rootDir
+		for _, comp := range bubbledComponents {
+			anchorPath = filepath.Join(anchorPath, comp)
+		}
+	}
+
+	return anchorPath, lastOriginalMsgID
 }

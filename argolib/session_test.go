@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -26,7 +27,7 @@ func TestCreateSession(t *testing.T) {
 
 		// Verify it's valid hex
 		for _, c := range sessionID {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 				t.Errorf("Invalid hex character in session ID: %c", c)
 			}
 		}
@@ -303,10 +304,10 @@ func TestGetLineage(t *testing.T) {
 			t.Logf("  [%d] %s: %s", i, msg.Role, msg.Content)
 		}
 
-		// The actual lineage should exclude the sibling point
+		// With bubble-up logic, the nested branch creates a sibling at the parent level
+		// So it's a sibling of 0001, which means it includes only message 0
 		expectedNestedLineage := []Message{
 			linearMessages[0], // Message 0
-			linearMessages[1], // Message 1
 			nestedMsg,         // Nested message
 		}
 
@@ -472,7 +473,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 					}
 				}
 			}
-			
+
 			for i := 0; i < 3; i++ {
 				siblingPath, err := CreateSibling(session.Path, "0001")
 				if err != nil {
@@ -484,7 +485,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 			// Verify paths are sequential starting from the current index
 			var expectedPaths []string
 			for i := 0; i < 3; i++ {
-				expectedPaths = append(expectedPaths, 
+				expectedPaths = append(expectedPaths,
 					filepath.Join(session.Path, fmt.Sprintf("0001.s.%04x", startingIndex+i)))
 			}
 
@@ -511,5 +512,255 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 				}
 			}
 		})
+	})
+}
+
+func TestBubbleUpSiblingCreation(t *testing.T) {
+	withTestSessionDir(t, func(sessionsDir string) {
+		// Create initial session with messages
+		session, err := CreateSession()
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Add messages
+		messages := []Message{
+			{Role: "user", Content: "Message 0", Timestamp: time.Now()},
+			{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test-model"},
+			{Role: "user", Content: "Message 2", Timestamp: time.Now()},
+			{Role: "assistant", Content: "Message 3", Timestamp: time.Now(), Model: "test-model"},
+		}
+
+		for _, msg := range messages {
+			if _, err := AppendMessage(session, msg); err != nil {
+				t.Fatalf("Failed to append message: %v", err)
+			}
+		}
+
+		t.Run("BubbleUpFromFirstLevelSibling", func(t *testing.T) {
+			// Create first sibling of message 0001
+			sibling1Path, err := CreateSibling(session.Path, "0001")
+			if err != nil {
+				t.Fatalf("Failed to create first sibling: %v", err)
+			}
+
+			// Expected: abc123/0001.s.0000
+			expectedPath1 := filepath.Join(session.Path, "0001.s.0000")
+			if sibling1Path != expectedPath1 {
+				t.Errorf("First sibling path mismatch: got %s, want %s", sibling1Path, expectedPath1)
+			}
+
+			// Load the sibling session and add a message
+			sibSession1, err := LoadSession(sibling1Path)
+			if err != nil {
+				t.Fatalf("Failed to load sibling session: %v", err)
+			}
+
+			sibMsg := Message{
+				Role:      "assistant",
+				Content:   "Regenerated message 1",
+				Timestamp: time.Now(),
+				Model:     "test-model-v2",
+			}
+			_, err = AppendMessage(sibSession1, sibMsg)
+			if err != nil {
+				t.Fatalf("Failed to append to sibling: %v", err)
+			}
+
+			// Now branch from the message inside the sibling (bubble-up test)
+			// This should create abc123/0001.s.0001, NOT abc123/0001.s.0000/0000.s.0000
+			sibling2Path, err := CreateSibling(sibSession1.Path, "0000")
+			if err != nil {
+				t.Fatalf("Failed to create second sibling: %v", err)
+			}
+
+			// Expected: abc123/0001.s.0001 (bubbled up)
+			expectedPath2 := filepath.Join(session.Path, "0001.s.0001")
+			if sibling2Path != expectedPath2 {
+				t.Errorf("Second sibling path mismatch (bubble-up failed): got %s, want %s", sibling2Path, expectedPath2)
+			}
+		})
+
+		t.Run("BubbleUpFromDeepNesting", func(t *testing.T) {
+			// Create a deeper nesting structure
+			// First, create sibling of 0002
+			sib1, err := CreateSibling(session.Path, "0002")
+			if err != nil {
+				t.Fatalf("Failed to create sibling of 0002: %v", err)
+			}
+
+			sib1Session, _ := LoadSession(sib1)
+			if _, err := AppendMessage(sib1Session, Message{Role: "user", Content: "Alt message", Timestamp: time.Now()}); err != nil {
+				t.Fatalf("Failed to append message: %v", err)
+			}
+
+			// Create sibling of the message in sib1
+			sib2, err := CreateSibling(sib1, "0000")
+			if err != nil {
+				t.Fatalf("Failed to create nested sibling: %v", err)
+			}
+
+			// This should bubble up to create a sibling of 0002
+			expectedSib2 := filepath.Join(session.Path, "0002.s.0001")
+			if sib2 != expectedSib2 {
+				t.Errorf("Nested sibling didn't bubble up: got %s, want %s", sib2, expectedSib2)
+			}
+		})
+
+		t.Run("MultipleBubbleUps", func(t *testing.T) {
+			// Test that multiple bubble-ups from the same nested location work correctly
+			baseSib, err := CreateSibling(session.Path, "0003")
+			if err != nil {
+				t.Fatalf("Failed to create base sibling: %v", err)
+			}
+
+			baseSibSession, _ := LoadSession(baseSib)
+			if _, err := AppendMessage(baseSibSession, Message{Role: "assistant", Content: "Regen 1", Timestamp: time.Now(), Model: "model"}); err != nil {
+				t.Fatalf("Failed to append message: %v", err)
+			}
+
+			// Create multiple siblings from the nested message
+			var siblingPaths []string
+			for i := 0; i < 3; i++ {
+				sibPath, err := CreateSibling(baseSib, "0000")
+				if err != nil {
+					t.Fatalf("Failed to create bubbled sibling %d: %v", i, err)
+				}
+				siblingPaths = append(siblingPaths, sibPath)
+			}
+
+			// All should bubble up to be siblings of 0003
+			expectedPaths := []string{
+				filepath.Join(session.Path, "0003.s.0001"),
+				filepath.Join(session.Path, "0003.s.0002"),
+				filepath.Join(session.Path, "0003.s.0003"),
+			}
+
+			for i, gotPath := range siblingPaths {
+				if gotPath != expectedPaths[i] {
+					t.Errorf("Sibling %d path mismatch: got %s, want %s", i, gotPath, expectedPaths[i])
+				}
+			}
+		})
+	})
+}
+
+func TestConcurrentSiblingCreation(t *testing.T) {
+	withTestSessionDir(t, func(sessionsDir string) {
+		// Test that concurrent sibling creation doesn't cause index collisions
+		// Create a session with a message to branch from
+		session, err := CreateSession()
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Add initial messages
+		if _, err := AppendMessage(session, Message{Role: "user", Content: "Message 0", Timestamp: time.Now()}); err != nil {
+			t.Fatalf("Failed to append message: %v", err)
+		}
+		if _, err := AppendMessage(session, Message{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test"}); err != nil {
+			t.Fatalf("Failed to append message: %v", err)
+		}
+
+		// Create first-level sibling
+		sibling1, err := CreateSibling(session.Path, "0001")
+		if err != nil {
+			t.Fatalf("Failed to create sibling: %v", err)
+		}
+
+		// Add message to sibling
+		sib1Session, _ := LoadSession(sibling1)
+		if _, err := AppendMessage(sib1Session, Message{Role: "assistant", Content: "Alt 1", Timestamp: time.Now(), Model: "test"}); err != nil {
+			t.Fatalf("Failed to append to sibling: %v", err)
+		}
+
+		// Now create siblings concurrently from different levels
+		const numGoroutines = 10
+		results := make(chan string, numGoroutines)
+		errors := make(chan error, numGoroutines)
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		// Half create siblings from the root level
+		for i := 0; i < numGoroutines/2; i++ {
+			go func() {
+				defer wg.Done()
+				path, err := CreateSibling(session.Path, "0001")
+				if err != nil {
+					errors <- err
+				} else {
+					results <- path
+				}
+			}()
+		}
+
+		// Half create siblings from the nested level (should bubble up)
+		for i := 0; i < numGoroutines/2; i++ {
+			go func() {
+				defer wg.Done()
+				path, err := CreateSibling(sibling1, "0000")
+				if err != nil {
+					errors <- err
+				} else {
+					results <- path
+				}
+			}()
+		}
+
+		// Wait for all goroutines to finish
+		go func() {
+			wg.Wait()
+			close(results)
+			close(errors)
+		}()
+
+		// Collect results
+		var paths []string
+		lockErrors := 0
+		for {
+			select {
+			case err, ok := <-errors:
+				if !ok {
+					goto done
+				}
+				// Lock acquisition failures are expected in concurrent scenarios
+				if strings.Contains(err.Error(), "session is locked") {
+					lockErrors++
+				} else {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			case path, ok := <-results:
+				if !ok {
+					goto done
+				}
+				paths = append(paths, path)
+			}
+		}
+	done:
+
+		// Verify all paths are unique
+		pathMap := make(map[string]bool)
+		for _, path := range paths {
+			if pathMap[path] {
+				t.Errorf("Duplicate path created: %s", path)
+			}
+			pathMap[path] = true
+		}
+
+		// Verify we got some successful creations
+		// Due to locking, not all goroutines may succeed
+		expectedSuccesses := numGoroutines - lockErrors
+		if len(pathMap) != expectedSuccesses {
+			t.Errorf("Expected %d unique paths (with %d lock failures), got %d",
+				expectedSuccesses, lockErrors, len(pathMap))
+		}
+
+		// Verify we had a reasonable success rate
+		if len(pathMap) == 0 {
+			t.Errorf("No siblings were created successfully")
+		}
+
+		// Log the results for debugging
+		t.Logf("Created %d unique sibling paths, %d lock failures", len(pathMap), lockErrors)
 	})
 }

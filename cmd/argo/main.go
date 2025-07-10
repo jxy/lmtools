@@ -53,35 +53,35 @@ func run() error {
 		return fmt.Errorf("failed to init logging: %w", err)
 	}
 
-	inputBytes, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return fmt.Errorf("failed to read from STDIN: %w", err)
-	}
-
-	// Combined validation
-	if len(inputBytes) > argo.MaxInputSizeBytes {
-		return fmt.Errorf("input too large: %d bytes (max: %d bytes)", len(inputBytes), argo.MaxInputSizeBytes)
-	}
-
-	inputStr := strings.TrimSpace(string(inputBytes))
-
 	// Check if we're branching from an assistant message (regeneration)
 	isRegeneration := false
 	if cfg.Branch != "" {
-		// Check if the message we're branching from is an assistant message
-		sessionPath, messageID := argo.ParseMessageID(cfg.Branch)
-		if messageID != "" {
-			// Load the message to check its role
-			msg, err := argo.ReadMessage(sessionPath, messageID)
-			if err == nil && msg.Role == "assistant" {
-				isRegeneration = true
-			}
+		isAssistant, err := argo.IsAssistantMessage(cfg.Branch)
+		if err != nil {
+			return fmt.Errorf("failed to check branch message type: %w", err)
 		}
+		isRegeneration = isAssistant
 	}
 
-	// Only require input if not regenerating
-	if inputStr == "" && !isRegeneration {
-		return fmt.Errorf("input cannot be empty")
+	// Only read stdin if not regenerating
+	var inputStr string
+	if !isRegeneration {
+		inputBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read from STDIN: %w", err)
+		}
+
+		// Combined validation
+		if len(inputBytes) > argo.MaxInputSizeBytes {
+			return fmt.Errorf("input too large: %d bytes (max: %d bytes)", len(inputBytes), argo.MaxInputSizeBytes)
+		}
+
+		inputStr = strings.TrimSpace(string(inputBytes))
+
+		// Only require input if not regenerating
+		if inputStr == "" {
+			return fmt.Errorf("input cannot be empty")
+		}
 	}
 
 	// Handle sessions

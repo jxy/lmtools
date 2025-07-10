@@ -16,38 +16,6 @@ func TestMessage(role, content string) Message {
 	}
 }
 
-// createTestSession creates a test session with the given messages
-func createTestSession(t *testing.T, messages []Message) *Session {
-	t.Helper()
-
-	session, err := CreateSession()
-	if err != nil {
-		t.Fatalf("Failed to create test session: %v", err)
-	}
-
-	for _, msg := range messages {
-		if _, err := AppendMessage(session, msg); err != nil {
-			t.Fatalf("Failed to append message: %v", err)
-		}
-	}
-
-	return session
-}
-
-// setupTestSessionDir creates a temporary directory for testing
-func setupTestSessionDir(t *testing.T) string {
-	t.Helper()
-
-	tmpDir := t.TempDir()
-	sessionsDir := filepath.Join(tmpDir, "sessions")
-
-	if err := os.MkdirAll(sessionsDir, 0o750); err != nil {
-		t.Fatalf("Failed to create test sessions directory: %v", err)
-	}
-
-	return sessionsDir
-}
-
 // withTestSessionDir runs a test with a temporary session directory
 func withTestSessionDir(t *testing.T, fn func(sessionsDir string)) {
 	t.Helper()
@@ -114,14 +82,5 @@ func assertLineageEqual(t *testing.T, expected, actual []Message) {
 		if expected[i].Content != actual[i].Content {
 			t.Errorf("Message %d content mismatch: expected %q, got %q", i, expected[i].Content, actual[i].Content)
 		}
-	}
-}
-
-// cleanupTestSessions removes test session directories
-func cleanupTestSessions(t *testing.T, path string) {
-	t.Helper()
-
-	if err := os.RemoveAll(path); err != nil {
-		t.Logf("Warning: failed to cleanup test sessions: %v", err)
 	}
 }

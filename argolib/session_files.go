@@ -3,7 +3,6 @@ package argo
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -223,20 +222,23 @@ func ensureSessionDir(path string) error {
 	return os.MkdirAll(path, 0o750)
 }
 
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	source, err := os.Open(src)
-	if err != nil {
-		return err
+// IsAssistantMessage checks if the given branch path points to an assistant message
+func IsAssistantMessage(branchPath string) (bool, error) {
+	if branchPath == "" {
+		return false, fmt.Errorf("branch path cannot be empty")
 	}
-	defer source.Close()
 
-	destination, err := os.Create(dst)
-	if err != nil {
-		return err
+	sessionPath, messageID := ParseMessageID(branchPath)
+	if messageID == "" {
+		// Not a message path, but this is not necessarily an error
+		// The path might be a session directory
+		return false, nil
 	}
-	defer destination.Close()
 
-	_, err = io.Copy(destination, source)
-	return err
+	msg, err := ReadMessage(sessionPath, messageID)
+	if err != nil {
+		return false, fmt.Errorf("failed to read message %s: %w", messageID, err)
+	}
+
+	return msg.Role == "assistant", nil
 }

@@ -414,3 +414,82 @@ func TestListMessagesNumericOrdering(t *testing.T) {
 		}
 	})
 }
+
+func TestIsAssistantMessage(t *testing.T) {
+	withTestSessionDir(t, func(sessionsDir string) {
+		// Create test session
+		session, err := CreateSession()
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Add messages
+		messages := []Message{
+			{Role: "user", Content: "Test user message", Timestamp: time.Now()},
+			{Role: "assistant", Content: "Test assistant message", Timestamp: time.Now(), Model: "test-model"},
+		}
+
+		var messageIDs []string
+		for _, msg := range messages {
+			msgID, err := AppendMessage(session, msg)
+			if err != nil {
+				t.Fatalf("Failed to append message: %v", err)
+			}
+			messageIDs = append(messageIDs, msgID)
+		}
+
+		// Test cases
+		tests := []struct {
+			name     string
+			path     string
+			expected bool
+			wantErr  bool
+		}{
+			{
+				name:     "User message",
+				path:     filepath.Join(GetSessionID(session.Path), messageIDs[0]), // Use relative path
+				expected: false,
+				wantErr:  false,
+			},
+			{
+				name:     "Assistant message",
+				path:     filepath.Join(GetSessionID(session.Path), messageIDs[1]), // Use relative path
+				expected: true,
+				wantErr:  false,
+			},
+			{
+				name:     "Empty path",
+				path:     "",
+				expected: false,
+				wantErr:  true, // Now returns an error for empty path
+			},
+			{
+				name:     "Invalid message ID",
+				path:     filepath.Join(GetSessionID(session.Path), "9999"),
+				expected: false,
+				wantErr:  true, // Should error when trying to read non-existent message
+			},
+			{
+				name:     "Session path only (no message ID)",
+				path:     session.Path,
+				expected: false,
+				wantErr:  false, // Should not error, just return false
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				isAssistant, err := IsAssistantMessage(tt.path)
+				if tt.wantErr && err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				if !tt.wantErr && err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if isAssistant != tt.expected {
+					t.Errorf("Expected %v, got %v", tt.expected, isAssistant)
+				}
+			})
+		}
+	})
+}

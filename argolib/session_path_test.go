@@ -364,3 +364,136 @@ func TestSanitizeSessionID(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAnchorForBranching(t *testing.T) {
+	withTestSessionDir(t, func(sessionsDir string) {
+		tests := []struct {
+			name         string
+			sessionPath  string
+			messageID    string
+			expectedPath string
+			expectedID   string
+		}{
+			{
+				name:         "Root level message",
+				sessionPath:  filepath.Join(sessionsDir, "abc123"),
+				messageID:    "0001",
+				expectedPath: filepath.Join(sessionsDir, "abc123"),
+				expectedID:   "0001",
+			},
+			{
+				name:         "Message in sibling directory",
+				sessionPath:  filepath.Join(sessionsDir, "abc123", "0001.s.0000"),
+				messageID:    "0000",
+				expectedPath: filepath.Join(sessionsDir, "abc123"),
+				expectedID:   "0001",
+			},
+			{
+				name:         "Message in nested sibling",
+				sessionPath:  filepath.Join(sessionsDir, "abc123", "0001.s.0002", "0003.s.0001"),
+				messageID:    "0000",
+				expectedPath: filepath.Join(sessionsDir, "abc123"), // Now bubbles all the way up
+				expectedID:   "0001",                               // Original message from the topmost sibling
+			},
+			{
+				name:         "Deep nesting",
+				sessionPath:  filepath.Join(sessionsDir, "abc123", "0001.s.0000", "0002.s.0000", "0003.s.0000"),
+				messageID:    "0004",
+				expectedPath: filepath.Join(sessionsDir, "abc123"), // Bubbles all the way up
+				expectedID:   "0001",                               // Original message from the topmost sibling
+			},
+			{
+				name:         "Non-sibling nested path - bubble up",
+				sessionPath:  filepath.Join(sessionsDir, "abc123", "0001.s.0000"),
+				messageID:    "0002",
+				expectedPath: filepath.Join(sessionsDir, "abc123"),
+				expectedID:   "0001",
+			},
+			{
+				name:         "Mixed sibling and non-sibling path",
+				sessionPath:  filepath.Join(sessionsDir, "abc123", "notes", "0001.s.0000", "0002.s.0001"),
+				messageID:    "0003",
+				expectedPath: filepath.Join(sessionsDir, "abc123", "notes"), // Stops at non-sibling 'notes'
+				expectedID:   "0001",                                        // From the first sibling encountered
+			},
+			{
+				name:         "Empty path components",
+				sessionPath:  filepath.Join(sessionsDir, "abc123"),
+				messageID:    "0001",
+				expectedPath: filepath.Join(sessionsDir, "abc123"),
+				expectedID:   "0001",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				gotPath, gotID := GetAnchorForBranching(tt.sessionPath, tt.messageID)
+				if gotPath != tt.expectedPath {
+					t.Errorf("Path mismatch: got %s, want %s", gotPath, tt.expectedPath)
+				}
+				if gotID != tt.expectedID {
+					t.Errorf("ID mismatch: got %s, want %s", gotID, tt.expectedID)
+				}
+			})
+		}
+	})
+}
+
+func TestValidationHelpers(t *testing.T) {
+	t.Run("isValidMessageID", func(t *testing.T) {
+		tests := []struct {
+			id       string
+			expected bool
+		}{
+			{"0000", true},
+			{"0001", true},
+			{"ffff", true},
+			{"dead", true},
+			{"beef", true},
+			{"00000", true},    // 5 chars is valid
+			{"10000", true},    // 5 chars for IDs > 0xffff
+			{"ffffff", true},   // 6 chars is valid
+			{"fffffff", true},  // 7 chars is valid
+			{"ffffffff", true}, // 8 chars is valid
+			{"FFFF", false},    // uppercase not allowed
+			{"000", false},     // too short (< 4)
+			{"000g", false},    // invalid hex char
+			{"00 1", false},    // space
+			{"00.1", false},    // dot
+			{"", false},        // empty
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.id, func(t *testing.T) {
+				if got := isValidMessageID(tt.id); got != tt.expected {
+					t.Errorf("isValidMessageID(%q) = %v, want %v", tt.id, got, tt.expected)
+				}
+			})
+		}
+	})
+
+	t.Run("isValidSessionID", func(t *testing.T) {
+		tests := []struct {
+			id       string
+			expected bool
+		}{
+			{"abc123", true},
+			{"deadbeef", true},
+			{"a", true},                // single char is valid
+			{"1234567890abcdef", true}, // long hex is valid
+			{"ABC123", false},          // uppercase not allowed
+			{"abc-123", false},         // dash not allowed
+			{"abc 123", false},         // space not allowed
+			{"abc.123", false},         // dot not allowed
+			{"", false},                // empty not allowed
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.id, func(t *testing.T) {
+				if got := isValidSessionID(tt.id); got != tt.expected {
+					t.Errorf("isValidSessionID(%q) = %v, want %v", tt.id, got, tt.expected)
+				}
+			})
+		}
+	})
+}

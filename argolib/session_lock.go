@@ -160,7 +160,11 @@ func WithSessionLock(sessionPath string, fn func() error) error {
 	if err != nil {
 		return fmt.Errorf("failed to acquire session lock: %w", err)
 	}
-	defer lock.Release()
+	defer func() {
+		if err := lock.Release(); err != nil {
+			Infof("failed to release session lock: %v", err)
+		}
+	}()
 
 	return fn()
 }
@@ -172,7 +176,11 @@ func WithSessionLockT[T any](sessionPath string, fn func() (T, error)) (T, error
 	if err != nil {
 		return zero, fmt.Errorf("failed to acquire session lock: %w", err)
 	}
-	defer lock.Release()
+	defer func() {
+		if err := lock.Release(); err != nil {
+			Infof("failed to release session lock: %v", err)
+		}
+	}()
 
 	return fn()
 }
