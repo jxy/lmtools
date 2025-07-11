@@ -1,11 +1,11 @@
 package argo
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,34 +39,61 @@ func GetSessionsDir() string {
 	return filepath.Join(homeDir, ".argo", "sessions")
 }
 
-// CreateSession creates a new session with a random 4-digit hex ID
+// CreateSession creates a new session with a sequential ID
 func CreateSession() (*Session, error) {
 	sessionsDir := GetSessionsDir()
 	if err := os.MkdirAll(sessionsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
-	// Try up to 10 times to avoid collisions
-	for attempts := 0; attempts < 10; attempts++ {
-		// Generate random 4-digit hex session ID
-		bytes := make([]byte, 2)
-		if _, err := rand.Read(bytes); err != nil {
-			return nil, fmt.Errorf("failed to generate session ID: %w", err)
-		}
-		sessionID := hex.EncodeToString(bytes)
+	// Find the next available sequential ID
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
+	}
 
+	// Find the highest numeric ID
+	maxID := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		// Try to parse as hex number
+		if id, err := strconv.ParseUint(entry.Name(), 16, 64); err == nil {
+			if int(id) > maxID {
+				maxID = int(id)
+			}
+		}
+	}
+
+	// Try sequential IDs starting from maxID + 1
+	for i := maxID + 1; i < maxID+100; i++ {
+		// Format with appropriate width based on the number
+		var sessionID string
+		if i <= 0xffff {
+			sessionID = fmt.Sprintf("%04x", i)
+		} else if i <= 0xfffff {
+			sessionID = fmt.Sprintf("%05x", i)
+		} else if i <= 0xffffff {
+			sessionID = fmt.Sprintf("%06x", i)
+		} else if i <= 0xfffffff {
+			sessionID = fmt.Sprintf("%07x", i)
+		} else {
+			sessionID = fmt.Sprintf("%08x", i)
+		}
 		sessionPath := filepath.Join(sessionsDir, sessionID)
 
 		// Check if already exists
 		if _, err := os.Stat(sessionPath); err == nil {
-			// Already exists, try again
+			// Already exists, try next
 			continue
 		}
 
 		// Create directory
 		if err := os.Mkdir(sessionPath, 0o750); err != nil {
 			if os.IsExist(err) {
-				// Race condition - someone else created it, try again
+				// Race condition - someone else created it, try next
 				continue
 			}
 			return nil, fmt.Errorf("failed to create session directory: %w", err)
@@ -75,7 +102,7 @@ func CreateSession() (*Session, error) {
 		return &Session{Path: sessionPath}, nil
 	}
 
-	return nil, fmt.Errorf("failed to create session after 10 attempts - too many collisions")
+	return nil, fmt.Errorf("failed to create session after 100 attempts - too many collisions")
 }
 
 // LoadSession loads an existing session by path
@@ -264,4 +291,70 @@ func GetSessionID(sessionPath string) string {
 		return filepath.Base(sessionPath)
 	}
 	return relPath
+}
+
+// DeleteNode deletes a node (session, branch, or message) and all its descendants
+func DeleteNode(nodePath string) error {
+	// If nodePath is relative (just ID or partial path), make it absolute
+	if !filepath.IsAbs(nodePath) {
+		nodePath = filepath.Join(GetSessionsDir(), nodePath)
+	}
+
+	// Clean the path to resolve .. components and ensure it's normalized
+	nodePath = filepath.Clean(nodePath)
+
+	// Security check: ensure the path is within the sessions directory
+	sessionsDir := GetSessionsDir()
+	if !strings.HasPrefix(nodePath, sessionsDir+string(filepath.Separator)) && nodePath != sessionsDir {
+		return fmt.Errorf("invalid path: must be within sessions directory")
+	}
+
+	// First check if the node exists (before acquiring lock)
+	// Check if the path exists as a directory
+	info, err := os.Stat(nodePath)
+	if err == nil && info.IsDir() {
+		// It's a directory - we can proceed
+	} else {
+		// It might be a message path (without file extension)
+		// Check if it looks like a message ID
+		dir := filepath.Dir(nodePath)
+		msgID := filepath.Base(nodePath)
+
+		// Validate it's a valid message ID format
+		if !isValidMessageID(msgID) {
+			return fmt.Errorf("node not found: %s", nodePath)
+		}
+
+		// Check if the message files exist
+		contentPath := filepath.Join(dir, msgID+".txt")
+		if _, err := os.Stat(contentPath); err != nil {
+			return fmt.Errorf("node not found: %s", nodePath)
+		}
+	}
+
+	// Get root session for locking
+	rootSession := GetRootSession(nodePath)
+
+	// Use session lock to prevent concurrent modifications
+	return WithSessionLock(rootSession, func() error {
+		// Check again if the path exists as a directory
+		info, err := os.Stat(nodePath)
+		if err == nil && info.IsDir() {
+			// It's a directory (session or branch), delete recursively
+			return os.RemoveAll(nodePath)
+		}
+
+		// It's a message path
+		dir := filepath.Dir(nodePath)
+		msgID := filepath.Base(nodePath)
+
+		// Parse message number
+		var msgNum int
+		if _, err := fmt.Sscanf(msgID, "%x", &msgNum); err != nil {
+			return fmt.Errorf("invalid message ID: %s", msgID)
+		}
+
+		// Delete the message and all descendants
+		return deleteMessageAndDescendants(dir, msgNum)
+	})
 }

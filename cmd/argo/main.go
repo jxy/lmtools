@@ -48,6 +48,11 @@ func run() error {
 		return argo.ShowSessions()
 	}
 
+	// Handle delete flag
+	if cfg.Delete != "" {
+		return argo.DeleteNode(cfg.Delete)
+	}
+
 	// Initialize logging with info level (hardcoded)
 	if err := argo.InitLogging("info"); err != nil {
 		return fmt.Errorf("failed to init logging: %w", err)

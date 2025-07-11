@@ -65,9 +65,9 @@ func ShowSessions() error {
 		}
 
 		if !created.IsZero() {
-			fmt.Printf("%s: (created: %s)\n", sessionID, created.Format("2006-01-02 15:04:05"))
+			fmt.Printf("%s/ (created: %s)\n", sessionID, created.Format("2006-01-02 15:04:05"))
 		} else {
-			fmt.Printf("%s:\n", sessionID)
+			fmt.Printf("%s/\n", sessionID)
 		}
 
 		// Build and display tree
@@ -98,7 +98,7 @@ func ShowTree(sessionID string) error {
 		return fmt.Errorf("failed to build tree: %w", err)
 	}
 
-	fmt.Printf("%s:\n", sessionID)
+	fmt.Printf("%s/\n", sessionID)
 	displayTree(tree, "", true)
 
 	return nil
@@ -175,7 +175,7 @@ func displayTree(nodes []*TreeNode, prefix string, isLast bool) {
 			} else {
 				fmt.Printf("├─ ")
 			}
-			fmt.Printf("(s.%s)\n", node.SiblingNum)
+			fmt.Printf(".s.%s/\n", node.SiblingNum)
 
 			// Display sibling children
 			childPrefix := prefix
@@ -203,16 +203,6 @@ func displayTree(nodes []*TreeNode, prefix string, isLast bool) {
 			// Add model info for assistant messages
 			if node.Message.Role == "assistant" && node.Message.Model != "" {
 				fmt.Printf(" (%s)", node.Message.Model)
-			}
-
-			// Check if this is a regeneration (has sibling with same content start)
-			if len(node.Children) > 0 {
-				for _, child := range node.Children {
-					if child.IsSibling && child.SiblingNum == "0000" {
-						fmt.Printf(" [original]")
-						break
-					}
-				}
 			}
 
 			fmt.Println()

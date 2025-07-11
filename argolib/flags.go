@@ -28,6 +28,7 @@ type Config struct {
 	Branch       string        // message ID to branch from
 	ShowSessions bool          // display conversation trees
 	NoSession    bool          // disable session creation
+	Delete       string        // node path to delete
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -66,6 +67,7 @@ func ParseFlags(args []string) (Config, error) {
 	fs.StringVar(&cfg.Branch, "branch", "", "create branch from message ID")
 	fs.BoolVar(&cfg.ShowSessions, "show-sessions", false, "display all conversation trees")
 	fs.BoolVar(&cfg.NoSession, "no-session", false, "disable session creation")
+	fs.StringVar(&cfg.Delete, "delete", "", "delete node and its descendants")
 
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
@@ -83,8 +85,12 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	// Check session flag combinations
-	if cfg.ShowSessions && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession) {
+	if cfg.ShowSessions && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession || cfg.Delete != "") {
 		return cfg, fmt.Errorf("invalid flag combination: -show-sessions cannot be used with other session flags")
+	}
+
+	if cfg.Delete != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession) {
+		return cfg, fmt.Errorf("invalid flag combination: -delete cannot be used with other session flags")
 	}
 
 	if cfg.Resume != "" && cfg.Branch != "" {
@@ -95,8 +101,8 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, fmt.Errorf("invalid flag combination: -no-session cannot be used with -resume or -branch")
 	}
 
-	// Validate user is provided (except for show-sessions)
-	if cfg.User == "" && !cfg.ShowSessions {
+	// Validate user is provided (except for show-sessions and delete)
+	if cfg.User == "" && !cfg.ShowSessions && cfg.Delete == "" {
 		return cfg, fmt.Errorf("user identifier (-u) is required")
 	}
 
@@ -135,6 +141,7 @@ Session Options:
   -branch string      Create branch from message ID
   -show-sessions      Display all conversation trees
   -no-session        Disable session creation
+  -delete string      Delete node and its descendants
 
 Examples:
   # Chat with default model

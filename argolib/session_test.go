@@ -19,10 +19,10 @@ func TestCreateSession(t *testing.T) {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
-		// Verify session ID is 4-digit hex
+		// Verify session ID is 4-digit hex (0001)
 		sessionID := filepath.Base(session.Path)
-		if len(sessionID) != 4 {
-			t.Errorf("Expected 4-character session ID, got %q", sessionID)
+		if sessionID != "0001" {
+			t.Errorf("Expected first session ID to be '0001', got %q", sessionID)
 		}
 
 		// Verify it's valid hex
@@ -37,14 +37,51 @@ func TestCreateSession(t *testing.T) {
 			t.Errorf("Session directory was not created: %v", err)
 		}
 
-		// Test creating multiple sessions - should have unique IDs
+		// Test creating multiple sessions - should have sequential IDs
 		session2, err := CreateSession()
 		if err != nil {
 			t.Fatalf("Failed to create second session: %v", err)
 		}
 
+		sessionID2 := filepath.Base(session2.Path)
+		if sessionID2 != "0002" {
+			t.Errorf("Expected second session ID to be '0002', got %q", sessionID2)
+		}
+
 		if session.Path == session2.Path {
 			t.Errorf("Two sessions have the same path: %s", session.Path)
+		}
+	})
+}
+
+func TestSessionIDOverflow(t *testing.T) {
+	withTestSessionDir(t, func(sessionsDir string) {
+		// Create a session directory with ID ffff to simulate near-overflow
+		highIDPath := filepath.Join(sessionsDir, "ffff")
+		if err := os.Mkdir(highIDPath, 0o750); err != nil {
+			t.Fatalf("Failed to create high ID session: %v", err)
+		}
+
+		// Now try to create a session - should succeed with 5-digit hex
+		session, err := CreateSession()
+		if err != nil {
+			t.Fatalf("Failed to create session after ffff: %v", err)
+		}
+
+		sessionID := filepath.Base(session.Path)
+		if sessionID != "10000" {
+			t.Errorf("Expected session ID '10000' after 'ffff', got %q", sessionID)
+		}
+
+		// Create another one to verify sequential continues
+		session2, err := CreateSession()
+		if err != nil {
+			t.Fatalf("Failed to create second session: %v", err)
+		}
+
+		sessionID2 := filepath.Base(session2.Path)
+		if sessionID2 != "10001" {
+			t.Errorf("Expected session ID '10001', got %q", sessionID2)
 		}
 	})
 }
@@ -762,5 +799,195 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 
 		// Log the results for debugging
 		t.Logf("Created %d unique sibling paths, %d lock failures", len(pathMap), lockErrors)
+	})
+}
+
+func TestDeleteNode(t *testing.T) {
+	withTestSessionDir(t, func(sessionsDir string) {
+		// Create a session with a complex tree structure
+		session, err := CreateSession()
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Add messages to root
+		messages := []Message{
+			{Role: "user", Content: "Message 0", Timestamp: time.Now()},
+			{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test-model"},
+			{Role: "user", Content: "Message 2", Timestamp: time.Now()},
+			{Role: "assistant", Content: "Message 3", Timestamp: time.Now(), Model: "test-model"},
+		}
+
+		for _, msg := range messages {
+			if _, err := AppendMessage(session, msg); err != nil {
+				t.Fatalf("Failed to append message: %v", err)
+			}
+		}
+
+		// Create branches
+		branch1, err := CreateSibling(session.Path, "0001")
+		if err != nil {
+			t.Fatalf("Failed to create branch1: %v", err)
+		}
+
+		// Add messages to branch1
+		branch1Session, _ := LoadSession(branch1)
+		_, _ = AppendMessage(branch1Session, Message{Role: "user", Content: "Branch1 Message 0", Timestamp: time.Now()})
+		_, _ = AppendMessage(branch1Session, Message{Role: "assistant", Content: "Branch1 Message 1", Timestamp: time.Now(), Model: "test"})
+
+		// Create another branch from message 2
+		branch2, err := CreateSibling(session.Path, "0002")
+		if err != nil {
+			t.Fatalf("Failed to create branch2: %v", err)
+		}
+
+		// Create a branch from message 3 to test deletion
+		branch3, err := CreateSibling(session.Path, "0003")
+		if err != nil {
+			t.Fatalf("Failed to create branch3: %v", err)
+		}
+
+		t.Run("DeleteMessage", func(t *testing.T) {
+			// Delete message 0002 and verify subsequent messages and branches are deleted
+			err := DeleteNode(filepath.Join(session.Path, "0002"))
+			if err != nil {
+				t.Fatalf("Failed to delete message: %v", err)
+			}
+
+			// Verify message 0002 and 0003 are deleted
+			if _, err := ReadMessage(session.Path, "0002"); err == nil {
+				t.Errorf("Message 0002 should have been deleted")
+			}
+			if _, err := ReadMessage(session.Path, "0003"); err == nil {
+				t.Errorf("Message 0003 should have been deleted")
+			}
+
+			// Verify messages 0000 and 0001 still exist
+			if _, err := ReadMessage(session.Path, "0000"); err != nil {
+				t.Errorf("Message 0000 should still exist: %v", err)
+			}
+			if _, err := ReadMessage(session.Path, "0001"); err != nil {
+				t.Errorf("Message 0001 should still exist: %v", err)
+			}
+
+			// Verify branch from 0001 still exists
+			if _, err := os.Stat(branch1); err != nil {
+				t.Errorf("Branch from 0001 should still exist: %v", err)
+			}
+
+			// Verify branch from 0002 still exists (branches of the deleted message are kept)
+			if _, err := os.Stat(branch2); err != nil {
+				t.Errorf("Branch from 0002 should still exist: %v", err)
+			}
+
+			// Verify branch from 0003 is deleted (branches from later messages are deleted)
+			if _, err := os.Stat(branch3); err == nil {
+				t.Errorf("Branch from 0003 should have been deleted")
+			}
+		})
+
+		t.Run("DeleteBranch", func(t *testing.T) {
+			// Delete the branch and verify it's gone
+			err := DeleteNode(branch1)
+			if err != nil {
+				t.Fatalf("Failed to delete branch: %v", err)
+			}
+
+			if _, err := os.Stat(branch1); err == nil {
+				t.Errorf("Branch should have been deleted")
+			}
+		})
+
+		t.Run("DeleteSession", func(t *testing.T) {
+			// Create a new session to delete
+			session2, err := CreateSession()
+			if err != nil {
+				t.Fatalf("Failed to create session2: %v", err)
+			}
+
+			// Delete entire session
+			err = DeleteNode(session2.Path)
+			if err != nil {
+				t.Fatalf("Failed to delete session: %v", err)
+			}
+
+			if _, err := os.Stat(session2.Path); err == nil {
+				t.Errorf("Session should have been deleted")
+			}
+		})
+
+		t.Run("DeleteNonExistent", func(t *testing.T) {
+			// Try to delete non-existent node
+			err := DeleteNode(filepath.Join(sessionsDir, "nonexistent"))
+			if err == nil {
+				t.Errorf("Expected error when deleting non-existent node")
+			}
+			if !strings.Contains(err.Error(), "node not found") {
+				t.Errorf("Expected 'node not found' error, got: %v", err)
+			}
+		})
+
+		t.Run("DeleteWithRelativePath", func(t *testing.T) {
+			// Create a session
+			session3, err := CreateSession()
+			if err != nil {
+				t.Fatalf("Failed to create session3: %v", err)
+			}
+			sessionID := filepath.Base(session3.Path)
+
+			// Delete using relative path (just session ID)
+			err = DeleteNode(sessionID)
+			if err != nil {
+				t.Fatalf("Failed to delete with relative path: %v", err)
+			}
+
+			if _, err := os.Stat(session3.Path); err == nil {
+				t.Errorf("Session should have been deleted")
+			}
+		})
+
+		t.Run("SecurityPathTraversal", func(t *testing.T) {
+			// Try to delete with path traversal
+			err := DeleteNode("../../../etc/passwd")
+			if err == nil {
+				t.Errorf("Expected error when trying to delete outside sessions directory")
+			}
+			if !strings.Contains(err.Error(), "invalid path") {
+				t.Errorf("Expected 'invalid path' error, got: %v", err)
+			}
+
+			// Try with absolute path outside sessions
+			err = DeleteNode("/etc/passwd")
+			if err == nil {
+				t.Errorf("Expected error when trying to delete absolute path outside sessions")
+			}
+			if !strings.Contains(err.Error(), "invalid path") {
+				t.Errorf("Expected 'invalid path' error, got: %v", err)
+			}
+		})
+
+		t.Run("SecurityDotDotInPath", func(t *testing.T) {
+			// Create a session
+			session4, err := CreateSession()
+			if err != nil {
+				t.Fatalf("Failed to create session4: %v", err)
+			}
+			sessionID := filepath.Base(session4.Path)
+
+			// Try to use .. in the middle of path
+			maliciousPath := sessionID + "/../../../tmp/evil"
+			err = DeleteNode(maliciousPath)
+			if err == nil {
+				t.Errorf("Expected error with .. in path")
+			}
+			if !strings.Contains(err.Error(), "invalid path") {
+				t.Errorf("Expected 'invalid path' error, got: %v", err)
+			}
+
+			// Verify original session still exists
+			if _, err := os.Stat(session4.Path); err != nil {
+				t.Errorf("Session should still exist after failed delete: %v", err)
+			}
+		})
 	})
 }

@@ -242,3 +242,65 @@ func IsAssistantMessage(branchPath string) (bool, error) {
 
 	return msg.Role == "assistant", nil
 }
+
+// deleteMessageAndDescendants deletes a message and all subsequent messages/branches
+func deleteMessageAndDescendants(dirPath string, msgNum int) error {
+	// Get all messages in the directory
+	msgIDs, err := ListMessages(dirPath)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	// Delete the target message and all subsequent messages
+	for _, msgID := range msgIDs {
+		num, err := strconv.ParseUint(msgID, 16, 64)
+		if err != nil {
+			continue
+		}
+
+		if int(num) >= msgNum {
+			// Delete message files
+			contentPath := filepath.Join(dirPath, msgID+".txt")
+			metaPath := filepath.Join(dirPath, msgID+".json")
+
+			if err := os.Remove(contentPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to delete content file: %w", err)
+			}
+			if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to delete metadata file: %w", err)
+			}
+		}
+	}
+
+	// Find and delete sibling branches for messages >= msgNum
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		// Check if it's a sibling directory (format: XXXX.s.YYYY)
+		if ok, branchMsgID, _ := IsSiblingDir(name); ok {
+			// Parse the message number from the branch point
+			branchNum, err := strconv.ParseUint(branchMsgID, 16, 64)
+			if err != nil {
+				continue
+			}
+
+			// Delete sibling branches that stem from messages after the deleted one
+			if int(branchNum) > msgNum {
+				branchPath := filepath.Join(dirPath, name)
+				if err := os.RemoveAll(branchPath); err != nil {
+					return fmt.Errorf("failed to delete sibling branch %s: %w", name, err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
