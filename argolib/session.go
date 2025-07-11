@@ -127,7 +127,7 @@ func LoadSession(sessionPath string) (*Session, error) {
 // AppendMessage adds a new message to the session
 func AppendMessage(session *Session, msg Message) (string, error) {
 	// Use session lock to prevent concurrent modifications
-	return WithSessionLockT(session.Path, func() (string, error) {
+	return WithSessionLockT(session.Path, 0, func() (string, error) {
 		// Get next message ID
 		msgID, err := GetNextMessageID(session.Path)
 		if err != nil {
@@ -158,7 +158,8 @@ func CreateSibling(sessionPath, messageID string) (string, error) {
 	rootSession := GetRootSession(sessionPath)
 
 	// Use session lock at the root level to prevent concurrent sibling creation
-	return WithSessionLockT(rootSession, func() (string, error) {
+	// Use retry logic to allow multiple goroutines to eventually succeed
+	return WithSessionLockT(rootSession, 5*time.Second, func() (string, error) {
 		// Re-calculate the sibling path inside the lock to ensure consistency
 		siblingPath, err := GetNextSiblingPath(anchorPath, anchorID)
 		if err != nil {
@@ -336,7 +337,7 @@ func DeleteNode(nodePath string) error {
 	rootSession := GetRootSession(nodePath)
 
 	// Use session lock to prevent concurrent modifications
-	return WithSessionLock(rootSession, func() error {
+	return WithSessionLock(rootSession, 0, func() error {
 		// Check again if the path exists as a directory
 		info, err := os.Stat(nodePath)
 		if err == nil && info.IsDir() {

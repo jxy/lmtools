@@ -1,6 +1,7 @@
 package argo
 
 import (
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -761,7 +762,7 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 					goto done
 				}
 				// Lock acquisition failures are expected in concurrent scenarios
-				if strings.Contains(err.Error(), "session is locked") {
+				if stderrors.Is(err, ErrLockHeld) || stderrors.Is(err, ErrLockTimeout) {
 					lockErrors++
 				} else {
 					t.Errorf("Unexpected error: %v", err)

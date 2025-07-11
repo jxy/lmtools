@@ -12,7 +12,12 @@ import (
 
 func TestHandleResponseEmbed(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{Embed: true, LogDir: dir}
+	// Override log directory for testing
+	oldLogDir := logBaseDir
+	logBaseDir = dir
+	t.Cleanup(func() { logBaseDir = oldLogDir })
+
+	cfg := Config{Embed: true}
 	body := []byte(`{"embedding":[[0.1,0.2,0.3]]}`)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}
 	out, err := HandleResponse(context.Background(), cfg, resp)
@@ -39,7 +44,12 @@ func TestHandleResponseEmbed(t *testing.T) {
 
 func TestHandleResponseChat(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{LogDir: dir}
+	// Override log directory for testing
+	oldLogDir := logBaseDir
+	logBaseDir = dir
+	t.Cleanup(func() { logBaseDir = oldLogDir })
+
+	cfg := Config{}
 	body := []byte(`{"response":"R"}`)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}
 	out, err := HandleResponse(context.Background(), cfg, resp)
@@ -65,7 +75,12 @@ func TestHandleResponseChat(t *testing.T) {
 
 func TestHandleResponseStreamChat(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{StreamChat: true, LogDir: dir}
+	// Override log directory for testing
+	oldLogDir := logBaseDir
+	logBaseDir = dir
+	t.Cleanup(func() { logBaseDir = oldLogDir })
+
+	cfg := Config{StreamChat: true}
 	content := "STREAM"
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(content))}
 

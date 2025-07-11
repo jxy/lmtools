@@ -28,7 +28,7 @@ func TestIntegrationEmbedAndChat(t *testing.T) {
 	defer server.Close()
 
 	baseURL := server.URL + "/base"
-	cfg := Config{Env: baseURL, Embed: true, Timeout: time.Second, LogDir: t.TempDir()}
+	cfg := Config{Env: baseURL, Embed: true, Timeout: time.Second}
 
 	// Embed path
 	req, _, err := BuildRequest(cfg, "hello")

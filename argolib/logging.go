@@ -30,6 +30,12 @@ func Infof(format string, args ...interface{}) {
 	log.Printf("[INFO] "+format, args...)
 }
 
+// LogLockOperation is deprecated and does nothing.
+// Lock operations are simple enough that they don't need special logging.
+func LogLockOperation(operation string, sessionPath string, fields map[string]interface{}) {
+	// No-op: removed complex lock logging
+}
+
 // sanitizeOp ensures operation names are safe and reasonable length
 func sanitizeOp(op string) string {
 	// Basic sanitization: no path separators
@@ -94,4 +100,21 @@ func CreateLogFile(dir, operation string) (*os.File, string, error) {
 	}
 
 	return f, f.Name(), nil
+}
+
+// logBaseDir can be overridden for testing
+var logBaseDir string
+
+// GetLogDir returns the directory where log files should be stored.
+// It follows the same pattern as GetSessionsDir(), placing logs under ~/.argo/logs
+func GetLogDir() string {
+	if logBaseDir != "" {
+		return logBaseDir
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".argo", "logs")
+	}
+	return filepath.Join(homeDir, ".argo", "logs")
 }

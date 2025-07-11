@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var defaultLogDir = os.ExpandEnv("$HOME/tmp/log/argo")
+// LogDir configuration removed - logs now always go to ~/.argo/logs
 
 func getDefaultUser() string {
 	return "" // No default, always require -u flag
@@ -18,7 +18,6 @@ type Config struct {
 	Model        string        // model to use
 	Embed        bool          // whether to run in embed mode
 	StreamChat   bool          // whether to use streaming chat mode
-	LogDir       string        // directory for log files
 	User         string        // user identifier
 	System       string        // system prompt for chat
 	Env          string        // environment (prod|dev|custom base URL)
@@ -33,6 +32,7 @@ type Config struct {
 
 func ParseFlags(args []string) (Config, error) {
 	var cfg Config
+	var noSessionExplicit bool
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 
 	// Set custom usage function
@@ -56,9 +56,6 @@ func ParseFlags(args []string) (Config, error) {
 	fs.StringVar(&cfg.User, "u", getDefaultUser(), "user identifier")
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
 
-	// Logging
-	fs.StringVar(&cfg.LogDir, "logDir", defaultLogDir, "directory for log files")
-
 	// Retry configuration
 	fs.IntVar(&cfg.Retries, "retries", 3, "number of retry attempts for failed requests")
 
@@ -69,8 +66,26 @@ func ParseFlags(args []string) (Config, error) {
 	fs.BoolVar(&cfg.NoSession, "no-session", false, "disable session creation")
 	fs.StringVar(&cfg.Delete, "delete", "", "delete node and its descendants")
 
+	// Check if -no-session was explicitly set before parsing
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-no-session" || strings.HasPrefix(args[i], "-no-session=") {
+			noSessionExplicit = true
+			break
+		}
+	}
+
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
+	}
+
+	// Check for invalid flag combination: embed mode with explicit -no-session=false
+	if cfg.Embed && noSessionExplicit && !cfg.NoSession {
+		return cfg, fmt.Errorf("invalid flag combination: embed mode requires sessions to be disabled. Remove -no-session=false or use chat mode instead")
+	}
+
+	// Automatically disable sessions in embed mode (only if not explicitly set)
+	if cfg.Embed && !noSessionExplicit {
+		cfg.NoSession = true
 	}
 
 	// Validate environment
@@ -82,6 +97,11 @@ func ParseFlags(args []string) (Config, error) {
 	// Check invalid flag combinations
 	if cfg.Embed && cfg.StreamChat {
 		return cfg, fmt.Errorf("invalid flag combination: embed mode cannot be used with stream")
+	}
+
+	// Check embed mode with session flags
+	if cfg.Embed && (cfg.Resume != "" || cfg.Branch != "") {
+		return cfg, fmt.Errorf("invalid flag combination: embed mode cannot be used with session flags (-resume, -branch)")
 	}
 
 	// Check session flag combinations
@@ -130,9 +150,6 @@ Configuration:
   -u string      User identifier (required)
   -timeout dur   HTTP request timeout (default: 10m)
 
-Logging:
-  -logDir string  Directory for log files (default: %q)
-
 Retry:
   -retries int    Number of retry attempts for failed requests (default: 3)
 
@@ -169,6 +186,5 @@ Examples:
 		DefaultChatModel, DefaultEmbedModel,
 		strings.Join(ChatModels, ", "),
 		strings.Join(EmbedModels, ", "),
-		defaultLogDir,
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }

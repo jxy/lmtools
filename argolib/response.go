@@ -29,7 +29,7 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 		if err != nil {
 			return "", fmt.Errorf("failed to read response body: %w", err)
 		}
-		if err := LogJSON(cfg.LogDir, "embed_output", data); err != nil {
+		if err := LogJSON(GetLogDir(), "embed_output", data); err != nil {
 			return "", fmt.Errorf("failed to log embed response: %w", err)
 		}
 		var embedResp struct {
@@ -56,7 +56,7 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 	}
 
 	if cfg.StreamChat {
-		f, path, err := CreateLogFile(cfg.LogDir, "stream_chat_output")
+		f, path, err := CreateLogFile(GetLogDir(), "stream_chat_output")
 		if err != nil {
 			return "", fmt.Errorf("failed to create log file: %w", err)
 		}
@@ -88,7 +88,7 @@ func HandleResponse(ctx context.Context, cfg Config, resp *http.Response) (strin
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
-	if err := LogJSON(cfg.LogDir, "chat_output", data); err != nil {
+	if err := LogJSON(GetLogDir(), "chat_output", data); err != nil {
 		return "", fmt.Errorf("failed to log chat response: %w", err)
 	}
 	var chatResp struct {

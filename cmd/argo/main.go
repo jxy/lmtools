@@ -120,7 +120,7 @@ func run() error {
 
 	// Log request
 	opName := getOperationName(&cfg)
-	if err := argo.LogJSON(cfg.LogDir, opName, body); err != nil {
+	if err := argo.LogJSON(argo.GetLogDir(), opName, body); err != nil {
 		return fmt.Errorf("failed to log request: %w", err)
 	}
 
