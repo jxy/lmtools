@@ -28,6 +28,7 @@ type Config struct {
 	ShowSessions bool          // display conversation trees
 	NoSession    bool          // disable session creation
 	Delete       string        // node path to delete
+	Show         string        // show session or message by ID/path
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -65,6 +66,7 @@ func ParseFlags(args []string) (Config, error) {
 	fs.BoolVar(&cfg.ShowSessions, "show-sessions", false, "display all conversation trees")
 	fs.BoolVar(&cfg.NoSession, "no-session", false, "disable session creation")
 	fs.StringVar(&cfg.Delete, "delete", "", "delete node and its descendants")
+	fs.StringVar(&cfg.Show, "show", "", "show session or message by ID/path")
 
 	// Check if -no-session was explicitly set before parsing
 	for i := 0; i < len(args); i++ {
@@ -105,12 +107,16 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	// Check session flag combinations
-	if cfg.ShowSessions && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession || cfg.Delete != "") {
+	if cfg.ShowSessions && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession || cfg.Delete != "" || cfg.Show != "") {
 		return cfg, fmt.Errorf("invalid flag combination: -show-sessions cannot be used with other session flags")
 	}
 
-	if cfg.Delete != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession) {
+	if cfg.Delete != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession || cfg.Show != "") {
 		return cfg, fmt.Errorf("invalid flag combination: -delete cannot be used with other session flags")
+	}
+
+	if cfg.Show != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.Delete != "" || cfg.ShowSessions || cfg.NoSession || cfg.Embed || cfg.StreamChat) {
+		return cfg, fmt.Errorf("invalid flag combination: -show cannot be used with other session or operation flags")
 	}
 
 	if cfg.Resume != "" && cfg.Branch != "" {
@@ -121,8 +127,8 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, fmt.Errorf("invalid flag combination: -no-session cannot be used with -resume or -branch")
 	}
 
-	// Validate user is provided (except for show-sessions and delete)
-	if cfg.User == "" && !cfg.ShowSessions && cfg.Delete == "" {
+	// Validate user is provided (except for show-sessions, delete, and show)
+	if cfg.User == "" && !cfg.ShowSessions && cfg.Delete == "" && cfg.Show == "" {
 		return cfg, fmt.Errorf("user identifier (-u) is required")
 	}
 
@@ -159,6 +165,7 @@ Session Options:
   -show-sessions      Display all conversation trees
   -no-session        Disable session creation
   -delete string      Delete node and its descendants
+  -show string        Show session or message by ID/path
 
 Examples:
   # Chat with default model

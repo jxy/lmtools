@@ -196,16 +196,16 @@ func displayTree(nodes []*TreeNode, prefix string, isLast bool) {
 
 			// Format message
 			content := truncateContent(node.Message.Content, 60)
-			role := fmt.Sprintf("[%s]", node.Message.Role)
 
-			fmt.Printf("%s %s: \"%s\"", node.Message.ID, role, content)
-
-			// Add model info for assistant messages
+			// Format role with model for assistant messages
+			var roleDisplay string
 			if node.Message.Role == "assistant" && node.Message.Model != "" {
-				fmt.Printf(" (%s)", node.Message.Model)
+				roleDisplay = fmt.Sprintf("[%s(%s)]", node.Message.Role, node.Message.Model)
+			} else {
+				roleDisplay = fmt.Sprintf("[%s]", node.Message.Role)
 			}
 
-			fmt.Println()
+			fmt.Printf("%s %s: \"%s\"\n", node.Message.ID, roleDisplay, content)
 
 			// Display children
 			if len(node.Children) > 0 {

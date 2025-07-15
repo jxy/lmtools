@@ -48,6 +48,11 @@ func run() error {
 		return argo.ShowSessions()
 	}
 
+	// Handle show flag
+	if cfg.Show != "" {
+		return argo.ShowDispatcher(cfg.Show)
+	}
+
 	// Handle delete flag
 	if cfg.Delete != "" {
 		return argo.DeleteNode(cfg.Delete)
