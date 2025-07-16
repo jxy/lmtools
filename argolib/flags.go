@@ -15,20 +15,22 @@ func getDefaultUser() string {
 }
 
 type Config struct {
-	Model        string        // model to use
-	Embed        bool          // whether to run in embed mode
-	StreamChat   bool          // whether to use streaming chat mode
-	User         string        // user identifier
-	System       string        // system prompt for chat
-	Env          string        // environment (prod|dev|custom base URL)
-	Timeout      time.Duration // HTTP request timeout
-	Retries      int           // number of retry attempts
-	Resume       string        // session ID or path to continue
-	Branch       string        // message ID to branch from
-	ShowSessions bool          // display conversation trees
-	NoSession    bool          // disable session creation
-	Delete       string        // node path to delete
-	Show         string        // show session or message by ID/path
+	Model          string        // model to use
+	Embed          bool          // whether to run in embed mode
+	StreamChat     bool          // whether to use streaming chat mode
+	User           string        // user identifier
+	System         string        // system prompt for chat
+	Env            string        // environment (prod|dev|custom base URL)
+	Timeout        time.Duration // HTTP request timeout
+	Retries        int           // number of retry attempts
+	Resume         string        // session ID or path to continue
+	Branch         string        // message ID to branch from
+	ShowSessions   bool          // display conversation trees
+	NoSession      bool          // disable session creation
+	Delete         string        // node path to delete
+	Show           string        // show session or message by ID/path
+	Debug          bool          // enable debug logging
+	SkipFlockCheck bool          // skip filesystem flock support check
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -67,6 +69,10 @@ func ParseFlags(args []string) (Config, error) {
 	fs.BoolVar(&cfg.NoSession, "no-session", false, "disable session creation")
 	fs.StringVar(&cfg.Delete, "delete", "", "delete node and its descendants")
 	fs.StringVar(&cfg.Show, "show", "", "show session or message by ID/path")
+
+	// Debug Options
+	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging")
+	fs.BoolVar(&cfg.SkipFlockCheck, "skip-flock-check", false, "skip filesystem flock support check")
 
 	// Check if -no-session was explicitly set before parsing
 	for i := 0; i < len(args); i++ {

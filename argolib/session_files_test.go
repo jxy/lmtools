@@ -431,7 +431,7 @@ func TestIsAssistantMessage(t *testing.T) {
 
 		var messageIDs []string
 		for _, msg := range messages {
-			msgID, err := AppendMessage(session, msg)
+			_, msgID, err := AppendMessage(session, msg)
 			if err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}

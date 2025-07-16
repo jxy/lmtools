@@ -138,7 +138,7 @@ func TestAppendMessage(t *testing.T) {
 			Timestamp: time.Now(),
 		}
 
-		msgID, err := AppendMessage(session, userMsg)
+		_, msgID, err := AppendMessage(session, userMsg)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
@@ -161,7 +161,7 @@ func TestAppendMessage(t *testing.T) {
 			Model:     "test-model",
 		}
 
-		msgID2, err := AppendMessage(session, assistantMsg)
+		_, msgID2, err := AppendMessage(session, assistantMsg)
 		if err != nil {
 			t.Fatalf("Failed to append second message: %v", err)
 		}
@@ -177,7 +177,7 @@ func TestAppendMessage(t *testing.T) {
 				Content:   "Test message",
 				Timestamp: time.Now(),
 			}
-			msgID, err := AppendMessage(session, msg)
+			_, msgID, err := AppendMessage(session, msg)
 			if err != nil {
 				t.Fatalf("Failed to append message %d: %v", i, err)
 			}
@@ -211,7 +211,7 @@ func TestCreateSibling(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -263,7 +263,7 @@ func TestGetLineage(t *testing.T) {
 		}
 
 		for _, msg := range linearMessages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -294,7 +294,7 @@ func TestGetLineage(t *testing.T) {
 		}
 
 		for _, msg := range branchMessages {
-			if _, err := AppendMessage(branchSession, msg); err != nil {
+			if _, _, err := AppendMessage(branchSession, msg); err != nil {
 				t.Fatalf("Failed to append branch message: %v", err)
 			}
 		}
@@ -326,7 +326,7 @@ func TestGetLineage(t *testing.T) {
 		}
 
 		nestedMsg := Message{Role: "user", Content: "Nested message", Timestamp: time.Now()}
-		if _, err := AppendMessage(nestedSession, nestedMsg); err != nil {
+		if _, _, err := AppendMessage(nestedSession, nestedMsg); err != nil {
 			t.Fatalf("Failed to append nested message: %v", err)
 		}
 
@@ -398,7 +398,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -444,7 +444,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 				Model:     "test-model-v2",
 			}
 
-			if _, err := AppendMessage(siblingSession, regenMsg); err != nil {
+			if _, _, err := AppendMessage(siblingSession, regenMsg); err != nil {
 				t.Fatalf("Failed to append regenerated message: %v", err)
 			}
 
@@ -570,7 +570,7 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -600,7 +600,7 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 				Timestamp: time.Now(),
 				Model:     "test-model-v2",
 			}
-			_, err = AppendMessage(sibSession1, sibMsg)
+			_, _, err = AppendMessage(sibSession1, sibMsg)
 			if err != nil {
 				t.Fatalf("Failed to append to sibling: %v", err)
 			}
@@ -628,7 +628,7 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 			}
 
 			sib1Session, _ := LoadSession(sib1)
-			if _, err := AppendMessage(sib1Session, Message{Role: "user", Content: "Alt message", Timestamp: time.Now()}); err != nil {
+			if _, _, err := AppendMessage(sib1Session, Message{Role: "user", Content: "Alt message", Timestamp: time.Now()}); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 
@@ -653,7 +653,7 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 			}
 
 			baseSibSession, _ := LoadSession(baseSib)
-			if _, err := AppendMessage(baseSibSession, Message{Role: "assistant", Content: "Regen 1", Timestamp: time.Now(), Model: "model"}); err != nil {
+			if _, _, err := AppendMessage(baseSibSession, Message{Role: "assistant", Content: "Regen 1", Timestamp: time.Now(), Model: "model"}); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 
@@ -693,10 +693,10 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 		}
 
 		// Add initial messages
-		if _, err := AppendMessage(session, Message{Role: "user", Content: "Message 0", Timestamp: time.Now()}); err != nil {
+		if _, _, err := AppendMessage(session, Message{Role: "user", Content: "Message 0", Timestamp: time.Now()}); err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
-		if _, err := AppendMessage(session, Message{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test"}); err != nil {
+		if _, _, err := AppendMessage(session, Message{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test"}); err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
 
@@ -708,7 +708,7 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 
 		// Add message to sibling
 		sib1Session, _ := LoadSession(sibling1)
-		if _, err := AppendMessage(sib1Session, Message{Role: "assistant", Content: "Alt 1", Timestamp: time.Now(), Model: "test"}); err != nil {
+		if _, _, err := AppendMessage(sib1Session, Message{Role: "assistant", Content: "Alt 1", Timestamp: time.Now(), Model: "test"}); err != nil {
 			t.Fatalf("Failed to append to sibling: %v", err)
 		}
 
@@ -820,7 +820,7 @@ func TestDeleteNode(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -833,8 +833,8 @@ func TestDeleteNode(t *testing.T) {
 
 		// Add messages to branch1
 		branch1Session, _ := LoadSession(branch1)
-		_, _ = AppendMessage(branch1Session, Message{Role: "user", Content: "Branch1 Message 0", Timestamp: time.Now()})
-		_, _ = AppendMessage(branch1Session, Message{Role: "assistant", Content: "Branch1 Message 1", Timestamp: time.Now(), Model: "test"})
+		_, _, _ = AppendMessage(branch1Session, Message{Role: "user", Content: "Branch1 Message 0", Timestamp: time.Now()})
+		_, _, _ = AppendMessage(branch1Session, Message{Role: "assistant", Content: "Branch1 Message 1", Timestamp: time.Now(), Model: "test"})
 
 		// Create another branch from message 2
 		branch2, err := CreateSibling(session.Path, "0002")

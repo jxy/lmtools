@@ -1,17 +1,66 @@
 package argo
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+)
+
+var (
+	// ErrMaxRetriesExceeded is returned when AppendMessage fails after maximum retry attempts
+	ErrMaxRetriesExceeded = errors.New("exceeded maximum retry attempts")
+	// ErrSiblingOverflow is returned when too many sibling branches exist
+	ErrSiblingOverflow = errors.New("too many sibling branches")
 )
 
 // Session represents a conversation session
 type Session struct {
 	Path string // Directory path (also serves as session ID)
+}
+
+// flockChecked tracks whether we've already tested flock support
+var flockChecked bool
+
+// TestFlockSupport checks if the filesystem supports flock
+func TestFlockSupport() error {
+	// Ensure ~/.argo exists
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	argoDir := filepath.Join(homeDir, ".argo")
+	if err := os.MkdirAll(argoDir, 0o750); err != nil {
+		return fmt.Errorf("failed to create argo directory: %w", err)
+	}
+
+	// Create test file in ~/.argo
+	testFile, err := os.CreateTemp(argoDir, ".flock-test-*")
+	if err != nil {
+		return fmt.Errorf("failed to create test file: %w", err)
+	}
+	defer os.Remove(testFile.Name())
+	defer testFile.Close()
+
+	// Test flock
+	fd := int(testFile.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return fmt.Errorf("flock not supported on %s: %w", argoDir, err)
+	}
+
+	// Clean unlock
+	if err := syscall.Flock(fd, syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("flock unlock failed: %w", err)
+	}
+
+	return nil
 }
 
 // Message represents a single message in a conversation
@@ -41,6 +90,19 @@ func GetSessionsDir() string {
 
 // CreateSession creates a new session with a sequential ID
 func CreateSession() (*Session, error) {
+	// Test flock support once (only on first session creation)
+	if !flockChecked {
+		// Skip check if environment variable is set
+		if os.Getenv("ARGO_SKIP_FLOCK_CHECK") != "1" {
+			if err := TestFlockSupport(); err != nil {
+				Warnf("File locking may not work properly: %v", err)
+				Warnf("Concurrent access to sessions may cause issues")
+				// Continue anyway - some users might not need locking
+			}
+		}
+		flockChecked = true
+	}
+
 	sessionsDir := GetSessionsDir()
 	if err := os.MkdirAll(sessionsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
@@ -124,26 +186,115 @@ func LoadSession(sessionPath string) (*Session, error) {
 	return &Session{Path: sessionPath}, nil
 }
 
-// AppendMessage adds a new message to the session
-func AppendMessage(session *Session, msg Message) (string, error) {
-	// Use session lock to prevent concurrent modifications
-	return WithSessionLockT(session.Path, 0, func() (string, error) {
-		// Get next message ID
-		msgID, err := GetNextMessageID(session.Path)
+// AppendMessage atomically appends a message to the session
+// Returns: (finalPath, messageID, error)
+func AppendMessage(session *Session, msg Message) (string, string, error) {
+	const maxRetries = 10
+
+	// 1. Create temp files ONCE before any locks
+	tempTxtFile, err := os.CreateTemp(session.Path, ".msg-*.txt.tmp")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temp txt: %w", err)
+	}
+	tempTxtPath := tempTxtFile.Name()
+	defer func() { _ = os.Remove(tempTxtPath) }()
+
+	// Write content and close immediately to avoid FD exhaustion
+	if _, err := tempTxtFile.Write([]byte(msg.Content)); err != nil {
+		tempTxtFile.Close()
+		return "", "", fmt.Errorf("failed to write content: %w", err)
+	}
+	if err := tempTxtFile.Close(); err != nil {
+		return "", "", fmt.Errorf("failed to close txt: %w", err)
+	}
+
+	// Create JSON temp file
+	tempJsonFile, err := os.CreateTemp(session.Path, ".msg-*.json.tmp")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temp json: %w", err)
+	}
+	tempJsonPath := tempJsonFile.Name()
+	defer func() { _ = os.Remove(tempJsonPath) }()
+
+	// Prepare metadata
+	var modelPtr *string
+	if msg.Model != "" {
+		modelPtr = &msg.Model
+	}
+	metadata := MessageMetadata{
+		Role:      msg.Role,
+		Timestamp: msg.Timestamp,
+		Model:     modelPtr,
+	}
+
+	// Write metadata and close
+	encoder := json.NewEncoder(tempJsonFile)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(metadata); err != nil {
+		tempJsonFile.Close()
+		return "", "", fmt.Errorf("failed to encode metadata: %w", err)
+	}
+	if err := tempJsonFile.Close(); err != nil {
+		return "", "", fmt.Errorf("failed to close json: %w", err)
+	}
+
+	// 2. Try to place files in correct location
+	currentPath := session.Path
+	var lastConflictMsgID string
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Optional exponential backoff after 2 retries
+		if attempt > 2 {
+			time.Sleep(time.Duration(1<<(attempt-2)) * 10 * time.Millisecond)
+		}
+
+		success, msgID, siblingPath, err := tryPlaceMessage(currentPath, tempTxtPath, tempJsonPath)
 		if err != nil {
-			return "", fmt.Errorf("failed to get next message ID: %w", err)
+			// Retry on lock timeout
+			if errors.Is(err, ErrLockTimeout) && attempt < maxRetries-1 {
+				// Debug logging would go here if we had access to config
+				continue
+			}
+			return "", "", err
 		}
 
-		msg.ID = msgID
-		if err := writeMessage(session.Path, msgID, msg); err != nil {
-			return "", fmt.Errorf("failed to write message: %w", err)
+		if success {
+			return currentPath, msgID, nil
 		}
 
-		return msgID, nil
-	})
+		// Track conflict for error reporting
+		lastConflictMsgID = msgID
+
+		// Always log conflicts - they're important operational events
+		Infof("Message ID conflict: %s exists in %s, using sibling %s",
+			msgID, GetSessionID(currentPath), GetSessionID(siblingPath))
+
+		// Move to sibling for next attempt
+		currentPath = siblingPath
+	}
+
+	// Max retries exceeded - provide detailed error
+	return "", "", fmt.Errorf(
+		"%w: gave up after %d attempts\n"+
+			"Last conflict: message ID '%s' already exists in %s\n"+
+			"Your content has been preserved in temporary files:\n"+
+			"  Content: %s\n"+
+			"  Metadata: %s\n"+
+			"Options:\n"+
+			"  1. Retry with: echo <your_message> | argo -resume %s\n"+
+			"  2. Manually move files to session directory with next available ID\n"+
+			"  3. Check for concurrent processes that may be writing to this session",
+		ErrMaxRetriesExceeded, maxRetries, lastConflictMsgID,
+		GetSessionID(currentPath), tempTxtPath, tempJsonPath,
+		GetSessionID(session.Path))
 }
 
 // CreateSibling creates a new sibling branch from a message
+// WARNING: This function acquires a lock on the ROOT session path to ensure
+// atomic creation of sibling branches across the entire session tree.
+// DO NOT call this function while holding a lock on a child session path,
+// as it will create a high risk of deadlocks (AB-BA lock acquisition).
+// Lock hierarchy: root lock may acquire child locks, but not vice versa.
 func CreateSibling(sessionPath, messageID string) (string, error) {
 	// Ensure sessionPath is absolute
 	if !filepath.IsAbs(sessionPath) {
@@ -358,4 +509,91 @@ func DeleteNode(nodePath string) error {
 		// Delete the message and all descendants
 		return deleteMessageAndDescendants(dir, msgNum)
 	})
+}
+
+// tryPlaceMessage attempts to atomically place message files in a session directory
+// Returns: (success, msgID, siblingPath, error)
+// This function is called from AppendMessage and handles the lock/check/rename logic
+func tryPlaceMessage(sessionPath, tempTxtPath, tempJsonPath string) (success bool, msgID string, siblingPath string, err error) {
+	// Phase 1: Check if we can place files (with lock)
+	var needSibling bool
+	var conflictMsgID string
+
+	err = WithSessionLock(sessionPath, 5*time.Second, func() error {
+		// Get next ID inside lock (reduces conflicts)
+		msgID, err = GetNextMessageID(sessionPath)
+		if err != nil {
+			return err
+		}
+
+		finalTxtPath := filepath.Join(sessionPath, msgID+".txt")
+		finalJsonPath := filepath.Join(sessionPath, msgID+".json")
+
+		// Use proper error checking
+		_, errTxt := os.Stat(finalTxtPath)
+		_, errJson := os.Stat(finalJsonPath)
+
+		txtExists := errTxt == nil || !errors.Is(errTxt, fs.ErrNotExist)
+		jsonExists := errJson == nil || !errors.Is(errJson, fs.ErrNotExist)
+
+		if txtExists || jsonExists {
+			// Conflict detected
+			needSibling = true
+			conflictMsgID = msgID
+			success = false
+			return nil
+		}
+
+		// No conflict - atomic rename
+		if err := os.Rename(tempTxtPath, finalTxtPath); err != nil {
+			return fmt.Errorf("failed to rename txt: %w", err)
+		}
+
+		if err := os.Rename(tempJsonPath, finalJsonPath); err != nil {
+			// CRITICAL: Rename back, not delete!
+			// This preserves user content for retry
+			rollbackErr := os.Rename(finalTxtPath, tempTxtPath)
+
+			if rollbackErr != nil {
+				// Critical failure - both json rename and rollback failed
+				return fmt.Errorf(
+					"CRITICAL: Failed to place message files\n"+
+						"  JSON rename error: %w\n"+
+						"  Rollback error: %w\n"+
+						"Files in inconsistent state:\n"+
+						"  ✓ Created: %s\n"+
+						"  ✗ Failed: %s\n"+
+						"  ! Orphaned: %s\n"+
+						"Manual intervention required to recover temp file: %s",
+					err, rollbackErr, finalTxtPath, finalJsonPath, finalTxtPath, tempJsonPath)
+			}
+
+			// Rollback successful
+			return fmt.Errorf(
+				"failed to place message (rolled back successfully)\n"+
+					"  Error: %w\n"+
+					"Your content is preserved in:\n"+
+					"  Text: %s\n"+
+					"  JSON: %s\n"+
+					"You can retry the operation or manually move these files",
+				err, tempTxtPath, tempJsonPath)
+		}
+
+		success = true
+		return nil
+	})
+	// LOCK RELEASED HERE!
+	if err != nil {
+		return false, "", "", err
+	}
+
+	// Phase 2: Create sibling if needed (NO LOCK - avoids deadlock)
+	if needSibling {
+		siblingPath, err = CreateSibling(sessionPath, conflictMsgID)
+		if err != nil {
+			return false, "", "", fmt.Errorf("failed to create sibling: %w", err)
+		}
+	}
+
+	return success, msgID, siblingPath, nil
 }

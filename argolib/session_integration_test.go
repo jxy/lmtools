@@ -20,7 +20,7 @@ func TestBasicConversationFlow(t *testing.T) {
 			Content:   "Hello, how are you?",
 			Timestamp: time.Now(),
 		}
-		userMsgID, err := AppendMessage(session, userMsg)
+		_, userMsgID, err := AppendMessage(session, userMsg)
 		if err != nil {
 			t.Fatalf("Failed to append user message: %v", err)
 		}
@@ -36,7 +36,7 @@ func TestBasicConversationFlow(t *testing.T) {
 			Timestamp: time.Now(),
 			Model:     "test-model",
 		}
-		assistantMsgID, err := AppendMessage(session, assistantMsg)
+		_, assistantMsgID, err := AppendMessage(session, assistantMsg)
 		if err != nil {
 			t.Fatalf("Failed to append assistant message: %v", err)
 		}
@@ -94,7 +94,7 @@ func TestBranchingWorkflow(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -122,7 +122,7 @@ func TestBranchingWorkflow(t *testing.T) {
 		}
 
 		for _, msg := range branchMessages {
-			if _, err := AppendMessage(branch, msg); err != nil {
+			if _, _, err := AppendMessage(branch, msg); err != nil {
 				t.Fatalf("Failed to append branch message: %v", err)
 			}
 		}
@@ -185,7 +185,7 @@ func TestMultipleBranches(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -243,7 +243,7 @@ func TestMultipleBranches(t *testing.T) {
 				Timestamp: time.Now(),
 			}
 
-			if _, err := AppendMessage(branchSession, msg); err != nil {
+			if _, _, err := AppendMessage(branchSession, msg); err != nil {
 				t.Fatalf("Failed to append to branch %s: %v", b.path, err)
 			}
 		}
@@ -284,7 +284,7 @@ func TestNestedBranches(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -307,7 +307,7 @@ func TestNestedBranches(t *testing.T) {
 		}
 
 		for _, msg := range level1Messages {
-			if _, err := AppendMessage(level1Session, msg); err != nil {
+			if _, _, err := AppendMessage(level1Session, msg); err != nil {
 				t.Fatalf("Failed to append level 1 message: %v", err)
 			}
 		}
@@ -330,7 +330,7 @@ func TestNestedBranches(t *testing.T) {
 			Timestamp: time.Now(),
 		}
 
-		if _, err := AppendMessage(level2Session, level2Message); err != nil {
+		if _, _, err := AppendMessage(level2Session, level2Message); err != nil {
 			t.Fatalf("Failed to append level 2 message: %v", err)
 		}
 
@@ -376,7 +376,7 @@ func TestNestedBranches(t *testing.T) {
 			Model:     "test-model",
 		}
 
-		if _, err := AppendMessage(level3Session, level3Message); err != nil {
+		if _, _, err := AppendMessage(level3Session, level3Message); err != nil {
 			t.Fatalf("Failed to append level 3 message: %v", err)
 		}
 
@@ -421,7 +421,7 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		for _, msg := range rootMessages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append root message: %v", err)
 			}
 		}
@@ -440,7 +440,7 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		for _, msg := range branch1Msgs {
-			if _, err := AppendMessage(branch1, msg); err != nil {
+			if _, _, err := AppendMessage(branch1, msg); err != nil {
 				t.Fatalf("Failed to append to branch 1: %v", err)
 			}
 		}
@@ -452,7 +452,7 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		branch2, _ := LoadSession(branch2Path)
-		if _, err := AppendMessage(branch2, Message{Role: "user", Content: "Branch 2 - Msg 0", Timestamp: time.Now()}); err != nil {
+		if _, _, err := AppendMessage(branch2, Message{Role: "user", Content: "Branch 2 - Msg 0", Timestamp: time.Now()}); err != nil {
 			t.Fatalf("Failed to append to branch 2: %v", err)
 		}
 
@@ -463,7 +463,7 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		branch3, _ := LoadSession(branch3Path)
-		if _, err := AppendMessage(branch3, Message{Role: "assistant", Content: "Root 3 - Regenerated", Timestamp: time.Now(), Model: "model2-regen"}); err != nil {
+		if _, _, err := AppendMessage(branch3, Message{Role: "assistant", Content: "Root 3 - Regenerated", Timestamp: time.Now(), Model: "model2-regen"}); err != nil {
 			t.Fatalf("Failed to append to branch 3: %v", err)
 		}
 
@@ -474,7 +474,7 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		nested, _ := LoadSession(nestedPath)
-		if _, err := AppendMessage(nested, Message{Role: "user", Content: "Nested - Msg 0", Timestamp: time.Now()}); err != nil {
+		if _, _, err := AppendMessage(nested, Message{Role: "user", Content: "Nested - Msg 0", Timestamp: time.Now()}); err != nil {
 			t.Fatalf("Failed to append to nested branch: %v", err)
 		}
 

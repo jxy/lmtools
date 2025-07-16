@@ -13,6 +13,10 @@ build:
 test:
 	go test -v ./argolib ./cmd/argo
 
+# Run integration tests (cross-process tests)
+test-integration: build
+	cd cmd/argo && go test -v -tags=integration -run Integration
+
 # Run tests with coverage
 coverage:
 	go test -coverprofile=coverage.out ./argolib ./cmd/argo
@@ -41,13 +45,14 @@ check: lint-fix test
 # Help message
 help:
 	@echo "Available targets:"
-	@echo "  make          - Run lint, test, and build (default)"
-	@echo "  make build    - Build the argo binary"
-	@echo "  make test     - Run all tests"
-	@echo "  make coverage - Generate test coverage report"
-	@echo "  make lint     - Run linting"
-	@echo "  make lint-fix - Auto-fix linting issues"
-	@echo "  make clean    - Remove build artifacts"
-	@echo "  make dev      - Full development cycle (lint, test, build)"
-	@echo "  make check    - Quick check before commit (lint-fix, test)"
-	@echo "  make help     - Show this help message"
+	@echo "  make              - Run lint, test, and build (default)"
+	@echo "  make build        - Build the argo binary"
+	@echo "  make test         - Run all tests"
+	@echo "  make test-integration - Run cross-process integration tests"
+	@echo "  make coverage     - Generate test coverage report"
+	@echo "  make lint         - Run linting"
+	@echo "  make lint-fix     - Auto-fix linting issues"
+	@echo "  make clean        - Remove build artifacts"
+	@echo "  make dev          - Full development cycle (lint, test, build)"
+	@echo "  make check        - Quick check before commit (lint-fix, test)"
+	@echo "  make help         - Show this help message"

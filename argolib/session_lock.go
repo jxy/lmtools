@@ -36,27 +36,40 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 	defer syscall.Close(fd)
 
 	// Try to acquire lock with timeout handling
-	acquired := make(chan error, 1)
-	go func() {
-		err := syscall.Flock(fd, syscall.LOCK_EX)
-		acquired <- err
-	}()
-
-	// Handle timeout
 	if timeout > 0 {
+		done := make(chan struct{})
+		acquired := make(chan error, 1)
+
+		go func() {
+			select {
+			case <-done:
+				return // Cancelled before acquiring
+			default:
+				err := syscall.Flock(fd, syscall.LOCK_EX)
+				select {
+				case acquired <- err:
+				case <-done:
+					// Main routine timed out, cleanup if we got the lock
+					if err == nil {
+						_ = syscall.Flock(fd, syscall.LOCK_UN)
+					}
+				}
+			}
+		}()
+
 		select {
 		case err := <-acquired:
 			if err != nil {
+				close(done)
 				return fmt.Errorf("failed to acquire lock: %w", err)
 			}
 		case <-time.After(timeout):
-			// Best effort close to interrupt the flock
-			syscall.Close(fd)
+			close(done)
 			return ErrLockTimeout
 		}
 	} else {
 		// Wait indefinitely
-		if err := <-acquired; err != nil {
+		if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
 			return fmt.Errorf("failed to acquire lock: %w", err)
 		}
 	}

@@ -43,6 +43,11 @@ func run() error {
 		return fmt.Errorf("invalid flags: %w", err)
 	}
 
+	// Set environment variable based on flag
+	if cfg.SkipFlockCheck {
+		os.Setenv("ARGO_SKIP_FLOCK_CHECK", "1")
+	}
+
 	// Handle show-sessions flag
 	if cfg.ShowSessions {
 		return argo.ShowSessions()
@@ -163,9 +168,15 @@ func run() error {
 			Timestamp: time.Now(),
 			Model:     cfg.Model,
 		}
-		if _, err := argo.AppendMessage(session, responseMsg); err != nil {
+		path, msgID, err := argo.AppendMessage(session, responseMsg)
+		if err != nil {
 			// Log error but don't fail the request
 			fmt.Fprintf(os.Stderr, "Warning: failed to save response to session: %v\n", err)
+		} else if path != session.Path {
+			// Update session path if a sibling was created
+			session.Path = path
+			fmt.Fprintf(os.Stderr, "Note: Response saved to sibling branch %s as message %s\n",
+				argo.GetSessionID(path), msgID)
 		}
 	}
 
@@ -214,8 +225,17 @@ func handleSession(cfg *argo.Config, inputStr string, isRegeneration bool) (*arg
 			Timestamp: time.Now(),
 		}
 
-		if _, err := argo.AppendMessage(session, userMsg); err != nil {
+		path, msgID, err := argo.AppendMessage(session, userMsg)
+		if err != nil {
 			return nil, fmt.Errorf("failed to save user message: %w", err)
+		}
+
+		// Update session path if a sibling was created
+		if path != session.Path {
+			session.Path = path
+			// Log that we're using a sibling
+			fmt.Fprintf(os.Stderr, "Note: Using sibling branch %s for message %s\n",
+				argo.GetSessionID(path), msgID)
 		}
 	}
 

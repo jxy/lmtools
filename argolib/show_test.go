@@ -21,7 +21,7 @@ func TestShowDispatcher(t *testing.T) {
 			Content:   "Hello, world!",
 			Timestamp: time.Now(),
 		}
-		msgID1, err := AppendMessage(session, msg1)
+		_, msgID1, err := AppendMessage(session, msg1)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
@@ -32,7 +32,7 @@ func TestShowDispatcher(t *testing.T) {
 			Model:     "gpt4o",
 			Timestamp: time.Now(),
 		}
-		_, err = AppendMessage(session, msg2)
+		_, _, err = AppendMessage(session, msg2)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
@@ -129,7 +129,7 @@ func TestShowConversation(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, err := AppendMessage(session, msg); err != nil {
+			if _, _, err := AppendMessage(session, msg); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -157,7 +157,7 @@ func TestShowMessage(t *testing.T) {
 			Model:     "gpt4o",
 			Timestamp: time.Now(),
 		}
-		msgID, err := AppendMessage(session, msg)
+		_, msgID, err := AppendMessage(session, msg)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
@@ -185,7 +185,7 @@ func TestShowWithBranches(t *testing.T) {
 			Content:   "Hello",
 			Timestamp: time.Now(),
 		}
-		_, err = AppendMessage(session, msg1)
+		_, _, err = AppendMessage(session, msg1)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
@@ -196,7 +196,7 @@ func TestShowWithBranches(t *testing.T) {
 			Model:     "gpt4o",
 			Timestamp: time.Now(),
 		}
-		msgID2, err := AppendMessage(session, msg2)
+		_, msgID2, err := AppendMessage(session, msg2)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
@@ -217,7 +217,7 @@ func TestShowWithBranches(t *testing.T) {
 			Model:     "gpt35",
 			Timestamp: time.Now(),
 		}
-		_, err = AppendMessage(branchSession, msg3)
+		_, _, err = AppendMessage(branchSession, msg3)
 		if err != nil {
 			t.Fatalf("Failed to append message to branch: %v", err)
 		}

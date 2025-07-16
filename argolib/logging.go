@@ -30,6 +30,10 @@ func Infof(format string, args ...interface{}) {
 	log.Printf("[INFO] "+format, args...)
 }
 
+func Warnf(format string, args ...interface{}) {
+	log.Printf("[WARN] "+format, args...)
+}
+
 // LogLockOperation is deprecated and does nothing.
 // Lock operations are simple enough that they don't need special logging.
 func LogLockOperation(operation string, sessionPath string, fields map[string]interface{}) {
