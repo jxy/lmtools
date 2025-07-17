@@ -4,8 +4,10 @@
 package main
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,29 +17,12 @@ import (
 	"time"
 )
 
-// buildArgoBinary builds the argo binary for testing
-func buildArgoBinary(t *testing.T) string {
-	t.Helper()
-	
-	tmpDir := t.TempDir()
-	argoBin := filepath.Join(tmpDir, "argo.test")
-	
-	cmd := exec.Command("go", "build", "-o", argoBin, ".")
-	cmd.Dir = "." // Run in cmd/argo directory
-	
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("Failed to build argo: %v\nOutput: %s", err, output)
-	}
-	
-	return argoBin
-}
 
 // setupTestEnvironment creates a temporary home directory for testing
-func setupTestEnvironment(t *testing.T) string {
+func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
 	t.Helper()
 	
-	tmpHome := t.TempDir()
+	tmpHome = t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	
 	// Create .argo directory
@@ -46,46 +31,56 @@ func setupTestEnvironment(t *testing.T) string {
 		t.Fatalf("Failed to create .argo directory: %v", err)
 	}
 	
-	return tmpHome
+	// Start a simple mock server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/chat/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"response": "Mock response for testing",
+			"model":    "gpt4o",
+		}
+		json.NewEncoder(w).Encode(response)
+	})
+	
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	
+	return tmpHome, server.URL
 }
 
-// runArgoCommand runs argo with the given arguments and input
-func runArgoCommand(t *testing.T, argoBin string, args []string, input string) (stdout, stderr string, err error) {
-	t.Helper()
-	
-	cmd := exec.Command(argoBin, args...)
-	cmd.Stdin = strings.NewReader(input)
-	
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-	
-	err = cmd.Run()
-	return stdoutBuf.String(), stderrBuf.String(), err
-}
 
 // TestCrossProcessConcurrentResume tests multiple processes resuming the same session
 func TestCrossProcessConcurrentResume(t *testing.T) {
 	argoBin := buildArgoBinary(t)
-	setupTestEnvironment(t)
+	_, mockURL := setupTestEnvironment(t)
+	
+	// Create custom sessions directory
+	sessionsDir := t.TempDir()
 	
 	// Create initial session
-	stdout, stderr, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "-no-log"}, "Initial message")
+	stdout, stderr, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "--env", mockURL, "-sessions-dir", sessionsDir}, "Initial message")
 	if err != nil {
 		t.Fatalf("Failed to create initial session: %v\nStderr: %s", err, stderr)
 	}
 	
-	// Extract session ID from stderr (e.g., "Session: abc123")
+	// Get session ID using -show-sessions
+	stdout, stderr, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show-sessions", "-sessions-dir", sessionsDir}, "")
+	if err != nil {
+		t.Fatalf("Failed to show sessions: %v\nStderr: %s", err, stderr)
+	}
+	
+	// Parse session ID from output (format: "0001/ (created: 2025-07-16 15:04:05)")
 	var sessionID string
-	for _, line := range strings.Split(stderr, "\n") {
-		if strings.HasPrefix(line, "Session: ") {
-			sessionID = strings.TrimPrefix(line, "Session: ")
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "/ (created:") {
+			sessionID = strings.TrimSpace(strings.Split(line, "/")[0])
 			break
 		}
 	}
 	
 	if sessionID == "" {
-		t.Fatalf("Failed to extract session ID from stderr: %s", stderr)
+		t.Fatalf("Failed to extract session ID from show-sessions output: %s", stdout)
 	}
 	
 	t.Logf("Created session: %s", sessionID)
@@ -111,7 +106,7 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 			
 			input := fmt.Sprintf("Response from process %d", processID)
 			stdout, stderr, err := runArgoCommand(t, argoBin, 
-				[]string{"-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "-no-log"}, 
+				[]string{"-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "--env", mockURL, "-sessions-dir", sessionsDir}, 
 				input)
 			
 			results <- struct {
@@ -159,7 +154,7 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 	}
 	
 	// Show final session state
-	stdout, stderr, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show", sessionID}, "")
+	stdout, stderr, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show", sessionID, "-sessions-dir", sessionsDir}, "")
 	if err != nil {
 		t.Errorf("Failed to show session: %v", err)
 	} else {
@@ -170,25 +165,35 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 // TestCrossProcessLockExclusion verifies that locks actually exclude other processes
 func TestCrossProcessLockExclusion(t *testing.T) {
 	argoBin := buildArgoBinary(t)
-	setupTestEnvironment(t)
+	_, mockURL := setupTestEnvironment(t)
+	
+	// Create custom sessions directory
+	sessionsDir := t.TempDir()
 	
 	// Create a test session
-	_, stderr, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "-no-log"}, "Test message")
+	_, stderr, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "--env", mockURL, "-sessions-dir", sessionsDir}, "Test message")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v\nStderr: %s", err, stderr)
 	}
 	
+	// Get session ID using -show-sessions
+	stdout, _, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show-sessions", "-sessions-dir", sessionsDir}, "")
+	if err != nil {
+		t.Fatalf("Failed to show sessions: %v", err)
+	}
+	
 	// Extract session ID
 	var sessionID string
-	for _, line := range strings.Split(stderr, "\n") {
-		if strings.HasPrefix(line, "Session: ") {
-			sessionID = strings.TrimPrefix(line, "Session: ")
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "/ (created:") {
+			sessionID = strings.TrimSpace(strings.Split(line, "/")[0])
 			break
 		}
 	}
 	
 	// Create a long-running process that holds a lock
-	cmd1 := exec.Command(argoBin, "-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "-no-log")
+	cmd1 := exec.Command(argoBin, "-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "--env", mockURL, "-sessions-dir", sessionsDir)
 	cmd1.Stdin = strings.NewReader("This is a long message that will take time to process")
 	
 	// Start first process
@@ -203,7 +208,7 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	// Try to access the same session from another process
 	start := time.Now()
 	_, stderr2, err2 := runArgoCommand(t, argoBin, 
-		[]string{"-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "-no-log"}, 
+		[]string{"-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "--env", mockURL, "-sessions-dir", sessionsDir}, 
 		"Concurrent message")
 	elapsed := time.Since(start)
 	
@@ -225,24 +230,34 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 // TestCrossProcessSiblingCreation tests concurrent sibling creation
 func TestCrossProcessSiblingCreation(t *testing.T) {
 	argoBin := buildArgoBinary(t)
-	setupTestEnvironment(t)
+	_, mockURL := setupTestEnvironment(t)
+	
+	// Create custom sessions directory
+	sessionsDir := t.TempDir()
 	
 	// Create initial session with a few messages
-	stdout, stderr, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "-no-log"}, "Message 1")
+	_, _, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "--env", mockURL, "-sessions-dir", sessionsDir}, "Message 1")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 	
+	// Get session ID using -show-sessions
+	stdout, _, err := runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show-sessions", "-sessions-dir", sessionsDir}, "")
+	if err != nil {
+		t.Fatalf("Failed to show sessions: %v", err)
+	}
+	
 	var sessionID string
-	for _, line := range strings.Split(stderr, "\n") {
-		if strings.HasPrefix(line, "Session: ") {
-			sessionID = strings.TrimPrefix(line, "Session: ")
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "/ (created:") {
+			sessionID = strings.TrimSpace(strings.Split(line, "/")[0])
 			break
 		}
 	}
 	
 	// Add another message
-	_, _, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "-no-log"}, "Message 2")
+	_, _, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-m", "gpt4o", "-resume", sessionID, "--env", mockURL, "-sessions-dir", sessionsDir}, "Message 2")
 	if err != nil {
 		t.Fatalf("Failed to add message: %v", err)
 	}
@@ -259,7 +274,7 @@ func TestCrossProcessSiblingCreation(t *testing.T) {
 			defer wg.Done()
 			
 			_, stderr, err := runArgoCommand(t, argoBin,
-				[]string{"-u", "testuser", "-m", "gpt4o", "-branch", sessionID + "/0001", "-no-log"},
+				[]string{"-u", "testuser", "-m", "gpt4o", "-branch", sessionID + "/0001", "--env", mockURL, "-sessions-dir", sessionsDir},
 				fmt.Sprintf("Branch %d response", id))
 			
 			if err != nil {
@@ -285,7 +300,7 @@ func TestCrossProcessSiblingCreation(t *testing.T) {
 	t.Logf("Successfully created %d/%d branches", successCount, numProcesses)
 	
 	// Show session tree
-	stdout, _, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show-sessions"}, "")
+	stdout, _, err = runArgoCommand(t, argoBin, []string{"-u", "testuser", "-show-sessions", "-sessions-dir", sessionsDir}, "")
 	if err != nil {
 		t.Errorf("Failed to show sessions: %v", err)
 	} else {

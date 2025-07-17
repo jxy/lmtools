@@ -72,8 +72,13 @@ type Message struct {
 	Model     string // Model name (empty for user messages)
 }
 
-// sessionsBaseDir can be overridden for testing
+// sessionsBaseDir can be overridden for testing or custom directory
 var sessionsBaseDir string
+
+// SetSessionsDir sets a custom sessions directory
+func SetSessionsDir(dir string) {
+	sessionsBaseDir = dir
+}
 
 // GetSessionsDir returns the base directory for all sessions
 func GetSessionsDir() string {

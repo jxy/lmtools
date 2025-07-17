@@ -43,9 +43,16 @@ func run() error {
 		return fmt.Errorf("invalid flags: %w", err)
 	}
 
-	// Set environment variable based on flag
-	if cfg.SkipFlockCheck {
-		os.Setenv("ARGO_SKIP_FLOCK_CHECK", "1")
+	// Initialize logging
+	if err := argo.InitLogging(""); err != nil {
+		// Log error to stderr but continue - logging is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize logging: %v\n", err)
+	}
+	defer argo.CloseLogging()
+
+	// Set custom sessions directory if provided
+	if cfg.SessionsDir != "" {
+		argo.SetSessionsDir(cfg.SessionsDir)
 	}
 
 	// Handle show-sessions flag

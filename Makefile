@@ -15,7 +15,14 @@ test:
 
 # Run integration tests (cross-process tests)
 test-integration: build
-	cd cmd/argo && go test -v -tags=integration -run Integration
+	go test -v -tags=integration ./cmd/argo
+
+# Run e2e tests (end-to-end with mock server)
+test-e2e: build
+	go test -v -tags=e2e ./cmd/argo
+
+# Run all tests including integration and e2e
+test-all: test test-integration test-e2e
 
 # Run tests with coverage
 coverage:
@@ -47,8 +54,10 @@ help:
 	@echo "Available targets:"
 	@echo "  make              - Run lint, test, and build (default)"
 	@echo "  make build        - Build the argo binary"
-	@echo "  make test         - Run all tests"
+	@echo "  make test         - Run unit tests"
 	@echo "  make test-integration - Run cross-process integration tests"
+	@echo "  make test-e2e     - Run end-to-end tests with mock server"
+	@echo "  make test-all     - Run all tests (unit, integration, e2e)"
 	@echo "  make coverage     - Generate test coverage report"
 	@echo "  make lint         - Run linting"
 	@echo "  make lint-fix     - Auto-fix linting issues"

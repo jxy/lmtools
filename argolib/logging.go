@@ -17,21 +17,67 @@ const (
 	maxOpLen = 30 // Windows MAX_PATH margin
 )
 
+var processLogFile *os.File
+
 // InitLogging initializes the logging configuration.
 // This function should be called once at program startup.
+// It creates a per-process log file in ~/.argo/logs/
 func InitLogging(level string) error {
-	// Ignore level parameter, always use info level
-	log.SetFlags(log.LstdFlags)
+	// Set up console logging to stderr
+	log.SetFlags(0) // We'll add our own timestamps
 	log.SetOutput(os.Stderr)
+
+	// Create per-process log file
+	logDir := GetLogDir()
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return fmt.Errorf("create log dir: %w", err)
+	}
+
+	// Create log file with PID
+	filename := fmt.Sprintf("%s_argo_%d.log",
+		time.Now().Format("20060102T150405"), os.Getpid())
+	logPath := filepath.Join(logDir, filename)
+
+	var err error
+	processLogFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("create process log file: %w", err)
+	}
+
 	return nil
 }
 
+// CloseLogging closes the process log file
+func CloseLogging() {
+	if processLogFile != nil {
+		processLogFile.Close()
+	}
+}
+
+func logToFile(level, format string, args ...interface{}) {
+	if processLogFile != nil {
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		msg := fmt.Sprintf(format, args...)
+		fmt.Fprintf(processLogFile, "%s [%s] %s\n", timestamp, level, msg)
+	}
+}
+
 func Infof(format string, args ...interface{}) {
-	log.Printf("[INFO] "+format, args...)
+	// Log to file
+	logToFile("INFO", format, args...)
+
+	// Log to console
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	log.Printf("%s [INFO] "+format, append([]interface{}{timestamp}, args...)...)
 }
 
 func Warnf(format string, args ...interface{}) {
-	log.Printf("[WARN] "+format, args...)
+	// Log to file
+	logToFile("WARN", format, args...)
+
+	// Log to console
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	log.Printf("%s [WARN] "+format, append([]interface{}{timestamp}, args...)...)
 }
 
 // LogLockOperation is deprecated and does nothing.
