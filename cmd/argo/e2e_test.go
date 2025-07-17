@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 // E2ETestServer wraps the mock server for e2e tests
 type E2ETestServer struct {
 	*httptest.Server
+	mu           sync.Mutex
 	requestCount int
 	requests     []interface{}
 }
@@ -41,8 +43,11 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 			return
 		}
 		
+		e2e.mu.Lock()
 		e2e.requestCount++
 		e2e.requests = append(e2e.requests, req)
+		requestNum := e2e.requestCount
+		e2e.mu.Unlock()
 		
 		// Generate contextual responses
 		response := "Default response"
@@ -54,18 +59,18 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 			case strings.Contains(strings.ToLower(lastMsg), "hello"):
 				response = "Hello! How can I assist you today?"
 			case strings.Contains(lastMsg, "continue"):
-				response = fmt.Sprintf("Continuing conversation #%d...", e2e.requestCount)
+				response = fmt.Sprintf("Continuing conversation #%d...", requestNum)
 			case strings.Contains(lastMsg, "test"):
 				response = "Test response confirmed."
 			default:
-				response = fmt.Sprintf("Response #%d to: %s", e2e.requestCount, lastMsg)
+				response = fmt.Sprintf("Response #%d to: %s", requestNum, lastMsg)
 			}
 		}
 		
 		resp := map[string]interface{}{
 			"response": response,
 			"model":    req.Model,
-			"id":       fmt.Sprintf("resp-%d", e2e.requestCount),
+			"id":       fmt.Sprintf("resp-%d", requestNum),
 		}
 		
 		w.Header().Set("Content-Type", "application/json")
@@ -80,8 +85,10 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 			return
 		}
 		
+		e2e.mu.Lock()
 		e2e.requestCount++
 		e2e.requests = append(e2e.requests, req)
+		e2e.mu.Unlock()
 		
 		// Generate dummy embedding (2D array as expected by response handler)
 		embedding := make([]float64, 1536)
@@ -106,8 +113,10 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 			return
 		}
 		
+		e2e.mu.Lock()
 		e2e.requestCount++
 		e2e.requests = append(e2e.requests, req)
+		e2e.mu.Unlock()
 		
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")

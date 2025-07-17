@@ -131,14 +131,10 @@ func (ms *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 
 // handleEmbed processes embed requests
 func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body []byte) {
-	var req EmbedRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
 	// Use custom response function if provided
 	if ms.responseFunc != nil {
+		// Restore body for custom function to read
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
 		resp, status, err := ms.responseFunc(r)
 		if err != nil {
 			http.Error(w, err.Error(), status)
@@ -148,6 +144,13 @@ func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body [
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
+		return
+	}
+
+	// Parse request only after checking custom response function
+	var req EmbedRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -180,12 +183,6 @@ func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body [
 
 // handleChat processes chat requests
 func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []byte) {
-	var req ChatRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
 	// Use custom response function if provided
 	if ms.responseFunc != nil {
 		// Restore body for custom function to read
@@ -199,6 +196,13 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
+		return
+	}
+
+	// Parse request only after checking custom response function
+	var req ChatRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -233,6 +237,21 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 
 // handleStreamChat processes streaming chat requests
 func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, body []byte) {
+	// Use custom response function if provided
+	if ms.responseFunc != nil {
+		// Restore body for custom function to read
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		_, status, err := ms.responseFunc(r)
+		if err != nil {
+			http.Error(w, err.Error(), status)
+			return
+		}
+		// For streaming, we expect the responseFunc to handle the streaming itself
+		// So we just return after it's done
+		return
+	}
+
+	// Parse request only after checking custom response function
 	var req ChatRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)

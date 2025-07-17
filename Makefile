@@ -11,22 +11,22 @@ build:
 
 # Run all tests
 test:
-	go test -v ./argolib ./cmd/argo
+	go test -v -race ./argolib ./cmd/argo
 
 # Run integration tests (cross-process tests)
 test-integration: build
-	go test -v -tags=integration ./cmd/argo
+	go test -v -race -tags=integration ./cmd/argo
 
 # Run e2e tests (end-to-end with mock server)
 test-e2e: build
-	go test -v -tags=e2e ./cmd/argo
+	go test -v -race -tags=e2e ./cmd/argo
 
 # Run all tests including integration and e2e
 test-all: test test-integration test-e2e
 
 # Run tests with coverage
 coverage:
-	go test -coverprofile=coverage.out ./argolib ./cmd/argo
+	go test -race -coverprofile=coverage.out ./argolib ./cmd/argo
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report saved to coverage.html"
 	@go tool cover -func=coverage.out | grep "total:" | awk '{print "Total coverage: " $$3}'

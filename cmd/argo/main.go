@@ -52,7 +52,28 @@ func run() error {
 
 	// Set custom sessions directory if provided
 	if cfg.SessionsDir != "" {
-		argo.SetSessionsDir(cfg.SessionsDir)
+		// Validate and convert to absolute path if needed
+		absDir, err := filepath.Abs(cfg.SessionsDir)
+		if err != nil {
+			return fmt.Errorf("invalid sessions directory: %w", err)
+		}
+
+		// Create directory if it doesn't exist
+		if err := os.MkdirAll(absDir, 0o750); err != nil {
+			return fmt.Errorf("failed to create sessions directory: %w", err)
+		}
+
+		// Verify it's a directory (not a file)
+		info, err := os.Stat(absDir)
+		if err != nil {
+			return fmt.Errorf("failed to access sessions directory: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("sessions-dir path exists but is not a directory: %s", absDir)
+		}
+
+		argo.SetSessionsDir(absDir)
+		argo.Infof("Using custom sessions directory: %s", absDir)
 	}
 
 	// Handle show-sessions flag
@@ -68,11 +89,6 @@ func run() error {
 	// Handle delete flag
 	if cfg.Delete != "" {
 		return argo.DeleteNode(cfg.Delete)
-	}
-
-	// Initialize logging with info level (hardcoded)
-	if err := argo.InitLogging("info"); err != nil {
-		return fmt.Errorf("failed to init logging: %w", err)
 	}
 
 	// Check if we're branching from an assistant message (regeneration)

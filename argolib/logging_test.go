@@ -137,10 +137,10 @@ func TestProcessLogFile(t *testing.T) {
 	logBaseDir = tmpDir
 	defer func() { logBaseDir = oldLogBaseDir }()
 
-	// Reset the global processLogFile to simulate fresh process
-	oldProcessLogFile := processLogFile
-	processLogFile = nil
-	defer func() { processLogFile = oldProcessLogFile }()
+	// Reset the global defaultLogger to simulate fresh process
+	oldDefaultLogger := defaultLogger
+	defaultLogger = nil
+	defer func() { defaultLogger = oldDefaultLogger }()
 
 	// Initialize logging
 	err := InitLogging("")

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -22,7 +23,8 @@ var (
 
 // Session represents a conversation session
 type Session struct {
-	Path string // Directory path (also serves as session ID)
+	Path        string // Directory path (also serves as session ID)
+	SessionsDir string // Base directory for sessions (optional, defaults to GetSessionsDir())
 }
 
 // flockChecked tracks whether we've already tested flock support
@@ -73,17 +75,26 @@ type Message struct {
 }
 
 // sessionsBaseDir can be overridden for testing or custom directory
-var sessionsBaseDir string
+var (
+	sessionsBaseDir string
+	sessionsDirMu   sync.RWMutex
+)
 
 // SetSessionsDir sets a custom sessions directory
 func SetSessionsDir(dir string) {
+	sessionsDirMu.Lock()
+	defer sessionsDirMu.Unlock()
 	sessionsBaseDir = dir
 }
 
 // GetSessionsDir returns the base directory for all sessions
 func GetSessionsDir() string {
-	if sessionsBaseDir != "" {
-		return sessionsBaseDir
+	sessionsDirMu.RLock()
+	baseDir := sessionsBaseDir
+	sessionsDirMu.RUnlock()
+
+	if baseDir != "" {
+		return baseDir
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -166,7 +177,7 @@ func CreateSession() (*Session, error) {
 			return nil, fmt.Errorf("failed to create session directory: %w", err)
 		}
 
-		return &Session{Path: sessionPath}, nil
+		return &Session{Path: sessionPath, SessionsDir: sessionsDir}, nil
 	}
 
 	return nil, fmt.Errorf("failed to create session after 100 attempts - too many collisions")
@@ -188,7 +199,9 @@ func LoadSession(sessionPath string) (*Session, error) {
 		return nil, fmt.Errorf("session path is not a directory: %s", sessionPath)
 	}
 
-	return &Session{Path: sessionPath}, nil
+	// Determine which sessions directory was used
+	sessionsDir := GetSessionsDir()
+	return &Session{Path: sessionPath, SessionsDir: sessionsDir}, nil
 }
 
 // AppendMessage atomically appends a message to the session
