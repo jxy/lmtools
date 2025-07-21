@@ -76,6 +76,11 @@ func run() error {
 		argo.Infof("Using custom sessions directory: %s", absDir)
 	}
 
+	// Set skip flock check if provided
+	if cfg.SkipFlockCheck {
+		argo.SetSkipFlockCheck(true)
+	}
+
 	// Handle show-sessions flag
 	if cfg.ShowSessions {
 		return argo.ShowSessions()

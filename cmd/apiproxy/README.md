@@ -33,32 +33,56 @@ go install ./cmd/apiproxy
 
 ### Configuration
 
-Set environment variables for the providers you want to use:
+Configure the proxy using command-line flags:
 
 ```bash
-# API Keys
-export OPENAI_API_KEY="sk-..."
-export GEMINI_API_KEY="..."
-export ANTHROPIC_API_KEY="..." # Only needed if proxying TO Anthropic
+# API Key configuration (pass files containing keys, not the keys directly)
+--openai-api-key-file       Path to file containing OpenAI API key
+--gemini-api-key-file       Path to file containing Gemini API key  
+--anthropic-api-key-file    Path to file containing Anthropic API key
 
-# Argo Configuration
-export ARGO_USER="your-username"
-export ARGO_ENV="prod" # or "dev" or custom URL
+# Other configuration flags
+--argo-user            Argo user
+--argo-env             Argo environment (default: "dev")
+--preferred-provider   Preferred provider: openai, google, argo (default: "openai")
+--big-model            Model for "sonnet" requests (default: "claudeopus4")
+--small-model          Model for "haiku" requests (default: "claudesonnet4")
 
-# Provider Configuration
-export PREFERRED_PROVIDER="openai" # Options: openai, google, argo
-export BIG_MODEL="gpt-4.1"         # Model for "sonnet" requests
-export SMALL_MODEL="gpt-4.1-mini"  # Model for "haiku" requests
+# Server configuration
+--host                 Host to bind (default: "127.0.0.1")
+--port                 Port to bind (default: 8082)
+
+# Other options
+--max-request-body-size   Maximum request body size in MB (default: 10)
+--log-level              Log level: DEBUG, INFO, WARN, ERROR (default: "INFO")
+--log-format             Log format: text, json (default: "text")
+--no-color               Disable colored output
 ```
 
 ### Running the Proxy
 
 ```bash
-# Start with default settings (port 8082)
-./apiproxy
+# First, save your API keys to files (one key per file)
+echo "sk-..." > ~/.openai-key
+echo "AIza..." > ~/.gemini-key
+chmod 600 ~/.openai-key ~/.gemini-key  # Secure the files
 
-# Custom host and port
-./apiproxy -host 0.0.0.0 -port 8080
+# Start with minimal configuration (OpenAI as default provider)
+./apiproxy --openai-api-key-file="$HOME/.openai-key"
+
+# Use Google Gemini as provider
+./apiproxy --gemini-api-key-file="$HOME/.gemini-key" --preferred-provider="google"
+
+# Use Argo with custom models
+./apiproxy --argo-user="username" --preferred-provider="argo" \
+  --big-model="claudesonnet4" --small-model="gemini25flash"
+
+# Custom host and port with debug logging
+./apiproxy --host="0.0.0.0" --port="8080" --log-level="DEBUG" \
+  --openai-api-key-file="$HOME/.openai-key"
+
+# Note: By default, the server binds to 127.0.0.1 (localhost only).
+# Use --host="0.0.0.0" to allow external connections.
 ```
 
 ## Usage Examples
@@ -120,33 +144,46 @@ The proxy automatically maps Anthropic model names to appropriate providers:
 
 ## Configuration Examples
 
-### Use OpenAI (Default)
+### Use Argo (Default)
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-export PREFERRED_PROVIDER="openai"
-export BIG_MODEL="gpt-4o"
-export SMALL_MODEL="gpt-4o-mini"
+# Run proxy with Argo (no API key file needed, just username)
+./apiproxy \
+  --argo-user="username" \
+  --argo-env="prod"
+# Uses default models: claudeopus4 for big, claudesonnet4 for small
+```
+
+### Use OpenAI
+
+```bash
+# Save API key to file
+echo "sk-..." > ~/.openai-key
+chmod 600 ~/.openai-key
+
+# Run proxy
+./apiproxy \
+  --openai-api-key-file="$HOME/.openai-key" \
+  --preferred-provider="openai" \
+  --big-model="gpt-4o" \
+  --small-model="gpt-4o-mini"
 ```
 
 ### Use Google Gemini
 
 ```bash
-export GEMINI_API_KEY="..."
-export PREFERRED_PROVIDER="google"
-export BIG_MODEL="gemini-2.5-pro-preview-03-25"
-export SMALL_MODEL="gemini-2.0-flash"
+# Save API key to file
+echo "AIza..." > ~/.gemini-key
+chmod 600 ~/.gemini-key
+
+# Run proxy
+./apiproxy \
+  --gemini-api-key-file="$HOME/.gemini-key" \
+  --preferred-provider="google" \
+  --big-model="gemini-2.5-pro-preview-03-25" \
+  --small-model="gemini-2.0-flash"
 ```
 
-### Use Argo
-
-```bash
-export ARGO_USER="username"
-export ARGO_ENV="prod"
-export PREFERRED_PROVIDER="argo"
-export BIG_MODEL="claudesonnet4"
-export SMALL_MODEL="gemini25flash"
-```
 
 ## Supported Models
 
@@ -169,7 +206,7 @@ export SMALL_MODEL="gemini25flash"
 
 The proxy is built with a modular architecture:
 
-- **Configuration**: Environment-based configuration with validation
+- **Configuration**: Command-line flag based configuration with validation
 - **Model Mapper**: Handles model name mapping and provider selection
 - **Converters**: Transform between API formats while preserving functionality
 - **HTTP Server**: Routes requests to appropriate handlers
@@ -198,7 +235,7 @@ GOOS=windows GOARCH=amd64 go build -o apiproxy.exe ./cmd/apiproxy
 
 ### Common Issues
 
-1. **"API key required" errors**: Ensure the appropriate environment variables are set
+1. **"API key required" errors**: Ensure the appropriate API key file flags are provided and the files exist
 2. **Model not found**: Check that the model name is in the supported lists
 3. **Connection errors**: Verify network connectivity and proxy settings
 4. **Invalid responses**: Enable debug logging to see raw requests/responses
@@ -208,7 +245,11 @@ GOOS=windows GOARCH=amd64 go build -o apiproxy.exe ./cmd/apiproxy
 Set log level for more verbose output:
 
 ```bash
-# Coming soon: debug logging support
+# Enable debug logging
+./apiproxy --log-level="DEBUG" --openai-api-key-file="$HOME/.openai-key"
+
+# JSON formatted logs for parsing
+./apiproxy --log-format="json" --log-level="DEBUG" --openai-api-key-file="$HOME/.openai-key"
 ```
 
 ## License

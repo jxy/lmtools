@@ -25,23 +25,27 @@ var (
 	logMutex        sync.Mutex
 )
 
-func init() {
-	// Set log level from environment
-	switch os.Getenv("LOG_LEVEL") {
-	case "DEBUG", "debug":
+// ConfigureLogging configures the logging system with the provided settings
+func ConfigureLogging(logLevel, logFormat string, noColor bool) {
+	// Set log level
+	switch strings.ToUpper(logLevel) {
+	case "DEBUG":
 		currentLogLevel = LogLevelDebug
-	case "INFO", "info":
+	case "INFO":
 		currentLogLevel = LogLevelInfo
-	case "WARN", "warn":
+	case "WARN":
 		currentLogLevel = LogLevelWarn
-	case "ERROR", "error":
+	case "ERROR":
 		currentLogLevel = LogLevelError
 	default:
 		currentLogLevel = LogLevelInfo // Default to info
 	}
 
 	// Check if structured logging is enabled
-	structuredMode = os.Getenv("LOG_FORMAT") == "json"
+	structuredMode = logFormat == "json"
+
+	// Configure colors
+	Color.enabled = !noColor && isTerminal()
 }
 
 // ANSI color codes
@@ -50,11 +54,6 @@ type Colors struct {
 }
 
 var Color Colors
-
-func init() {
-	// Check if we're in a TTY and colors are not disabled
-	Color.enabled = os.Getenv("NO_COLOR") == "" && isTerminal()
-}
 
 func isTerminal() bool {
 	// Simple check if stdout is a terminal

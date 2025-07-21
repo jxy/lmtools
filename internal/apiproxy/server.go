@@ -102,7 +102,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Map the model to appropriate provider
 	provider, mappedModel := s.mapper.MapModel(anthReq.Model)
 	if provider == "" || mappedModel == "" {
-		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("No API key configured for model: %s. Please set the appropriate API key (OPENAI_API_KEY, GEMINI_API_KEY, or ARGO_USER)", originalModel))
+		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("No API key configured for model: %s. Please provide the appropriate API key file (--openai-api-key-file, --gemini-api-key-file, or --argo-user)", originalModel))
 		return
 	}
 	anthReq.Model = mappedModel
@@ -638,12 +638,36 @@ func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *A
 		return fmt.Errorf("failed to get non-streaming response: %w", err)
 	}
 
-	// Convert the response to Anthropic format first
-	LogDebug("Converting Argo response to Anthropic format...")
-	anthResp := s.converter.ConvertArgoToAnthropic(argoResp, handler.originalModel)
+	// Start ping ticker for long-running operations
+	pingTicker := time.NewTicker(15 * time.Second)
+	defer pingTicker.Stop()
 
-	// Log the converted response
-	LogJSON("Argo Response Converted to Anthropic Format", anthResp)
+	// Create a channel to signal when conversion is done
+	conversionDone := make(chan struct{})
+	var anthResp *AnthropicResponse
+
+	// Run conversion in a goroutine
+	go func() {
+		defer close(conversionDone)
+		LogDebug("Converting Argo response to Anthropic format...")
+		anthResp = s.converter.ConvertArgoToAnthropic(argoResp, handler.originalModel)
+	}()
+
+	// Send pings while waiting for conversion
+	for {
+		select {
+		case <-conversionDone:
+			// Conversion completed, break out of loop
+			goto conversionComplete
+		case <-pingTicker.C:
+			// Send ping every 15 seconds
+			if err := handler.SendPing(); err != nil {
+				LogDebug(fmt.Sprintf("Failed to send ping: %v", err))
+			}
+		}
+	}
+
+conversionComplete:
 
 	// Validate response
 	if anthResp == nil {
@@ -657,32 +681,20 @@ func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *A
 	blockIndex := 0 // Index for tool blocks (text is always index 0)
 	textBlockProcessed := false
 
-	LogDebug(fmt.Sprintf("=== Processing %d Content Blocks ===", len(anthResp.Content)))
-
-	for i, block := range anthResp.Content {
-		LogDebug(fmt.Sprintf("\n--- Block %d/%d ---", i+1, len(anthResp.Content)))
-		LogDebug(fmt.Sprintf("  Type: %s", block.Type))
-
+	for _, block := range anthResp.Content {
 		switch block.Type {
 		case "text":
 			// Send text in chunks
 			content := block.Text
-			LogDebug(fmt.Sprintf("  Text content length: %d chars", len(content)))
 
 			if content == "" {
-				LogDebug("  WARNING: Empty text block, skipping")
 				continue
 			}
 
 			textBlockProcessed = true
-			LogDebug("  State before text processing:")
-			LogDebug(fmt.Sprintf("    TextSent: %v, TextBlockClosed: %v, AccumulatedText length: %d",
-				handler.state.TextSent, handler.state.TextBlockClosed, len(handler.state.AccumulatedText)))
 
 			// Split content into chunks to simulate streaming
 			chunkSize := 20 // Characters per chunk
-			totalChunks := (len(content) + chunkSize - 1) / chunkSize
-			LogDebug(fmt.Sprintf("  Splitting into %d chunks of up to %d chars each", totalChunks, chunkSize))
 
 			for j := 0; j < len(content); j += chunkSize {
 				end := j + chunkSize
@@ -691,70 +703,56 @@ func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *A
 				}
 
 				chunk := content[j:end]
-				chunkNum := (j / chunkSize) + 1
-				LogDebug(fmt.Sprintf("    Chunk %d/%d [chars %d-%d]: %q", chunkNum, totalChunks, j, end-1, chunk))
 
 				if err := handler.SendTextDelta(chunk); err != nil {
-					LogError(fmt.Sprintf("Failed to send text chunk %d/%d", chunkNum, totalChunks), err)
-					return fmt.Errorf("failed to send text chunk %d/%d: %w", chunkNum, totalChunks, err)
+					LogError("Failed to send text chunk", err)
+					return fmt.Errorf("failed to send text chunk: %w", err)
 				}
 
 				// Small delay to simulate streaming
 				time.Sleep(10 * time.Millisecond)
 			}
 
-			LogDebug("  Text block processing completed")
-			LogDebug(fmt.Sprintf("    Final AccumulatedText length: %d", len(handler.state.AccumulatedText)))
-
 		case "tool_use":
-			LogDebug(fmt.Sprintf("  Tool use block: id=%s, name=%s", block.ID, block.Name))
+			LogDebug(fmt.Sprintf("Tool: %s", block.Name))
 
 			// Validate tool block
 			if block.ID == "" {
-				LogDebug("  WARNING: Tool block has empty ID")
+				LogDebug("WARNING: Tool block has empty ID")
 			}
 			if block.Name == "" {
-				LogDebug("  WARNING: Tool block has empty name")
+				LogDebug("WARNING: Tool block has empty name")
 			}
 			if block.Input == nil {
-				LogDebug("  WARNING: Tool block has nil input")
 				block.Input = make(map[string]interface{})
 			}
 
 			// Close text block if needed
 			if textBlockProcessed && !handler.state.TextBlockClosed {
-				LogDebug("  Need to close text block before starting tool block")
-				LogDebug(fmt.Sprintf("    Current state: TextBlockClosed=%v, blockIndex=%d", handler.state.TextBlockClosed, blockIndex))
 
 				if err := handler.SendContentBlockStop(0); err != nil {
 					LogError("Failed to close text block", err)
 					return fmt.Errorf("failed to close text block: %w", err)
 				}
 				handler.state.TextBlockClosed = true
-				LogDebug("    Text block closed successfully")
 			}
 
 			// Send tool use block
 			blockIndex++
-			LogDebug(fmt.Sprintf("  Starting tool block with index=%d", blockIndex))
 
 			if err := handler.SendToolUseStart(blockIndex, block.ID, block.Name); err != nil {
 				LogError(fmt.Sprintf("Failed to send tool_use start for block index %d", blockIndex), err)
 				return fmt.Errorf("failed to send tool_use start (index=%d): %w", blockIndex, err)
 			}
-			LogDebug("    Tool use start event sent")
 
 			// Send tool input as JSON chunks to match Anthropic's streaming format
-			LogDebug("  Marshaling tool input...")
 			inputJSON, err := json.Marshal(block.Input)
 			if err != nil {
 				LogError(fmt.Sprintf("Failed to marshal tool input for %s", block.Name), err)
-				LogDebug(fmt.Sprintf("    Input that failed: %+v", block.Input))
 				return fmt.Errorf("failed to marshal tool input for %s: %w", block.Name, err)
 			}
 
 			// Send empty initial delta to match Anthropic format
-			LogDebug("  Sending initial empty input_json_delta")
 			if err := handler.SendToolInputDelta(blockIndex, ""); err != nil {
 				LogError("Failed to send initial empty delta", err)
 				return fmt.Errorf("failed to send initial empty delta: %w", err)
@@ -762,7 +760,6 @@ func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *A
 
 			// Stream the JSON in chunks to simulate real streaming
 			jsonStr := string(inputJSON)
-			LogDebug(fmt.Sprintf("  Streaming tool input JSON (%d bytes) in chunks", len(jsonStr)))
 
 			// Simulate streaming JSON in realistic chunks
 			chunkSize := 15 // Approximate chunk size
@@ -773,7 +770,6 @@ func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *A
 				}
 
 				chunk := jsonStr[j:end]
-				LogDebug(fmt.Sprintf("    Sending JSON chunk: %q", chunk))
 
 				if err := handler.SendToolInputDelta(blockIndex, chunk); err != nil {
 					LogError("Failed to send tool input chunk", err)
@@ -783,54 +779,33 @@ func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *A
 				// Small delay between chunks
 				time.Sleep(5 * time.Millisecond)
 			}
-			LogDebug("    Tool input streaming completed")
 
 			// Close tool block
-			LogDebug(fmt.Sprintf("  Closing tool block (index=%d)", blockIndex))
 			if err := handler.SendContentBlockStop(blockIndex); err != nil {
 				LogError(fmt.Sprintf("Failed to close tool block index %d", blockIndex), err)
 				return fmt.Errorf("failed to close tool block (index=%d): %w", blockIndex, err)
 			}
-			LogDebug("    Tool block closed successfully")
 
 			// Update tool tracking
-			LogDebug(fmt.Sprintf("  Updating tool tracking: LastToolIndex=%d -> %d", handler.state.LastToolIndex, blockIndex))
 			handler.state.LastToolIndex = blockIndex
 			handler.state.ToolIndex = &blockIndex
-			LogDebug("  Tool use block processing completed")
 
 		default:
-			LogDebug(fmt.Sprintf("  WARNING: Unknown block type: %s", block.Type))
-			LogDebug(fmt.Sprintf("    Block content: %+v", block))
+			LogDebug(fmt.Sprintf("WARNING: Unknown block type: %s", block.Type))
 		}
 	}
 
-	LogDebug("\n=== Finalizing Simulated Stream ===")
-
 	// Update token counts
-	LogDebug("Updating token counts...")
-	LogDebug(fmt.Sprintf("  Previous: input=%d, output=%d", handler.state.InputTokens, handler.state.OutputTokens))
 	handler.state.InputTokens = anthResp.Usage.InputTokens
 	handler.state.OutputTokens = anthResp.Usage.OutputTokens
-	LogDebug(fmt.Sprintf("  Updated: input=%d, output=%d", handler.state.InputTokens, handler.state.OutputTokens))
-
-	// Log final state
-	LogDebug("Final handler state:")
-	LogDebug(fmt.Sprintf("  TextSent: %v", handler.state.TextSent))
-	LogDebug(fmt.Sprintf("  TextBlockClosed: %v", handler.state.TextBlockClosed))
-	LogDebug(fmt.Sprintf("  LastToolIndex: %d", handler.state.LastToolIndex))
-	LogDebug(fmt.Sprintf("  AccumulatedText length: %d", len(handler.state.AccumulatedText)))
-	LogDebug(fmt.Sprintf("  Tool calls tracked: %d", len(handler.state.ToolCalls)))
 
 	// Complete the stream with appropriate stop reason
-	LogDebug(fmt.Sprintf("Calling handler.Complete with stop_reason=%s", anthResp.StopReason))
 	err = handler.Complete(anthResp.StopReason)
 	if err != nil {
 		LogError("Failed to complete simulated stream", err)
 		return err
 	}
 
-	LogDebug("=== Simulated Streaming Completed Successfully ===")
 	return nil
 }
 

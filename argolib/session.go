@@ -78,6 +78,7 @@ type Message struct {
 var (
 	sessionsBaseDir string
 	sessionsDirMu   sync.RWMutex
+	skipFlockCheck  bool // Skip file locking check if set
 )
 
 // SetSessionsDir sets a custom sessions directory
@@ -85,6 +86,11 @@ func SetSessionsDir(dir string) {
 	sessionsDirMu.Lock()
 	defer sessionsDirMu.Unlock()
 	sessionsBaseDir = dir
+}
+
+// SetSkipFlockCheck sets whether to skip the file locking check
+func SetSkipFlockCheck(skip bool) {
+	skipFlockCheck = skip
 }
 
 // GetSessionsDir returns the base directory for all sessions
@@ -108,8 +114,8 @@ func GetSessionsDir() string {
 func CreateSession() (*Session, error) {
 	// Test flock support once (only on first session creation)
 	if !flockChecked {
-		// Skip check if environment variable is set
-		if os.Getenv("ARGO_SKIP_FLOCK_CHECK") != "1" {
+		// Skip check if flag is set
+		if !skipFlockCheck {
 			if err := TestFlockSupport(); err != nil {
 				Warnf("File locking may not work properly: %v", err)
 				Warnf("Concurrent access to sessions may cause issues")

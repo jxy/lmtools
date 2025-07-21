@@ -2,7 +2,6 @@ package apiproxy
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -31,80 +30,57 @@ type Config struct {
 	MaxRequestBodySize int64 // Maximum request body size in bytes
 }
 
-// LoadConfig loads configuration from environment variables
-func LoadConfig() (*Config, error) {
-	config := &Config{
-		// Load API keys
-		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
-		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
-		GeminiAPIKey:    os.Getenv("GEMINI_API_KEY"),
+// InitializeModelLists initializes the model lists for each provider
+func (c *Config) InitializeModelLists() {
+	// Normalize provider name
+	c.PreferredProvider = strings.ToLower(c.PreferredProvider)
 
-		// Load Argo configuration
-		ArgoUser: os.Getenv("ARGO_USER"),
-		ArgoEnv:  getEnvOrDefault("ARGO_ENV", "dev"),
-
-		// Load provider configuration
-		PreferredProvider: strings.ToLower(getEnvOrDefault("PREFERRED_PROVIDER", "openai")),
-		BigModel:          getEnvOrDefault("BIG_MODEL", "gpt-4.1"),
-		SmallModel:        getEnvOrDefault("SMALL_MODEL", "gpt-4.1-mini"),
-
-		// Load security configuration
-		MaxRequestBodySize: getMaxRequestBodySize(),
-
-		// Define supported models
-		OpenAIModels: []string{
-			"o3-mini",
-			"o1",
-			"o1-mini",
-			"o1-pro",
-			"gpt-4.5-preview",
-			"gpt-4o",
-			"gpt-4o-audio-preview",
-			"chatgpt-4o-latest",
-			"gpt-4o-mini",
-			"gpt-4o-mini-audio-preview",
-			"gpt-4.1",
-			"gpt-4.1-mini",
-		},
-		GeminiModels: []string{
-			"gemini-2.5-pro-preview-03-25",
-			"gemini-2.0-flash",
-		},
-		ArgoModels: []string{
-			"gpt35",
-			"gpt35large",
-			"gpt4",
-			"gpt4large",
-			"gpt4turbo",
-			"gpt4o",
-			"gpt4olatest",
-			"gpto1mini",
-			"gpto3mini",
-			"gpto1",
-			"gpto3",
-			"gpto4mini",
-			"gpt41",
-			"gpt41mini",
-			"gpt41nano",
-			"gemini25pro",
-			"gemini25flash",
-			"claudeopus4",
-			"claudesonnet4",
-			"claudesonnet37",
-			"claudesonnet35v2",
-		},
+	// Define supported models
+	c.OpenAIModels = []string{
+		"o3-mini",
+		"o1",
+		"o1-mini",
+		"o1-pro",
+		"gpt-4.5-preview",
+		"gpt-4o",
+		"gpt-4o-audio-preview",
+		"chatgpt-4o-latest",
+		"gpt-4o-mini",
+		"gpt-4o-mini-audio-preview",
+		"gpt-4.1",
+		"gpt-4.1-mini",
 	}
-
-	// Validate configuration
-	if err := config.validate(); err != nil {
-		return nil, err
+	c.GeminiModels = []string{
+		"gemini-2.5-pro-preview-03-25",
+		"gemini-2.0-flash",
 	}
-
-	return config, nil
+	c.ArgoModels = []string{
+		"gpt35",
+		"gpt35large",
+		"gpt4",
+		"gpt4large",
+		"gpt4turbo",
+		"gpt4o",
+		"gpt4olatest",
+		"gpto1mini",
+		"gpto3mini",
+		"gpto1",
+		"gpto3",
+		"gpto4mini",
+		"gpt41",
+		"gpt41mini",
+		"gpt41nano",
+		"gemini25pro",
+		"gemini25flash",
+		"claudeopus4",
+		"claudesonnet4",
+		"claudesonnet37",
+		"claudesonnet35v2",
+	}
 }
 
-// validate checks if the configuration is valid
-func (c *Config) validate() error {
+// Validate checks if the configuration is valid
+func (c *Config) Validate() error {
 	// Validate preferred provider
 	validProviders := []string{"openai", "google", "argo"}
 	valid := false
@@ -115,40 +91,40 @@ func (c *Config) validate() error {
 		}
 	}
 	if !valid {
-		return fmt.Errorf("invalid PREFERRED_PROVIDER: %s, must be one of: %s",
+		return fmt.Errorf("invalid --preferred-provider: %s, must be one of: %s",
 			c.PreferredProvider, strings.Join(validProviders, ", "))
 	}
 
 	// Check if required API keys are present based on configuration
 	if c.PreferredProvider == "openai" && c.OpenAIAPIKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY is required when PREFERRED_PROVIDER is 'openai'")
+		return fmt.Errorf("--openai-api-key-file is required when --preferred-provider is 'openai'")
 	}
 	if c.PreferredProvider == "google" && c.GeminiAPIKey == "" {
-		return fmt.Errorf("GEMINI_API_KEY is required when PREFERRED_PROVIDER is 'google'")
+		return fmt.Errorf("--gemini-api-key-file is required when --preferred-provider is 'google'")
 	}
 	if c.PreferredProvider == "argo" && c.ArgoUser == "" {
-		return fmt.Errorf("ARGO_USER is required when PREFERRED_PROVIDER is 'argo'")
+		return fmt.Errorf("--argo-user is required when --preferred-provider is 'argo'")
 	}
 
 	// Check if models exist in their respective lists
 	if c.isOpenAIModel(c.BigModel) && c.OpenAIAPIKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY is required when BIG_MODEL is an OpenAI model")
+		return fmt.Errorf("--openai-api-key-file is required when --big-model is an OpenAI model")
 	}
 	if c.isGeminiModel(c.BigModel) && c.GeminiAPIKey == "" {
-		return fmt.Errorf("GEMINI_API_KEY is required when BIG_MODEL is a Gemini model")
+		return fmt.Errorf("--gemini-api-key-file is required when --big-model is a Gemini model")
 	}
 	if c.isArgoModel(c.BigModel) && c.ArgoUser == "" {
-		return fmt.Errorf("ARGO_USER is required when BIG_MODEL is an Argo model")
+		return fmt.Errorf("--argo-user is required when --big-model is an Argo model")
 	}
 
 	if c.isOpenAIModel(c.SmallModel) && c.OpenAIAPIKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY is required when SMALL_MODEL is an OpenAI model")
+		return fmt.Errorf("--openai-api-key-file is required when --small-model is an OpenAI model")
 	}
 	if c.isGeminiModel(c.SmallModel) && c.GeminiAPIKey == "" {
-		return fmt.Errorf("GEMINI_API_KEY is required when SMALL_MODEL is a Gemini model")
+		return fmt.Errorf("--gemini-api-key-file is required when --small-model is a Gemini model")
 	}
 	if c.isArgoModel(c.SmallModel) && c.ArgoUser == "" {
-		return fmt.Errorf("ARGO_USER is required when SMALL_MODEL is an Argo model")
+		return fmt.Errorf("--argo-user is required when --small-model is an Argo model")
 	}
 
 	return nil
@@ -182,25 +158,4 @@ func (c *Config) isArgoModel(model string) bool {
 		}
 	}
 	return false
-}
-
-// getEnvOrDefault returns the environment variable value or a default
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getMaxRequestBodySize returns the max request body size from env or default (10MB)
-func getMaxRequestBodySize() int64 {
-	if value := os.Getenv("MAX_REQUEST_BODY_SIZE"); value != "" {
-		// Parse as MB and convert to bytes
-		var mb int64
-		if _, err := fmt.Sscanf(value, "%d", &mb); err == nil && mb > 0 {
-			return mb * 1024 * 1024
-		}
-	}
-	// Default to 10MB
-	return 10 * 1024 * 1024
 }

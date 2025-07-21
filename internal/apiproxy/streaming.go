@@ -41,8 +41,7 @@ func NewSSEWriter(w http.ResponseWriter) (*SSEWriter, error) {
 func (s *SSEWriter) WriteEvent(eventType, data string) error {
 	// Log the event being sent to client
 	if eventType != "" {
-		LogDebug(fmt.Sprintf("→ CLIENT: event: %s", eventType))
-		LogDebug(fmt.Sprintf("→ CLIENT: data: %s", data))
+		LogDebug(fmt.Sprintf("→ CLIENT: event: %s | data: %s", eventType, data))
 	} else {
 		LogDebug(fmt.Sprintf("→ CLIENT: data: %s", data))
 	}
@@ -166,12 +165,8 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 		return nil
 	}
 
-	prevAccumulated := len(h.state.AccumulatedText)
 	h.state.TextSent = true
 	h.state.AccumulatedText += text
-
-	LogDebug(fmt.Sprintf("SendTextDelta: Adding %d chars, accumulated: %d -> %d",
-		len(text), prevAccumulated, len(h.state.AccumulatedText)))
 
 	deltaData := map[string]interface{}{
 		"type":  "content_block_delta",
@@ -190,20 +185,14 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 
 // SendToolUseStart sends a tool_use block start
 func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string) error {
-	LogDebug(fmt.Sprintf("SendToolUseStart: index=%d, toolID=%s, name=%s", index, toolID, name))
-
 	// Track the tool call (only for real streaming, not simulated)
 	if !h.simulatedStreaming {
-		LogDebug("  Tracking tool call in state (real streaming)")
 		h.state.ToolCalls = append(h.state.ToolCalls, AnthropicContentBlock{
 			Type:  "tool_use",
 			ID:    toolID,
 			Name:  name,
 			Input: make(map[string]interface{}),
 		})
-		LogDebug(fmt.Sprintf("  Tool calls in state: %d", len(h.state.ToolCalls)))
-	} else {
-		LogDebug("  Not tracking tool call (simulated streaming)")
 	}
 
 	blockData := map[string]interface{}{
@@ -225,8 +214,6 @@ func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string
 
 // SendToolInputDelta sends tool input delta
 func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON string) error {
-	LogDebug(fmt.Sprintf("SendToolInputDelta: index=%d, partial_json=%q", index, partialJSON))
-
 	// For simulated streaming, we accumulate the partialJSON to update tool calls
 	// Note: partialJSON may be incomplete during streaming
 	if !h.simulatedStreaming && len(h.state.ToolCalls) > 0 {
@@ -256,11 +243,8 @@ func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON strin
 
 // SendContentBlockStop sends a content_block_stop event
 func (h *AnthropicStreamHandler) SendContentBlockStop(index int) error {
-	LogDebug(fmt.Sprintf("SendContentBlockStop: index=%d", index))
-
 	// Check if already closed
 	if h.state.ClosedBlocks[index] {
-		LogDebug(fmt.Sprintf("  Block %d already closed, skipping", index))
 		return nil
 	}
 
@@ -310,123 +294,52 @@ func (h *AnthropicStreamHandler) SendDone() error {
 
 // Complete sends the completion sequence
 func (h *AnthropicStreamHandler) Complete(stopReason string) error {
-	LogDebug("=== AnthropicStreamHandler.Complete Called ===")
-	LogDebug(fmt.Sprintf("  Stop reason: %s", stopReason))
-	LogDebug(fmt.Sprintf("  Simulated streaming: %v", h.simulatedStreaming))
-	LogDebug("  Current state:")
-	LogDebug(fmt.Sprintf("    TextSent: %v, TextBlockClosed: %v", h.state.TextSent, h.state.TextBlockClosed))
-	LogDebug(fmt.Sprintf("    AccumulatedText length: %d", len(h.state.AccumulatedText)))
-	LogDebug(fmt.Sprintf("    ToolIndex: %v, LastToolIndex: %d", h.state.ToolIndex, h.state.LastToolIndex))
-
 	// Close any open blocks
 	if !h.state.TextBlockClosed && (h.state.TextSent || h.state.AccumulatedText != "") {
-		LogDebug("  Text block needs closing")
 		if h.state.AccumulatedText != "" && !h.state.TextSent {
 			// Send accumulated text
-			LogDebug(fmt.Sprintf("    Sending accumulated text (%d chars): %q",
-				len(h.state.AccumulatedText), h.state.AccumulatedText))
 			if err := h.SendTextDelta(h.state.AccumulatedText); err != nil {
 				LogError("Failed to send accumulated text", err)
 				return err
 			}
 		}
-		LogDebug("  Sending content_block_stop for text (index=0)")
 		if err := h.SendContentBlockStop(0); err != nil {
 			LogError("Failed to close text block", err)
 			return err
 		}
 		h.state.TextBlockClosed = true
-		LogDebug("    Text block closed, TextBlockClosed set to true")
-	} else {
-		LogDebug("  No text block to close")
 	}
 
 	// Close tool blocks
 	if h.state.ToolIndex != nil {
-		LogDebug(fmt.Sprintf("  Need to close tool blocks (LastToolIndex=%d)", h.state.LastToolIndex))
 		for i := 1; i <= h.state.LastToolIndex; i++ {
-			LogDebug(fmt.Sprintf("    Sending content_block_stop for tool (index=%d)", i))
 			if err := h.SendContentBlockStop(i); err != nil {
 				LogError(fmt.Sprintf("Failed to close tool block %d", i), err)
 				return err
 			}
 		}
-		LogDebug("  All tool blocks closed")
-	} else {
-		LogDebug("  No tool blocks to close")
 	}
 
 	// Log what we've accumulated (this is NOT sent to client, just for debugging)
-	LogDebug("  === ACCUMULATED STATE (for debugging, NOT sent to client) ===")
-	content := []interface{}{}
-
-	// Add text content if present
-	if h.state.AccumulatedText != "" {
-		LogDebug(fmt.Sprintf("    Text content: %d chars", len(h.state.AccumulatedText)))
-		content = append(content, map[string]interface{}{
-			"type": "text",
-			"text": h.state.AccumulatedText,
-		})
+	if h.simulatedStreaming {
+		LogDebug(fmt.Sprintf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, len(h.state.AccumulatedText), len(h.state.ToolCalls)))
 	}
-
-	// Add tool calls if present
-	LogDebug(fmt.Sprintf("    Tool calls tracked: %d", len(h.state.ToolCalls)))
-	for i, toolCall := range h.state.ToolCalls {
-		LogDebug(fmt.Sprintf("      Tool %d: type=%s, id=%s, name=%s",
-			i+1, toolCall.Type, toolCall.ID, toolCall.Name))
-		content = append(content, map[string]interface{}{
-			"type":  toolCall.Type,
-			"id":    toolCall.ID,
-			"name":  toolCall.Name,
-			"input": toolCall.Input,
-		})
-	}
-
-	// Log the accumulated state (NOT sent to client)
-	finalResponse := map[string]interface{}{
-		"type":        "message",
-		"id":          h.state.MessageID,
-		"role":        "assistant",
-		"model":       h.originalModel,
-		"content":     content,
-		"stop_reason": stopReason,
-		"usage": map[string]interface{}{
-			"input_tokens":  h.state.InputTokens,
-			"output_tokens": h.state.OutputTokens,
-		},
-	}
-	LogJSON("Accumulated State (NOT sent to client)", finalResponse)
-	LogDebug("  === END ACCUMULATED STATE ===")
 
 	// Send completion events
-	LogDebug("  Sending completion events...")
-	LogDebug(fmt.Sprintf("    message_delta: stop_reason=%s, output_tokens=%d", stopReason, h.state.OutputTokens))
 	if err := h.SendMessageDelta(stopReason, h.state.OutputTokens); err != nil {
 		LogError("Failed to send message_delta", err)
 		return err
 	}
 
-	LogDebug("    message_stop")
 	if err := h.SendMessageStop(); err != nil {
 		LogError("Failed to send message_stop", err)
 		return err
 	}
 
-	LogDebug("    [DONE] marker")
 	if err := h.SendDone(); err != nil {
 		LogError("Failed to send [DONE]", err)
 		return err
 	}
-
-	LogDebug("=== Stream Completion Sequence Finished ===")
-
-	// Log summary of what was sent
-	LogDebug("\n=== STREAM SUMMARY ===")
-	LogDebug(fmt.Sprintf("Total blocks closed: %d", len(h.state.ClosedBlocks)))
-	for index := range h.state.ClosedBlocks {
-		LogDebug(fmt.Sprintf("  - Block %d: closed", index))
-	}
-	LogDebug("=== END STREAM SUMMARY ===\n")
 
 	return nil
 }
