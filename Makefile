@@ -1,32 +1,36 @@
 SHELL := /bin/bash
 
-.PHONY: all build test lint lint-fix clean coverage help
+.PHONY: all build test test-unit test-integration test-e2e test-all coverage lint lint-fix clean dev check help
 
 # Default target
 all: lint test build
 
-# Build the argo binary
+# Build all binaries
 build:
 	go build -o ./bin/argo ./cmd/argo
+	go build -o ./bin/apiproxy ./cmd/apiproxy
 
-# Run all tests
-test:
-	go test -v -race ./argolib ./cmd/argo
+# Run unit tests for all packages
+test: test-unit
 
-# Run integration tests (cross-process tests)
+# Run unit tests
+test-unit:
+	go test -v -race ./argolib ./cmd/argo ./internal/apiproxy/... ./cmd/apiproxy
+
+# Run integration tests (requires built binaries)
 test-integration: build
-	go test -v -race -tags=integration ./cmd/argo
+	go test -v -race -tags=integration ./cmd/argo ./internal/apiproxy/...
 
-# Run e2e tests (end-to-end with mock server)
+# Run e2e tests (end-to-end with mock servers)
 test-e2e: build
-	go test -v -race -tags=e2e ./cmd/argo
+	go test -v -race -tags=e2e ./cmd/argo ./internal/apiproxy/...
 
-# Run all tests including integration and e2e
-test-all: test test-integration test-e2e
+# Run all tests (unit, integration, e2e)
+test-all: test-unit test-integration test-e2e
 
-# Run tests with coverage
+# Run tests with coverage for all packages
 coverage:
-	go test -race -coverprofile=coverage.out ./argolib ./cmd/argo
+	go test -race -coverprofile=coverage.out ./argolib ./cmd/argo ./internal/apiproxy/... ./cmd/apiproxy
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report saved to coverage.html"
 	@go tool cover -func=coverage.out | grep "total:" | awk '{print "Total coverage: " $$3}'
@@ -52,16 +56,17 @@ check: lint-fix test
 # Help message
 help:
 	@echo "Available targets:"
-	@echo "  make              - Run lint, test, and build (default)"
-	@echo "  make build        - Build the argo binary"
-	@echo "  make test         - Run unit tests"
-	@echo "  make test-integration - Run cross-process integration tests"
-	@echo "  make test-e2e     - Run end-to-end tests with mock server"
-	@echo "  make test-all     - Run all tests (unit, integration, e2e)"
-	@echo "  make coverage     - Generate test coverage report"
-	@echo "  make lint         - Run linting"
-	@echo "  make lint-fix     - Auto-fix linting issues"
-	@echo "  make clean        - Remove build artifacts"
-	@echo "  make dev          - Full development cycle (lint, test, build)"
-	@echo "  make check        - Quick check before commit (lint-fix, test)"
-	@echo "  make help         - Show this help message"
+	@echo ""
+	@echo "  make                 - Run lint, test, and build (default)"
+	@echo "  make build           - Build all binaries (argo and apiproxy)"
+	@echo "  make test            - Run all unit tests"
+	@echo "  make test-integration - Run integration tests (requires binaries)"
+	@echo "  make test-e2e        - Run end-to-end tests with mock servers"
+	@echo "  make test-all        - Run all tests (unit, integration, e2e)"
+	@echo "  make coverage        - Generate test coverage report for all packages"
+	@echo "  make lint            - Run linting checks"
+	@echo "  make lint-fix        - Auto-fix linting issues"
+	@echo "  make clean           - Remove build artifacts"
+	@echo "  make dev             - Full development cycle (lint, test, build)"
+	@echo "  make check           - Quick check before commit (lint-fix, test)"
+	@echo "  make help            - Show this help message"
