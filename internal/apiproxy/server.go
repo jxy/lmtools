@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+const (
+	// minPingInterval is the minimum allowed ping interval to prevent CPU spinning
+	minPingInterval = 100 * time.Millisecond
+	// maxPingInterval is the maximum allowed ping interval to prevent timeouts
+	maxPingInterval = 60 * time.Second
+
+	// Streaming configuration
+	defaultTextChunkSize = 20 // Default chunk size for text streaming
+	defaultJSONChunkSize = 15 // Default chunk size for JSON streaming
+	defaultPingInterval  = 15 * time.Second
+)
+
 // Server represents the API proxy server
 type Server struct {
 	config    *Config
@@ -112,32 +124,38 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Handle streaming if requested
 	if anthReq.Stream {
 		LogDebug(fmt.Sprintf("Streaming requested for model %s via provider %s", originalModel, provider))
-		s.handleStreamingRequest(w, &anthReq, provider, originalModel)
+		s.handleStreamingRequest(w, r, &anthReq, provider, originalModel)
 		return
 	}
 
 	// Handle non-streaming request
-	s.handleNonStreamingRequest(w, &anthReq, provider, originalModel)
+	s.handleNonStreamingRequest(w, r, &anthReq, provider, originalModel)
 }
 
 // handleNonStreamingRequest handles non-streaming message requests
-func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, anthReq *AnthropicRequest, provider, originalModel string) {
+func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel string) {
 	var response interface{}
 	var err error
 
 	switch provider {
 	case "openai":
-		response, err = s.forwardToOpenAI(anthReq)
+		response, err = s.forwardToOpenAI(r.Context(), anthReq)
 	case "gemini":
-		response, err = s.forwardToGemini(anthReq)
+		response, err = s.forwardToGemini(r.Context(), anthReq)
 	case "argo":
-		response, err = s.forwardToArgo(anthReq)
+		response, err = s.forwardToArgo(r.Context(), anthReq)
 	default:
 		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider: %s", provider))
 		return
 	}
 
 	if err != nil {
+		// Check if error is due to context cancellation
+		if r.Context().Err() != nil {
+			LogDebug("Request cancelled by client")
+			// Don't send error response if client disconnected
+			return
+		}
 		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Provider error: %v", err))
 		return
 	}
@@ -167,7 +185,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, anthReq *Anthr
 }
 
 // forwardToOpenAI forwards the request to OpenAI
-func (s *Server) forwardToOpenAI(anthReq *AnthropicRequest) (*OpenAIResponse, error) {
+func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(anthReq)
 	if err != nil {
@@ -183,7 +201,7 @@ func (s *Server) forwardToOpenAI(anthReq *AnthropicRequest) (*OpenAIResponse, er
 		return nil, fmt.Errorf("marshal error: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", GetProviderURL("openai"), bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", GetProviderURL("openai"), bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("request creation error: %w", err)
 	}
@@ -192,7 +210,6 @@ func (s *Server) forwardToOpenAI(anthReq *AnthropicRequest) (*OpenAIResponse, er
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.mapper.GetAPIKey("openai")))
 
 	// Send request with retry
-	ctx := context.Background()
 	resp, err := s.client.Do(ctx, req, "openai")
 	if err != nil {
 		return nil, fmt.Errorf("request error: %w", err)
@@ -218,7 +235,7 @@ func (s *Server) forwardToOpenAI(anthReq *AnthropicRequest) (*OpenAIResponse, er
 }
 
 // forwardToGemini forwards the request to Google Gemini
-func (s *Server) forwardToGemini(anthReq *AnthropicRequest) (*GeminiResponse, error) {
+func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest) (*GeminiResponse, error) {
 	// Convert to Gemini format
 	geminiReq, err := s.converter.ConvertAnthropicToGemini(anthReq)
 	if err != nil {
@@ -240,7 +257,7 @@ func (s *Server) forwardToGemini(anthReq *AnthropicRequest) (*GeminiResponse, er
 		anthReq.Model,
 		s.mapper.GetAPIKey("gemini"))
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("request creation error: %w", err)
 	}
@@ -248,7 +265,6 @@ func (s *Server) forwardToGemini(anthReq *AnthropicRequest) (*GeminiResponse, er
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send request with retry
-	ctx := context.Background()
 	resp, err := s.client.Do(ctx, req, "gemini")
 	if err != nil {
 		return nil, fmt.Errorf("request error: %w", err)
@@ -274,7 +290,7 @@ func (s *Server) forwardToGemini(anthReq *AnthropicRequest) (*GeminiResponse, er
 }
 
 // forwardToArgo forwards the request to Argo
-func (s *Server) forwardToArgo(anthReq *AnthropicRequest) (*ArgoChatResponse, error) {
+func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (*ArgoChatResponse, error) {
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(anthReq, s.config.ArgoUser)
 	if err != nil {
@@ -298,7 +314,7 @@ func (s *Server) forwardToArgo(anthReq *AnthropicRequest) (*ArgoChatResponse, er
 
 	url := GetArgoURL(s.config.ArgoEnv, endpoint)
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("request creation error: %w", err)
 	}
@@ -308,7 +324,6 @@ func (s *Server) forwardToArgo(anthReq *AnthropicRequest) (*ArgoChatResponse, er
 	req.Header.Set("Accept-Encoding", "identity")
 
 	// Send request with retry
-	ctx := context.Background()
 	resp, err := s.client.Do(ctx, req, "argo")
 	if err != nil {
 		return nil, fmt.Errorf("request error: %w", err)
@@ -395,7 +410,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStreamingRequest handles streaming message requests
-func (s *Server) handleStreamingRequest(w http.ResponseWriter, anthReq *AnthropicRequest, provider, originalModel string) {
+func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel string) {
 	LogDebug(fmt.Sprintf("handleStreamingRequest called for provider %s", provider))
 
 	// Log the streaming request start
@@ -428,32 +443,38 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, anthReq *Anthropi
 	// Handle streaming based on provider
 	switch provider {
 	case "openai":
-		if err := s.streamFromOpenAI(anthReq, handler); err != nil {
+		if err := s.streamFromOpenAI(r.Context(), anthReq, handler); err != nil {
 			LogError(fmt.Sprintf("OpenAI streaming error: %v", err), err)
-			_ = handler.Complete("error")
+			if completeErr := handler.Complete("error"); completeErr != nil {
+				LogError("Failed to send error completion", completeErr)
+			}
 		}
 	case "gemini":
-		if err := s.streamFromGemini(anthReq, handler); err != nil {
+		if err := s.streamFromGemini(r.Context(), anthReq, handler); err != nil {
 			LogError(fmt.Sprintf("Gemini streaming error: %v", err), err)
-			_ = handler.Complete("error")
+			if completeErr := handler.Complete("error"); completeErr != nil {
+				LogError("Failed to send error completion", completeErr)
+			}
 		}
 	case "argo":
 		// Check if request has tools - Argo streamchat doesn't handle them correctly
 		if len(anthReq.Tools) > 0 {
 			LogDebug(fmt.Sprintf("Request has %d tools defined, using simulated streaming for Argo", len(anthReq.Tools)))
-			if err := s.simulateStreamingFromArgo(anthReq, handler); err != nil {
+			if err := s.simulateStreamingFromArgo(r.Context(), anthReq, handler); err != nil {
 				LogError(fmt.Sprintf("Argo simulated streaming error: %v", err), err)
-				_ = handler.Complete("error")
+				if completeErr := handler.Complete("error"); completeErr != nil {
+					LogError("Failed to send error completion", completeErr)
+				}
 			}
 		} else {
 			LogDebug("Request has no tools, using native Argo streaming")
-			if err := s.streamFromArgo(anthReq, handler); err != nil {
+			if err := s.streamFromArgo(r.Context(), anthReq, handler); err != nil {
 				LogError(fmt.Sprintf("Argo native streaming failed: %v", err), err)
 				// Try to fallback to simulated streaming
 				LogDebug("=== Fallback: Attempting simulated streaming after native streaming failure ===")
 				LogDebug(fmt.Sprintf("Native streaming error was: %v", err))
 
-				if err := s.simulateStreamingFromArgo(anthReq, handler); err != nil {
+				if err := s.simulateStreamingFromArgo(r.Context(), anthReq, handler); err != nil {
 					LogError("Fallback to simulated streaming also failed", err)
 					if completeErr := handler.Complete("error"); completeErr != nil {
 						LogError("Failed to send error completion", completeErr)
@@ -464,12 +485,14 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, anthReq *Anthropi
 			}
 		}
 	default:
-		_ = handler.Complete("error")
+		if completeErr := handler.Complete("error"); completeErr != nil {
+			LogError("Failed to send error completion", completeErr)
+		}
 	}
 }
 
 // streamFromOpenAI streams from OpenAI
-func (s *Server) streamFromOpenAI(anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(anthReq)
 	if err != nil {
@@ -488,7 +511,7 @@ func (s *Server) streamFromOpenAI(anthReq *AnthropicRequest, handler *AnthropicS
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", GetProviderURL("openai"), bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", GetProviderURL("openai"), bytes.NewReader(jsonData))
 	if err != nil {
 		return fmt.Errorf("request creation error: %w", err)
 	}
@@ -497,7 +520,6 @@ func (s *Server) streamFromOpenAI(anthReq *AnthropicRequest, handler *AnthropicS
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.mapper.GetAPIKey("openai")))
 
 	// Send request with retry
-	ctx := context.Background()
 	resp, err := s.client.Do(ctx, req, "openai")
 	if err != nil {
 		return fmt.Errorf("request error: %w", err)
@@ -522,7 +544,7 @@ func (s *Server) streamFromOpenAI(anthReq *AnthropicRequest, handler *AnthropicS
 }
 
 // streamFromGemini streams from Google Gemini
-func (s *Server) streamFromGemini(anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	// Convert to Gemini format
 	geminiReq, err := s.converter.ConvertAnthropicToGemini(anthReq)
 	if err != nil {
@@ -544,7 +566,7 @@ func (s *Server) streamFromGemini(anthReq *AnthropicRequest, handler *AnthropicS
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return fmt.Errorf("request creation error: %w", err)
 	}
@@ -552,7 +574,6 @@ func (s *Server) streamFromGemini(anthReq *AnthropicRequest, handler *AnthropicS
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send request with retry
-	ctx := context.Background()
 	resp, err := s.client.Do(ctx, req, "gemini")
 	if err != nil {
 		return fmt.Errorf("request error: %w", err)
@@ -571,7 +592,7 @@ func (s *Server) streamFromGemini(anthReq *AnthropicRequest, handler *AnthropicS
 }
 
 // streamFromArgo streams from Argo
-func (s *Server) streamFromArgo(anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(anthReq, s.config.ArgoUser)
 	if err != nil {
@@ -589,7 +610,7 @@ func (s *Server) streamFromArgo(anthReq *AnthropicRequest, handler *AnthropicStr
 
 	url := GetArgoURL(s.config.ArgoEnv, "streamchat")
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return fmt.Errorf("request creation error: %w", err)
 	}
@@ -599,7 +620,6 @@ func (s *Server) streamFromArgo(anthReq *AnthropicRequest, handler *AnthropicStr
 	req.Header.Set("Accept-Encoding", "identity")
 
 	// Send request with retry
-	ctx := context.Background()
 	resp, err := s.client.Do(ctx, req, "argo")
 	if err != nil {
 		return fmt.Errorf("request error: %w", err)
@@ -617,64 +637,101 @@ func (s *Server) streamFromArgo(anthReq *AnthropicRequest, handler *AnthropicStr
 	return parser.Parse(resp.Body)
 }
 
-// simulateStreamingFromArgo simulates streaming by calling non-streaming endpoint
-func (s *Server) simulateStreamingFromArgo(anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	LogDebug("=== Starting Simulated Streaming for Argo ===")
-	LogDebug(fmt.Sprintf("Request ID: %s, Model: %s", handler.state.MessageID, anthReq.Model))
+// simulateStreamingFromArgo simulates streaming by calling non-streaming endpoint with default ping interval
+func (s *Server) simulateStreamingFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	return s.simulateStreamingFromArgoWithInterval(ctx, anthReq, handler, defaultPingInterval)
+}
 
-	// Mark this as simulated streaming to avoid tracking tool calls
-	LogDebug("Setting handler.simulatedStreaming = true to prevent duplicate tool tracking")
-	handler.simulatedStreaming = true
-
-	// Force non-streaming for the actual request
-	LogDebug("Forcing anthReq.Stream = false for non-streaming endpoint call")
-	anthReq.Stream = false
-
-	// Get non-streaming response
-	LogDebug("Calling forwardToArgo to get non-streaming response...")
-	argoResp, err := s.forwardToArgo(anthReq)
-	if err != nil {
-		LogError("Failed to get non-streaming response from Argo", err)
-		return fmt.Errorf("failed to get non-streaming response: %w", err)
+// validatePingInterval ensures the ping interval is within acceptable bounds
+func (s *Server) validatePingInterval(pingInterval time.Duration) time.Duration {
+	// Use configured minimum if available, otherwise use constant
+	minInterval := minPingInterval
+	if s.config.MinPingInterval > 0 {
+		minInterval = s.config.MinPingInterval
 	}
 
-	// Start ping ticker for long-running operations
-	pingTicker := time.NewTicker(15 * time.Second)
-	defer pingTicker.Stop()
+	// Validate ping interval to prevent panic and CPU spinning
+	if pingInterval <= 0 {
+		LogDebug(fmt.Sprintf("WARNING: Invalid pingInterval %v, using default %v", pingInterval, defaultPingInterval))
+		return defaultPingInterval
+	}
+	if pingInterval < minInterval {
+		LogDebug(fmt.Sprintf("WARNING: pingInterval %v too small, using minimum %v", pingInterval, minInterval))
+		return minInterval
+	}
+	if pingInterval > maxPingInterval {
+		LogDebug(fmt.Sprintf("WARNING: pingInterval %v too large, using maximum %v", pingInterval, maxPingInterval))
+		return maxPingInterval
+	}
+	return pingInterval
+}
 
-	// Create a channel to signal when conversion is done
-	conversionDone := make(chan struct{})
-	var anthResp *AnthropicResponse
+// waitForArgoResponseWithPings fetches the Argo response while sending periodic pings
+func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingTicker *time.Ticker) (*ArgoChatResponse, error) {
+	// Create a cancellable context for the API call
+	callCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// Run conversion in a goroutine
+	// Channel for API response
+	type argoResult struct {
+		resp *ArgoChatResponse
+		err  error
+	}
+	resultChan := make(chan argoResult, 1)
+
+	// Make the API call in a goroutine
 	go func() {
-		defer close(conversionDone)
-		LogDebug("Converting Argo response to Anthropic format...")
-		anthResp = s.converter.ConvertArgoToAnthropic(argoResp, handler.originalModel)
+		LogDebug("Calling forwardToArgo to get non-streaming response...")
+		// Create non-streaming copy
+		nonStreamingReq := *anthReq
+		nonStreamingReq.Stream = false
+
+		resp, err := s.forwardToArgo(callCtx, &nonStreamingReq)
+		// Check if parent context is already cancelled before trying to send
+		if ctx.Err() != nil {
+			LogDebug("Parent context already cancelled, not sending result")
+			return
+		}
+		select {
+		case resultChan <- argoResult{resp: resp, err: err}:
+			// Successfully sent result
+		case <-ctx.Done():
+			// Context was cancelled, don't block on send
+			LogDebug("Context cancelled before sending result to channel")
+		}
 	}()
 
-	// Send pings while waiting for conversion
+	// Send pings while waiting for API response
+	waitStartTime := time.Now()
+	LogDebug(fmt.Sprintf("Waiting for Argo API response, will send pings every %v...", pingTicker))
+
 	for {
 		select {
-		case <-conversionDone:
-			// Conversion completed, break out of loop
-			goto conversionComplete
-		case <-pingTicker.C:
-			// Send ping every 15 seconds
-			if err := handler.SendPing(); err != nil {
-				LogDebug(fmt.Sprintf("Failed to send ping: %v", err))
+		case result := <-resultChan:
+			LogDebug(fmt.Sprintf("Received response from Argo API after %v", time.Since(waitStartTime)))
+			if result.err != nil {
+				return nil, result.err
 			}
+			return result.resp, nil
+
+		case <-pingTicker.C:
+			LogDebug("Sending ping while waiting for Argo API response")
+			if err := handler.SendPing(); err != nil {
+				LogError("Failed to send ping, client likely disconnected", err)
+				// Cancel the API call since client is gone
+				cancel()
+				return nil, fmt.Errorf("client disconnected: %w", err)
+			}
+
+		case <-ctx.Done():
+			LogDebug("Context cancelled while waiting for Argo API response")
+			return nil, ctx.Err()
 		}
 	}
+}
 
-conversionComplete:
-
-	// Validate response
-	if anthResp == nil {
-		LogError("Converted response is nil", nil)
-		return fmt.Errorf("converted response is nil")
-	}
-
+// streamArgoResponseContent streams the content blocks from an Argo response
+func (s *Server) streamArgoResponseContent(anthResp *AnthropicResponse, handler *AnthropicStreamHandler) error {
 	LogDebug(fmt.Sprintf("Processing %d content blocks for simulated streaming", len(anthResp.Content)))
 
 	// Process each content block
@@ -684,52 +741,14 @@ conversionComplete:
 	for _, block := range anthResp.Content {
 		switch block.Type {
 		case "text":
-			// Send text in chunks
-			content := block.Text
-
-			if content == "" {
-				continue
+			if err := s.streamTextBlock(block.Text, handler); err != nil {
+				return err
 			}
-
 			textBlockProcessed = true
 
-			// Split content into chunks to simulate streaming
-			chunkSize := 20 // Characters per chunk
-
-			for j := 0; j < len(content); j += chunkSize {
-				end := j + chunkSize
-				if end > len(content) {
-					end = len(content)
-				}
-
-				chunk := content[j:end]
-
-				if err := handler.SendTextDelta(chunk); err != nil {
-					LogError("Failed to send text chunk", err)
-					return fmt.Errorf("failed to send text chunk: %w", err)
-				}
-
-				// Small delay to simulate streaming
-				time.Sleep(10 * time.Millisecond)
-			}
-
 		case "tool_use":
-			LogDebug(fmt.Sprintf("Tool: %s", block.Name))
-
-			// Validate tool block
-			if block.ID == "" {
-				LogDebug("WARNING: Tool block has empty ID")
-			}
-			if block.Name == "" {
-				LogDebug("WARNING: Tool block has empty name")
-			}
-			if block.Input == nil {
-				block.Input = make(map[string]interface{})
-			}
-
 			// Close text block if needed
 			if textBlockProcessed && !handler.state.TextBlockClosed {
-
 				if err := handler.SendContentBlockStop(0); err != nil {
 					LogError("Failed to close text block", err)
 					return fmt.Errorf("failed to close text block: %w", err)
@@ -737,58 +756,11 @@ conversionComplete:
 				handler.state.TextBlockClosed = true
 			}
 
-			// Send tool use block
+			// Stream tool block
 			blockIndex++
-
-			if err := handler.SendToolUseStart(blockIndex, block.ID, block.Name); err != nil {
-				LogError(fmt.Sprintf("Failed to send tool_use start for block index %d", blockIndex), err)
-				return fmt.Errorf("failed to send tool_use start (index=%d): %w", blockIndex, err)
+			if err := s.streamToolBlock(block, blockIndex, handler); err != nil {
+				return err
 			}
-
-			// Send tool input as JSON chunks to match Anthropic's streaming format
-			inputJSON, err := json.Marshal(block.Input)
-			if err != nil {
-				LogError(fmt.Sprintf("Failed to marshal tool input for %s", block.Name), err)
-				return fmt.Errorf("failed to marshal tool input for %s: %w", block.Name, err)
-			}
-
-			// Send empty initial delta to match Anthropic format
-			if err := handler.SendToolInputDelta(blockIndex, ""); err != nil {
-				LogError("Failed to send initial empty delta", err)
-				return fmt.Errorf("failed to send initial empty delta: %w", err)
-			}
-
-			// Stream the JSON in chunks to simulate real streaming
-			jsonStr := string(inputJSON)
-
-			// Simulate streaming JSON in realistic chunks
-			chunkSize := 15 // Approximate chunk size
-			for j := 0; j < len(jsonStr); j += chunkSize {
-				end := j + chunkSize
-				if end > len(jsonStr) {
-					end = len(jsonStr)
-				}
-
-				chunk := jsonStr[j:end]
-
-				if err := handler.SendToolInputDelta(blockIndex, chunk); err != nil {
-					LogError("Failed to send tool input chunk", err)
-					return fmt.Errorf("failed to send tool input chunk: %w", err)
-				}
-
-				// Small delay between chunks
-				time.Sleep(5 * time.Millisecond)
-			}
-
-			// Close tool block
-			if err := handler.SendContentBlockStop(blockIndex); err != nil {
-				LogError(fmt.Sprintf("Failed to close tool block index %d", blockIndex), err)
-				return fmt.Errorf("failed to close tool block (index=%d): %w", blockIndex, err)
-			}
-
-			// Update tool tracking
-			handler.state.LastToolIndex = blockIndex
-			handler.state.ToolIndex = &blockIndex
 
 		default:
 			LogDebug(fmt.Sprintf("WARNING: Unknown block type: %s", block.Type))
@@ -799,14 +771,124 @@ conversionComplete:
 	handler.state.InputTokens = anthResp.Usage.InputTokens
 	handler.state.OutputTokens = anthResp.Usage.OutputTokens
 
-	// Complete the stream with appropriate stop reason
-	err = handler.Complete(anthResp.StopReason)
-	if err != nil {
-		LogError("Failed to complete simulated stream", err)
-		return err
+	// Complete the stream
+	return handler.Complete(anthResp.StopReason)
+}
+
+// streamTextBlock streams a text content block in chunks
+func (s *Server) streamTextBlock(content string, handler *AnthropicStreamHandler) error {
+	if content == "" {
+		return nil
+	}
+
+	// Split content into chunks to simulate streaming
+	chunks := splitTextForStreaming(content, defaultTextChunkSize)
+
+	for _, chunk := range chunks {
+		if err := handler.SendTextDelta(chunk); err != nil {
+			LogError("Failed to send text chunk", err)
+			return fmt.Errorf("failed to send text chunk: %w", err)
+		}
+		// No artificial delay - let network be the natural throttle
 	}
 
 	return nil
+}
+
+// streamToolBlock streams a tool use block
+func (s *Server) streamToolBlock(block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
+	LogDebug(fmt.Sprintf("Tool: %s", block.Name))
+
+	// Validate tool block
+	if block.ID == "" {
+		LogDebug("WARNING: Tool block has empty ID")
+	}
+	if block.Name == "" {
+		LogDebug("WARNING: Tool block has empty name")
+	}
+	if block.Input == nil {
+		block.Input = make(map[string]interface{})
+	}
+
+	// Send tool use start
+	if err := handler.SendToolUseStart(blockIndex, block.ID, block.Name); err != nil {
+		LogError(fmt.Sprintf("Failed to send tool_use start for block index %d", blockIndex), err)
+		return fmt.Errorf("failed to send tool_use start (index=%d): %w", blockIndex, err)
+	}
+
+	// Send tool input as JSON chunks
+	inputJSON, err := json.Marshal(block.Input)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to marshal tool input for %s", block.Name), err)
+		return fmt.Errorf("failed to marshal tool input for %s: %w", block.Name, err)
+	}
+
+	// Send empty initial delta to match Anthropic format
+	if err := handler.SendToolInputDelta(blockIndex, ""); err != nil {
+		LogError("Failed to send initial empty delta", err)
+		return fmt.Errorf("failed to send initial empty delta: %w", err)
+	}
+
+	// Stream the JSON in chunks
+	jsonStr := string(inputJSON)
+	chunks := splitTextForStreaming(jsonStr, defaultJSONChunkSize)
+	for _, chunk := range chunks {
+		if err := handler.SendToolInputDelta(blockIndex, chunk); err != nil {
+			LogError("Failed to send tool input chunk", err)
+			return fmt.Errorf("failed to send tool input chunk: %w", err)
+		}
+		// No artificial delay - let network be the natural throttle
+	}
+
+	// Close tool block
+	if err := handler.SendContentBlockStop(blockIndex); err != nil {
+		LogError(fmt.Sprintf("Failed to close tool block index %d", blockIndex), err)
+		return fmt.Errorf("failed to close tool block (index=%d): %w", blockIndex, err)
+	}
+
+	// Update tool tracking
+	handler.state.LastToolIndex = blockIndex
+	handler.state.ToolIndex = &blockIndex
+
+	return nil
+}
+
+// simulateStreamingFromArgoWithInterval simulates streaming with configurable ping interval
+func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
+	// Validate ping interval
+	pingInterval = s.validatePingInterval(pingInterval)
+
+	LogDebug("=== Starting Simulated Streaming for Argo ===")
+	LogDebug(fmt.Sprintf("Request ID: %s, Model: %s", handler.state.MessageID, anthReq.Model))
+
+	// Mark this as simulated streaming to avoid tracking tool calls
+	LogDebug("Setting handler.simulatedStreaming = true to prevent duplicate tool tracking")
+	handler.simulatedStreaming = true
+
+	// Start ping ticker
+	pingTicker := time.NewTicker(pingInterval)
+	defer pingTicker.Stop()
+
+	// Get response from Argo while sending pings
+	argoResp, err := s.waitForArgoResponseWithPings(ctx, anthReq, handler, pingTicker)
+	if err != nil {
+		LogError("Failed to get non-streaming response from Argo", err)
+		return fmt.Errorf("failed to get non-streaming response: %w", err)
+	}
+
+	// Convert response
+	LogDebug("Converting Argo response to Anthropic format...")
+	anthResp := s.converter.ConvertArgoToAnthropic(argoResp, handler.originalModel)
+	LogDebug("Conversion completed")
+
+	// Validate response
+	if anthResp == nil {
+		LogError("Converted response is nil", nil)
+		return fmt.Errorf("converted response is nil")
+	}
+
+	// Stream the response content
+	return s.streamArgoResponseContent(anthResp, handler)
 }
 
 // sendError sends an error response
@@ -867,4 +949,37 @@ func estimateContentLength(content interface{}) int {
 		data, _ := json.Marshal(content)
 		return len(data)
 	}
+}
+
+// splitTextForStreaming splits text into chunks for simulated streaming.
+// It uses Go's built-in UTF-8 iteration to ensure we never break multibyte characters.
+func splitTextForStreaming(text string, targetChunkSize int) []string {
+	if len(text) == 0 {
+		return nil
+	}
+
+	// Parameter validation
+	if targetChunkSize <= 0 {
+		targetChunkSize = defaultTextChunkSize
+	}
+
+	var chunks []string
+	var currentChunk []rune
+
+	for _, r := range text {
+		currentChunk = append(currentChunk, r)
+
+		// Check if we've reached the target size in bytes
+		if len(string(currentChunk)) >= targetChunkSize {
+			chunks = append(chunks, string(currentChunk))
+			currentChunk = nil
+		}
+	}
+
+	// Don't forget the last chunk
+	if len(currentChunk) > 0 {
+		chunks = append(chunks, string(currentChunk))
+	}
+
+	return chunks
 }

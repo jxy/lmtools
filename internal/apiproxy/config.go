@@ -3,6 +3,7 @@ package apiproxy
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Config holds the configuration for the API proxy
@@ -28,6 +29,9 @@ type Config struct {
 
 	// Security Configuration
 	MaxRequestBodySize int64 // Maximum request body size in bytes
+
+	// Streaming Configuration
+	MinPingInterval time.Duration // Minimum ping interval for SSE keep-alive
 }
 
 // InitializeModelLists initializes the model lists for each provider

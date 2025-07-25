@@ -99,6 +99,7 @@ func main() {
 		BigModel:           bigModel,
 		SmallModel:         smallModel,
 		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
+		MinPingInterval:    100 * time.Millisecond,           // Default minimum ping interval
 	}
 
 	// Initialize models lists

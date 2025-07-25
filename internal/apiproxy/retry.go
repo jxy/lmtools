@@ -23,7 +23,7 @@ type RetryConfig struct {
 // DefaultRetryConfig returns default retry configuration
 func DefaultRetryConfig() *RetryConfig {
 	return &RetryConfig{
-		MaxRetries:     4,
+		MaxRetries:     8,
 		InitialBackoff: 1 * time.Second,
 		MaxBackoff:     30 * time.Second,
 		BackoffFactor:  2.0,
@@ -36,7 +36,7 @@ func ProviderRetryConfig(provider string) *RetryConfig {
 	case "openai":
 		// OpenAI has aggressive rate limiting
 		return &RetryConfig{
-			MaxRetries:     5,
+			MaxRetries:     8,
 			InitialBackoff: 2 * time.Second,
 			MaxBackoff:     60 * time.Second,
 			BackoffFactor:  2.0,
@@ -44,7 +44,7 @@ func ProviderRetryConfig(provider string) *RetryConfig {
 	case "gemini":
 		// Gemini is generally more lenient
 		return &RetryConfig{
-			MaxRetries:     3,
+			MaxRetries:     8,
 			InitialBackoff: 1 * time.Second,
 			MaxBackoff:     20 * time.Second,
 			BackoffFactor:  1.5,
@@ -52,7 +52,7 @@ func ProviderRetryConfig(provider string) *RetryConfig {
 	case "argo":
 		// Argo internal service, enhanced retry with exponential backoff
 		return &RetryConfig{
-			MaxRetries:     5,
+			MaxRetries:     8,
 			InitialBackoff: 1 * time.Second,
 			MaxBackoff:     30 * time.Second,
 			BackoffFactor:  2.0,
