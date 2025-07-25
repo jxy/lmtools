@@ -427,6 +427,28 @@ func filterSchemaMetadata(schema interface{}) interface{} {
 	return filtered
 }
 
+// estimateTokenCount estimates token count from content blocks using simple heuristic
+func estimateTokenCount(content []AnthropicContentBlock) int {
+	totalLength := 0
+	for _, block := range content {
+		switch block.Type {
+		case "text":
+			totalLength += len(block.Text)
+		case "tool_use":
+			// Estimate tool use length based on name and input
+			totalLength += len(block.Name)
+			if block.Input != nil {
+				// Convert input to JSON string to estimate length
+				if inputJSON, err := json.Marshal(block.Input); err == nil {
+					totalLength += len(inputJSON)
+				}
+			}
+		}
+	}
+	// Simple heuristic: ~4 characters per token
+	return totalLength / 4
+}
+
 // ConvertArgoToAnthropic converts an Argo response to Anthropic format
 func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel string) *AnthropicResponse {
 	// Handle different response formats
@@ -561,6 +583,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			stopReason = "tool_use"
 		}
 
+		// Calculate token usage based on content
+		tokenCount := estimateTokenCount(content)
 		return &AnthropicResponse{
 			Type:       "message",
 			Model:      originalModel,
@@ -568,8 +592,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			Content:    content,
 			StopReason: stopReason,
 			Usage: AnthropicUsage{
-				InputTokens:  100, // Estimate
-				OutputTokens: 100,
+				InputTokens:  tokenCount,
+				OutputTokens: tokenCount,
 			},
 		}
 
