@@ -201,7 +201,9 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 		return nil, fmt.Errorf("marshal error: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", GetProviderURL("openai"), bytes.NewReader(jsonData))
+	url := s.config.OpenAIURL
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("request creation error: %w", err)
 	}
@@ -252,8 +254,9 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Build URL with model
+	baseURL := s.config.GeminiURL
 	url := fmt.Sprintf("%s/%s:generateContent?key=%s",
-		GetProviderURL("gemini"),
+		baseURL,
 		anthReq.Model,
 		s.mapper.GetAPIKey("gemini"))
 
@@ -312,7 +315,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 		endpoint = "streamchat"
 	}
 
-	url := GetArgoURL(s.config.ArgoEnv, endpoint)
+	url := s.config.GetArgoURL(endpoint)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -511,7 +514,9 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", GetProviderURL("openai"), bytes.NewReader(jsonData))
+	url := s.config.OpenAIURL
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return fmt.Errorf("request creation error: %w", err)
 	}
@@ -555,8 +560,9 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	LogJSON("Outgoing Gemini Streaming Request", geminiReq)
 
 	// Build URL with streaming endpoint
+	baseURL := s.config.GeminiURL
 	url := fmt.Sprintf("%s/%s:streamGenerateContent?key=%s&alt=sse",
-		GetProviderURL("gemini"),
+		baseURL,
 		anthReq.Model,
 		s.mapper.GetAPIKey("gemini"))
 
@@ -608,7 +614,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	url := GetArgoURL(s.config.ArgoEnv, "streamchat")
+	url := s.config.GetArgoURL("streamchat")
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {

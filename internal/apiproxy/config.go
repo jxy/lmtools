@@ -32,12 +32,37 @@ type Config struct {
 
 	// Streaming Configuration
 	MinPingInterval time.Duration // Minimum ping interval for SSE keep-alive
+
+	// API Endpoints
+	OpenAIURL    string // OpenAI API endpoint
+	GeminiURL    string // Google Gemini API endpoint
+	AnthropicURL string // Anthropic API endpoint
+	ArgoBaseURL  string // Argo API base URL (environment-specific)
 }
 
 // InitializeModelLists initializes the model lists for each provider
 func (c *Config) InitializeModelLists() {
 	// Normalize provider name
 	c.PreferredProvider = strings.ToLower(c.PreferredProvider)
+
+	// Initialize API URLs with defaults
+	if c.OpenAIURL == "" {
+		c.OpenAIURL = "https://api.openai.com/v1/chat/completions"
+	}
+	if c.GeminiURL == "" {
+		c.GeminiURL = "https://generativelanguage.googleapis.com/v1beta/models"
+	}
+	if c.AnthropicURL == "" {
+		c.AnthropicURL = "https://api.anthropic.com/v1/messages"
+	}
+	if c.ArgoBaseURL == "" {
+		// Set default based on environment
+		if c.ArgoEnv == "prod" {
+			c.ArgoBaseURL = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
+		} else {
+			c.ArgoBaseURL = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource"
+		}
+	}
 
 	// Define supported models
 	c.OpenAIModels = []string{
@@ -162,4 +187,18 @@ func (c *Config) isArgoModel(model string) bool {
 		}
 	}
 	return false
+}
+
+// GetArgoURL returns the full Argo URL for the given endpoint
+func (c *Config) GetArgoURL(endpoint string) string {
+	switch endpoint {
+	case "chat":
+		return c.ArgoBaseURL + "/chat/"
+	case "streamchat":
+		return c.ArgoBaseURL + "/streamchat/"
+	case "embed":
+		return c.ArgoBaseURL + "/embed/"
+	default:
+		return c.ArgoBaseURL
+	}
 }

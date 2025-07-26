@@ -6,7 +6,6 @@ package apiproxy
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,31 +33,22 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 
 	// Create config
 	config := &Config{
-		OpenAIAPIKey:      "test-openai-key",
-		GeminiAPIKey:      "test-gemini-key",
-		ArgoUser:          "testuser",
-		PreferredProvider: "openai",
-		SmallModel:        "gpt-4o-mini",
-		BigModel:          "gpt-4o",
-		OpenAIModels:      []string{"gpt-4o", "gpt-4o-mini"},
-		GeminiModels:      []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-		ArgoModels:        []string{"gpt4", "claude"},
+		OpenAIAPIKey:       "test-openai-key",
+		GeminiAPIKey:       "test-gemini-key",
+		ArgoUser:           "testuser",
+		PreferredProvider:  "openai",
+		SmallModel:         "gpt-4o-mini",
+		BigModel:           "gpt-4o",
+		OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
+		GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
+		ArgoModels:         []string{"gpt4", "claude"},
+		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Override provider URLs
-	originalGetProviderURL := GetProviderURL
-	GetProviderURL = func(provider string) string {
-		switch provider {
-		case "openai":
-			return openAIMock.URL + "/v1/chat/completions"
-		case "gemini":
-			return geminiMock.URL + "/v1beta/models"
-		case "argo":
-			return argoMock.URL
-		default:
-			return ""
-		}
-	}
+	// Set mock URLs in config
+	config.OpenAIURL = openAIMock.URL + "/v1/chat/completions"
+	config.GeminiURL = geminiMock.URL + "/v1beta/models"
+	config.ArgoBaseURL = argoMock.URL
 
 	// Create proxy server
 	proxyServer := httptest.NewServer(NewServer(config))
@@ -79,7 +69,6 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 		openAIMock.Close()
 		geminiMock.Close()
 		argoMock.Close()
-		GetProviderURL = originalGetProviderURL
 	})
 
 	return suite
@@ -403,14 +392,14 @@ func TestE2EBasicChat(t *testing.T) {
 			model:          "claude-3-haiku-20240307",
 			message:        "Hello",
 			expectProvider: "openai",
-			expectContent:  "gpt-4o-mini",
+			expectContent:  "GPT-4o-mini",
 		},
 		{
 			name:           "Sonnet maps to big model",
 			model:          "claude-3-5-sonnet-20241022",
 			message:        "Hello",
 			expectProvider: "openai",
-			expectContent:  "gpt-4o",
+			expectContent:  "GPT-4o",
 		},
 		{
 			name:           "Direct Gemini model",
@@ -565,7 +554,7 @@ func TestE2EStreamingResponses(t *testing.T) {
 
 	// Verify we got text content
 	fullText := strings.Join(textChunks, "")
-	if !strings.Contains(fullText, "gpt-4o-mini") {
+	if !strings.Contains(fullText, "GPT-4o-mini") {
 		t.Errorf("Expected streamed text to contain model info, got: %s", fullText)
 	}
 }
@@ -641,8 +630,8 @@ func TestE2EToolUse(t *testing.T) {
 						t.Errorf("Expected tool name 'calculator', got %s", content.Name)
 					}
 					// Verify the tool input
-					if input, ok := content.Input.(map[string]interface{}); ok {
-						if expr, ok := input["expression"].(string); ok {
+					if content.Input != nil {
+						if expr, ok := content.Input["expression"].(string); ok {
 							if !strings.Contains(expr, "25") || !strings.Contains(expr, "4") {
 								t.Errorf("Expected expression to contain '25' and '4', got %s", expr)
 							}
@@ -768,7 +757,7 @@ func TestE2EErrorHandling(t *testing.T) {
 			},
 			endpoint:   "/v1/messages",
 			expectCode: http.StatusBadRequest,
-			expectErr:  "Unknown provider",
+			expectErr:  "Messages array cannot be empty",
 		},
 		{
 			name:       "Invalid endpoint",

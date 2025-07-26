@@ -43,6 +43,9 @@ func TestContextCancellationDuringPing(t *testing.T) {
 		ArgoModels: []string{"gpt35"},
 	}
 
+	// Set mock URL in config
+	config.ArgoBaseURL = mockArgo.URL
+
 	// Create server
 	mapper := NewModelMapper(config)
 	server := &Server{
@@ -134,6 +137,9 @@ func TestFastResponseNoPingDuringWait(t *testing.T) {
 		ArgoEnv:    mockArgo.URL,
 		ArgoModels: []string{"gpt35"},
 	}
+
+	// Set mock URL in config
+	config.ArgoBaseURL = mockArgo.URL
 
 	// Create server
 	mapper := NewModelMapper(config)

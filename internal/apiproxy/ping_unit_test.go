@@ -48,6 +48,9 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 		ArgoModels: []string{"gpt35"}, // Ensure model is recognized
 	}
 
+	// Set mock URL in config
+	config.ArgoBaseURL = mockArgo.URL
+
 	// Create server components directly (bypass middleware)
 	mapper := NewModelMapper(config)
 	server := &Server{
@@ -146,6 +149,9 @@ func TestPingEventsQuickResponse(t *testing.T) {
 		ArgoModels: []string{"gpt35"},
 	}
 
+	// Set mock URL in config
+	config.ArgoBaseURL = mockArgo.URL
+
 	// Create server components
 	mapper := NewModelMapper(config)
 	server := &Server{
@@ -221,6 +227,9 @@ func TestPingIntervalClamping(t *testing.T) {
 		ArgoEnv:    mockArgo.URL,
 		ArgoModels: []string{"gpt35"},
 	}
+
+	// Set mock URL in config
+	config.ArgoBaseURL = mockArgo.URL
 
 	// Create server components
 	mapper := NewModelMapper(config)

@@ -32,6 +32,9 @@ func TestPingDuring30MillisecondDelay(t *testing.T) {
 		ArgoModels: []string{"gpt35"},
 	}
 
+	// Set mock URL in config
+	config.ArgoBaseURL = mockArgo.URL
+
 	// Create server
 	mapper := NewModelMapper(config)
 	server := &Server{
