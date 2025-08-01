@@ -8,7 +8,7 @@ A pure Go implementation of an API proxy that translates between Anthropic's Mes
 - **Model Mapping**: Automatically maps Claude model names (haiku/sonnet) to configured models
 - **Multi-Provider Support**: Route requests to OpenAI, Google Gemini, or Argo based on configuration
 - **Pure Go**: No external dependencies, uses only Go standard library
-- **Streaming Support**: Planned support for Server-Sent Events streaming
+- **Streaming Support**: Server-Sent Events for real-time responses
 - **Token Counting**: Estimate token usage for requests
 
 ## Quick Start
@@ -44,7 +44,8 @@ Configure the proxy using command-line flags:
 # Other configuration flags
 --argo-user            Argo user
 --argo-env             Argo environment (default: "dev")
---preferred-provider   Preferred provider: openai, google, argo (default: "openai")
+--preferred-provider   Preferred provider: openai, google, argo (default: "argo")
+--provider-url         Custom URL for the selected provider (overrides default)
 --big-model            Model for "sonnet" requests (default: "claudeopus4")
 --small-model          Model for "haiku" requests (default: "claudesonnet4")
 
@@ -83,6 +84,16 @@ chmod 600 ~/.openai-key ~/.gemini-key  # Secure the files
 
 # Note: By default, the server binds to 127.0.0.1 (localhost only).
 # Use --host="0.0.0.0" to allow external connections.
+
+# Use custom provider URLs
+./apiproxy --openai-api-key-file="$HOME/.openai-key" --preferred-provider="openai" \
+  --provider-url="https://custom-openai-proxy.com/v1/chat/completions"
+
+./apiproxy --gemini-api-key-file="$HOME/.gemini-key" --preferred-provider="google" \
+  --provider-url="https://custom-gemini-endpoint.com/v1beta/models"
+
+./apiproxy --argo-user="username" --preferred-provider="argo" \
+  --provider-url="https://custom-argo-server.com/api/v1/resource"
 ```
 
 ## Usage Examples
@@ -130,7 +141,7 @@ The proxy automatically maps Anthropic model names to appropriate providers:
 |----------------|-----------|----------|
 | *haiku* | `SMALL_MODEL` | Based on model/config |
 | *sonnet* | `BIG_MODEL` | Based on model/config |
-| Other models | Direct mapping | Auto-detected |
+| Other models | Direct passthrough | Auto-detected from provider model lists |
 
 ### Provider Selection Logic
 
@@ -141,6 +152,18 @@ The proxy automatically maps Anthropic model names to appropriate providers:
    - Model's presence in provider-specific lists
    - `PREFERRED_PROVIDER` setting
    - Availability of API keys
+
+### Dynamic Model Defaults
+
+When using the default models (`claudeopus4` and `claudesonnet4`), the proxy automatically selects provider-specific models based on your `--preferred-provider`:
+
+| Provider | Big Model (sonnet) | Small Model (haiku) |
+|----------|-------------------|---------------------|
+| argo (default) | claudeopus4 | claudesonnet4 |
+| openai | o3-mini | gpt-4o-mini |
+| google | gemini-2.5-pro-preview-03-25 | gemini-2.0-flash |
+
+**Note**: These automatic mappings only apply when using the default model values. If you specify custom models via `--big-model` or `--small-model`, those will be used exactly as specified.
 
 ## Configuration Examples
 
@@ -190,6 +213,8 @@ chmod 600 ~/.gemini-key
 ### OpenAI Models
 - o3-mini, o1, o1-mini, o1-pro
 - gpt-4.5-preview, gpt-4o, gpt-4o-mini
+- gpt-4o-audio-preview, gpt-4o-mini-audio-preview
+- chatgpt-4o-latest
 - gpt-4.1, gpt-4.1-mini
 
 ### Google Gemini Models
@@ -210,11 +235,18 @@ The proxy is built with a modular architecture:
 - **Model Mapper**: Handles model name mapping and provider selection
 - **Converters**: Transform between API formats while preserving functionality
 - **HTTP Server**: Routes requests to appropriate handlers
-- **Streaming**: (Planned) Server-Sent Events for real-time responses
+- **Streaming**: Server-Sent Events for real-time responses
+
+## Streaming
+
+The proxy supports full Server-Sent Events (SSE) streaming:
+- Native streaming for OpenAI and Gemini providers
+- Simulated streaming for Argo (converts non-streaming responses)
+- Automatic ping keep-alive events to prevent timeouts
+- Provider-specific response parsing and formatting
 
 ## Limitations
 
-- Streaming support is not yet implemented
 - Token counting is estimated, not exact
 - Some advanced features may not be fully supported across all providers
 - Error messages from providers are passed through with minimal modification

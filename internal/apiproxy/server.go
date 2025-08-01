@@ -650,20 +650,14 @@ func (s *Server) simulateStreamingFromArgo(ctx context.Context, anthReq *Anthrop
 
 // validatePingInterval ensures the ping interval is within acceptable bounds
 func (s *Server) validatePingInterval(pingInterval time.Duration) time.Duration {
-	// Use configured minimum if available, otherwise use constant
-	minInterval := minPingInterval
-	if s.config.MinPingInterval > 0 {
-		minInterval = s.config.MinPingInterval
-	}
-
 	// Validate ping interval to prevent panic and CPU spinning
 	if pingInterval <= 0 {
 		LogDebug(fmt.Sprintf("WARNING: Invalid pingInterval %v, using default %v", pingInterval, defaultPingInterval))
 		return defaultPingInterval
 	}
-	if pingInterval < minInterval {
-		LogDebug(fmt.Sprintf("WARNING: pingInterval %v too small, using minimum %v", pingInterval, minInterval))
-		return minInterval
+	if pingInterval < minPingInterval {
+		LogDebug(fmt.Sprintf("WARNING: pingInterval %v too small, using minimum %v", pingInterval, minPingInterval))
+		return minPingInterval
 	}
 	if pingInterval > maxPingInterval {
 		LogDebug(fmt.Sprintf("WARNING: pingInterval %v too large, using maximum %v", pingInterval, maxPingInterval))

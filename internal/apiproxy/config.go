@@ -3,7 +3,6 @@ package apiproxy
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 // Config holds the configuration for the API proxy
@@ -19,6 +18,7 @@ type Config struct {
 
 	// Provider Configuration
 	PreferredProvider string
+	ProviderURL       string
 	BigModel          string
 	SmallModel        string
 
@@ -31,13 +31,29 @@ type Config struct {
 	MaxRequestBodySize int64 // Maximum request body size in bytes
 
 	// Streaming Configuration
-	MinPingInterval time.Duration // Minimum ping interval for SSE keep-alive
 
 	// API Endpoints
 	OpenAIURL    string // OpenAI API endpoint
 	GeminiURL    string // Google Gemini API endpoint
 	AnthropicURL string // Anthropic API endpoint
 	ArgoBaseURL  string // Argo API base URL (environment-specific)
+}
+
+// ApplyDynamicModelDefaults applies provider-specific model defaults
+// when the user hasn't changed the default model values
+func (c *Config) ApplyDynamicModelDefaults() {
+	// If user hasn't changed the defaults, set provider-specific defaults
+	if c.BigModel == "claudeopus4" && c.SmallModel == "claudesonnet4" {
+		switch c.PreferredProvider {
+		case "openai":
+			c.BigModel = "o3-mini"
+			c.SmallModel = "gpt-4o-mini"
+		case "google":
+			c.BigModel = "gemini-2.5-pro-preview-03-25"
+			c.SmallModel = "gemini-2.0-flash"
+			// case "argo": keep the current defaults
+		}
+	}
 }
 
 // InitializeModelLists initializes the model lists for each provider
@@ -64,7 +80,28 @@ func (c *Config) InitializeModelLists() {
 		}
 	}
 
+	// Apply custom provider URL if specified
+	if c.ProviderURL != "" {
+		switch c.PreferredProvider {
+		case "openai":
+			c.OpenAIURL = c.ProviderURL
+		case "google":
+			c.GeminiURL = c.ProviderURL
+		case "argo":
+			c.ArgoBaseURL = c.ProviderURL
+		}
+	}
+
 	// Define supported models
+	// MODEL LIST MAINTENANCE:
+	// - Update these lists when new models are released by providers
+	// - Official model names can be found at:
+	//   OpenAI: https://platform.openai.com/docs/models
+	//   Gemini: https://ai.google.dev/gemini-api/docs/models
+	//   Argo: Internal documentation
+	// - Test new models with the proxy before adding to ensure compatibility
+	// - Keep deprecated models for backward compatibility unless officially removed
+	// Last updated: 2025-07-31
 	c.OpenAIModels = []string{
 		"o3-mini",
 		"o1",

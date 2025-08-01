@@ -29,6 +29,7 @@ func main() {
 		argoUser           string
 		argoEnv            string
 		preferredProvider  string
+		providerURL        string
 		bigModel           string
 		smallModel         string
 		maxRequestBodySize int64
@@ -52,6 +53,7 @@ func main() {
 	flag.StringVar(&argoUser, "argo-user", "", "Argo user")
 	flag.StringVar(&argoEnv, "argo-env", "dev", "Argo environment")
 	flag.StringVar(&preferredProvider, "preferred-provider", "argo", "Preferred provider (openai, google, argo)")
+	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
 	flag.StringVar(&bigModel, "big-model", "claudeopus4", "Big model to use")
 	flag.StringVar(&smallModel, "small-model", "claudesonnet4", "Small model to use")
 	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", 10, "Maximum request body size in MB")
@@ -96,11 +98,14 @@ func main() {
 		ArgoUser:           argoUser,
 		ArgoEnv:            argoEnv,
 		PreferredProvider:  preferredProvider,
+		ProviderURL:        providerURL,
 		BigModel:           bigModel,
 		SmallModel:         smallModel,
 		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
-		MinPingInterval:    100 * time.Millisecond,           // Default minimum ping interval
 	}
+
+	// Apply dynamic model defaults based on provider
+	config.ApplyDynamicModelDefaults()
 
 	// Initialize models lists
 	config.InitializeModelLists()

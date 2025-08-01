@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // SetupTestServer creates a test server with mock providers
 func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptest.Server, *httptest.Server) {
+	t.Helper()
 	// Create mock providers
 	openAIMock := httptest.NewServer(NewMockOpenAI(t))
 	geminiMock := httptest.NewServer(NewMockGemini(t))
@@ -49,6 +49,7 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 
 // MockOpenAI creates a mock OpenAI server
 func NewMockOpenAI(t *testing.T) http.Handler {
+	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Mock OpenAI: %s %s", r.Method, r.URL.Path)
 
@@ -93,7 +94,6 @@ func NewMockOpenAI(t *testing.T) http.Handler {
 			for _, chunk := range chunks {
 				fmt.Fprintf(w, "%s\n\n", chunk)
 				w.(http.Flusher).Flush()
-				time.Sleep(10 * time.Millisecond)
 			}
 			return
 		}
@@ -127,6 +127,7 @@ func NewMockOpenAI(t *testing.T) http.Handler {
 
 // MockGemini creates a mock Gemini server
 func NewMockGemini(t *testing.T) http.Handler {
+	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Mock Gemini: %s %s", r.Method, r.URL.Path)
 
@@ -151,7 +152,6 @@ func NewMockGemini(t *testing.T) http.Handler {
 			for _, chunk := range chunks {
 				fmt.Fprintf(w, "%s\n\n", chunk)
 				w.(http.Flusher).Flush()
-				time.Sleep(10 * time.Millisecond)
 			}
 			return
 		}
@@ -179,6 +179,7 @@ func NewMockGemini(t *testing.T) http.Handler {
 
 // MockArgo creates a mock Argo server
 func NewMockArgo(t *testing.T) http.Handler {
+	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Mock Argo: %s %s", r.Method, r.URL.Path)
 
@@ -200,7 +201,6 @@ func NewMockArgo(t *testing.T) http.Handler {
 			for _, char := range message {
 				fmt.Fprintf(w, "%c", char)
 				w.(http.Flusher).Flush()
-				time.Sleep(20 * time.Millisecond)
 			}
 			return
 		}
