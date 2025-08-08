@@ -4,7 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"lmtools/internal/apiproxy"
+	"lmtools/internal/logger"
+	"lmtools/internal/proxy"
 	"log"
 	"net/http"
 	"os"
@@ -52,7 +53,7 @@ func main() {
 	// Configuration flags
 	flag.StringVar(&argoUser, "argo-user", "", "Argo user")
 	flag.StringVar(&argoEnv, "argo-env", "dev", "Argo environment")
-	flag.StringVar(&preferredProvider, "preferred-provider", "argo", "Preferred provider (openai, google, argo)")
+	flag.StringVar(&preferredProvider, "provider", "argo", "Provider (openai, google, argo)")
 	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
 	flag.StringVar(&bigModel, "big-model", "claudeopus4", "Big model to use")
 	flag.StringVar(&smallModel, "small-model", "claudesonnet4", "Small model to use")
@@ -91,13 +92,13 @@ func main() {
 	}
 
 	// Create configuration from flags
-	config := &apiproxy.Config{
+	config := &proxy.Config{
 		AnthropicAPIKey:    anthropicAPIKey,
 		OpenAIAPIKey:       openAIAPIKey,
 		GeminiAPIKey:       geminiAPIKey,
 		ArgoUser:           argoUser,
 		ArgoEnv:            argoEnv,
-		PreferredProvider:  preferredProvider,
+		Provider:           preferredProvider,
 		ProviderURL:        providerURL,
 		BigModel:           bigModel,
 		SmallModel:         smallModel,
@@ -116,10 +117,12 @@ func main() {
 	}
 
 	// Configure logging
-	apiproxy.ConfigureLogging(logLevel, logFormat, noColor)
+	if err := logger.Initialize("", logLevel, logFormat, noColor); err != nil {
+		log.Printf("Failed to initialize logger: %v", err)
+	}
 
 	// Create and configure server
-	server := apiproxy.NewServer(config)
+	server := proxy.NewServer(config)
 
 	// Create handler with proper middleware chain
 	handler := server
@@ -134,9 +137,10 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Starting API proxy server on %s:%d", host, port)
+		logger.Infof("Starting API proxy server on %s:%d", host, port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			logger.Errorf("Failed to start server: %v", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -145,14 +149,14 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	logger.Infof("Shutting down server...")
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Errorf("Server forced to shutdown: %v", err)
 	}
 
 	log.Println("Server exited")
