@@ -13,18 +13,40 @@ import (
 
 // TestPingDuring30MillisecondDelay verifies ping behavior with a 30ms API delay
 func TestPingDuring30MillisecondDelay(t *testing.T) {
+	// Create test-controlled context for clean shutdown
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	// Create mock Argo server with 30ms delay (less than 50ms ping interval)
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Log("Mock Argo: 30ms delay started")
-		time.Sleep(30 * time.Millisecond)
+		t.Log("Mock Argo: simulating 30ms delay")
 
-		resp := ArgoChatResponse{
-			Response: "Response after 30 milliseconds",
+		// Use timer with proper cleanup instead of time.Sleep
+		timer := time.NewTimer(30 * time.Millisecond)
+		defer timer.Stop()
+
+		select {
+		case <-r.Context().Done():
+			// Client cancelled request
+			t.Log("Mock Argo: Client request cancelled")
+			return
+		case <-serverCtx.Done():
+			// Test is ending, exit cleanly
+			t.Log("Mock Argo: Test context cancelled, exiting cleanly")
+			return
+		case <-timer.C:
+			// Timer expired, send response
+			resp := ArgoChatResponse{
+				Response: "Response after 30 milliseconds",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
 	}))
-	defer mockArgo.Close()
+	defer func() {
+		serverCancel()   // Signal handler to exit
+		mockArgo.Close() // Now safe to close
+	}()
 
 	// Create config
 	config := &Config{

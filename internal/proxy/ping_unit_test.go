@@ -29,18 +29,41 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping long-running test in short mode")
 	}
+
+	// Create test-controlled context for clean shutdown
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	// Create a mock Argo server with 110ms delay (just over 100ms minimum ping interval)
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Logf("Mock Argo received request, sleeping for 110 milliseconds...")
-		time.Sleep(110 * time.Millisecond)
+		t.Logf("Mock Argo received request, simulating 110ms delay...")
 
-		resp := ArgoChatResponse{
-			Response: "Delayed response after 110 milliseconds",
+		// Use timer with proper cleanup instead of time.Sleep
+		timer := time.NewTimer(110 * time.Millisecond)
+		defer timer.Stop()
+
+		select {
+		case <-r.Context().Done():
+			// Client cancelled request
+			t.Log("Mock Argo: Client request cancelled")
+			return
+		case <-serverCtx.Done():
+			// Test is ending, exit cleanly
+			t.Log("Mock Argo: Test context cancelled, exiting cleanly")
+			return
+		case <-timer.C:
+			// Timer expired, send response
+			resp := ArgoChatResponse{
+				Response: "Delayed response after 110 milliseconds",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
 	}))
-	defer mockArgo.Close()
+	defer func() {
+		serverCancel()   // Signal handler to exit
+		mockArgo.Close() // Now safe to close
+	}()
 
 	// Create config
 	config := &Config{
@@ -209,18 +232,40 @@ func TestPingEventsQuickResponse(t *testing.T) {
 
 // TestPingIntervalClamping tests that ping intervals below 100ms are clamped to the minimum
 func TestPingIntervalClamping(t *testing.T) {
+	// Create test-controlled context for clean shutdown
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	// Create a mock Argo server with 150ms delay
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Logf("Mock Argo received request, sleeping for 150ms...")
-		time.Sleep(150 * time.Millisecond)
+		t.Logf("Mock Argo received request, simulating 150ms delay...")
 
-		resp := ArgoChatResponse{
-			Response: "Response after clamped interval test",
+		// Use timer with proper cleanup instead of time.Sleep
+		timer := time.NewTimer(150 * time.Millisecond)
+		defer timer.Stop()
+
+		select {
+		case <-r.Context().Done():
+			// Client cancelled request
+			t.Log("Mock Argo: Client request cancelled")
+			return
+		case <-serverCtx.Done():
+			// Test is ending, exit cleanly
+			t.Log("Mock Argo: Test context cancelled, exiting cleanly")
+			return
+		case <-timer.C:
+			// Timer expired, send response
+			resp := ArgoChatResponse{
+				Response: "Response after clamped interval test",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
 	}))
-	defer mockArgo.Close()
+	defer func() {
+		serverCancel()   // Signal handler to exit
+		mockArgo.Close() // Now safe to close
+	}()
 
 	// Create config
 	config := &Config{

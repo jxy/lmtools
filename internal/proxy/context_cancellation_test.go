@@ -7,27 +7,36 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
 // TestContextCancellationDuringPing tests that context cancellation properly stops the streaming
 func TestContextCancellationDuringPing(t *testing.T) {
-	// Create a mock Argo server that never responds
-	var wg sync.WaitGroup
-	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wg.Add(1)
-		defer wg.Done()
+	// Create a context we control for the mock server handler
+	// This allows us to cleanly shutdown the handler before closing the server
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel() // Ensure handler exits before test ends
 
-		// Block for a long time, simulating a slow API
+	// Create a mock Argo server that simulates a slow response
+	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Use a timer that can be properly cleaned up
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+
+		// Wait for either request cancellation, test cancellation, or timeout
 		select {
 		case <-r.Context().Done():
-			// Context was cancelled, this is expected
-			t.Log("Mock Argo: Request context cancelled as expected")
+			// Client request was cancelled (may not happen with httptest)
+			t.Log("Mock server: Request context cancelled")
 			return
-		case <-time.After(10 * time.Second):
-			// This should not happen in the test
+		case <-serverCtx.Done():
+			// Test is ending, exit cleanly
+			t.Log("Mock server: Test context cancelled, exiting cleanly")
+			return
+		case <-timer.C:
+			// This should never happen in the test
+			t.Error("Mock server: Timer expired without cancellation")
 			resp := ArgoChatResponse{
 				Response: "This response should never be sent",
 			}
@@ -35,7 +44,10 @@ func TestContextCancellationDuringPing(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(resp)
 		}
 	}))
-	defer mockArgo.Close()
+	defer func() {
+		serverCancel()   // Signal handler to exit
+		mockArgo.Close() // Now safe to close since handler will exit
+	}()
 
 	// Create config
 	config := &Config{
@@ -47,13 +59,13 @@ func TestContextCancellationDuringPing(t *testing.T) {
 	// Set mock URL in config
 	config.ArgoBaseURL = mockArgo.URL
 
-	// Create server
+	// Create server with shorter timeout for testing
 	mapper := NewModelMapper(config)
 	server := &Server{
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Second, nil),
+		client:    retry.NewClient(5*time.Second, nil), // Shorter timeout for test responsiveness
 	}
 
 	// Create handler
@@ -95,7 +107,7 @@ func TestContextCancellationDuringPing(t *testing.T) {
 	// Cancel the context
 	cancel()
 
-	// Wait for the streaming to finish
+	// Wait for the streaming to finish (should be immediate)
 	select {
 	case err := <-errChan:
 		if err == nil {
@@ -103,12 +115,9 @@ func TestContextCancellationDuringPing(t *testing.T) {
 		} else {
 			t.Logf("Got expected error: %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Error("Streaming did not terminate within 2 seconds after context cancellation")
+	case <-time.After(500 * time.Millisecond): // Reduced from 2s since cancellation should be quick
+		t.Error("Streaming did not terminate within 500ms after context cancellation")
 	}
-
-	// Wait for mock server goroutine to finish
-	wg.Wait()
 
 	// Verify we got at least two pings (initial + at least one during wait)
 	body := w.Body.String()

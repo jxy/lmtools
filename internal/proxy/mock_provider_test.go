@@ -75,7 +75,16 @@ func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body
 		for _, chunk := range chunks {
 			fmt.Fprintf(w, "%s\n\n", chunk)
 			w.(http.Flusher).Flush()
-			time.Sleep(10 * time.Millisecond)
+
+			// Use context-aware delay
+			timer := time.NewTimer(10 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				timer.Stop()
+				return // Client cancelled
+			case <-timer.C:
+				// Continue to next chunk
+			}
 		}
 		return
 	}
@@ -154,7 +163,16 @@ func (m *MockProvider) handleGemini(w http.ResponseWriter, r *http.Request, body
 			data, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "data: %s\n\n", string(data))
 			w.(http.Flusher).Flush()
-			time.Sleep(10 * time.Millisecond)
+
+			// Use context-aware delay
+			timer := time.NewTimer(10 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				timer.Stop()
+				return // Client cancelled
+			case <-timer.C:
+				// Continue to next chunk
+			}
 		}
 		return
 	}
@@ -201,7 +219,16 @@ func (m *MockProvider) handleArgo(w http.ResponseWriter, r *http.Request, body [
 		for _, char := range response {
 			fmt.Fprintf(w, "%c", char)
 			w.(http.Flusher).Flush()
-			time.Sleep(20 * time.Millisecond)
+
+			// Use context-aware delay
+			timer := time.NewTimer(20 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				timer.Stop()
+				return // Client cancelled
+			case <-timer.C:
+				// Continue to next character
+			}
 		}
 		return
 	}

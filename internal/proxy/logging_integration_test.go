@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -195,20 +196,36 @@ func TestStreamingRequestLogging(t *testing.T) {
 }
 
 func TestConcurrentRequestLogging(t *testing.T) {
+	// Create test-controlled context for clean shutdown
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	// Create mock provider
 	mockProvider := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		// Simulate some processing time
-		time.Sleep(10 * time.Millisecond)
+		// Simulate some processing time with context-aware delay
+		timer := time.NewTimer(10 * time.Millisecond)
+		defer timer.Stop()
 
-		response := ArgoChatResponse{
-			Response: "Concurrent test response",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Errorf("Failed to encode response: %v", err)
+		select {
+		case <-r.Context().Done():
+			return // Client cancelled
+		case <-serverCtx.Done():
+			return // Test ending
+		case <-timer.C:
+			// Timer expired, send response
+			response := ArgoChatResponse{
+				Response: "Concurrent test response",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				t.Errorf("Failed to encode response: %v", err)
+			}
 		}
 	})
-	defer mockProvider.Close()
+	defer func() {
+		serverCancel()
+		mockProvider.Close()
+	}()
 
 	// Create server config
 	config := &Config{
@@ -264,20 +281,36 @@ func TestConcurrentRequestLogging(t *testing.T) {
 }
 
 func TestRequestDurationLogging(t *testing.T) {
+	// Create test-controlled context for clean shutdown
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	// Create mock provider with controlled delay
 	mockProvider := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		// Simulate processing time
-		time.Sleep(100 * time.Millisecond)
+		// Simulate processing time with context-aware delay
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
 
-		response := ArgoChatResponse{
-			Response: "Delayed response",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Errorf("Failed to encode response: %v", err)
+		select {
+		case <-r.Context().Done():
+			return // Client cancelled
+		case <-serverCtx.Done():
+			return // Test ending
+		case <-timer.C:
+			// Timer expired, send response
+			response := ArgoChatResponse{
+				Response: "Delayed response",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				t.Errorf("Failed to encode response: %v", err)
+			}
 		}
 	})
-	defer mockProvider.Close()
+	defer func() {
+		serverCancel()
+		mockProvider.Close()
+	}()
 
 	// Create server config
 	config := &Config{
@@ -328,20 +361,36 @@ func TestPingIntervalLogging(t *testing.T) {
 	// This test verifies that ping interval is logged correctly (not as pointer)
 	// In a real implementation, we would capture logs and verify the format
 
+	// Create test-controlled context for clean shutdown
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	// Create mock provider that delays response
 	mockProvider := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		// Delay to trigger pings
-		time.Sleep(200 * time.Millisecond)
+		// Delay to trigger pings with context-aware timer
+		timer := time.NewTimer(200 * time.Millisecond)
+		defer timer.Stop()
 
-		response := ArgoChatResponse{
-			Response: "Delayed for pings",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Errorf("Failed to encode response: %v", err)
+		select {
+		case <-r.Context().Done():
+			return // Client cancelled
+		case <-serverCtx.Done():
+			return // Test ending
+		case <-timer.C:
+			// Timer expired, send response
+			response := ArgoChatResponse{
+				Response: "Delayed for pings",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				t.Errorf("Failed to encode response: %v", err)
+			}
 		}
 	})
-	defer mockProvider.Close()
+	defer func() {
+		serverCancel()
+		mockProvider.Close()
+	}()
 
 	// Create server config
 	config := &Config{

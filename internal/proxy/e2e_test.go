@@ -161,7 +161,16 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 			data, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "data: %s\n\n", string(data))
 			w.(http.Flusher).Flush()
-			time.Sleep(50 * time.Millisecond)
+			
+			// Use context-aware delay
+			timer := time.NewTimer(50 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				timer.Stop()
+				return // Client cancelled
+			case <-timer.C:
+				// Continue to next word
+			}
 		}
 
 		// Send completion
@@ -275,7 +284,16 @@ func (m *E2EMockProvider) handleGeminiE2E(w http.ResponseWriter, r *http.Request
 			jsonData, _ := json.Marshal(data)
 			fmt.Fprintf(w, "data: %s\n\n", string(jsonData))
 			w.(http.Flusher).Flush()
-			time.Sleep(50 * time.Millisecond)
+			
+			// Use context-aware delay
+			timer := time.NewTimer(50 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				timer.Stop()
+				return // Client cancelled
+			case <-timer.C:
+				// Continue to next chunk
+			}
 		}
 		return
 	}
@@ -361,7 +379,16 @@ func (m *E2EMockProvider) handleArgoE2E(w http.ResponseWriter, r *http.Request, 
 		for _, char := range responseText {
 			fmt.Fprintf(w, "%c", char)
 			w.(http.Flusher).Flush()
-			time.Sleep(20 * time.Millisecond)
+			
+			// Use context-aware delay
+			timer := time.NewTimer(20 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				timer.Stop()
+				return // Client cancelled
+			case <-timer.C:
+				// Continue to next character
+			}
 		}
 		return
 	}
