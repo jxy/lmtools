@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"lmtools/internal/models"
+	"lmtools/internal/core"
 )
 
 // E2ETestServer wraps the mock server for e2e tests
@@ -37,7 +37,7 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 	
 	// Handle chat endpoint
 	mux.HandleFunc("/chat/", func(w http.ResponseWriter, r *http.Request) {
-		var req models.ChatRequest
+		var req core.ChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
@@ -82,7 +82,7 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 	
 	// Handle embedding endpoint
 	mux.HandleFunc("/embed/", func(w http.ResponseWriter, r *http.Request) {
-		var req models.EmbedRequest
+		var req core.EmbedRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
@@ -110,7 +110,7 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 	
 	// Handle streaming endpoint
 	mux.HandleFunc("/streamchat/", func(w http.ResponseWriter, r *http.Request) {
-		var req models.ChatRequest
+		var req core.ChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
@@ -497,12 +497,12 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 		t.Fatalf("Failed to show session: %v", err)
 	}
 	
-	// Count messages by looking for bullet separators with message IDs
+	// Count messages by looking for role headers in the new format
 	msgLines := strings.Split(stdout, "\n")
 	var messageCount int
 	for _, line := range msgLines {
-		// Look for lines with format: "0000 • user • ..." or "0001 • assistant/... • ..."
-		if strings.Contains(line, " • user • ") || strings.Contains(line, " • assistant") {
+		// Look for lines with format: "[user] timestamp" or "[assistant/model] timestamp"
+		if strings.HasPrefix(line, "[user]") || strings.HasPrefix(line, "[assistant") {
 			messageCount++
 		}
 	}

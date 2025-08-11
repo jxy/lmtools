@@ -2,12 +2,12 @@ package config
 
 import (
 	"fmt"
-	"lmtools/internal/models"
+	"lmtools/internal/core"
 )
 
 // ValidateChatModel validates that the given model is supported for chat
 func ValidateChatModel(model string) error {
-	if !models.IsValidChatModel(model) {
+	if !core.IsValidChatModel(model) {
 		return fmt.Errorf("invalid chat model: %q", model)
 	}
 	return nil
@@ -15,7 +15,7 @@ func ValidateChatModel(model string) error {
 
 // ValidateEmbedModel validates that the given model is supported for embedding
 func ValidateEmbedModel(model string) error {
-	if !models.IsValidEmbedModel(model) {
+	if !core.IsValidEmbedModel(model) {
 		return fmt.Errorf("invalid embed model: %q", model)
 	}
 	return nil

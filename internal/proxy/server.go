@@ -33,6 +33,26 @@ type Server struct {
 	client    *retry.Client
 }
 
+// readResponseBody safely reads a response body with size limit
+func (s *Server) readResponseBody(resp *http.Response) ([]byte, error) {
+	maxSize := s.config.MaxResponseBodySize
+	if maxSize <= 0 {
+		maxSize = 50 * 1024 * 1024 // Default 50MB
+	}
+
+	limitedReader := io.LimitReader(resp.Body, maxSize+1)
+	body, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(len(body)) > maxSize {
+		return nil, fmt.Errorf("response body too large: exceeds %d bytes", maxSize)
+	}
+
+	return body, nil
+}
+
 // NewServer creates a new API proxy server
 func NewServer(config *Config) http.Handler {
 	mapper := NewModelMapper(config)
@@ -43,13 +63,9 @@ func NewServer(config *Config) http.Handler {
 		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
 	}
 
-	// Wrap with middleware (order matters - outermost runs first)
+	// Wrap with consolidated middleware
 	handler := http.Handler(server)
-	handler = NewRequestLogger(handler)
-	handler = NewErrorMiddleware(handler)
-	handler = NewSecurityMiddleware(handler, config)
-	handler = NewStreamingMiddleware(handler)
-	handler = NewRequestIDMiddleware(handler)
+	handler = NewProxyMiddleware(handler, config)
 
 	return handler
 }
@@ -273,7 +289,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := s.readResponseBody(resp)
 		s.logErrorResponse("OpenAI", resp.StatusCode, body)
 		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
@@ -332,7 +348,7 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := s.readResponseBody(resp)
 		s.logErrorResponse("Gemini", resp.StatusCode, body)
 		return nil, fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, string(body))
 	}
@@ -394,7 +410,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := s.readResponseBody(resp)
 		s.logErrorResponse("Argo", resp.StatusCode, body)
 		return nil, fmt.Errorf("argo API error (status %d): %s", resp.StatusCode, string(body))
 	}
@@ -621,7 +637,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := s.readResponseBody(resp)
 		s.logErrorResponse("OpenAI Streaming", resp.StatusCode, body)
 		return fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
@@ -673,7 +689,7 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := s.readResponseBody(resp)
 		s.logErrorResponse("Gemini Streaming", resp.StatusCode, body)
 		return fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, string(body))
 	}

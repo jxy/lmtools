@@ -3,7 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
-	"lmtools/internal/models"
+	"lmtools/internal/core"
 	"os"
 	"strings"
 	"time"
@@ -46,9 +46,9 @@ func ParseFlags(args []string) (Config, error) {
 
 	// Model Options
 	fs.StringVar(&cfg.Model, "m", "", fmt.Sprintf("model to use (default: %q for chat, %q for embed)\n\t\tChat models: %s\n\t\tEmbed models: %s",
-		models.DefaultChatModel, models.DefaultEmbedModel,
-		strings.Join(models.ChatModels, ", "),
-		strings.Join(models.EmbedModels, ", ")))
+		core.DefaultChatModel, core.DefaultEmbedModel,
+		strings.Join(core.ChatModels, ", "),
+		strings.Join(core.EmbedModels, ", ")))
 	fs.BoolVar(&cfg.Embed, "e", false, "enable embed mode instead of chat")
 
 	// Chat Options
@@ -197,8 +197,8 @@ Examples:
   %s -show-sessions
 `,
 		os.Args[0],
-		models.DefaultChatModel, models.DefaultEmbedModel,
-		strings.Join(models.ChatModels, ", "),
-		strings.Join(models.EmbedModels, ", "),
+		core.DefaultChatModel, core.DefaultEmbedModel,
+		strings.Join(core.ChatModels, ", "),
+		strings.Join(core.EmbedModels, ", "),
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }

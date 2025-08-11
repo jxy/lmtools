@@ -28,7 +28,8 @@ type Config struct {
 	ArgoModels   []string
 
 	// Security Configuration
-	MaxRequestBodySize int64 // Maximum request body size in bytes
+	MaxRequestBodySize  int64 // Maximum request body size in bytes
+	MaxResponseBodySize int64 // Maximum response body size in bytes
 
 	// Streaming Configuration
 
@@ -101,7 +102,7 @@ func (c *Config) InitializeModelLists() {
 	//   Argo: Internal documentation
 	// - Test new models with the proxy before adding to ensure compatibility
 	// - Keep deprecated models for backward compatibility unless officially removed
-	// Last updated: 2025-07-31
+	// Last updated: 2025-08-11 (added gpt5, gpt5mini, gpt5nano)
 	c.OpenAIModels = []string{
 		"o3-mini",
 		"o1",
@@ -136,6 +137,9 @@ func (c *Config) InitializeModelLists() {
 		"gpt41",
 		"gpt41mini",
 		"gpt41nano",
+		"gpt5",
+		"gpt5mini",
+		"gpt5nano",
 		"gemini25pro",
 		"gemini25flash",
 		"claudeopus4",

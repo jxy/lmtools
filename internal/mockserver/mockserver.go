@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"lmtools/internal/models"
+	"lmtools/internal/core"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -149,7 +149,7 @@ func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body [
 	}
 
 	// Parse request only after checking custom response function
-	var req models.EmbedRequest
+	var req core.EmbedRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -201,7 +201,7 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 	}
 
 	// Parse request only after checking custom response function
-	var req models.ChatRequest
+	var req core.ChatRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -257,7 +257,7 @@ func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, b
 	}
 
 	// Parse request only after checking custom response function
-	var req models.ChatRequest
+	var req core.ChatRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return

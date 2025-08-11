@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Support for new GPT-5 models in Argo provider: `gpt5`, `gpt5mini`, `gpt5nano`
 - Extracted flags (`flags.go`), request builder (`request.go`), logger helpers (`logger.go`), HTTP client (`client.go`), and response handler (`response.go`).
 - Comprehensive unit tests for each helper package.
 - Streaming and non-streaming chat, embedding, and prompt-chat modes preserved.

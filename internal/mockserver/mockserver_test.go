@@ -3,8 +3,7 @@ package mockserver
 import (
 	"encoding/json"
 	"lmtools/internal/config"
-	"lmtools/internal/models"
-	"lmtools/internal/request"
+	"lmtools/internal/core"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,7 +26,7 @@ func TestMockServer_BasicChat(t *testing.T) {
 	}
 
 	// Make a chat request
-	req, _, err := request.BuildRequest(cfg, "Test message")
+	req, _, err := core.BuildRequest(cfg, "Test message")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -75,7 +74,7 @@ func TestMockServer_Embedding(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	req, _, err := request.BuildRequest(cfg, "Test embedding")
+	req, _, err := core.BuildRequest(cfg, "Test embedding")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -128,7 +127,7 @@ func TestMockServer_StreamChat(t *testing.T) {
 		Timeout:    5 * time.Second,
 	}
 
-	req, _, err := request.BuildRequest(cfg, "Test streaming")
+	req, _, err := core.BuildRequest(cfg, "Test streaming")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -151,7 +150,7 @@ func TestMockServer_CustomResponse(t *testing.T) {
 	mock := NewMockServer(
 		WithResponseFunc(func(r *http.Request) (interface{}, int, error) {
 			// Parse request to determine response
-			var req models.ChatRequest
+			var req core.ChatRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				return nil, 400, err
 			}
@@ -180,7 +179,7 @@ func TestMockServer_CustomResponse(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	req, _, err := request.BuildRequest(cfg, "Hello custom")
+	req, _, err := core.BuildRequest(cfg, "Hello custom")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -221,7 +220,7 @@ func TestMockServer_ErrorSimulation(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	req, _, err := request.BuildRequest(cfg, "This should fail")
+	req, _, err := core.BuildRequest(cfg, "This should fail")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -254,7 +253,7 @@ func TestMockServer_RequestCapture(t *testing.T) {
 	messages := []string{"First", "Second", "Third"}
 
 	for _, msg := range messages {
-		req, _, err := request.BuildRequest(cfg, msg)
+		req, _, err := core.BuildRequest(cfg, msg)
 		if err != nil {
 			t.Fatalf("Failed to build request: %v", err)
 		}

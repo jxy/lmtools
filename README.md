@@ -134,7 +134,7 @@ go test -tags=e2e ./cmd/lmc
 ## Supported Models
 
 ### Chat Models
-gpt35, gpt35large, gpt4, gpt4large, gpt4turbo, gpt4o, gpt4olatest, gpto1mini, gpto3mini, gpto1, gpto3, gpto4mini, gpt41, gpt41mini, gpt41nano, gemini25pro, gemini25flash, claudeopus4, claudesonnet4, claudesonnet37, claudesonnet35v2
+gpt35, gpt35large, gpt4, gpt4large, gpt4turbo, gpt4o, gpt4olatest, gpto1mini, gpto3mini, gpto1, gpto3, gpto4mini, gpt41, gpt41mini, gpt41nano, gpt5, gpt5mini, gpt5nano, gemini25pro, gemini25flash, claudeopus4, claudesonnet4, claudesonnet37, claudesonnet35v2
 
 ### Embedding Models
 ada002, v3large, v3small

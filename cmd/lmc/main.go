@@ -1,19 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"lmtools/internal/config"
-	"lmtools/internal/display"
-	interrors "lmtools/internal/errors"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	"lmtools/internal/models"
-	"lmtools/internal/request"
-	"lmtools/internal/response"
 	"lmtools/internal/retry"
 	"lmtools/internal/session"
 	"net/http"
@@ -97,7 +91,7 @@ func run() error {
 
 	// Handle show flag
 	if cfg.Show != "" {
-		return display.ShowDispatcher(cfg.Show)
+		return session.ShowDispatcher(cfg.Show)
 	}
 
 	// Handle delete flag
@@ -124,8 +118,8 @@ func run() error {
 		}
 
 		// Combined validation
-		if len(inputBytes) > models.MaxInputSizeBytes {
-			return fmt.Errorf("input too large: %d bytes (max: %d bytes)", len(inputBytes), models.MaxInputSizeBytes)
+		if len(inputBytes) > core.MaxInputSizeBytes {
+			return fmt.Errorf("input too large: %d bytes (max: %d bytes)", len(inputBytes), core.MaxInputSizeBytes)
 		}
 
 		inputStr = strings.TrimSpace(string(inputBytes))
@@ -153,12 +147,12 @@ func run() error {
 	if sess != nil {
 		if isRegeneration {
 			// For regeneration, build request with the created session
-			req, body, err = buildRegenerationRequest(cfg, sess)
+			req, body, err = core.BuildRegenerationRequest(cfg, sess, session.GetLineageAdapter)
 		} else {
-			req, body, err = request.BuildRequestWithSession(cfg, sess)
+			req, body, err = core.BuildRequestWithSession(cfg, sess, session.GetLineageAdapter)
 		}
 	} else {
-		req, body, err = request.BuildRequest(cfg, inputStr)
+		req, body, err = core.BuildRequest(cfg, inputStr)
 	}
 
 	if err != nil {
@@ -191,7 +185,7 @@ func run() error {
 		}
 	}()
 
-	out, err := response.HandleResponse(ctx, cfg, resp)
+	out, err := core.HandleResponse(ctx, cfg, resp, logger.DefaultLogger())
 	if err != nil {
 		return fmt.Errorf("failed to handle response: %w", err)
 	}
@@ -319,70 +313,15 @@ func getOperationName(cfg *config.Config) string {
 }
 
 // buildRegenerationRequest builds a request for regenerating an assistant message
-func buildRegenerationRequest(cfg config.Config, sess *session.Session) (*http.Request, []byte, error) {
-	// The session has already been created in handleSession, so we use it directly
-	// Get the lineage for this new branch
-	messages, err := session.GetLineage(sess.Path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get lineage: %w", err)
-	}
-
-	// Convert to chat messages
-	chatMessages := []request.ChatMessage{{Role: "system", Content: cfg.System}}
-	for _, msg := range messages {
-		chatMessages = append(chatMessages, request.ChatMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	// Build the request
-	urlBase := models.GetBaseURL(cfg.Env)
-	model := cfg.Model
-	if model == "" {
-		model = models.DefaultChatModel
-	}
-
-	if err := config.ValidateChatModel(model); err != nil {
-		return nil, nil, err
-	}
-
-	req := request.ChatRequest{
-		User:     cfg.User,
-		Model:    model,
-		Messages: chatMessages,
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	endpoint := fmt.Sprintf("%s/chat/", urlBase)
-	if cfg.StreamChat {
-		endpoint = fmt.Sprintf("%s/streamchat/", urlBase)
-	}
-
-	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/plain")
-	httpReq.Header.Set("Accept-Encoding", "identity")
-	return httpReq, body, nil
-}
-
 // getActualModel returns the actual model that will be used for the request
 func getActualModel(cfg config.Config) string {
 	if cfg.Model != "" {
 		return cfg.Model
 	}
 	if cfg.Embed {
-		return models.DefaultEmbedModel
+		return core.DefaultEmbedModel
 	}
-	return models.DefaultChatModel
+	return core.DefaultChatModel
 }
 
 // getExitCode returns the appropriate exit code for an error
@@ -392,7 +331,7 @@ func getExitCode(err error) int {
 	}
 
 	// Check for interruption
-	if errors.Is(err, interrors.ErrInterrupted) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, core.ErrInterrupted) || errors.Is(err, context.Canceled) {
 		return exitInterrupted
 	}
 
