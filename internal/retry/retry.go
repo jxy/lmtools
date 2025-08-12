@@ -21,9 +21,9 @@ type Config struct {
 	InitialBackoff time.Duration
 	MaxBackoff     time.Duration
 	BackoffFactor  float64
-	// ContextLoggerKey is the context key to look up a logger from context
-	// If set, the retryer will try to get a logger from ctx.Value(ContextLoggerKey)
-	ContextLoggerKey interface{}
+	// LoggerFromContext is an optional function to extract a logger from context
+	// If set, the retryer will try to get a logger from this function
+	LoggerFromContext func(context.Context) Logger
 }
 
 // DefaultConfig returns default retry configuration
@@ -83,10 +83,23 @@ type Logger interface {
 	Errorf(format string, args ...interface{})
 }
 
+// discardLogger is a no-op logger that discards all log messages
+type discardLogger struct{}
+
+func (discardLogger) Infof(format string, args ...interface{})  {}
+func (discardLogger) Debugf(format string, args ...interface{}) {}
+func (discardLogger) Errorf(format string, args ...interface{}) {}
+
+// defaultDiscardLogger is the package-level discard logger instance
+var defaultDiscardLogger Logger = discardLogger{}
+
 // NewRetryer creates a new retryer with the given configuration
 func NewRetryer(config *Config, logger Logger) *Retryer {
 	if config == nil {
 		config = DefaultConfig()
+	}
+	if logger == nil {
+		logger = defaultDiscardLogger
 	}
 	return &Retryer{
 		config: config,
@@ -96,14 +109,12 @@ func NewRetryer(config *Config, logger Logger) *Retryer {
 }
 
 // getLogger returns the appropriate logger for the given context
-// It first tries to get a logger from context using the configured key,
+// It first tries to get a logger from LoggerFromContext function,
 // then falls back to the retryer's logger
 func (r *Retryer) getLogger(ctx context.Context) Logger {
-	if r.config.ContextLoggerKey != nil {
-		if ctxLogger := ctx.Value(r.config.ContextLoggerKey); ctxLogger != nil {
-			if logger, ok := ctxLogger.(Logger); ok {
-				return logger
-			}
+	if r.config.LoggerFromContext != nil {
+		if logger := r.config.LoggerFromContext(ctx); logger != nil {
+			return logger
 		}
 	}
 	return r.logger
@@ -114,6 +125,9 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 	if r.config.MaxRetries < 0 {
 		return nil, fmt.Errorf("max retries must be >= 0")
 	}
+
+	// Resolve logger once for this operation
+	logger := r.getLogger(ctx)
 
 	var lastErr error
 	var overrideBackoff time.Duration
@@ -129,10 +143,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			}
 
 			// Try to get request logger from context first
-			logger := r.getLogger(ctx)
-			if logger != nil {
-				logger.Infof("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
-			}
+			logger.Infof("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
 
 			select {
 			case <-ctx.Done():
@@ -181,10 +192,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			// Use the maximum of Retry-After and calculated backoff
 			if retryAfter > nextBackoff {
 				overrideBackoff = retryAfter
-				logger := r.getLogger(ctx)
-				if logger != nil {
-					logger.Infof("Retry-After header suggests waiting %v (vs calculated %v)", retryAfter, nextBackoff)
-				}
+				logger.Infof("Retry-After header suggests waiting %v (vs calculated %v)", retryAfter, nextBackoff)
 			}
 		}
 	}
@@ -194,6 +202,9 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 
 // DoWithFunc executes a function with retry logic
 func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, error)) (*http.Response, error) {
+	// Resolve logger once for this operation
+	logger := r.getLogger(ctx)
+
 	var lastErr error
 
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
@@ -202,10 +213,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 			backoff := r.calculateBackoff(attempt - 1)
 
 			// Try to get request logger from context first
-			logger := r.getLogger(ctx)
-			if logger != nil {
-				logger.Debugf("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
-			}
+			logger.Debugf("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
 
 			select {
 			case <-ctx.Done():
@@ -226,10 +234,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 			}
 			// Log error response for debugging
 			if resp.StatusCode >= 500 {
-				logger := r.getLogger(ctx)
-				if logger != nil {
-					logger.Errorf("HTTP %d error response from %s", resp.StatusCode, resp.Request.URL)
-				}
+				logger.Errorf("HTTP %d error response from %s", resp.StatusCode, resp.Request.URL)
 			}
 			lastErr = fmt.Errorf("HTTP %d response", resp.StatusCode)
 		} else {
@@ -284,28 +289,6 @@ func (r *Retryer) calculateBackoff(attempt int) time.Duration {
 	}
 
 	return time.Duration(backoff)
-}
-
-// SimpleRetry performs HTTP request with exponential backoff retry (legacy compatibility)
-func SimpleRetry(ctx context.Context, client *http.Client, req *http.Request,
-	bodyBytes []byte, maxAttempts int, initialDelay time.Duration,
-) (*http.Response, error) {
-	if maxAttempts < 1 {
-		return nil, fmt.Errorf("attempts must be >= 1")
-	}
-
-	config := &Config{
-		MaxRetries:     maxAttempts - 1, // Convert attempts to retries
-		InitialBackoff: initialDelay,
-		MaxBackoff:     30 * time.Second,
-		BackoffFactor:  2.0,
-	}
-	if initialDelay <= 0 {
-		config.InitialBackoff = 10 * time.Millisecond
-	}
-
-	retryer := NewRetryer(config, nil)
-	return retryer.Do(ctx, client, req, bodyBytes)
 }
 
 // DrainAndClose fully drains the response body to enable connection reuse

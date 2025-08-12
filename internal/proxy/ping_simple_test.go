@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,12 @@ import (
 
 // TestPingDuring30MillisecondDelay verifies ping behavior with a 30ms API delay
 func TestPingDuring30MillisecondDelay(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
@@ -63,7 +70,7 @@ func TestPingDuring30MillisecondDelay(t *testing.T) {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, nil),
+		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
 	}
 
 	// Create handler

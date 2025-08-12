@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,12 @@ import (
 
 // TestContextCancellationDuringPing tests that context cancellation properly stops the streaming
 func TestContextCancellationDuringPing(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create a context we control for the mock server handler
 	// This allows us to cleanly shutdown the handler before closing the server
 	serverCtx, serverCancel := context.WithCancel(context.Background())
@@ -64,7 +71,7 @@ func TestContextCancellationDuringPing(t *testing.T) {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(5*time.Second, nil), // Shorter timeout for test responsiveness
+		client:    retry.NewClient(5*time.Second, logger.GetLogger()), // Shorter timeout for test responsiveness
 	}
 
 	// Create handler
@@ -130,6 +137,12 @@ func TestContextCancellationDuringPing(t *testing.T) {
 
 // TestFastResponseNoPingDuringWait tests that fast responses don't trigger pings while waiting
 func TestFastResponseNoPingDuringWait(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create a mock Argo server that responds immediately
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := ArgoChatResponse{
@@ -155,7 +168,7 @@ func TestFastResponseNoPingDuringWait(t *testing.T) {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Second, nil),
+		client:    retry.NewClient(10*time.Second, logger.GetLogger()),
 	}
 
 	// Create handler

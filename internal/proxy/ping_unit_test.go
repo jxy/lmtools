@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,12 @@ func newFlushableRecorder() *flushableRecorder {
 func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping long-running test in short mode")
+	}
+
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
 	// Create test-controlled context for clean shutdown
@@ -80,7 +87,7 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, nil),
+		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
 	}
 
 	// Create streaming handler
@@ -155,6 +162,12 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 // TestPingEventsQuickResponse tests that we only get initial ping with fast response
 func TestPingEventsQuickResponse(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create a mock Argo server that responds immediately
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := ArgoChatResponse{
@@ -180,7 +193,7 @@ func TestPingEventsQuickResponse(t *testing.T) {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, nil),
+		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
 	}
 
 	// Create handler
@@ -230,6 +243,12 @@ func TestPingEventsQuickResponse(t *testing.T) {
 
 // TestPingIntervalClamping tests that ping intervals below 100ms are clamped to the minimum
 func TestPingIntervalClamping(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
@@ -280,7 +299,7 @@ func TestPingIntervalClamping(t *testing.T) {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, nil),
+		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
 	}
 
 	// Test with very small interval (10ms) which should be clamped to 100ms

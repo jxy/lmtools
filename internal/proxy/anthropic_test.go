@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
@@ -138,6 +139,12 @@ func TestConfigValidationAnthropic(t *testing.T) {
 
 // TestForwardToAnthropic tests the forwardToAnthropic function
 func TestForwardToAnthropic(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create a mock Anthropic server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
@@ -197,7 +204,7 @@ func TestForwardToAnthropic(t *testing.T) {
 		config:    config,
 		mapper:    NewModelMapper(config),
 		converter: NewConverter(NewModelMapper(config)),
-		client:    retry.NewClient(5*time.Second, nil),
+		client:    retry.NewClient(5*time.Second, logger.GetLogger()),
 	}
 
 	// Test request
@@ -235,6 +242,12 @@ func TestForwardToAnthropic(t *testing.T) {
 
 // TestStreamFromAnthropic tests the streamFromAnthropic function
 func TestStreamFromAnthropic(t *testing.T) {
+	// Initialize logger for testing
+	logger.ResetForTesting()
+	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Create a mock Anthropic streaming server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
@@ -298,7 +311,7 @@ func TestStreamFromAnthropic(t *testing.T) {
 		config:    config,
 		mapper:    NewModelMapper(config),
 		converter: NewConverter(NewModelMapper(config)),
-		client:    retry.NewClient(5*time.Second, nil),
+		client:    retry.NewClient(5*time.Second, logger.GetLogger()),
 	}
 
 	// Create a test response writer

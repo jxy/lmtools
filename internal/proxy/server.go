@@ -55,6 +55,15 @@ func (s *Server) readResponseBody(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+// extractRequestLogger is a helper function to extract the request logger from context
+// and adapt it to the retry.Logger interface
+func extractRequestLogger(ctx context.Context) retry.Logger {
+	if logger := GetRequestLogger(ctx); logger != nil {
+		return logger
+	}
+	return nil
+}
+
 // NewServer creates a new API proxy server
 func NewServer(config *Config) http.Handler {
 	mapper := NewModelMapper(config)
@@ -62,7 +71,7 @@ func NewServer(config *Config) http.Handler {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClientWithOptions(10*time.Minute, 0, logger.GetLogger(), RequestLoggerKey{}),
+		client:    retry.NewClientWithOptions(10*time.Minute, 0, logger.GetLogger(), extractRequestLogger),
 	}
 
 	// Wrap with consolidated middleware
