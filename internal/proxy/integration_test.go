@@ -68,8 +68,9 @@ func TestIntegrationBasicChat(t *testing.T) {
 				if len(resp.Content) == 0 {
 					t.Fatal("Expected content in response")
 				}
-				if !strings.Contains(resp.Content[0].Text, "Gemini") {
-					t.Errorf("Expected Gemini response, got %s", resp.Content[0].Text)
+				// With provider=openai, Gemini models also go to OpenAI
+				if !strings.Contains(resp.Content[0].Text, "OpenAI") {
+					t.Errorf("Expected OpenAI response, got %s", resp.Content[0].Text)
 				}
 			},
 		},
@@ -193,21 +194,17 @@ func TestIntegrationRetry(t *testing.T) {
 	
 	// Create config with retry settings
 	config := &Config{
-		OpenAIAPIKey:       "test-key",
-		GeminiAPIKey:       "test-key",
+		// Don't set OpenAI/Gemini keys so Argo is used
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
 		ArgoBaseURL:        retryMock.URL, // Use ArgoBaseURL instead
 		Provider:  "argo",
 		ProviderURL:        "",
 		SmallModel:         "gpt35",
-		BigModel:           "gpt4",
+		Model:              "gpt4",
 		MaxRequestBodySize: 10 * 1024 * 1024,
-		OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-		GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-		ArgoModels:         []string{"gpt4", "gpt35", "claude"},
 	}
-	config.InitializeModelLists()
+	config.InitializeURLs()
 	
 	// Create proxy server
 	server := NewServer(config)
@@ -294,20 +291,16 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 	
 	// Create config
 	config := &Config{
-		OpenAIAPIKey:       "test-key",
-		GeminiAPIKey:       "test-key",
+		// Don't set OpenAI/Gemini keys so Argo is used
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
 		ArgoBaseURL:        rateLimitMock.URL, // Use ArgoBaseURL instead
 		Provider:  "argo",
 		SmallModel:         "gpt35",
-		BigModel:           "gpt4",
+		Model:              "gpt4",
 		MaxRequestBodySize: 10 * 1024 * 1024,
-		OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-		GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-		ArgoModels:         []string{"gpt4", "gpt35", "claude"},
 	}
-	config.InitializeModelLists()
+	config.InitializeURLs()
 	
 	// Create proxy server
 	server := NewServer(config)
@@ -531,13 +524,10 @@ func TestCustomProviderURL(t *testing.T) {
 					Provider:  "openai",
 					ProviderURL:        customMock.URL + "/custom/openai/path",
 					SmallModel:         "gpt-4o-mini",
-					BigModel:           "gpt-4o",
+					Model:              "gpt-4o",
 					MaxRequestBodySize: 10 * 1024 * 1024,
-					OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-					GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-					ArgoModels:         []string{"gpt4", "gpt35", "claude"},
 				}
-				config.InitializeModelLists()
+				config.InitializeURLs()
 				
 				return config, customMock
 			},
@@ -581,13 +571,10 @@ func TestCustomProviderURL(t *testing.T) {
 					Provider:  "google",
 					ProviderURL:        customMock.URL + "/custom/gemini/models",
 					SmallModel:         "gemini-2.0-flash",
-					BigModel:           "gemini-2.5-pro-preview-03-25",
+					Model:              "gemini-2.5-pro-preview-03-25",
 					MaxRequestBodySize: 10 * 1024 * 1024,
-					OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-					GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-					ArgoModels:         []string{"gpt4", "gpt35", "claude"},
 				}
-				config.InitializeModelLists()
+				config.InitializeURLs()
 				
 				return config, customMock
 			},
@@ -621,13 +608,10 @@ func TestCustomProviderURL(t *testing.T) {
 					Provider:  "argo",
 					ProviderURL:        customMock.URL + "/custom/argo",
 					SmallModel:         "gpt35",
-					BigModel:           "gpt4",
+					Model:              "gpt4",
 					MaxRequestBodySize: 10 * 1024 * 1024,
-					OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-					GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-					ArgoModels:         []string{"gpt4", "gpt35", "claude"},
 				}
-				config.InitializeModelLists()
+				config.InitializeURLs()
 				
 				return config, customMock
 			},

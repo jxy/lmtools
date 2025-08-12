@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// requestLoggerKey is the context key for request logger (matches proxy.RequestLoggerKey)
+type requestLoggerKey struct{}
+
 // Config defines retry behavior
 type Config struct {
 	MaxRetries     int
@@ -112,7 +115,15 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			}
 
 			if r.logger != nil {
-				r.logger.Infof("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
+				// Check if we have a request logger in context (for apiproxy)
+				var requestID string
+				if reqLoggerValue := ctx.Value(requestLoggerKey{}); reqLoggerValue != nil {
+					// Try to get request ID using reflection to avoid circular imports
+					if idGetter, ok := reqLoggerValue.(interface{ GetRequestID() int64 }); ok {
+						requestID = fmt.Sprintf("[#%d] ", idGetter.GetRequestID())
+					}
+				}
+				r.logger.Infof("%sRetry attempt %d/%d after %v due to: %v", requestID, attempt, r.config.MaxRetries, backoff, lastErr)
 			}
 
 			select {
@@ -163,7 +174,15 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			if retryAfter > nextBackoff {
 				overrideBackoff = retryAfter
 				if r.logger != nil {
-					r.logger.Infof("Retry-After header suggests waiting %v (vs calculated %v)", retryAfter, nextBackoff)
+					// Check if we have a request logger in context (for apiproxy)
+					var requestID string
+					if reqLoggerValue := ctx.Value(requestLoggerKey{}); reqLoggerValue != nil {
+						// Try to get request ID using reflection to avoid circular imports
+						if idGetter, ok := reqLoggerValue.(interface{ GetRequestID() int64 }); ok {
+							requestID = fmt.Sprintf("[#%d] ", idGetter.GetRequestID())
+						}
+					}
+					r.logger.Infof("%sRetry-After header suggests waiting %v (vs calculated %v)", requestID, retryAfter, nextBackoff)
 				}
 			}
 		}
@@ -182,7 +201,15 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 			backoff := r.calculateBackoff(attempt - 1)
 
 			if r.logger != nil {
-				r.logger.Debugf("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
+				// Check if we have a request logger in context (for apiproxy)
+				var requestID string
+				if reqLoggerValue := ctx.Value(requestLoggerKey{}); reqLoggerValue != nil {
+					// Try to get request ID using reflection to avoid circular imports
+					if idGetter, ok := reqLoggerValue.(interface{ GetRequestID() int64 }); ok {
+						requestID = fmt.Sprintf("[#%d] ", idGetter.GetRequestID())
+					}
+				}
+				r.logger.Debugf("%sRetry attempt %d/%d after %v due to: %v", requestID, attempt, r.config.MaxRetries, backoff, lastErr)
 			}
 
 			select {

@@ -27,10 +27,7 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 		ArgoEnv:            "test",
 		Provider:           "openai",
 		SmallModel:         "gpt-4o-mini",
-		BigModel:           "gpt-4o",
-		OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-		GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-		ArgoModels:         []string{"gpt4", "gpt35", "claude"},
+		Model:              "gpt-4o",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 		// Set mock URLs
 		OpenAIURL:   openAIMock.URL + "/v1/chat/completions",
@@ -38,8 +35,8 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 		ArgoBaseURL: argoMock.URL,
 	}
 
-	// Initialize model lists
-	config.InitializeModelLists()
+	// Initialize URLs
+	config.InitializeURLs()
 
 	// Create server
 	server := NewServer(config)

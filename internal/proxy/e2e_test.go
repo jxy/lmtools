@@ -38,10 +38,7 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 		ArgoUser:           "testuser",
 		Provider:  "openai",
 		SmallModel:         "gpt-4o-mini",
-		BigModel:           "gpt-4o",
-		OpenAIModels:       []string{"gpt-4o", "gpt-4o-mini"},
-		GeminiModels:       []string{"gemini-2.0-flash", "gemini-1.5-pro"},
-		ArgoModels:         []string{"gpt4", "claude"},
+		Model:              "gpt-4o",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -432,15 +429,22 @@ func TestE2EBasicChat(t *testing.T) {
 			name:           "Direct Gemini model",
 			model:          "gemini-2.0-flash",
 			message:        "Hello",
-			expectProvider: "gemini",
-			expectContent:  "Gemini 2.0 Flash",
+			expectProvider: "openai", // With provider=openai, all models go to OpenAI
+			expectContent:  "Response from OpenAI model: gemini-2.0-flash",
 		},
 		{
-			name:           "Direct Argo model",
-			model:          "gpt4",
+			name:           "Custom model uses preferred provider",
+			model:          "llama-70b",
 			message:        "Hello",
-			expectProvider: "argo",
-			expectContent:  "Argo response",
+			expectProvider: "openai",
+			expectContent:  "Response from OpenAI",
+		},
+		{
+			name:           "Direct OpenAI model",
+			model:          "gpt-4",
+			message:        "Hello",
+			expectProvider: "openai",
+			expectContent:  "Response from OpenAI",
 		},
 	}
 
@@ -947,6 +951,170 @@ func (s *SSEScanner) Event() string {
 
 func (s *SSEScanner) Data() string {
 	return s.currentData
+}
+
+// TestProviderFlagPrecedence tests that the provider flag takes precedence over model name patterns
+func TestProviderFlagPrecedence(t *testing.T) {
+	// Test with different provider configurations
+	testCases := []struct {
+		name           string
+		provider       string
+		model          string
+		hasOpenAI      bool
+		hasGemini      bool
+		hasArgo        bool
+		expectProvider string
+		expectError    bool
+	}{
+		{
+			name:           "Provider=argo with gpt model",
+			provider:       "argo",
+			model:          "gpt-4",
+			hasArgo:        true,
+			expectProvider: "argo",
+		},
+		{
+			name:           "Provider=argo with gemini model",
+			provider:       "argo",
+			model:          "gemini-2.0-flash",
+			hasArgo:        true,
+			expectProvider: "argo",
+		},
+		{
+			name:           "Provider=google with gpt model",
+			provider:       "google",
+			model:          "gpt-4",
+			hasGemini:      true,
+			expectProvider: "gemini",
+		},
+		{
+			name:           "Provider=openai with custom model",
+			provider:       "openai",
+			model:          "llama-70b",
+			hasOpenAI:      true,
+			expectProvider: "openai",
+		},
+		{
+			name:           "Provider=argo but no credentials",
+			provider:       "argo",
+			model:          "gpt-4",
+			hasOpenAI:      true,
+			expectProvider: "openai", // Falls back to available provider
+		},
+		{
+			name:        "No available provider",
+			provider:    "argo",
+			model:       "gpt-4",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock servers
+			openAIMock := httptest.NewServer(NewMockOpenAI(t))
+			defer openAIMock.Close()
+			
+			geminiMock := httptest.NewServer(NewMockGemini(t))
+			defer geminiMock.Close()
+			
+			argoMock := httptest.NewServer(NewMockArgo(t))
+			defer argoMock.Close()
+
+			// Create config with specified provider
+			config := &Config{
+				Provider:           tc.provider,
+				SmallModel:         "gpt-4o-mini",
+				Model:              "gpt-4o",
+				MaxRequestBodySize: 10 * 1024 * 1024,
+			}
+
+			// Set credentials based on test case
+			if tc.hasOpenAI {
+				config.OpenAIAPIKey = "test-key"
+			}
+			if tc.hasGemini {
+				config.GeminiAPIKey = "test-key"
+			}
+			if tc.hasArgo {
+				config.ArgoUser = "testuser"
+			}
+
+			// Set mock URLs
+			config.OpenAIURL = openAIMock.URL + "/v1/chat/completions"
+			config.GeminiURL = geminiMock.URL + "/v1beta/models"
+			config.ArgoBaseURL = argoMock.URL
+			config.InitializeURLs()
+
+			// Create proxy server
+			server := NewServer(config)
+			proxyServer := httptest.NewServer(server)
+			defer proxyServer.Close()
+
+			// Create request
+			req := AnthropicRequest{
+				Model:     tc.model,
+				MaxTokens: 100,
+				Messages: []AnthropicMessage{
+					{
+						Role:    RoleUser,
+						Content: json.RawMessage(`"Test provider precedence"`),
+					},
+				},
+			}
+
+			reqBody, _ := json.Marshal(req)
+			resp, err := http.Post(
+				proxyServer.URL+"/v1/messages",
+				"application/json",
+				bytes.NewReader(reqBody),
+			)
+			if err != nil {
+				t.Fatalf("Request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			body, _ := io.ReadAll(resp.Body)
+
+			if tc.expectError {
+				if resp.StatusCode == http.StatusOK {
+					t.Errorf("Expected error but got success")
+				}
+				return
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Unexpected status %d: %s", resp.StatusCode, string(body))
+			}
+
+			// Parse response
+			var anthResp AnthropicResponse
+			if err := json.Unmarshal(body, &anthResp); err != nil {
+				t.Fatalf("Failed to decode response: %v", err)
+			}
+
+			// Verify the response came from expected provider
+			if len(anthResp.Content) == 0 {
+				t.Fatal("Expected content in response")
+			}
+
+			content := anthResp.Content[0].Text
+			switch tc.expectProvider {
+			case "openai":
+				if !strings.Contains(content, "OpenAI") {
+					t.Errorf("Expected OpenAI response, got: %s", content)
+				}
+			case "gemini":
+				if !strings.Contains(content, "Gemini") {
+					t.Errorf("Expected Gemini response, got: %s", content)
+				}
+			case "argo":
+				if !strings.Contains(content, "Argo") {
+					t.Errorf("Expected Argo response, got: %s", content)
+				}
+			}
+		})
+	}
 }
 
 // Benchmark tests

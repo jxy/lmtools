@@ -36,14 +36,12 @@ func TestDebugLoggingToStderr(t *testing.T) {
 		ArgoEnv:            "test", 
 		Provider:  "argo",
 		SmallModel:         "claude-3-haiku-20240307",
-		BigModel:           "claude-3-opus-20240229",
+		Model:              "claude-3-opus-20240229",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 		ArgoBaseURL:        argoMock.URL,
 		// DON'T set OpenAI/Gemini keys so Argo is selected
 	}
-	config.InitializeModelLists()
-	// Add our models AFTER InitializeModelLists (which overwrites the list)
-	config.ArgoModels = append(config.ArgoModels, "claude-3-opus-20240229", "claude-3-haiku-20240307")
+	config.InitializeURLs()
 	server := NewServer(config)
 	proxyServer := httptest.NewServer(server)
 	defer proxyServer.Close()
@@ -252,14 +250,12 @@ func TestArgoToolDetectionLogging(t *testing.T) {
 		ArgoEnv:           "test",
 		Provider: "argo",
 		ArgoBaseURL:       argoMock.URL,
-		BigModel:          "claude-3-opus-20240229",
+		Model:             "claude-3-opus-20240229",
 		SmallModel:        "claude-3-haiku-20240307",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 		// NO OpenAI or Gemini keys - this ensures Argo is used
 	}
-	config.InitializeModelLists()
-	// Add our models AFTER InitializeModelLists (which overwrites the list)
-	config.ArgoModels = append(config.ArgoModels, "claude-3-opus-20240229", "claude-3-haiku-20240307")
+	config.InitializeURLs()
 
 	// Create server
 	server := NewServer(config)

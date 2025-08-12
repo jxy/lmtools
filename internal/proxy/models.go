@@ -13,6 +13,18 @@ const (
 	RoleAssistant Role = "assistant"
 )
 
+// EstimateTokenCount estimates the number of tokens in a text string
+// using a simple heuristic of dividing character count by 3
+func EstimateTokenCount(text string) int {
+	return len(text) / 3
+}
+
+// EstimateTokenCountFromChars estimates the number of tokens from character count
+// using a simple heuristic of dividing character count by 3
+func EstimateTokenCountFromChars(charCount int) int {
+	return charCount / 3
+}
+
 // Anthropic API Models
 
 // AnthropicRequest represents a request to the Anthropic Messages API

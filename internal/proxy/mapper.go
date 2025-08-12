@@ -2,40 +2,18 @@ package proxy
 
 import (
 	"strings"
-	"sync"
 )
 
 // ModelMapper handles model name mapping between different providers
 type ModelMapper struct {
 	config *Config
-	// Pre-computed maps for O(1) lookups
-	openAIModels map[string]bool
-	geminiModels map[string]bool
-	argoModels   map[string]bool
-	mu           sync.RWMutex
 }
 
 // NewModelMapper creates a new model mapper
 func NewModelMapper(config *Config) *ModelMapper {
-	m := &ModelMapper{
-		config:       config,
-		openAIModels: make(map[string]bool),
-		geminiModels: make(map[string]bool),
-		argoModels:   make(map[string]bool),
+	return &ModelMapper{
+		config: config,
 	}
-
-	// Pre-compute model maps
-	for _, model := range config.OpenAIModels {
-		m.openAIModels[model] = true
-	}
-	for _, model := range config.GeminiModels {
-		m.geminiModels[model] = true
-	}
-	for _, model := range config.ArgoModels {
-		m.argoModels[model] = true
-	}
-
-	return m
 }
 
 // MapModel maps an incoming model name to the appropriate provider and model
@@ -48,50 +26,14 @@ func (m *ModelMapper) MapModel(model string) (provider, mappedModel string) {
 		if strings.Contains(strings.ToLower(cleanModel), "haiku") {
 			return m.mapToSmallModel()
 		} else {
-			// All non-haiku Claude models map to BIG_MODEL
-			return m.mapToBigModel()
+			// All non-haiku Claude models map to Model
+			return m.mapToModel()
 		}
 	}
 
-	// Check if the model exists in our known lists (and API key is available)
-	if m.isOpenAIModel(cleanModel) && m.config.OpenAIAPIKey != "" {
-		return "openai", cleanModel
-	}
-	if m.isGeminiModel(cleanModel) && m.config.GeminiAPIKey != "" {
-		return "gemini", cleanModel
-	}
-	if m.isArgoModel(cleanModel) && m.config.ArgoUser != "" {
-		return "argo", cleanModel
-	}
-
-	// If model is not recognized, use preferred provider with BIG_MODEL as fallback
-	// If BIG_MODEL is not set, use the original model name
-	switch m.config.Provider {
-	case "google":
-		if m.config.GeminiAPIKey != "" {
-			if m.config.BigModel != "" {
-				return "gemini", m.config.BigModel
-			}
-			return "gemini", cleanModel
-		}
-	case "argo":
-		if m.config.ArgoUser != "" {
-			if m.config.BigModel != "" {
-				return "argo", m.config.BigModel
-			}
-			return "argo", cleanModel
-		}
-	default:
-		if m.config.OpenAIAPIKey != "" {
-			if m.config.BigModel != "" {
-				return "openai", m.config.BigModel
-			}
-			return "openai", cleanModel
-		}
-	}
-
-	// No valid provider with API key found
-	return "", ""
+	// For all other models, use the provider flag to determine routing
+	// The provider flag takes precedence over model name patterns
+	return m.mapToProvider(cleanModel)
 }
 
 // cleanModelName removes provider prefixes from model names
@@ -109,71 +51,103 @@ func (m *ModelMapper) cleanModelName(model string) string {
 func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 	smallModel := m.config.SmallModel
 
-	// Determine provider based on model and API key availability
-	if m.config.Provider == "google" && m.isGeminiModel(smallModel) && m.config.GeminiAPIKey != "" {
-		return "gemini", smallModel
+	// Use preferred provider if credentials are available
+	switch m.config.Provider {
+	case "google":
+		if m.config.GeminiAPIKey != "" {
+			return "gemini", smallModel
+		}
+	case "argo":
+		if m.config.ArgoUser != "" {
+			return "argo", smallModel
+		}
+	default: // "openai" or any other value defaults to OpenAI
+		if m.config.OpenAIAPIKey != "" {
+			return "openai", smallModel
+		}
 	}
-	if m.config.Provider == "argo" && m.isArgoModel(smallModel) && m.config.ArgoUser != "" {
-		return "argo", smallModel
-	}
-	if m.isGeminiModel(smallModel) && m.config.GeminiAPIKey != "" {
-		return "gemini", smallModel
-	}
-	if m.isArgoModel(smallModel) && m.config.ArgoUser != "" {
-		return "argo", smallModel
-	}
-	// Default to OpenAI if API key is available
+
+	// Fallback to any available provider
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", smallModel
 	}
-	// No API keys available
+	if m.config.GeminiAPIKey != "" {
+		return "gemini", smallModel
+	}
+	if m.config.ArgoUser != "" {
+		return "argo", smallModel
+	}
+
+	// No credentials available
 	return "", ""
 }
 
-// mapToBigModel maps to the configured big model
-func (m *ModelMapper) mapToBigModel() (provider, model string) {
-	bigModel := m.config.BigModel
+// mapToModel maps to the configured model
+func (m *ModelMapper) mapToModel() (provider, model string) {
+	model = m.config.Model
 
-	// Determine provider based on model and API key availability
-	if m.config.Provider == "google" && m.isGeminiModel(bigModel) && m.config.GeminiAPIKey != "" {
-		return "gemini", bigModel
+	// Use preferred provider if credentials are available
+	switch m.config.Provider {
+	case "google":
+		if m.config.GeminiAPIKey != "" {
+			return "gemini", model
+		}
+	case "argo":
+		if m.config.ArgoUser != "" {
+			return "argo", model
+		}
+	default: // "openai" or any other value defaults to OpenAI
+		if m.config.OpenAIAPIKey != "" {
+			return "openai", model
+		}
 	}
-	if m.config.Provider == "argo" && m.isArgoModel(bigModel) && m.config.ArgoUser != "" {
-		return "argo", bigModel
-	}
-	if m.isGeminiModel(bigModel) && m.config.GeminiAPIKey != "" {
-		return "gemini", bigModel
-	}
-	if m.isArgoModel(bigModel) && m.config.ArgoUser != "" {
-		return "argo", bigModel
-	}
-	// Default to OpenAI if API key is available
+
+	// Fallback to any available provider
 	if m.config.OpenAIAPIKey != "" {
-		return "openai", bigModel
+		return "openai", model
 	}
-	// No API keys available
+	if m.config.GeminiAPIKey != "" {
+		return "gemini", model
+	}
+	if m.config.ArgoUser != "" {
+		return "argo", model
+	}
+
+	// No credentials available
 	return "", ""
 }
 
-// isOpenAIModel checks if a model is in the OpenAI models list
-func (m *ModelMapper) isOpenAIModel(model string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.openAIModels[model]
-}
+// mapToProvider maps a model to the configured provider
+func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string) {
+	// Use the configured provider if credentials are available
+	switch m.config.Provider {
+	case "google":
+		if m.config.GeminiAPIKey != "" {
+			return "gemini", model
+		}
+	case "argo":
+		if m.config.ArgoUser != "" {
+			return "argo", model
+		}
+	default: // "openai" or any other value defaults to OpenAI
+		if m.config.OpenAIAPIKey != "" {
+			return "openai", model
+		}
+	}
 
-// isGeminiModel checks if a model is in the Gemini models list
-func (m *ModelMapper) isGeminiModel(model string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.geminiModels[model]
-}
+	// Fallback to any available provider if preferred provider has no credentials
+	if m.config.OpenAIAPIKey != "" {
+		return "openai", model
+	}
+	if m.config.GeminiAPIKey != "" {
+		return "gemini", model
+	}
+	if m.config.ArgoUser != "" {
+		return "argo", model
+	}
 
-// isArgoModel checks if a model is in the Argo models list
-func (m *ModelMapper) isArgoModel(model string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.argoModels[model]
+	// No credentials available
+	return "", ""
 }
 
 // GetAPIKey returns the appropriate API key for a provider

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"lmtools/internal/auth"
 	"lmtools/internal/config"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -99,6 +102,11 @@ func run() error {
 		return session.DeleteNode(cfg.Delete)
 	}
 
+	// Handle list-models flag
+	if cfg.ListModels {
+		return listModels(cfg)
+	}
+
 	// Check if we're branching from an assistant message (regeneration)
 	isRegeneration := false
 	if cfg.Branch != "" {
@@ -144,6 +152,10 @@ func run() error {
 	var req *http.Request
 	var body []byte
 
+	// Log request start
+	startTime := time.Now()
+	logger.Infof("Starting request | Model: %s | Provider: %s", cfg.Model, cfg.Provider)
+
 	if sess != nil {
 		if isRegeneration {
 			// For regeneration, build request with the created session
@@ -159,6 +171,15 @@ func run() error {
 		return fmt.Errorf("failed to build request: %w", err)
 	}
 
+	// Log request details
+	var requestData map[string]interface{}
+	if err := json.Unmarshal(body, &requestData); err == nil {
+		messages, _ := requestData["messages"].([]interface{})
+		tools, _ := requestData["tools"].([]interface{})
+		logger.Infof("Request built | Messages: %d | Tools: %d | Stream: %v",
+			len(messages), len(tools), cfg.StreamChat)
+	}
+
 	// Log request
 	opName := getOperationName(&cfg)
 	if err := logger.LogJSON(logger.GetLogDir(), opName, body); err != nil {
@@ -169,14 +190,19 @@ func run() error {
 	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.GetLogger())
 
 	// Send request with retry using pooled client
+	logger.Infof("Sending request to %s", req.URL.String())
 	resp, err := retryClient.Do(ctx, req, "lmc")
 	// Handle error with response cleanup
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
+		logger.Errorf("Request failed after %v: %v", time.Since(startTime), err)
 		return fmt.Errorf("failed to send request: %w", err)
 	}
+
+	// Log response received
+	logger.Infof("Response received | Status: %d | Duration: %v", resp.StatusCode, time.Since(startTime))
 
 	// Defer response cleanup for success case
 	defer func() {
@@ -187,8 +213,12 @@ func run() error {
 
 	out, err := core.HandleResponse(ctx, cfg, resp, logger.DefaultLogger())
 	if err != nil {
+		logger.Errorf("Response handling failed: %v", err)
 		return fmt.Errorf("failed to handle response: %w", err)
 	}
+
+	// Log completion
+	logger.Infof("Request completed successfully | Total duration: %v", time.Since(startTime))
 
 	// Save response to session if enabled
 	if sess != nil && out != "" {
@@ -272,6 +302,263 @@ func handleSession(cfg *config.Config, inputStr string, isRegeneration bool) (*s
 	return sess, nil
 }
 
+// listModels queries and displays available models for the configured provider
+func listModels(cfg config.Config) error {
+	// Determine provider
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "argo"
+	}
+
+	// Build models endpoint URL
+	var url string
+	if cfg.ProviderURL != "" {
+		// Custom provider URL
+		url = strings.TrimRight(cfg.ProviderURL, "/") + "/models"
+	} else {
+		// Standard provider endpoints
+		switch provider {
+		case "argo":
+			if cfg.ArgoEnv == "prod" {
+				url = "https://apps.inside.anl.gov/argoapi/api/v1/models/"
+			} else {
+				url = "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/"
+			}
+		case "openai":
+			url = "https://api.openai.com/v1/models"
+		case "gemini":
+			url = "https://generativelanguage.googleapis.com/v1beta/models"
+		case "anthropic":
+			url = "https://api.anthropic.com/v1/models"
+		default:
+			return fmt.Errorf("unknown provider: %s", provider)
+		}
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication headers if needed
+	if provider != "argo" && cfg.ProviderURL == "" {
+		// Standard non-Argo providers need API key
+		if cfg.APIKeyFile == "" {
+			return fmt.Errorf("-api-key-file is required for %s provider when listing models", provider)
+		}
+
+		apiKey, err := auth.ReadKeyFile(cfg.APIKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to read API key: %w", err)
+		}
+
+		// Use centralized header setting
+		auth.SetProviderHeaders(req, provider, apiKey)
+
+		// Handle Gemini's special case (API key in URL)
+		if provider == "gemini" {
+			// Gemini uses API key in URL
+			if !strings.Contains(url, "?") {
+				url += "?key=" + apiKey
+			} else {
+				url += "&key=" + apiKey
+			}
+			req.URL, _ = req.URL.Parse(url)
+		}
+	}
+
+	// Make request
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch models: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("failed to fetch models: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read response
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Log the raw response for debugging
+	if err := logger.LogJSON(logger.GetLogDir(), "list_models_response", data); err != nil {
+		logger.Warnf("Failed to log models response: %v", err)
+	}
+
+	// Parse and display models based on provider
+	switch provider {
+	case "argo":
+		return displayArgoModels(data)
+	case "openai":
+		return displayOpenAIModels(data)
+	case "gemini":
+		return displayGeminiModels(data)
+	case "anthropic":
+		return displayAnthropicModels(data)
+	default:
+		// For custom providers, just display raw JSON
+		fmt.Println(string(data))
+		return nil
+	}
+}
+
+// Provider-specific model display functions
+func displayArgoModels(data []byte) error {
+	// Try to parse as array first (old format)
+	var models []string
+	if err := json.Unmarshal(data, &models); err == nil {
+		sort.Strings(models)
+		fmt.Println("Available Argo models:")
+		for _, model := range models {
+			fmt.Printf("  %s\n", model)
+		}
+		return nil
+	}
+
+	// Try to parse as object with models field
+	var response struct {
+		Models []string `json:"models"`
+	}
+	if err := json.Unmarshal(data, &response); err == nil && len(response.Models) > 0 {
+		sort.Strings(response.Models)
+		fmt.Println("Available Argo models:")
+		for _, model := range response.Models {
+			fmt.Printf("  %s\n", model)
+		}
+		return nil
+	}
+
+	// Try to parse as object with data field containing model objects
+	var objectResponse struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+		Models []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &objectResponse); err == nil {
+		if len(objectResponse.Data) > 0 {
+			sort.Slice(objectResponse.Data, func(i, j int) bool {
+				return objectResponse.Data[i].ID < objectResponse.Data[j].ID
+			})
+			fmt.Println("Available Argo models:")
+			for _, model := range objectResponse.Data {
+				if model.Name != "" {
+					fmt.Printf("  %s (%s)\n", model.ID, model.Name)
+				} else {
+					fmt.Printf("  %s\n", model.ID)
+				}
+			}
+			return nil
+		}
+		if len(objectResponse.Models) > 0 {
+			sort.Slice(objectResponse.Models, func(i, j int) bool {
+				return objectResponse.Models[i].ID < objectResponse.Models[j].ID
+			})
+			fmt.Println("Available Argo models:")
+			for _, model := range objectResponse.Models {
+				if model.Name != "" {
+					fmt.Printf("  %s (%s)\n", model.ID, model.Name)
+				} else {
+					fmt.Printf("  %s\n", model.ID)
+				}
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unable to parse Argo models response - check logs for raw response")
+}
+
+func displayOpenAIModels(data []byte) error {
+	var response struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Created int64  `json:"created"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return fmt.Errorf("failed to parse OpenAI models: %w", err)
+	}
+
+	// Sort models by ID
+	sort.Slice(response.Data, func(i, j int) bool {
+		return response.Data[i].ID < response.Data[j].ID
+	})
+
+	fmt.Println("Available OpenAI models:")
+	for _, model := range response.Data {
+		fmt.Printf("  %s\n", model.ID)
+	}
+	return nil
+}
+
+func displayGeminiModels(data []byte) error {
+	var response struct {
+		Models []struct {
+			Name             string   `json:"name"`
+			DisplayName      string   `json:"displayName"`
+			SupportedMethods []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return fmt.Errorf("failed to parse Gemini models: %w", err)
+	}
+
+	// Sort by model ID (extracted from name)
+	sort.Slice(response.Models, func(i, j int) bool {
+		idI := strings.TrimPrefix(response.Models[i].Name, "models/")
+		idJ := strings.TrimPrefix(response.Models[j].Name, "models/")
+		return idI < idJ
+	})
+
+	fmt.Println("Available Gemini models:")
+	for _, model := range response.Models {
+		// Extract model ID from name (format: models/model-id)
+		modelID := strings.TrimPrefix(model.Name, "models/")
+		fmt.Printf("  %s (%s)\n", modelID, model.DisplayName)
+	}
+	return nil
+}
+
+func displayAnthropicModels(data []byte) error {
+	var response struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+			Created     string `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return fmt.Errorf("failed to parse Anthropic models: %w", err)
+	}
+
+	// Sort models by ID
+	sort.Slice(response.Data, func(i, j int) bool {
+		return response.Data[i].ID < response.Data[j].ID
+	})
+
+	fmt.Println("Available Anthropic models:")
+	for _, model := range response.Data {
+		if model.DisplayName != "" {
+			fmt.Printf("  %s (%s)\n", model.ID, model.DisplayName)
+		} else {
+			fmt.Printf("  %s\n", model.ID)
+		}
+	}
+	return nil
+}
+
 func handleResumeOrBranch(resumeID string, inputStr string) (*session.Session, error) {
 	// For -resume, we only accept session IDs (directories), not message IDs
 
@@ -321,7 +608,12 @@ func getActualModel(cfg config.Config) string {
 	if cfg.Embed {
 		return core.DefaultEmbedModel
 	}
-	return core.DefaultChatModel
+	// Get provider-specific default
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "argo"
+	}
+	return core.GetDefaultChatModel(provider)
 }
 
 // getExitCode returns the appropriate exit code for an error

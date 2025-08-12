@@ -221,10 +221,15 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 		for _, block := range anthResp.Content {
 			if block.Type == "tool_use" && block.Name != "" {
 				if len(block.Input) > 0 {
-					// Create a brief summary of parameters
+					// Create a brief summary of parameters with values
 					params := make([]string, 0, len(block.Input))
-					for key := range block.Input {
-						params = append(params, key)
+					for key, value := range block.Input {
+						// Format value as string, truncate if too long
+						valStr := fmt.Sprintf("%v", value)
+						if len(valStr) > 100 {
+							valStr = valStr[:97] + "..."
+						}
+						params = append(params, fmt.Sprintf("%s=%s", key, valStr))
 					}
 					reqLogger.Infof("Tool call: %s (params: %s)", block.Name, strings.Join(params, ", "))
 				} else {
@@ -244,10 +249,35 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Get response writer to access status code
-	if rw, ok := w.(*responseWriter); ok {
+	if rw, ok := w.(*proxyResponseWriter); ok {
 		// Log request completion with model mapping
 		reqLogger.LogRequest(r.Method, r.URL.Path, originalModel, anthReq.Model, provider,
 			len(anthReq.Messages), len(anthReq.Tools), rw.statusCode, false)
+
+		// Log request completion summary
+		if anthResp != nil {
+			// Count tool calls in response
+			toolCallCount := 0
+			if anthResp.Content != nil {
+				for _, block := range anthResp.Content {
+					if block.Type == "tool_use" {
+						toolCallCount++
+					}
+				}
+			}
+
+			// Get token counts
+			inputTokens := 0
+			outputTokens := 0
+			if anthResp.Usage != nil {
+				inputTokens = anthResp.Usage.InputTokens
+				outputTokens = anthResp.Usage.OutputTokens
+			}
+
+			// Log summary
+			reqLogger.Infof("Request completed | Messages: %d | Tool calls: %d | Tokens: %d in, %d out | Duration: %v",
+				len(anthReq.Messages), toolCallCount, inputTokens, outputTokens, reqLogger.GetDuration())
+		}
 	}
 }
 
@@ -290,7 +320,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse("OpenAI", resp.StatusCode, body)
+		s.logErrorResponse(reqLogger, "OpenAI", resp.StatusCode, body)
 		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -349,7 +379,7 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse("Gemini", resp.StatusCode, body)
+		s.logErrorResponse(reqLogger, "Gemini", resp.StatusCode, body)
 		return nil, fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -411,7 +441,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse("Argo", resp.StatusCode, body)
+		s.logErrorResponse(reqLogger, "Argo", resp.StatusCode, body)
 		return nil, fmt.Errorf("argo API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -482,8 +512,8 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		totalChars += len(toolJSON)
 	}
 
-	// Estimate tokens (~4 chars per token)
-	tokens := totalChars / 4
+	// Estimate tokens using the unified function
+	tokens := EstimateTokenCountFromChars(totalChars)
 
 	// Send response
 	resp := AnthropicTokenCountResponse{
@@ -584,9 +614,20 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Log request completion with model mapping
-	if rw, ok := w.(*responseWriter); ok {
+	if rw, ok := w.(*proxyResponseWriter); ok {
 		reqLogger.LogRequest(r.Method, r.URL.Path, originalModel, anthReq.Model, provider,
 			len(anthReq.Messages), len(anthReq.Tools), rw.statusCode, true)
+
+		// Log request completion summary for streaming
+		if handler != nil && handler.state != nil {
+			toolCallCount := len(handler.state.ToolCalls)
+			inputTokens := handler.state.InputTokens
+			outputTokens := handler.state.OutputTokens
+
+			// Log summary
+			reqLogger.Infof("Request completed | Messages: %d | Tool calls: %d | Tokens: %d in, %d out | Duration: %v",
+				len(anthReq.Messages), toolCallCount, inputTokens, outputTokens, reqLogger.GetDuration())
+		}
 	}
 }
 
@@ -638,7 +679,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse("OpenAI Streaming", resp.StatusCode, body)
+		s.logErrorResponse(reqLogger, "OpenAI Streaming", resp.StatusCode, body)
 		return fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -690,7 +731,7 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse("Gemini Streaming", resp.StatusCode, body)
+		s.logErrorResponse(reqLogger, "Gemini Streaming", resp.StatusCode, body)
 		return fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -791,7 +832,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 			// Check status
 			if result.resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(result.resp.Body)
-				s.logErrorResponse("Argo Streaming", result.resp.StatusCode, body)
+				s.logErrorResponse(reqLogger, "Argo Streaming", result.resp.StatusCode, body)
 				return fmt.Errorf("argo API error (status %d): %s", result.resp.StatusCode, string(body))
 			}
 
@@ -979,10 +1020,15 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 
 	// Log tool call at INFO level with parameters
 	if len(block.Input) > 0 {
-		// Create a brief summary of parameters
+		// Create a brief summary of parameters with values
 		params := make([]string, 0, len(block.Input))
-		for key := range block.Input {
-			params = append(params, key)
+		for key, value := range block.Input {
+			// Format value as string, truncate if too long
+			valStr := fmt.Sprintf("%v", value)
+			if len(valStr) > 100 {
+				valStr = valStr[:97] + "..."
+			}
+			params = append(params, fmt.Sprintf("%s=%s", key, valStr))
 		}
 		reqLogger.Infof("Tool call: %s (params: %s)", block.Name, strings.Join(params, ", "))
 	} else {
@@ -1075,13 +1121,13 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 
 // sendError sends an error response
 // logErrorResponse logs error responses from providers, attempting to parse as JSON
-func (s *Server) logErrorResponse(provider string, statusCode int, body []byte) {
+func (s *Server) logErrorResponse(reqLogger *RequestScopedLogger, provider string, statusCode int, body []byte) {
 	// Try to parse as JSON for better logging
 	var errorData interface{}
 	if err := json.Unmarshal(body, &errorData); err == nil {
-		LogJSON(fmt.Sprintf("%s Error Response (status %d)", provider, statusCode), errorData)
+		reqLogger.LogJSON(fmt.Sprintf("%s Error Response (status %d)", provider, statusCode), errorData)
 	} else {
-		logger.Debugf("%s Error Response (status %d, raw): %s", provider, statusCode, string(body))
+		reqLogger.Debugf("%s Error Response (status %d, raw): %s", provider, statusCode, string(body))
 	}
 }
 

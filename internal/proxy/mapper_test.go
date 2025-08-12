@@ -17,8 +17,7 @@ func TestModelMapper(t *testing.T) {
 			config: &Config{
 				Provider:     "openai",
 				SmallModel:   "gpt-4o-mini",
-				BigModel:     "gpt-4o",
-				OpenAIModels: []string{"gpt-4o", "gpt-4o-mini"},
+				Model:        "gpt-4o",
 				OpenAIAPIKey: "test-key",
 			},
 			inputModel:       "claude-3-haiku-20240307",
@@ -26,12 +25,11 @@ func TestModelMapper(t *testing.T) {
 			expectedModel:    "gpt-4o-mini",
 		},
 		{
-			name: "sonnet maps to big model",
+			name: "sonnet maps to model",
 			config: &Config{
 				Provider:     "openai",
 				SmallModel:   "gpt-4o-mini",
-				BigModel:     "gpt-4o",
-				OpenAIModels: []string{"gpt-4o", "gpt-4o-mini"},
+				Model:        "gpt-4o",
 				OpenAIAPIKey: "test-key",
 			},
 			inputModel:       "claude-3-sonnet-20240229",
@@ -43,8 +41,7 @@ func TestModelMapper(t *testing.T) {
 			config: &Config{
 				Provider:     "google",
 				SmallModel:   "gemini-2.0-flash",
-				BigModel:     "gemini-2.5-pro-preview-03-25",
-				GeminiModels: []string{"gemini-2.0-flash", "gemini-2.5-pro-preview-03-25"},
+				Model:        "gemini-2.5-pro-preview-03-25",
 				GeminiAPIKey: "test-key",
 			},
 			inputModel:       "claude-3-haiku",
@@ -56,8 +53,7 @@ func TestModelMapper(t *testing.T) {
 			config: &Config{
 				Provider:   "argo",
 				SmallModel: "gemini25flash",
-				BigModel:   "claudesonnet4",
-				ArgoModels: []string{"gemini25flash", "claudesonnet4"},
+				Model:      "claudesonnet4",
 				ArgoUser:   "testuser",
 			},
 			inputModel:       "claude-3-sonnet",
@@ -68,7 +64,6 @@ func TestModelMapper(t *testing.T) {
 			name: "direct openai model",
 			config: &Config{
 				Provider:     "google",
-				OpenAIModels: []string{"gpt-4o", "gpt-4o-mini"},
 				OpenAIAPIKey: "test-key",
 			},
 			inputModel:       "gpt-4o",
@@ -79,7 +74,6 @@ func TestModelMapper(t *testing.T) {
 			name: "direct gemini model",
 			config: &Config{
 				Provider:     "openai",
-				GeminiModels: []string{"gemini-2.0-flash"},
 				GeminiAPIKey: "test-key",
 			},
 			inputModel:       "gemini-2.0-flash",
@@ -90,7 +84,6 @@ func TestModelMapper(t *testing.T) {
 			name: "remove provider prefix",
 			config: &Config{
 				Provider:     "openai",
-				OpenAIModels: []string{"gpt-4o"},
 				OpenAIAPIKey: "test-key",
 			},
 			inputModel:       "openai/gpt-4o",
@@ -111,8 +104,7 @@ func TestModelMapper(t *testing.T) {
 			name: "anthropic prefix removal",
 			config: &Config{
 				Provider:     "openai",
-				BigModel:     "gpt-4o",
-				OpenAIModels: []string{"gpt-4o"},
+				Model:        "gpt-4o",
 				OpenAIAPIKey: "test-key",
 			},
 			inputModel:       "anthropic/claude-3-sonnet",

@@ -96,54 +96,33 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 	// Convert messages - handle content based on provider
 	for _, msg := range req.Messages {
 		// Check if content is already an array
-		var content interface{}
-
-		// Try to unmarshal as array first
 		var contentArray []AnthropicContentBlock
 		if err := json.Unmarshal(msg.Content, &contentArray); err == nil {
-			// For OpenAI models, we need to convert tool blocks
-			if provider == "openai" {
-				// Handle different message types
-				if msg.Role == RoleUser {
-					// User messages with tool_result blocks
-					for _, block := range contentArray {
-						if block.Type == "tool_result" {
-							// Convert tool_result to OpenAI tool message format
-							toolMsg := ArgoMessage{
-								Role:       "tool",
-								ToolCallID: block.ToolUseID,
-							}
-							// Extract content from the tool result
-							var toolContent interface{}
-							if err := json.Unmarshal(block.Content, &toolContent); err == nil {
-								if contentStr, ok := toolContent.(string); ok {
-									toolMsg.Content = contentStr
-								} else {
-									toolMsg.Content = string(block.Content)
-								}
-							} else {
-								toolMsg.Content = string(block.Content)
-							}
-							messages = append(messages, toolMsg)
-						} else {
-							// For other block types in user messages, preserve as is
-							content = contentArray
-						}
-					}
-					// If we processed tool_result blocks, skip adding the original message
-					if content == nil {
-						continue
-					}
-				} else if msg.Role == RoleAssistant {
-					// Assistant messages with tool_use blocks
-					var textContent string
-					var toolCalls []ToolCall
+			// Check if there are any tool-related blocks
+			hasToolBlocks := false
+			for _, block := range contentArray {
+				if block.Type == "tool_use" || block.Type == "tool_result" {
+					hasToolBlocks = true
+					break
+				}
+			}
 
-					for _, block := range contentArray {
-						switch block.Type {
-						case "text":
-							textContent = block.Text
-						case "tool_use":
+			// For OpenAI models with tool blocks, we need special conversion
+			if provider == "openai" && hasToolBlocks {
+				// Process each block in the message
+				var textContent string
+				var hasText bool
+				var toolCalls []ToolCall
+
+				for _, block := range contentArray {
+					switch block.Type {
+					case "text":
+						textContent += block.Text
+						hasText = true
+
+					case "tool_use":
+						// Only process tool_use in assistant messages
+						if msg.Role == RoleAssistant {
 							// Convert to OpenAI tool call format
 							toolCall := ToolCall{
 								ID:   block.ID,
@@ -160,46 +139,71 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 							}
 							toolCalls = append(toolCalls, toolCall)
 						}
-					}
 
-					// Create the assistant message with tool calls
-					if len(toolCalls) > 0 {
-						messages = append(messages, ArgoMessage{
-							Role:      string(msg.Role),
-							Content:   textContent, // OpenAI allows text content with tool calls
-							ToolCalls: toolCalls,
-						})
-						continue // Skip the normal message addition
-					} else {
-						// No tool calls, treat as normal text
-						content = textContent
+					case "tool_result":
+						// Convert tool_result to separate OpenAI tool message
+						toolMsg := ArgoMessage{
+							Role:       "tool",
+							ToolCallID: block.ToolUseID,
+						}
+						// Extract content from the tool result
+						var toolContent interface{}
+						if err := json.Unmarshal(block.Content, &toolContent); err == nil {
+							if contentStr, ok := toolContent.(string); ok {
+								toolMsg.Content = contentStr
+							} else {
+								toolMsg.Content = string(block.Content)
+							}
+						} else {
+							toolMsg.Content = string(block.Content)
+						}
+						messages = append(messages, toolMsg)
 					}
 				}
+
+				// Add the message with text and/or tool calls if applicable
+				if msg.Role == RoleAssistant && len(toolCalls) > 0 {
+					// Assistant message with tool calls
+					messages = append(messages, ArgoMessage{
+						Role:      string(msg.Role),
+						Content:   textContent, // OpenAI allows text content with tool calls
+						ToolCalls: toolCalls,
+					})
+				} else if hasText {
+					// Message with text content
+					messages = append(messages, ArgoMessage{
+						Role:    string(msg.Role),
+						Content: textContent,
+					})
+				}
+				// If only tool_result blocks were processed, they were already added as separate messages
+
 			} else {
-				// For non-OpenAI providers, preserve array as is
-				content = contentArray
+				// For non-OpenAI providers or OpenAI without tool blocks, preserve array as is
+				messages = append(messages, ArgoMessage{
+					Role:    string(msg.Role),
+					Content: contentArray,
+				})
 			}
 		} else {
 			// Try as string
 			var contentStr string
 			if err := json.Unmarshal(msg.Content, &contentStr); err == nil {
-				content = contentStr
+				messages = append(messages, ArgoMessage{
+					Role:    string(msg.Role),
+					Content: contentStr,
+				})
 			} else {
 				// Fallback to extracting text
 				text, err := c.extractTextFromAnthropicMessage(msg)
 				if err != nil {
 					return nil, fmt.Errorf("failed to extract text from message: %w", err)
 				}
-				content = text
+				messages = append(messages, ArgoMessage{
+					Role:    string(msg.Role),
+					Content: text,
+				})
 			}
-		}
-
-		// Only add message if we have content
-		if content != nil {
-			messages = append(messages, ArgoMessage{
-				Role:    string(msg.Role),
-				Content: content,
-			})
 		}
 	}
 
@@ -513,8 +517,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			},
 			StopReason: "end_turn",
 			Usage: &AnthropicUsage{
-				InputTokens:  len(r) / 4,
-				OutputTokens: len(r) / 4,
+				InputTokens:  EstimateTokenCount(r),
+				OutputTokens: EstimateTokenCount(r),
 			},
 		}
 
@@ -658,8 +662,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			},
 			StopReason: "end_turn",
 			Usage: &AnthropicUsage{
-				InputTokens:  len(text) / 4,
-				OutputTokens: len(text) / 4,
+				InputTokens:  EstimateTokenCount(text),
+				OutputTokens: EstimateTokenCount(text),
 			},
 		}
 	}

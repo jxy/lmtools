@@ -31,7 +31,7 @@ func TestLoggingIntegration(t *testing.T) {
 
 	// Test 1: Embedding request with logging
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "testuser", "-e", "-m", "v3large",  "-env", ms.URL(), "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-e", "-model", "v3large",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
 		"Test message for embedding")
 
 	if err != nil {
@@ -83,7 +83,7 @@ func TestLoggingIntegration(t *testing.T) {
 
 	// Test 2: Chat request with logging
 	stdout, stderr, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "testuser", "-m", "gpt4o",  "-env", ms.URL(), "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
 		"Test chat message")
 
 	if err != nil {
@@ -183,7 +183,7 @@ func TestConcurrentLogging(t *testing.T) {
 	for i := 0; i < numProcesses; i++ {
 		go func(id int) {
 			_, stderr, err := runLmcCommand(t, lmcBin,
-				[]string{"-u", "testuser", "-e",  "-env", ms.URL(), "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "testuser", "-e",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
 				"Concurrent test message")
 			if err != nil {
 				t.Logf("Process %d failed: %v, stderr: %s", id, err, stderr)

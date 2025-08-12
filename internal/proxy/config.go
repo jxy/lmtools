@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"lmtools/internal/core"
 	"strings"
 )
 
@@ -19,13 +20,8 @@ type Config struct {
 	// Provider Configuration
 	Provider    string
 	ProviderURL string
-	BigModel    string
+	Model       string
 	SmallModel  string
-
-	// Model Lists
-	OpenAIModels []string
-	GeminiModels []string
-	ArgoModels   []string
 
 	// Security Configuration
 	MaxRequestBodySize  int64 // Maximum request body size in bytes
@@ -41,24 +37,27 @@ type Config struct {
 }
 
 // ApplyDynamicModelDefaults applies provider-specific model defaults
-// when the user hasn't changed the default model values
+// when the user hasn't specified models
 func (c *Config) ApplyDynamicModelDefaults() {
-	// If user hasn't changed the defaults, set provider-specific defaults
-	if c.BigModel == "claudeopus4" && c.SmallModel == "claudesonnet4" {
-		switch c.Provider {
-		case "openai":
-			c.BigModel = "o3-mini"
-			c.SmallModel = "gpt-4o-mini"
-		case "google":
-			c.BigModel = "gemini-2.5-pro-preview-03-25"
-			c.SmallModel = "gemini-2.0-flash"
-			// case "argo": keep the current defaults
-		}
+	// Normalize provider name
+	provider := strings.ToLower(c.Provider)
+	if provider == "google" {
+		provider = "gemini"
+	}
+
+	// If Model not specified, use provider-specific default
+	if c.Model == "" {
+		c.Model = core.GetDefaultChatModel(provider)
+	}
+
+	// If SmallModel not specified or still has old default, use provider-specific default
+	if c.SmallModel == "" || c.SmallModel == "claudesonnet4" {
+		c.SmallModel = core.GetDefaultSmallModel(provider)
 	}
 }
 
-// InitializeModelLists initializes the model lists for each provider
-func (c *Config) InitializeModelLists() {
+// InitializeURLs initializes the API URLs for each provider
+func (c *Config) InitializeURLs() {
 	// Normalize provider name
 	c.Provider = strings.ToLower(c.Provider)
 
@@ -93,60 +92,8 @@ func (c *Config) InitializeModelLists() {
 		}
 	}
 
-	// Define supported models
-	// MODEL LIST MAINTENANCE:
-	// - Update these lists when new models are released by providers
-	// - Official model names can be found at:
-	//   OpenAI: https://platform.openai.com/docs/models
-	//   Gemini: https://ai.google.dev/gemini-api/docs/models
-	//   Argo: Internal documentation
-	// - Test new models with the proxy before adding to ensure compatibility
-	// - Keep deprecated models for backward compatibility unless officially removed
-	// Last updated: 2025-08-11 (added gpt5, gpt5mini, gpt5nano)
-	c.OpenAIModels = []string{
-		"o3-mini",
-		"o1",
-		"o1-mini",
-		"o1-pro",
-		"gpt-4.5-preview",
-		"gpt-4o",
-		"gpt-4o-audio-preview",
-		"chatgpt-4o-latest",
-		"gpt-4o-mini",
-		"gpt-4o-mini-audio-preview",
-		"gpt-4.1",
-		"gpt-4.1-mini",
-	}
-	c.GeminiModels = []string{
-		"gemini-2.5-pro-preview-03-25",
-		"gemini-2.0-flash",
-	}
-	c.ArgoModels = []string{
-		"gpt35",
-		"gpt35large",
-		"gpt4",
-		"gpt4large",
-		"gpt4turbo",
-		"gpt4o",
-		"gpt4olatest",
-		"gpto1mini",
-		"gpto3mini",
-		"gpto1",
-		"gpto3",
-		"gpto4mini",
-		"gpt41",
-		"gpt41mini",
-		"gpt41nano",
-		"gpt5",
-		"gpt5mini",
-		"gpt5nano",
-		"gemini25pro",
-		"gemini25flash",
-		"claudeopus4",
-		"claudesonnet4",
-		"claudesonnet37",
-		"claudesonnet35v2",
-	}
+	// No longer maintaining hardcoded model lists
+	// Models are queried dynamically from provider APIs
 }
 
 // Validate checks if the configuration is valid
@@ -165,69 +112,24 @@ func (c *Config) Validate() error {
 			c.Provider, strings.Join(validProviders, ", "))
 	}
 
-	// Check if required API keys are present based on configuration
-	if c.Provider == "openai" && c.OpenAIAPIKey == "" {
-		return fmt.Errorf("-openai-api-key-file is required when -provider is 'openai'")
-	}
-	if c.Provider == "google" && c.GeminiAPIKey == "" {
-		return fmt.Errorf("-gemini-api-key-file is required when -provider is 'google'")
-	}
-	if c.Provider == "argo" && c.ArgoUser == "" {
-		return fmt.Errorf("-argo-user is required when -provider is 'argo'")
-	}
-
-	// Check if models exist in their respective lists
-	if c.isOpenAIModel(c.BigModel) && c.OpenAIAPIKey == "" {
-		return fmt.Errorf("-openai-api-key-file is required when -big-model is an OpenAI model")
-	}
-	if c.isGeminiModel(c.BigModel) && c.GeminiAPIKey == "" {
-		return fmt.Errorf("-gemini-api-key-file is required when -big-model is a Gemini model")
-	}
-	if c.isArgoModel(c.BigModel) && c.ArgoUser == "" {
-		return fmt.Errorf("-argo-user is required when -big-model is an Argo model")
-	}
-
-	if c.isOpenAIModel(c.SmallModel) && c.OpenAIAPIKey == "" {
-		return fmt.Errorf("-openai-api-key-file is required when -small-model is an OpenAI model")
-	}
-	if c.isGeminiModel(c.SmallModel) && c.GeminiAPIKey == "" {
-		return fmt.Errorf("-gemini-api-key-file is required when -small-model is a Gemini model")
-	}
-	if c.isArgoModel(c.SmallModel) && c.ArgoUser == "" {
-		return fmt.Errorf("-argo-user is required when -small-model is an Argo model")
+	// Check if required credentials are present based on the selected provider
+	// With the unified -api-key-file flag, we only need the key for the selected provider
+	switch c.Provider {
+	case "openai":
+		if c.OpenAIAPIKey == "" && c.ProviderURL == "" {
+			return fmt.Errorf("-api-key-file is required when -provider is 'openai' (unless using -provider-url)")
+		}
+	case "google":
+		if c.GeminiAPIKey == "" && c.ProviderURL == "" {
+			return fmt.Errorf("-api-key-file is required when -provider is 'google' (unless using -provider-url)")
+		}
+	case "argo":
+		if c.ArgoUser == "" {
+			return fmt.Errorf("-argo-user is required when -provider is 'argo'")
+		}
 	}
 
 	return nil
-}
-
-// isOpenAIModel checks if a model is in the OpenAI models list
-func (c *Config) isOpenAIModel(model string) bool {
-	for _, m := range c.OpenAIModels {
-		if m == model {
-			return true
-		}
-	}
-	return false
-}
-
-// isGeminiModel checks if a model is in the Gemini models list
-func (c *Config) isGeminiModel(model string) bool {
-	for _, m := range c.GeminiModels {
-		if m == model {
-			return true
-		}
-	}
-	return false
-}
-
-// isArgoModel checks if a model is in the Argo models list
-func (c *Config) isArgoModel(model string) bool {
-	for _, m := range c.ArgoModels {
-		if m == model {
-			return true
-		}
-	}
-	return false
 }
 
 // GetArgoURL returns the full Argo URL for the given endpoint

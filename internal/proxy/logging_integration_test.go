@@ -97,8 +97,7 @@ func TestLoggingWithModelMapping(t *testing.T) {
 	config := &Config{
 		ArgoBaseURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
-		ArgoModels:         []string{"gpto3"},
-		BigModel:           "gpto3",
+		Model:              "gpto3",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -160,8 +159,7 @@ func TestStreamingRequestLogging(t *testing.T) {
 	config := &Config{
 		ArgoBaseURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
-		ArgoModels:         []string{"gpto3"},
-		BigModel:           "gpto3",
+		Model:              "gpto3",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -231,8 +229,7 @@ func TestConcurrentRequestLogging(t *testing.T) {
 	config := &Config{
 		ArgoBaseURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
-		ArgoModels:         []string{"gpto3"},
-		BigModel:           "gpto3",
+		Model:              "gpto3",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -316,8 +313,7 @@ func TestRequestDurationLogging(t *testing.T) {
 	config := &Config{
 		ArgoBaseURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
-		ArgoModels:         []string{"gpto3"},
-		BigModel:           "gpto3",
+		Model:              "gpto3",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -396,8 +392,7 @@ func TestPingIntervalLogging(t *testing.T) {
 	config := &Config{
 		ArgoBaseURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
-		ArgoModels:         []string{"gpto3"},
-		BigModel:           "gpto3",
+		Model:              "gpto3",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 

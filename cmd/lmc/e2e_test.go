@@ -163,7 +163,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 	
 	// Test 1: Create new session
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "alice", "-m", "gpt4o",  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "alice", "-model", "gpt4o",  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Hello, this is my first message")
 	
 	if err != nil {
@@ -176,7 +176,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 	
 	// Get session ID using -show-sessions
 	stdout, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "alice", "-show-sessions", "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "alice", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -201,7 +201,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 	
 	// Test 2: Resume session
 	stdout, stderr, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "alice", "-m", "gpt4o", "-resume", sessionID,  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "alice", "-model", "gpt4o", "-resume", sessionID,  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"What's the weather like?")
 	
 	if err != nil {
@@ -214,7 +214,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 	
 	// Test 3: Show conversation
 	stdout, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "alice", "-show", sessionID, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "alice", "-show", sessionID, "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -245,7 +245,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 	
 	// Create initial conversation
 	_, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "bob", "-m", "gpt4o",  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-model", "gpt4o",  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Initial message")
 	
 	if err != nil {
@@ -254,7 +254,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 	
 	// Get session ID using -show-sessions
 	stdout, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "bob", "-show-sessions", "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -272,7 +272,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 	
 	// Add second message
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "bob", "-m", "gpt4o", "-resume", sessionID,  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-model", "gpt4o", "-resume", sessionID,  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Second message")
 	
 	if err != nil {
@@ -281,7 +281,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 	
 	// Branch from first message
 	stdout, stderr, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "bob", "-m", "gpt4o", "-branch", sessionID + "/0001",  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-model", "gpt4o", "-branch", sessionID + "/0001",  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Alternative second message")
 	
 	if err != nil {
@@ -295,7 +295,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 	
 	// Show sessions to see the tree
 	stdout, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "bob", "-show-sessions", "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -313,7 +313,7 @@ func TestE2E_EmbeddingMode(t *testing.T) {
 	server := newE2ETestServer(t)
 	
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "charlie", "-m", "v3large", "-e",  "-env", server.URL},
+		[]string{"-argo-user", "charlie", "-model", "v3large", "-e",  "-argo-env", server.URL},
 		"Generate an embedding for this text")
 	
 	if err != nil {
@@ -348,7 +348,7 @@ func TestE2E_StreamingMode(t *testing.T) {
 	server := newE2ETestServer(t)
 	
 	// Use exec.Command directly to capture streaming output
-	cmd := exec.Command(lmcBin, "-u", "dave", "-m", "gpt4o",  "-stream",  "-env", server.URL)
+	cmd := exec.Command(lmcBin, "-argo-user", "dave", "-model", "gpt4o",  "-stream",  "-argo-env", server.URL)
 	cmd.Stdin = strings.NewReader("Test streaming response")
 	
 	output, err := cmd.CombinedOutput()
@@ -373,7 +373,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 	
 	// Create a session
 	_, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "eve", "-m", "gpt4o",  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "eve", "-model", "gpt4o",  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Message to be deleted")
 	
 	if err != nil {
@@ -382,7 +382,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 	
 	// Get session ID using -show-sessions
 	stdout, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "eve", "-show-sessions", "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "eve", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -400,7 +400,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 	
 	// Verify session exists
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "eve", "-show", sessionID, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "eve", "-show", sessionID, "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -409,7 +409,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 	
 	// Delete the session
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "eve", "-delete", sessionID, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "eve", "-delete", sessionID, "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -418,7 +418,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 	
 	// Verify session is gone
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "eve", "-show", sessionID, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "eve", "-show", sessionID, "-sessions-dir", sessionsDir},
 		"")
 	
 	if err == nil {
@@ -436,7 +436,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 	
 	// Create initial session
 	_, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "frank", "-m", "gpt4o",  "-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "frank", "-model", "gpt4o",  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Start concurrent test")
 	
 	if err != nil {
@@ -445,7 +445,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 	
 	// Get session ID using -show-sessions
 	stdout, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-u", "frank", "-show-sessions", "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "frank", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {
@@ -468,7 +468,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		go func(id int) {
 			_, _, err := runLmcCommand(t, lmcBin,
-				[]string{"-u", "frank", "-m", "gpt4o", "-resume", sessionID,  "-env", server.URL, "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "frank", "-model", "gpt4o", "-resume", sessionID,  "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 				fmt.Sprintf("Concurrent message %d", id))
 			if err != nil {
 				errors <- err
@@ -490,7 +490,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 	
 	// Verify all messages were added
 	stdout, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-u", "frank", "-show", sessionID, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "frank", "-show", sessionID, "-sessions-dir", sessionsDir},
 		"")
 	
 	if err != nil {

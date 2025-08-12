@@ -37,7 +37,7 @@ func TestModelRecordingInSessions(t *testing.T) {
 		{
 			name:          "chat without model flag uses default",
 			modelFlag:     "",
-			expectedModel: "gemini25pro",
+			expectedModel: "gpt5", // Default for argo provider
 			embedMode:     false,
 		},
 		{
@@ -55,13 +55,13 @@ func TestModelRecordingInSessions(t *testing.T) {
 
 			// Build command arguments
 			args := []string{
-				"-u", "testuser",
-				"-env", ms.URL(),
+				"-argo-user", "testuser",
+				"-argo-env", ms.URL(),
 				"-sessions-dir", sessionsDir,
 			}
 
 			if tt.modelFlag != "" {
-				args = append(args, "-m", tt.modelFlag)
+				args = append(args, "-model", tt.modelFlag)
 			}
 
 			if tt.embedMode {

@@ -19,10 +19,10 @@ func TestMockServer_BasicChat(t *testing.T) {
 
 	// Create config pointing to mock server
 	cfg := config.Config{
-		User:    "testuser",
-		Model:   "gpt4o",
-		Env:     mock.URL(),
-		Timeout: 5 * time.Second,
+		ArgoUser: "testuser",
+		Model:    "gpt4o",
+		ArgoEnv:  mock.URL(),
+		Timeout:  5 * time.Second,
 	}
 
 	// Make a chat request
@@ -67,11 +67,11 @@ func TestMockServer_Embedding(t *testing.T) {
 	defer mock.Close()
 
 	cfg := config.Config{
-		User:    "testuser",
-		Model:   "v3large",
-		Embed:   true,
-		Env:     mock.URL(),
-		Timeout: 5 * time.Second,
+		ArgoUser: "testuser",
+		Model:    "v3large",
+		Embed:    true,
+		ArgoEnv:  mock.URL(),
+		Timeout:  5 * time.Second,
 	}
 
 	req, _, err := core.BuildRequest(cfg, "Test embedding")
@@ -120,10 +120,10 @@ func TestMockServer_StreamChat(t *testing.T) {
 	defer mock.Close()
 
 	cfg := config.Config{
-		User:       "testuser",
+		ArgoUser:   "testuser",
 		Model:      "gpt4o",
 		StreamChat: true,
-		Env:        mock.URL(),
+		ArgoEnv:    mock.URL(),
 		Timeout:    5 * time.Second,
 	}
 
@@ -173,10 +173,10 @@ func TestMockServer_CustomResponse(t *testing.T) {
 	defer mock.Close()
 
 	cfg := config.Config{
-		User:    "testuser",
-		Model:   "gpt4o",
-		Env:     mock.URL(),
-		Timeout: 5 * time.Second,
+		ArgoUser: "testuser",
+		Model:    "gpt4o",
+		ArgoEnv:  mock.URL(),
+		Timeout:  5 * time.Second,
 	}
 
 	req, _, err := core.BuildRequest(cfg, "Hello custom")
@@ -214,10 +214,10 @@ func TestMockServer_ErrorSimulation(t *testing.T) {
 	mock.SimulateError(500, "Internal server error")
 
 	cfg := config.Config{
-		User:    "testuser",
-		Model:   "gpt4o",
-		Env:     mock.URL(),
-		Timeout: 5 * time.Second,
+		ArgoUser: "testuser",
+		Model:    "gpt4o",
+		ArgoEnv:  mock.URL(),
+		Timeout:  5 * time.Second,
 	}
 
 	req, _, err := core.BuildRequest(cfg, "This should fail")
@@ -242,11 +242,11 @@ func TestMockServer_RequestCapture(t *testing.T) {
 	defer mock.Close()
 
 	cfg := config.Config{
-		User:    "testuser",
-		Model:   "gpt4o",
-		System:  "You are a helpful assistant",
-		Env:     mock.URL(),
-		Timeout: 5 * time.Second,
+		ArgoUser: "testuser",
+		Model:    "gpt4o",
+		System:   "You are a helpful assistant",
+		ArgoEnv:  mock.URL(),
+		Timeout:  5 * time.Second,
 	}
 
 	// Make multiple requests

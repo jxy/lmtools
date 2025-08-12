@@ -513,7 +513,7 @@ func (p *OpenAIStreamParser) processChunk(chunk map[string]interface{}) error {
 		if err := p.handler.SendTextDelta(content); err != nil {
 			return err
 		}
-		p.handler.state.OutputTokens += len(content) / 4 // Rough estimate
+		p.handler.state.OutputTokens += EstimateTokenCount(content)
 	}
 
 	// Handle tool calls
@@ -644,7 +644,7 @@ func (p *GeminiStreamParser) processChunk(chunk map[string]interface{}) error {
 			if err := p.handler.SendTextDelta(text); err != nil {
 				return err
 			}
-			p.handler.state.OutputTokens += len(text) / 4
+			p.handler.state.OutputTokens += EstimateTokenCount(text)
 		}
 
 		// Handle function calls
@@ -757,7 +757,7 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 				}
 				return err
 			}
-			p.handler.state.OutputTokens += len(text) / 4
+			p.handler.state.OutputTokens += EstimateTokenCount(text)
 
 		case err := <-errChan:
 			if err == io.EOF {

@@ -19,9 +19,9 @@ type Config struct {
 	Model          string        // model to use
 	Embed          bool          // whether to run in embed mode
 	StreamChat     bool          // whether to use streaming chat mode
-	User           string        // user identifier
+	ArgoUser       string        // user identifier (required for Argo provider only)
 	System         string        // system prompt for chat
-	Env            string        // environment (prod|dev|custom base URL)
+	ArgoEnv        string        // environment (prod|dev|custom base URL)
 	Timeout        time.Duration // HTTP request timeout
 	Retries        int           // number of retry attempts
 	Resume         string        // session ID or path to continue
@@ -32,6 +32,12 @@ type Config struct {
 	Show           string        // show session or message by ID/path
 	SessionsDir    string        // custom sessions directory
 	SkipFlockCheck bool          // skip file locking check
+
+	// Provider support
+	Provider    string // provider: argo (default), openai, gemini, anthropic
+	ProviderURL string // custom provider API endpoint
+	APIKeyFile  string // path to API key file (required for non-Argo providers)
+	ListModels  bool   // list available models from provider
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -45,10 +51,8 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	// Model Options
-	fs.StringVar(&cfg.Model, "m", "", fmt.Sprintf("model to use (default: %q for chat, %q for embed)\n\t\tChat models: %s\n\t\tEmbed models: %s",
-		core.DefaultChatModel, core.DefaultEmbedModel,
-		strings.Join(core.ChatModels, ", "),
-		strings.Join(core.EmbedModels, ", ")))
+	fs.StringVar(&cfg.Model, "model", "", fmt.Sprintf("model to use (default varies by provider, %q for embed)",
+		core.DefaultEmbedModel))
 	fs.BoolVar(&cfg.Embed, "e", false, "enable embed mode instead of chat")
 
 	// Chat Options
@@ -56,9 +60,15 @@ func ParseFlags(args []string) (Config, error) {
 	fs.StringVar(&cfg.System, "s", "You are a brilliant assistant.", "system prompt for chat mode")
 
 	// Configuration
-	fs.StringVar(&cfg.Env, "env", "dev", "environment: prod, dev, or custom base URL")
-	fs.StringVar(&cfg.User, "u", getDefaultUser(), "user identifier")
+	fs.StringVar(&cfg.ArgoEnv, "argo-env", "dev", "environment: prod, dev, or custom base URL")
+	fs.StringVar(&cfg.ArgoUser, "argo-user", getDefaultUser(), "user identifier (required for Argo provider)")
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
+
+	// Provider support
+	fs.StringVar(&cfg.Provider, "provider", "argo", "provider: argo, openai, gemini, anthropic")
+	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "custom provider API endpoint")
+	fs.StringVar(&cfg.APIKeyFile, "api-key-file", "", "path to API key file (required for non-Argo providers)")
+	fs.BoolVar(&cfg.ListModels, "list-models", false, "list available models from provider")
 
 	// Retry configuration
 	fs.IntVar(&cfg.Retries, "retries", 3, "number of retry attempts for failed requests")
@@ -96,9 +106,9 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	// Validate environment
-	if !IsValidEnvironment(cfg.Env) {
-		return cfg, fmt.Errorf("invalid env: %q, must be one of: %s, or a custom URL (http://... or https://...)",
-			cfg.Env, strings.Join(Environments, ", "))
+	if !IsValidEnvironment(cfg.ArgoEnv) {
+		return cfg, fmt.Errorf("invalid argo-env: %q, must be one of: %s, or a custom URL (http://... or https://...)",
+			cfg.ArgoEnv, strings.Join(Environments, ", "))
 	}
 
 	// Check invalid flag combinations
@@ -132,9 +142,42 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, fmt.Errorf("invalid flag combination: -no-session cannot be used with -resume or -branch")
 	}
 
-	// Validate user is provided (except for show-sessions, delete, and show)
-	if cfg.User == "" && !cfg.ShowSessions && cfg.Delete == "" && cfg.Show == "" {
-		return cfg, fmt.Errorf("user identifier (-u) is required")
+	// Provider-specific validation
+	// Normalize provider to lowercase
+	cfg.Provider = strings.ToLower(cfg.Provider)
+
+	// Validate provider
+	validProviders := []string{"argo", "openai", "gemini", "anthropic"}
+	isValidProvider := false
+	for _, p := range validProviders {
+		if cfg.Provider == p {
+			isValidProvider = true
+			break
+		}
+	}
+	if !isValidProvider && cfg.Provider != "" {
+		return cfg, fmt.Errorf("invalid provider: %q, must be one of: %s",
+			cfg.Provider, strings.Join(validProviders, ", "))
+	}
+
+	// Default to argo if not specified
+	if cfg.Provider == "" {
+		cfg.Provider = "argo"
+	}
+
+	// Provider-specific authentication requirements
+	if cfg.Provider == "argo" {
+		// Argo requires user identifier (except for show-sessions, delete, show, and list-models)
+		if cfg.ArgoUser == "" && !cfg.ShowSessions && cfg.Delete == "" && cfg.Show == "" && !cfg.ListModels {
+			return cfg, fmt.Errorf("user identifier (-argo-user) is required for Argo provider")
+		}
+	} else {
+		// For non-Argo providers using standard endpoints (no custom URL), require API key file
+		if cfg.ProviderURL == "" && cfg.APIKeyFile == "" && !cfg.ShowSessions && cfg.Delete == "" && cfg.Show == "" && !cfg.ListModels {
+			return cfg, fmt.Errorf("-api-key-file is required for %s provider when not using custom -provider-url", cfg.Provider)
+		}
+		// For custom provider URLs, API key is optional (might be an internal service)
+		// For non-Argo providers, if no user is specified, we'll use a hash of the API key later
 	}
 
 	return cfg, nil
@@ -147,9 +190,9 @@ func printUsage() {
 lmc is a command-line interface for AI model interactions.
 
 Model Options:
-  -m string      Model to use (default: %q for chat, %q for embed)
-                 Chat models: %s
-                 Embed models: %s
+  -model string  Model to use (default varies by provider: gpt5 for argo, gpt-5 for openai,
+                 claude-opus-4-1-20250805 for anthropic, gemini-2.5-pro for gemini)
+                 Use -list-models to see available models for your provider
   -e             Enable embed mode instead of chat (default: false)
 
 Chat Options:
@@ -157,9 +200,15 @@ Chat Options:
   -s string      System prompt for chat mode (default: "You are a brilliant assistant.")
 
 Configuration:
-  -env string    Environment: prod, dev, or custom base URL (default: "dev")
-  -u string      User identifier (required)
-  -timeout dur   HTTP request timeout (default: 10m)
+  -argo-env string   Environment: prod, dev, or custom base URL (default: "dev")
+  -argo-user string  User identifier (required for Argo provider only)
+  -timeout dur       HTTP request timeout (default: 10m)
+
+Provider Options:
+  -provider string       Provider: argo, openai, gemini, anthropic (default: "argo")
+  -provider-url string   Custom provider API base URL with version (e.g., http://localhost:8080/v1)
+  -api-key-file string   Path to API key file (required for standard non-Argo providers)
+  -list-models           List available models from the provider
 
 Retry:
   -retries int    Number of retry attempts for failed requests (default: 3)
@@ -175,30 +224,68 @@ Session Options:
   -skip-flock-check  Skip file locking check
 
 Examples:
-  # Chat with default model
-  echo "Hello, how are you?" | %s
+  # Chat with default Argo provider
+  echo "Hello, how are you?" | %s -argo-user myuser
 
-  # Use specific model
-  echo "Explain quantum physics" | %s -m claude-3-sonnet
+  # Use OpenAI provider with API key
+  echo "Explain quantum physics" | %s -provider openai -api-key-file ~/.openai-key
 
-  # Generate embeddings
-  echo "Text to embed" | %s -e -m text-embedding-ada-002
+  # Use Gemini provider 
+  echo "Tell me about AI" | %s -provider gemini -api-key-file ~/.gemini-key
+
+  # Use Anthropic provider with specific model
+  echo "Write a poem" | %s -provider anthropic -api-key-file ~/.anthropic-key -model claude-3-opus-20240229
+
+  # Use custom provider endpoint (no API key required)
+  echo "Hello" | %s -provider openai -provider-url http://localhost:8080/v1
 
   # Stream chat response
-  echo "Tell me a story" | %s -stream
+  echo "Tell me a story" | %s -argo-user myuser -stream
 
   # Resume a session
-  echo "Continue from where we left off" | %s -resume 001a
-
-  # Branch from a message
-  echo "Let me rephrase that" | %s -branch 001a/0002
+  echo "Continue from where we left off" | %s -argo-user myuser -resume 001a
 
   # Show all conversation trees
-  %s -show-sessions
+  %s -argo-user myuser -show-sessions
 `,
 		os.Args[0],
-		core.DefaultChatModel, core.DefaultEmbedModel,
-		strings.Join(core.ChatModels, ", "),
-		strings.Join(core.EmbedModels, ", "),
-		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+}
+
+// Adapter methods for Config to implement core.RequestConfig interface
+
+func (c Config) GetUser() string {
+	return c.ArgoUser
+}
+
+func (c Config) GetModel() string {
+	return c.Model
+}
+
+func (c Config) GetSystem() string {
+	return c.System
+}
+
+func (c Config) GetEnv() string {
+	return c.ArgoEnv
+}
+
+func (c Config) IsEmbed() bool {
+	return c.Embed
+}
+
+func (c Config) IsStreamChat() bool {
+	return c.StreamChat
+}
+
+func (c Config) GetProvider() string {
+	return c.Provider
+}
+
+func (c Config) GetProviderURL() string {
+	return c.ProviderURL
+}
+
+func (c Config) GetAPIKeyFile() string {
+	return c.APIKeyFile
 }

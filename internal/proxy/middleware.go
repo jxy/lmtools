@@ -1,51 +1,99 @@
 package proxy
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
-// RequestLogger is a middleware that logs requests and responses
-type RequestLogger struct {
-	handler http.Handler
+// ProxyMiddleware combines all middleware functionality into a single handler
+// This simplifies the middleware stack from 5 layers to 1
+type ProxyMiddleware struct {
+	next   http.Handler
+	config *Config
 }
 
-// NewRequestLogger creates a new request logger middleware
-func NewRequestLogger(handler http.Handler) *RequestLogger {
-	return &RequestLogger{handler: handler}
+// NewProxyMiddleware creates the proxy middleware
+func NewProxyMiddleware(next http.Handler, config *Config) http.Handler {
+	return &ProxyMiddleware{
+		next:   next,
+		config: config,
+	}
 }
 
-// ServeHTTP implements the http.Handler interface
-func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Create request-scoped logger
+// ServeHTTP implements http.Handler with all middleware functionality
+func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 1. Request ID (was RequestIDMiddleware)
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = m.generateRequestID()
+	}
+	w.Header().Set("X-Request-ID", requestID)
+	ctx := context.WithValue(r.Context(), RequestIDKey{}, requestID)
+
+	// 2. Security - Apply request body size limit (was SecurityMiddleware)
+	r.Body = http.MaxBytesReader(w, r.Body, m.config.MaxRequestBodySize)
+
+	// 3. Request logging setup (was RequestLogger)
 	reqLogger := NewRequestScopedLogger()
-
-	// Add logger to context
-	ctx := WithRequestLogger(r.Context(), reqLogger)
+	ctx = WithRequestLogger(ctx, reqLogger)
 	r = r.WithContext(ctx)
 
-	// Create a response writer that captures the status code
-	rw := &responseWriter{
+	// 4. Response writer wrapper for status capture and streaming detection
+	rw := &proxyResponseWriter{
 		ResponseWriter: w,
 		statusCode:     http.StatusOK,
 		reqLogger:      reqLogger,
+		request:        r,
 	}
 
+	// 5. Error handling with panic recovery (was ErrorMiddleware)
+	defer func() {
+		if err := recover(); err != nil {
+			LogError(fmt.Sprintf("Panic in %s %s", r.Method, r.URL.Path), fmt.Errorf("%v", err))
+
+			if !rw.written {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error": map[string]interface{}{
+						"type":    "internal_error",
+						"message": "An internal error occurred",
+					},
+				})
+			}
+		}
+	}()
+
 	// Process the request
-	l.handler.ServeHTTP(rw, r)
+	m.next.ServeHTTP(rw, r)
 }
 
-// responseWriter wraps http.ResponseWriter to capture status code
-type responseWriter struct {
+// generateRequestID creates a unique request ID
+func (m *ProxyMiddleware) generateRequestID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "req_fallback"
+	}
+	return "req_" + hex.EncodeToString(b)
+}
+
+// proxyResponseWriter combines all response writer functionality
+type proxyResponseWriter struct {
 	http.ResponseWriter
-	statusCode int
-	written    bool
-	reqLogger  *RequestScopedLogger
+	statusCode     int
+	written        bool
+	reqLogger      *RequestScopedLogger
+	request        *http.Request
+	streamDetected bool
 }
 
 // WriteHeader captures the status code
-func (rw *responseWriter) WriteHeader(code int) {
+func (rw *proxyResponseWriter) WriteHeader(code int) {
 	if !rw.written {
 		rw.statusCode = code
 		rw.ResponseWriter.WriteHeader(code)
@@ -53,54 +101,29 @@ func (rw *responseWriter) WriteHeader(code int) {
 	}
 }
 
-// Write ensures WriteHeader is called
-func (rw *responseWriter) Write(b []byte) (int, error) {
+// Write handles both normal writes and streaming detection
+func (rw *proxyResponseWriter) Write(b []byte) (int, error) {
 	if !rw.written {
 		rw.WriteHeader(http.StatusOK)
 	}
+
+	// Streaming detection (was StreamingMiddleware)
+	if !rw.streamDetected {
+		if rw.Header().Get("Content-Type") == "text/event-stream" {
+			rw.streamDetected = true
+			// Disable write timeout for streaming
+			if rc := http.NewResponseController(rw.ResponseWriter); rc != nil {
+				_ = rc.SetWriteDeadline(time.Time{})
+			}
+		}
+	}
+
 	return rw.ResponseWriter.Write(b)
 }
 
 // Flush implements http.Flusher
-func (rw *responseWriter) Flush() {
+func (rw *proxyResponseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
-}
-
-// ErrorMiddleware handles panics and converts them to proper error responses
-type ErrorMiddleware struct {
-	handler http.Handler
-}
-
-// NewErrorMiddleware creates a new error middleware
-func NewErrorMiddleware(handler http.Handler) *ErrorMiddleware {
-	return &ErrorMiddleware{handler: handler}
-}
-
-// ServeHTTP implements the http.Handler interface
-func (e *ErrorMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if err := recover(); err != nil {
-			// Log panic with stack trace and request context
-			LogError(fmt.Sprintf("Panic in %s %s", r.Method, r.URL.Path), fmt.Errorf("%v", err))
-
-			// Check if response has already been written
-			if rw, ok := w.(*responseWriter); ok && rw.written {
-				// Cannot write error response if headers already sent
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]interface{}{
-					"type":    "internal_error",
-					"message": "An internal error occurred",
-				},
-			})
-		}
-	}()
-
-	e.handler.ServeHTTP(w, r)
 }

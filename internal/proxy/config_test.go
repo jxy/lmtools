@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -8,50 +9,50 @@ func TestDynamicModelDefaults(t *testing.T) {
 	tests := []struct {
 		name               string
 		preferredProvider  string
-		inputBigModel      string
+		inputModel         string
 		inputSmallModel    string
-		expectedBigModel   string
+		expectedModel      string
 		expectedSmallModel string
 	}{
 		{
 			name:               "OpenAI provider with default models",
 			preferredProvider:  "openai",
-			inputBigModel:      "claudeopus4",
-			inputSmallModel:    "claudesonnet4",
-			expectedBigModel:   "o3-mini",
-			expectedSmallModel: "gpt-4o-mini",
+			inputModel:         "",
+			inputSmallModel:    "",
+			expectedModel:      "gpt-5",
+			expectedSmallModel: "gpt-5-mini",
 		},
 		{
 			name:               "Google provider with default models",
 			preferredProvider:  "google",
-			inputBigModel:      "claudeopus4",
-			inputSmallModel:    "claudesonnet4",
-			expectedBigModel:   "gemini-2.5-pro-preview-03-25",
-			expectedSmallModel: "gemini-2.0-flash",
+			inputModel:         "",
+			inputSmallModel:    "",
+			expectedModel:      "gemini-2.5-pro",
+			expectedSmallModel: "gemini-2.5-flash",
 		},
 		{
 			name:               "Argo provider keeps default models",
 			preferredProvider:  "argo",
-			inputBigModel:      "claudeopus4",
-			inputSmallModel:    "claudesonnet4",
-			expectedBigModel:   "claudeopus4",
-			expectedSmallModel: "claudesonnet4",
+			inputModel:         "",
+			inputSmallModel:    "",
+			expectedModel:      "gpt5",
+			expectedSmallModel: "gpt5mini",
 		},
 		{
 			name:               "OpenAI with custom models",
 			preferredProvider:  "openai",
-			inputBigModel:      "gpt-4o",
+			inputModel:         "gpt-4o",
 			inputSmallModel:    "gpt-4o-mini",
-			expectedBigModel:   "gpt-4o",
+			expectedModel:      "gpt-4o",
 			expectedSmallModel: "gpt-4o-mini",
 		},
 		{
 			name:               "Only big model changed",
 			preferredProvider:  "openai",
-			inputBigModel:      "gpt-4o",
+			inputModel:         "gpt-4o",
 			inputSmallModel:    "claudesonnet4",
-			expectedBigModel:   "gpt-4o",
-			expectedSmallModel: "claudesonnet4",
+			expectedModel:      "gpt-4o",
+			expectedSmallModel: "gpt-5-mini", // Should use OpenAI default since claudesonnet4 matches old default
 		},
 	}
 
@@ -60,15 +61,15 @@ func TestDynamicModelDefaults(t *testing.T) {
 			// Create config and apply dynamic defaults
 			config := &Config{
 				Provider:   tt.preferredProvider,
-				BigModel:   tt.inputBigModel,
+				Model:      tt.inputModel,
 				SmallModel: tt.inputSmallModel,
 			}
 
 			// Apply dynamic defaults using the actual method
 			config.ApplyDynamicModelDefaults()
 
-			if config.BigModel != tt.expectedBigModel {
-				t.Errorf("Expected bigModel=%s, got %s", tt.expectedBigModel, config.BigModel)
+			if config.Model != tt.expectedModel {
+				t.Errorf("Expected model=%s, got %s", tt.expectedModel, config.Model)
 			}
 			if config.SmallModel != tt.expectedSmallModel {
 				t.Errorf("Expected smallModel=%s, got %s", tt.expectedSmallModel, config.SmallModel)
@@ -128,7 +129,7 @@ func TestProviderURLOverride(t *testing.T) {
 				ArgoEnv:     "dev",
 			}
 
-			config.InitializeModelLists()
+			config.InitializeURLs()
 
 			if config.OpenAIURL != tt.expectedOpenAI {
 				t.Errorf("Expected OpenAIURL=%s, got %s", tt.expectedOpenAI, config.OpenAIURL)
@@ -138,6 +139,93 @@ func TestProviderURLOverride(t *testing.T) {
 			}
 			if config.ArgoBaseURL != tt.expectedArgo {
 				t.Errorf("Expected ArgoBaseURL=%s, got %s", tt.expectedArgo, config.ArgoBaseURL)
+			}
+		})
+	}
+}
+
+func TestUnifiedAPIKeyValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		provider      string
+		openAIKey     string
+		geminiKey     string
+		argoUser      string
+		providerURL   string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:        "OpenAI provider with API key",
+			provider:    "openai",
+			openAIKey:   "test-key",
+			expectError: false,
+		},
+		{
+			name:          "OpenAI provider without API key",
+			provider:      "openai",
+			expectError:   true,
+			errorContains: "-api-key-file is required when -provider is 'openai'",
+		},
+		{
+			name:        "OpenAI provider with custom URL (no key needed)",
+			provider:    "openai",
+			providerURL: "http://localhost:11434/v1",
+			expectError: false,
+		},
+		{
+			name:        "Google provider with API key",
+			provider:    "google",
+			geminiKey:   "test-key",
+			expectError: false,
+		},
+		{
+			name:          "Google provider without API key",
+			provider:      "google",
+			expectError:   true,
+			errorContains: "-api-key-file is required when -provider is 'google'",
+		},
+		{
+			name:        "Argo provider with user",
+			provider:    "argo",
+			argoUser:    "testuser",
+			expectError: false,
+		},
+		{
+			name:          "Argo provider without user",
+			provider:      "argo",
+			expectError:   true,
+			errorContains: "-argo-user is required when -provider is 'argo'",
+		},
+		{
+			name:          "Invalid provider",
+			provider:      "invalid",
+			expectError:   true,
+			errorContains: "invalid -provider: invalid",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Provider:     tt.provider,
+				OpenAIAPIKey: tt.openAIKey,
+				GeminiAPIKey: tt.geminiKey,
+				ArgoUser:     tt.argoUser,
+				ProviderURL:  tt.providerURL,
+			}
+
+			err := config.Validate()
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errorContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
 			}
 		})
 	}

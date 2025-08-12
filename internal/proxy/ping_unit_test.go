@@ -67,9 +67,8 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser:   "testuser",
-		ArgoEnv:    mockArgo.URL,
-		ArgoModels: []string{"gpt35"}, // Ensure model is recognized
+		ArgoUser: "testuser",
+		ArgoEnv:  mockArgo.URL,
 	}
 
 	// Set mock URL in config
@@ -168,9 +167,8 @@ func TestPingEventsQuickResponse(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser:   "testuser",
-		ArgoEnv:    mockArgo.URL,
-		ArgoModels: []string{"gpt35"},
+		ArgoUser: "testuser",
+		ArgoEnv:  mockArgo.URL,
 	}
 
 	// Set mock URL in config
@@ -269,9 +267,8 @@ func TestPingIntervalClamping(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser:   "testuser",
-		ArgoEnv:    mockArgo.URL,
-		ArgoModels: []string{"gpt35"},
+		ArgoUser: "testuser",
+		ArgoEnv:  mockArgo.URL,
 	}
 
 	// Set mock URL in config
