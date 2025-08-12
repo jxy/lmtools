@@ -794,7 +794,11 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 		case <-pingTicker.C:
 			// Only send ping if we haven't received data recently
 			if time.Since(lastActivity) >= pingInterval {
-				logger.Debugf("%s", fmt.Sprintf("Sending ping after %v of inactivity", time.Since(lastActivity)))
+				if p.reqLogger != nil {
+					p.reqLogger.Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
+				} else {
+					logger.Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
+				}
 				if err := p.handler.SendPing(); err != nil {
 					logger.Errorf("%s: %v", "Failed to send ping during Argo streaming", err)
 					return fmt.Errorf("client disconnected: %w", err)

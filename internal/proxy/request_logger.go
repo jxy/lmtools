@@ -80,10 +80,10 @@ func (rl *RequestScopedLogger) Errorf(format string, args ...interface{}) {
 func (rl *RequestScopedLogger) LogJSON(label string, data interface{}) {
 	b, err := json.Marshal(data)
 	if err != nil {
-		rl.Debugf("%s: [JSON marshal error: %v] %+v", rl.formatMessage(label), err, data)
+		rl.Debugf("%s: [JSON marshal error: %v] %+v", label, err, data)
 		return
 	}
-	rl.Debugf("%s: %s", rl.formatMessage(label), string(b))
+	rl.Debugf("%s: %s", label, string(b))
 }
 
 // LogDuration logs a message with the request duration
