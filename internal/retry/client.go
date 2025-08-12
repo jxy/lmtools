@@ -22,6 +22,11 @@ func NewClient(timeout time.Duration, logger Logger) *Client {
 
 // NewClientWithRetries creates a new retryable HTTP client with custom retry count
 func NewClientWithRetries(timeout time.Duration, maxRetries int, logger Logger) *Client {
+	return NewClientWithOptions(timeout, maxRetries, logger, nil)
+}
+
+// NewClientWithOptions creates a new retryable HTTP client with full configuration options
+func NewClientWithOptions(timeout time.Duration, maxRetries int, logger Logger, contextLoggerKey interface{}) *Client {
 	// Configure transport with proper pooling and timeouts
 	transport := &http.Transport{
 		MaxIdleConns:        100,
@@ -42,6 +47,10 @@ func NewClientWithRetries(timeout time.Duration, maxRetries int, logger Logger) 
 		}
 		if maxRetries > 0 {
 			config.MaxRetries = maxRetries
+		}
+		// Set the context logger key if provided
+		if contextLoggerKey != nil {
+			config.ContextLoggerKey = contextLoggerKey
 		}
 		retryers[provider] = NewRetryer(config, logger)
 	}

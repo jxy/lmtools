@@ -62,7 +62,7 @@ func NewServer(config *Config) http.Handler {
 		config:    config,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
+		client:    retry.NewClientWithOptions(10*time.Minute, 0, logger.GetLogger(), RequestLoggerKey{}),
 	}
 
 	// Wrap with consolidated middleware
