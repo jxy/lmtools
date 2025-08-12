@@ -87,6 +87,8 @@ func (c *Config) InitializeURLs() {
 			c.OpenAIURL = c.ProviderURL
 		case "google":
 			c.GeminiURL = c.ProviderURL
+		case "anthropic":
+			c.AnthropicURL = c.ProviderURL
 		case "argo":
 			c.ArgoBaseURL = c.ProviderURL
 		}
@@ -99,7 +101,7 @@ func (c *Config) InitializeURLs() {
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	// Validate preferred provider
-	validProviders := []string{"openai", "google", "argo"}
+	validProviders := []string{"openai", "google", "anthropic", "argo"}
 	valid := false
 	for _, p := range validProviders {
 		if c.Provider == p {
@@ -122,6 +124,10 @@ func (c *Config) Validate() error {
 	case "google":
 		if c.GeminiAPIKey == "" && c.ProviderURL == "" {
 			return fmt.Errorf("-api-key-file is required when -provider is 'google' (unless using -provider-url)")
+		}
+	case "anthropic":
+		if c.AnthropicAPIKey == "" && c.ProviderURL == "" {
+			return fmt.Errorf("-api-key-file is required when -provider is 'anthropic' (unless using -provider-url)")
 		}
 	case "argo":
 		if c.ArgoUser == "" {

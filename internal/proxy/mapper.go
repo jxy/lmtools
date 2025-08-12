@@ -53,6 +53,10 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 
 	// Use preferred provider if credentials are available
 	switch m.config.Provider {
+	case "anthropic":
+		if m.config.AnthropicAPIKey != "" {
+			return "anthropic", smallModel
+		}
 	case "google":
 		if m.config.GeminiAPIKey != "" {
 			return "gemini", smallModel
@@ -68,6 +72,9 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 	}
 
 	// Fallback to any available provider
+	if m.config.AnthropicAPIKey != "" {
+		return "anthropic", smallModel
+	}
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", smallModel
 	}
@@ -88,6 +95,10 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 
 	// Use preferred provider if credentials are available
 	switch m.config.Provider {
+	case "anthropic":
+		if m.config.AnthropicAPIKey != "" {
+			return "anthropic", model
+		}
 	case "google":
 		if m.config.GeminiAPIKey != "" {
 			return "gemini", model
@@ -103,6 +114,9 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 	}
 
 	// Fallback to any available provider
+	if m.config.AnthropicAPIKey != "" {
+		return "anthropic", model
+	}
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", model
 	}
@@ -121,6 +135,10 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string) {
 	// Use the configured provider if credentials are available
 	switch m.config.Provider {
+	case "anthropic":
+		if m.config.AnthropicAPIKey != "" {
+			return "anthropic", model
+		}
 	case "google":
 		if m.config.GeminiAPIKey != "" {
 			return "gemini", model
@@ -136,6 +154,9 @@ func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string)
 	}
 
 	// Fallback to any available provider if preferred provider has no credentials
+	if m.config.AnthropicAPIKey != "" {
+		return "anthropic", model
+	}
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", model
 	}

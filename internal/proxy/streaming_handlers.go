@@ -41,6 +41,11 @@ func (h *StreamingHandlers) StreamFromArgoWithPings(ctx context.Context, req *ht
 	return h.server.streamFromArgoWithPings(ctx, req, handler, pingInterval)
 }
 
+// StreamFromAnthropic handles streaming from Anthropic provider
+func (h *StreamingHandlers) StreamFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	return h.server.streamFromAnthropic(ctx, anthReq, handler)
+}
+
 // SimulateStreamingFromArgo simulates streaming for non-streaming Argo responses
 func (h *StreamingHandlers) SimulateStreamingFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	return h.server.simulateStreamingFromArgo(ctx, anthReq, handler)

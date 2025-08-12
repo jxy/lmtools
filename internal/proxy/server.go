@@ -1,11 +1,13 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/auth"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -186,6 +188,8 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 		response, err = s.forwardToOpenAI(r.Context(), anthReq)
 	case "gemini":
 		response, err = s.forwardToGemini(r.Context(), anthReq)
+	case "anthropic":
+		response, err = s.forwardToAnthropic(r.Context(), anthReq)
 	case "argo":
 		response, err = s.forwardToArgo(r.Context(), anthReq)
 	default:
@@ -215,6 +219,9 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 		anthResp = s.converter.ConvertGeminiToAnthropic(resp, originalModel)
 	case *ArgoChatResponse:
 		anthResp = s.converter.ConvertArgoToAnthropicWithRequest(resp, originalModel, anthReq)
+	case *AnthropicResponse:
+		// Already in Anthropic format
+		anthResp = resp
 	default:
 		apiErr := NewAPIError(ErrTypeServer, "handleNonStreamingRequest", "Invalid response type from provider", nil)
 		s.sendAPIError(r.Context(), w, apiErr)
@@ -462,6 +469,56 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	return &argoResp, nil
 }
 
+// forwardToAnthropic forwards the request to Anthropic
+func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
+	reqLogger := GetRequestLogger(ctx)
+
+	// Log outgoing request
+	reqLogger.LogJSON("Outgoing Anthropic Request", anthReq)
+
+	// Prepare request
+	jsonData, err := json.Marshal(anthReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal error: %w", err)
+	}
+
+	url := s.config.AnthropicURL
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("request creation error: %w", err)
+	}
+
+	// Set headers using auth package
+	auth.SetProviderHeaders(req, "anthropic", s.mapper.GetAPIKey("anthropic"))
+	auth.SetRequestHeaders(req, true, false, "anthropic")
+
+	// Send request with retry
+	resp, err := s.client.Do(ctx, req, "anthropic")
+	if err != nil {
+		return nil, fmt.Errorf("request error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := s.readResponseBody(resp)
+		s.logErrorResponse(reqLogger, "Anthropic", resp.StatusCode, body)
+		return nil, fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var anthResp AnthropicResponse
+	if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
+		return nil, fmt.Errorf("response decode error: %w", err)
+	}
+
+	// Log response
+	reqLogger.LogJSON("Anthropic Response", anthResp)
+
+	return &anthResp, nil
+}
+
 // handleCountTokens handles the /v1/messages/count_tokens endpoint
 func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	// Get request logger from context
@@ -585,6 +642,13 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 	case "gemini":
 		if err := s.streamFromGemini(r.Context(), anthReq, handler); err != nil {
 			reqLogger.Errorf("Gemini streaming error: %v", err)
+			if completeErr := handler.Complete("error"); completeErr != nil {
+				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+			}
+		}
+	case "anthropic":
+		if err := s.streamFromAnthropic(r.Context(), anthReq, handler); err != nil {
+			reqLogger.Errorf("Anthropic streaming error: %v", err)
 			if completeErr := handler.Complete("error"); completeErr != nil {
 				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
 			}
@@ -864,6 +928,159 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 			return ctx.Err()
 		}
 	}
+}
+
+// streamFromAnthropic streams from Anthropic
+func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	reqLogger := GetRequestLogger(ctx)
+
+	// Force streaming
+	anthReq.Stream = true
+
+	// Log outgoing request
+	reqLogger.LogJSON("Outgoing Anthropic Streaming Request", anthReq)
+
+	// Prepare request
+	jsonData, err := json.Marshal(anthReq)
+	if err != nil {
+		return fmt.Errorf("marshal error: %w", err)
+	}
+
+	url := s.config.AnthropicURL
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+	if err != nil {
+		return fmt.Errorf("request creation error: %w", err)
+	}
+
+	// Set headers using auth package
+	auth.SetProviderHeaders(req, "anthropic", s.mapper.GetAPIKey("anthropic"))
+	auth.SetRequestHeaders(req, true, true, "anthropic")
+
+	// Send request with retry
+	resp, err := s.client.Do(ctx, req, "anthropic")
+	if err != nil {
+		return fmt.Errorf("request error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := s.readResponseBody(resp)
+		s.logErrorResponse(reqLogger, "Anthropic Streaming", resp.StatusCode, body)
+		return fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse Anthropic's native SSE format
+	return s.parseAnthropicStream(resp.Body, handler)
+}
+
+// parseAnthropicStream parses Anthropic's native SSE format
+func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHandler) error {
+	scanner := bufio.NewScanner(body)
+
+	var currentEvent string
+	var stopReason string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Parse SSE format
+		if strings.HasPrefix(line, "event: ") {
+			currentEvent = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+
+			// Parse JSON based on current event type
+			switch currentEvent {
+			case "message_start":
+				// Extract usage from message_start
+				var msgStart struct {
+					Message struct {
+						Usage struct {
+							InputTokens int `json:"input_tokens"`
+						} `json:"usage"`
+					} `json:"message"`
+				}
+				if err := json.Unmarshal([]byte(data), &msgStart); err == nil {
+					handler.state.InputTokens = msgStart.Message.Usage.InputTokens
+				}
+
+			case "content_block_start":
+				// Already handled by handler initialization
+
+			case "content_block_delta":
+				// Parse delta for text content
+				var delta struct {
+					Delta struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"delta"`
+				}
+				if err := json.Unmarshal([]byte(data), &delta); err == nil {
+					if delta.Delta.Type == "text_delta" && delta.Delta.Text != "" {
+						if err := handler.SendTextDelta(delta.Delta.Text); err != nil {
+							return err
+						}
+					}
+				}
+
+			case "content_block_stop":
+				// Content block completed
+
+			case "message_delta":
+				// Parse delta for stop reason and usage
+				var msgDelta struct {
+					Delta struct {
+						StopReason string `json:"stop_reason,omitempty"`
+					} `json:"delta"`
+					Usage struct {
+						OutputTokens int `json:"output_tokens"`
+					} `json:"usage"`
+				}
+				if err := json.Unmarshal([]byte(data), &msgDelta); err == nil {
+					if msgDelta.Delta.StopReason != "" {
+						stopReason = msgDelta.Delta.StopReason
+					}
+					if msgDelta.Usage.OutputTokens > 0 {
+						handler.state.OutputTokens = msgDelta.Usage.OutputTokens
+					}
+				}
+
+			case "message_stop":
+				// Complete the stream with the stop reason
+				return handler.Complete(stopReason)
+
+			case "error":
+				// Handle error event
+				var errorData struct {
+					Error struct {
+						Type    string `json:"type"`
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal([]byte(data), &errorData); err == nil {
+					return fmt.Errorf("anthropic API error: %s - %s", errorData.Error.Type, errorData.Error.Message)
+				}
+			}
+
+			// Reset current event after processing data
+			currentEvent = ""
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading stream: %w", err)
+	}
+
+	// If we didn't receive a proper message_stop, complete anyway
+	if stopReason == "" {
+		stopReason = "end_turn"
+	}
+	return handler.Complete(stopReason)
 }
 
 // simulateStreamingFromArgo simulates streaming by calling non-streaming endpoint with default ping interval
