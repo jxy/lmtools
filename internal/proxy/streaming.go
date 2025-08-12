@@ -151,7 +151,7 @@ func (h *AnthropicStreamHandler) SendMessageStart() error {
 			"stop_reason":   nil,
 			"stop_sequence": nil,
 			"usage": map[string]interface{}{
-				"input_tokens":                0,
+				"input_tokens":                h.state.InputTokens,
 				"cache_creation_input_tokens": 0,
 				"cache_read_input_tokens":     0,
 				"output_tokens":               0,
@@ -526,7 +526,8 @@ func (p *OpenAIStreamParser) processChunk(chunk map[string]interface{}) error {
 		if err := p.handler.SendTextDelta(content); err != nil {
 			return err
 		}
-		p.handler.state.OutputTokens += EstimateTokenCount(content)
+		// Note: OpenAI provides actual token counts in the usage field,
+		// so we don't need to estimate tokens here
 	}
 
 	// Handle tool calls
@@ -622,6 +623,16 @@ func (p *GeminiStreamParser) Parse(reader io.Reader) error {
 
 // processChunk processes a single Gemini streaming chunk
 func (p *GeminiStreamParser) processChunk(chunk map[string]interface{}) error {
+	// Check for usage metadata in the chunk (Gemini may send this)
+	if usageMetadata, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+		if promptTokens, ok := usageMetadata["promptTokenCount"].(float64); ok {
+			p.handler.state.InputTokens = int(promptTokens)
+		}
+		if candidatesTokens, ok := usageMetadata["candidatesTokenCount"].(float64); ok {
+			p.handler.state.OutputTokens = int(candidatesTokens)
+		}
+	}
+
 	candidates, ok := chunk["candidates"].([]interface{})
 	if !ok || len(candidates) == 0 {
 		return nil
@@ -657,7 +668,8 @@ func (p *GeminiStreamParser) processChunk(chunk map[string]interface{}) error {
 			if err := p.handler.SendTextDelta(text); err != nil {
 				return err
 			}
-			p.handler.state.OutputTokens += EstimateTokenCount(text)
+			// Note: Gemini provides actual token counts in the usageMetadata field,
+			// so we don't need to estimate tokens here
 		}
 
 		// Handle function calls
@@ -770,6 +782,7 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 				}
 				return err
 			}
+			// Argo doesn't provide token counts, so we must estimate them
 			p.handler.state.OutputTokens += EstimateTokenCount(text)
 
 		case err := <-errChan:

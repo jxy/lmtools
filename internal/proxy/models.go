@@ -14,7 +14,12 @@ const (
 )
 
 // EstimateTokenCount estimates the number of tokens in a text string
-// using a simple heuristic of dividing character count by 3
+// using a simple heuristic of dividing character count by 3.
+//
+// IMPORTANT: This function is ONLY needed for the Argo API provider,
+// which does not return token counts in its responses. Other providers
+// (OpenAI, Gemini, Anthropic) provide actual token counts in their
+// responses and should use those instead of calling this function.
 func EstimateTokenCount(text string) int {
 	return len(text) / 3
 }

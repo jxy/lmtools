@@ -818,6 +818,13 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	reqLogger := GetRequestLogger(ctx)
 
+	// Estimate and set input tokens for Argo streaming
+	// Argo doesn't provide token counts, so we must estimate them
+	inputTokens := EstimateRequestTokens(anthReq)
+	handler.mu.Lock()
+	handler.state.InputTokens = inputTokens
+	handler.mu.Unlock()
+
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
