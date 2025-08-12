@@ -270,49 +270,6 @@ func (l *Logger) LogJSON(dir, operation string, data []byte) error {
 	return nil
 }
 
-// LogRequest logs HTTP request details
-func (l *Logger) LogRequest(method, path, originalModel, mappedModel string, numMessages, numTools, statusCode int, isStreaming bool) {
-	if l == nil {
-		return
-	}
-
-	// Format the log entry based on configuration
-	if l.useJSON {
-		entry := map[string]interface{}{
-			"time":          time.Now().Format(time.RFC3339),
-			"method":        method,
-			"path":          path,
-			"originalModel": originalModel,
-			"mappedModel":   mappedModel,
-			"numMessages":   numMessages,
-			"numTools":      numTools,
-			"statusCode":    statusCode,
-			"streaming":     isStreaming,
-		}
-		if data, err := json.Marshal(entry); err == nil {
-			l.Infof("%s", string(data))
-		}
-	} else {
-		// Colored output for terminal
-		status := fmt.Sprintf("%d", statusCode)
-		if l.useColor {
-			if statusCode >= 200 && statusCode < 300 {
-				status = l.colors.Green(status)
-			} else if statusCode >= 400 {
-				status = l.colors.Red(status)
-			}
-		}
-
-		streaming := ""
-		if isStreaming {
-			streaming = " [STREAM]"
-		}
-
-		l.Infof("%s %s | Model: %s->%s | Messages: %d | Tools: %d | Status: %s%s",
-			method, path, originalModel, mappedModel, numMessages, numTools, status, streaming)
-	}
-}
-
 // Helper functions
 func parseLevel(level string) int {
 	switch strings.ToLower(level) {

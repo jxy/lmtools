@@ -113,7 +113,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body
 	// First read the body to detect unknown fields
-	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)) // 10MB limit
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		apiErr := NewAPIError(ErrTypePayloadSize, "handleMessages", "Failed to read request body", err)
 		s.sendAPIError(r.Context(), w, apiErr)
@@ -126,7 +126,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		// Check if the error is due to request body size limit
 		if err.Error() == "http: request body too large" {
 			apiErr := NewAPIError(ErrTypePayloadSize, "handleMessages", "Request body too large", err).
-				WithDetails("max_size_mb", 10)
+				WithDetails("max_size_mb", s.config.MaxRequestBodySize/1024/1024)
 			s.sendAPIError(r.Context(), w, apiErr)
 			return
 		}
@@ -155,7 +155,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Map the model to appropriate provider
 	provider, mappedModel := s.mapper.MapModel(anthReq.Model)
 	if provider == "" || mappedModel == "" {
-		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("No API key configured for model: %s. Please provide the appropriate API key file (-openai-api-key-file, -gemini-api-key-file, or -argo-user)", originalModel))
+		apiErr := NewAPIError(ErrTypeValidation, "handleMessages", "No API key configured for model", nil).
+			WithDetails("model", originalModel)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 	anthReq.Model = mappedModel
@@ -187,7 +189,8 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	case "argo":
 		response, err = s.forwardToArgo(r.Context(), anthReq)
 	default:
-		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider: %s", provider))
+		apiErr := NewAPIError(ErrTypeValidation, "handleMessages", fmt.Sprintf("Unknown provider: %s", provider), nil)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 
@@ -198,7 +201,8 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 			// Don't send error response if client disconnected
 			return
 		}
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Provider error: %v", err))
+		apiErr := NewAPIError(ErrTypeServer, "handleNonStreamingRequest", fmt.Sprintf("Provider error: %v", err), err)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 
@@ -210,9 +214,10 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	case *GeminiResponse:
 		anthResp = s.converter.ConvertGeminiToAnthropic(resp, originalModel)
 	case *ArgoChatResponse:
-		anthResp = s.converter.ConvertArgoToAnthropic(resp, originalModel)
+		anthResp = s.converter.ConvertArgoToAnthropicWithRequest(resp, originalModel, anthReq)
 	default:
-		s.sendError(w, http.StatusInternalServerError, "Invalid response type from provider")
+		apiErr := NewAPIError(ErrTypeServer, "handleNonStreamingRequest", "Invalid response type from provider", nil)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 
@@ -472,10 +477,13 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&tokenReq); err != nil {
 		// Check if the error is due to request body size limit
 		if err.Error() == "http: request body too large" {
-			s.sendError(w, http.StatusRequestEntityTooLarge, "Request body too large. Maximum allowed size is 10MB")
+			apiErr := NewAPIError(ErrTypePayloadSize, "handleCountTokens", "Request body too large", err).
+				WithDetails("max_size_mb", s.config.MaxRequestBodySize/1024/1024)
+			s.sendAPIError(r.Context(), w, apiErr)
 			return
 		}
-		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		apiErr := NewAPIError(ErrTypeValidation, "handleCountTokens", fmt.Sprintf("Invalid request body: %v", err), err)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 
@@ -484,7 +492,8 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	// Validate message array is not empty
 	if len(tokenReq.Messages) == 0 {
-		s.sendError(w, http.StatusBadRequest, "Messages array cannot be empty")
+		apiErr := NewAPIError(ErrTypeValidation, "handleCountTokens", "Messages array cannot be empty", nil)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 
@@ -545,7 +554,8 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 	handler, err := NewAnthropicStreamHandler(w, originalModel, reqLogger)
 	if err != nil {
 		reqLogger.Errorf("Failed to create stream handler: %v", err)
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to create stream handler: %v", err))
+		apiErr := NewAPIError(ErrTypeServer, "handleStreamingRequest", fmt.Sprintf("Failed to create stream handler: %v", err), err)
+		s.sendAPIError(r.Context(), w, apiErr)
 		return
 	}
 
@@ -987,8 +997,10 @@ func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *Anthro
 	}
 
 	// Update token counts
-	handler.state.InputTokens = anthResp.Usage.InputTokens
-	handler.state.OutputTokens = anthResp.Usage.OutputTokens
+	if anthResp.Usage != nil {
+		handler.state.InputTokens = anthResp.Usage.InputTokens
+		handler.state.OutputTokens = anthResp.Usage.OutputTokens
+	}
 
 	// Complete the stream
 	return handler.Complete(anthResp.StopReason)
@@ -1107,7 +1119,7 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 	}
 
 	// Convert response
-	anthResp := s.converter.ConvertArgoToAnthropic(argoResp, handler.originalModel)
+	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, handler.originalModel, anthReq)
 
 	// Validate response
 	if anthResp == nil {
@@ -1119,8 +1131,6 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 	return s.streamArgoResponseContent(ctx, anthResp, handler)
 }
 
-// sendError sends an error response
-// logErrorResponse logs error responses from providers, attempting to parse as JSON
 func (s *Server) logErrorResponse(reqLogger *RequestScopedLogger, provider string, statusCode int, body []byte) {
 	// Try to parse as JSON for better logging
 	var errorData interface{}
@@ -1129,20 +1139,6 @@ func (s *Server) logErrorResponse(reqLogger *RequestScopedLogger, provider strin
 	} else {
 		reqLogger.Debugf("%s Error Response (status %d, raw): %s", provider, statusCode, string(body))
 	}
-}
-
-func (s *Server) sendError(w http.ResponseWriter, status int, message string) {
-	// Log the error details
-	logger.Errorf("HTTP %d error: %s", status, message)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"error": map[string]interface{}{
-			"type":    "error",
-			"message": message,
-		},
-	})
 }
 
 // estimateContentLength estimates the character length of content

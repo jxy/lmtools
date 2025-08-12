@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"lmtools/internal/logger"
 	"net/http"
 	"time"
 )
@@ -54,7 +54,7 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 5. Error handling with panic recovery (was ErrorMiddleware)
 	defer func() {
 		if err := recover(); err != nil {
-			LogError(fmt.Sprintf("Panic in %s %s", r.Method, r.URL.Path), fmt.Errorf("%v", err))
+			logger.Errorf("Panic in %s %s: %v", r.Method, r.URL.Path, err)
 
 			if !rw.written {
 				w.Header().Set("Content-Type", "application/json")

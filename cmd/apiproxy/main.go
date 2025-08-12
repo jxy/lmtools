@@ -4,13 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"lmtools/internal/auth"
 	"lmtools/internal/logger"
 	"lmtools/internal/proxy"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -19,14 +19,14 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: %s [options]
 
 apiproxy is an HTTP proxy server that provides an Anthropic-compatible API interface 
-for various AI model providers.
+for OpenAI, Google Gemini, and Argo providers.
 
 Server Options:
   -host string               Host to bind the server to (default: "127.0.0.1")
   -port int                  Port to bind the server to (default: 8082)
 
 Provider Options:
-  -provider string           Provider: argo, openai, google, anthropic (default: "argo")
+  -provider string           Provider: argo, openai, google (default: "argo")
   -provider-url string       Custom URL for the selected provider (overrides default)
   -api-key-file string       Path to file containing API key for the selected provider
                             (required for non-Argo providers when not using custom URL)
@@ -35,7 +35,7 @@ Provider Options:
 
 Model Options:
   -model string              Model to use (default varies by provider)
-  -small-model string        Small model to use (default: "claudesonnet4")
+  -small-model string        Small model to use (default varies by provider)
 
 Request Options:
   -max-request-body-size int Maximum request body size in MB (default: 10)
@@ -104,7 +104,7 @@ func main() {
 	flag.StringVar(&preferredProvider, "provider", "argo", "Provider (openai, google, argo)")
 	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
 	flag.StringVar(&model, "model", "", "Model to use (default varies by provider)")
-	flag.StringVar(&smallModel, "small-model", "claudesonnet4", "Small model to use")
+	flag.StringVar(&smallModel, "small-model", "", "Small model to use")
 	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", 10, "Maximum request body size in MB")
 
 	// Logging flags
@@ -115,10 +115,10 @@ func main() {
 	flag.Parse()
 
 	// Read API key from file based on provider
-	var anthropicAPIKey, openAIAPIKey, geminiAPIKey string
+	var openAIAPIKey, geminiAPIKey string
 
 	if apiKeyFile != "" {
-		apiKey, err := readKeyFile(apiKeyFile)
+		apiKey, err := auth.ReadKeyFile(apiKeyFile)
 		if err != nil {
 			log.Fatalf("Failed to read API key file: %v", err)
 		}
@@ -129,8 +129,6 @@ func main() {
 			openAIAPIKey = apiKey
 		case "google":
 			geminiAPIKey = apiKey
-		case "anthropic":
-			anthropicAPIKey = apiKey
 		case "argo":
 			// Argo doesn't use API keys, ignore
 		default:
@@ -143,7 +141,7 @@ func main() {
 
 	// Create configuration from flags
 	config := &proxy.Config{
-		AnthropicAPIKey:    anthropicAPIKey,
+		AnthropicAPIKey:    "",
 		OpenAIAPIKey:       openAIAPIKey,
 		GeminiAPIKey:       geminiAPIKey,
 		ArgoUser:           argoUser,
@@ -210,20 +208,4 @@ func main() {
 	}
 
 	log.Println("Server exited")
-}
-
-// readKeyFile reads an API key from a file, trimming whitespace
-func readKeyFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file %s: %w", path, err)
-	}
-
-	// Trim whitespace and newlines
-	key := strings.TrimSpace(string(data))
-	if key == "" {
-		return "", fmt.Errorf("file %s is empty or contains only whitespace", path)
-	}
-
-	return key, nil
 }

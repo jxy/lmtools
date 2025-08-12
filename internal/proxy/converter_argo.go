@@ -500,11 +500,21 @@ func estimateTokenCount(content []AnthropicContentBlock) int {
 }
 
 // ConvertArgoToAnthropic converts an Argo response to Anthropic format
+// Note: For Argo provider, we need the original request to estimate input tokens
 func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel string) *AnthropicResponse {
+	// This method is deprecated - use ConvertArgoToAnthropicWithRequest instead
+	// We can't estimate input tokens without the request
+	return c.ConvertArgoToAnthropicWithRequest(resp, originalModel, &AnthropicRequest{})
+}
+
+// ConvertArgoToAnthropicWithRequest converts an Argo response to Anthropic format with request for token estimation
+func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
 	// Handle different response formats
 	switch r := resp.Response.(type) {
 	case string:
 		// Simple string response
+		outputTokens := EstimateTokenCount(r)
+		inputTokens := EstimateRequestTokens(req)
 		return &AnthropicResponse{
 			Type:  "message",
 			Model: originalModel,
@@ -517,8 +527,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			},
 			StopReason: "end_turn",
 			Usage: &AnthropicUsage{
-				InputTokens:  EstimateTokenCount(r),
-				OutputTokens: EstimateTokenCount(r),
+				InputTokens:  inputTokens,
+				OutputTokens: outputTokens,
 			},
 		}
 
@@ -634,7 +644,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 		}
 
 		// Calculate token usage based on content
-		tokenCount := estimateTokenCount(content)
+		outputTokens := estimateTokenCount(content)
+		inputTokens := EstimateRequestTokens(req)
 		return &AnthropicResponse{
 			Type:       "message",
 			Model:      originalModel,
@@ -642,14 +653,16 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			Content:    content,
 			StopReason: stopReason,
 			Usage: &AnthropicUsage{
-				InputTokens:  tokenCount,
-				OutputTokens: tokenCount,
+				InputTokens:  inputTokens,
+				OutputTokens: outputTokens,
 			},
 		}
 
 	default:
 		// Fallback: treat as JSON string
 		text := fmt.Sprintf("%v", resp.Response)
+		outputTokens := EstimateTokenCount(text)
+		inputTokens := EstimateRequestTokens(req)
 		return &AnthropicResponse{
 			Type:  "message",
 			Model: originalModel,
@@ -662,8 +675,8 @@ func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel
 			},
 			StopReason: "end_turn",
 			Usage: &AnthropicUsage{
-				InputTokens:  EstimateTokenCount(text),
-				OutputTokens: EstimateTokenCount(text),
+				InputTokens:  inputTokens,
+				OutputTokens: outputTokens,
 			},
 		}
 	}

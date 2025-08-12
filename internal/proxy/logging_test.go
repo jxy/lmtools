@@ -164,7 +164,7 @@ func TestInfoLoggingToStderr(t *testing.T) {
 	os.Stderr = w
 
 	// Log an info message directly
-	LogInfo("Test info message")
+	logger.Infof("Test info message")
 
 	// Restore stderr and read captured output
 	w.Close()
@@ -196,10 +196,10 @@ func TestDebugLoggingDisabledAtInfoLevel(t *testing.T) {
 	os.Stderr = w
 
 	// Log a debug message
-	LogDebug("This debug message should not appear")
+	logger.Debugf("%s", "This debug message should not appear")
 
 	// Log an info message to ensure logging is working
-	LogInfo("This info message should appear")
+	logger.Infof("%s", "This info message should appear")
 
 	// Restore stderr and read captured output
 	w.Close()

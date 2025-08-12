@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/logger"
 	"net/http"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ func NewSSEWriter(w http.ResponseWriter, reqLogger *RequestScopedLogger) (*SSEWr
 		if reqLogger != nil {
 			reqLogger.Debugf("ResponseWriter type: %T does not implement http.Flusher", w)
 		} else {
-			LogDebug(fmt.Sprintf("ResponseWriter type: %T does not implement http.Flusher", w))
+			logger.Debugf("%s", fmt.Sprintf("ResponseWriter type: %T does not implement http.Flusher", w))
 		}
 		return nil, fmt.Errorf("streaming not supported (ResponseWriter type: %T)", w)
 	}
@@ -50,9 +51,9 @@ func (s *SSEWriter) WriteEvent(eventType, data string) error {
 		}
 	} else {
 		if eventType != "" {
-			LogDebug(fmt.Sprintf("→ CLIENT: event: %s | data: %s", eventType, data))
+			logger.Debugf("→ CLIENT: event: %s | data: %s", eventType, data)
 		} else {
-			LogDebug(fmt.Sprintf("→ CLIENT: data: %s", data))
+			logger.Debugf("→ CLIENT: data: %s", data)
 		}
 	}
 
@@ -187,7 +188,7 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 	defer h.mu.Unlock()
 
 	if h.state.TextBlockClosed {
-		LogDebug(fmt.Sprintf("SendTextDelta called but text block is closed, ignoring %d chars", len(text)))
+		logger.Debugf("SendTextDelta called but text block is closed, ignoring %d chars", len(text))
 		return nil
 	}
 
@@ -203,7 +204,7 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 		},
 	}
 	if err := h.sse.WriteJSON("content_block_delta", deltaData); err != nil {
-		LogError("Failed to write text delta", err)
+		logger.Errorf("%s: %v", "Failed to write text delta", err)
 		return err
 	}
 	return nil
@@ -235,7 +236,7 @@ func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string
 		},
 	}
 	if err := h.sse.WriteJSON("content_block_start", blockData); err != nil {
-		LogError(fmt.Sprintf("Failed to write tool_use start for %s", name), err)
+		logger.Errorf("%s: %v", fmt.Sprintf("Failed to write tool_use start for %s", name), err)
 		return err
 	}
 	return nil
@@ -254,7 +255,7 @@ func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON strin
 		if lastToolIndex >= 0 {
 			// For real streaming, we'd need to accumulate partialJSON
 			// and parse when complete. For now, we skip partial updates.
-			LogDebug("  Real streaming: would accumulate partial JSON")
+			logger.Debugf("%s", "  Real streaming: would accumulate partial JSON")
 		}
 	}
 
@@ -267,7 +268,7 @@ func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON strin
 		},
 	}
 	if err := h.sse.WriteJSON("content_block_delta", deltaData); err != nil {
-		LogError(fmt.Sprintf("Failed to write input_json_delta for index %d", index), err)
+		logger.Errorf("%s: %v", fmt.Sprintf("Failed to write input_json_delta for index %d", index), err)
 		return err
 	}
 	return nil
@@ -288,7 +289,7 @@ func (h *AnthropicStreamHandler) SendContentBlockStop(index int) error {
 		"index": index,
 	}
 	if err := h.sse.WriteJSON("content_block_stop", stopData); err != nil {
-		LogError(fmt.Sprintf("Failed to write content_block_stop for index %d", index), err)
+		logger.Errorf("%s: %v", fmt.Sprintf("Failed to write content_block_stop for index %d", index), err)
 		return err
 	}
 
@@ -310,6 +311,7 @@ func (h *AnthropicStreamHandler) SendMessageDelta(stopReason string, outputToken
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// The message_delta should include both input and output tokens in the usage field
 	deltaData := map[string]interface{}{
 		"type": "message_delta",
 		"delta": map[string]interface{}{
@@ -317,6 +319,7 @@ func (h *AnthropicStreamHandler) SendMessageDelta(stopReason string, outputToken
 			"stop_sequence": nil,
 		},
 		"usage": map[string]interface{}{
+			"input_tokens":  h.state.InputTokens,
 			"output_tokens": outputTokens,
 		},
 	}
@@ -360,12 +363,12 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		if accumulatedText != "" && !textSent {
 			// Send accumulated text
 			if err := h.SendTextDelta(accumulatedText); err != nil {
-				LogError("Failed to send accumulated text", err)
+				logger.Errorf("%s: %v", "Failed to send accumulated text", err)
 				return err
 			}
 		}
 		if err := h.SendContentBlockStop(0); err != nil {
-			LogError("Failed to close text block", err)
+			logger.Errorf("%s: %v", "Failed to close text block", err)
 			return err
 		}
 		h.mu.Lock()
@@ -377,7 +380,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	if toolIndex != nil {
 		for i := 1; i <= lastToolIndex; i++ {
 			if err := h.SendContentBlockStop(i); err != nil {
-				LogError(fmt.Sprintf("Failed to close tool block %d", i), err)
+				logger.Errorf("%s: %v", fmt.Sprintf("Failed to close tool block %d", i), err)
 				return err
 			}
 		}
@@ -391,7 +394,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		if h.reqLogger != nil {
 			h.reqLogger.Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
 		} else {
-			LogDebug(fmt.Sprintf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen))
+			logger.Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
 		}
 	}
 
@@ -401,17 +404,17 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	h.mu.Unlock()
 
 	if err := h.SendMessageDelta(stopReason, outputTokens); err != nil {
-		LogError("Failed to send message_delta", err)
+		logger.Errorf("%s: %v", "Failed to send message_delta", err)
 		return err
 	}
 
 	if err := h.SendMessageStop(); err != nil {
-		LogError("Failed to send message_stop", err)
+		logger.Errorf("%s: %v", "Failed to send message_stop", err)
 		return err
 	}
 
 	if err := h.SendDone(); err != nil {
-		LogError("Failed to send [DONE]", err)
+		logger.Errorf("%s: %v", "Failed to send [DONE]", err)
 		return err
 	}
 
@@ -456,22 +459,22 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			// Parse JSON chunk
 			var chunk map[string]interface{}
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				LogError("Failed to parse OpenAI stream chunk", err)
+				logger.Errorf("%s: %v", "Failed to parse OpenAI stream chunk", err)
 				continue // Skip invalid JSON but log the error
 			}
 
 			// Log the received chunk
-			LogJSON("OpenAI Stream Chunk", chunk)
+			p.handler.reqLogger.LogJSON("OpenAI Stream Chunk", chunk)
 
 			// Process the chunk
 			if err := p.processChunk(chunk); err != nil {
-				LogError("Failed to process OpenAI stream chunk", err)
+				logger.Errorf("%s: %v", "Failed to process OpenAI stream chunk", err)
 				// Send error event to client
 				if err := p.handler.sse.WriteJSON("error", map[string]string{
 					"type":    "error",
 					"message": fmt.Sprintf("Stream processing error: %v", err),
 				}); err != nil {
-					LogError("Failed to write error event", err)
+					logger.Errorf("%s: %v", "Failed to write error event", err)
 				}
 				return err
 			}
@@ -483,6 +486,16 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 
 // processChunk processes a single streaming chunk
 func (p *OpenAIStreamParser) processChunk(chunk map[string]interface{}) error {
+	// Check for usage data in the chunk (OpenAI sometimes sends this)
+	if usage, ok := chunk["usage"].(map[string]interface{}); ok {
+		if promptTokens, ok := usage["prompt_tokens"].(float64); ok {
+			p.handler.state.InputTokens = int(promptTokens)
+		}
+		if completionTokens, ok := usage["completion_tokens"].(float64); ok {
+			p.handler.state.OutputTokens = int(completionTokens)
+		}
+	}
+
 	choices, ok := chunk["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
 		return nil
@@ -588,17 +601,17 @@ func (p *GeminiStreamParser) Parse(reader io.Reader) error {
 		}
 
 		// Log the received chunk
-		LogJSON("Gemini Stream Chunk", chunk)
+		p.handler.reqLogger.LogJSON("Gemini Stream Chunk", chunk)
 
 		// Process the chunk
 		if err := p.processChunk(chunk); err != nil {
-			LogError("Failed to process Gemini stream chunk", err)
+			logger.Errorf("%s: %v", "Failed to process Gemini stream chunk", err)
 			// Send error event to client
 			if err := p.handler.sse.WriteJSON("error", map[string]string{
 				"type":    "error",
 				"message": fmt.Sprintf("Stream processing error: %v", err),
 			}); err != nil {
-				LogError("Failed to write error event", err)
+				logger.Errorf("%s: %v", "Failed to write error event", err)
 			}
 			return err
 		}
@@ -744,16 +757,16 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 			if p.reqLogger != nil {
 				p.reqLogger.Debugf("Argo Stream Chunk: %q", text)
 			} else {
-				LogDebug(fmt.Sprintf("Argo Stream Chunk: %q", text))
+				logger.Debugf("%s", fmt.Sprintf("Argo Stream Chunk: %q", text))
 			}
 			if err := p.handler.SendTextDelta(text); err != nil {
-				LogError("Failed to send Argo text delta", err)
+				logger.Errorf("%s: %v", "Failed to send Argo text delta", err)
 				// Send error event to client
 				if err := p.handler.sse.WriteJSON("error", map[string]string{
 					"type":    "error",
 					"message": fmt.Sprintf("Stream processing error: %v", err),
 				}); err != nil {
-					LogError("Failed to write error event", err)
+					logger.Errorf("%s: %v", "Failed to write error event", err)
 				}
 				return err
 			}
@@ -768,9 +781,9 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 		case <-pingTicker.C:
 			// Only send ping if we haven't received data recently
 			if time.Since(lastActivity) >= pingInterval {
-				LogDebug(fmt.Sprintf("Sending ping after %v of inactivity", time.Since(lastActivity)))
+				logger.Debugf("%s", fmt.Sprintf("Sending ping after %v of inactivity", time.Since(lastActivity)))
 				if err := p.handler.SendPing(); err != nil {
-					LogError("Failed to send ping during Argo streaming", err)
+					logger.Errorf("%s: %v", "Failed to send ping during Argo streaming", err)
 					return fmt.Errorf("client disconnected: %w", err)
 				}
 			}

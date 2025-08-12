@@ -25,6 +25,52 @@ func EstimateTokenCountFromChars(charCount int) int {
 	return charCount / 3
 }
 
+// EstimateRequestTokens estimates the total input tokens for an Anthropic request
+// This includes system message, conversation messages, and tool definitions
+func EstimateRequestTokens(req *AnthropicRequest) int {
+	totalChars := 0
+
+	// Count system message
+	if req.System != nil {
+		// Try to extract text content from system message
+		var systemContent string
+		if err := json.Unmarshal(req.System, &systemContent); err == nil {
+			totalChars += len(systemContent)
+		} else {
+			// If it's not a simple string, count the raw JSON
+			totalChars += len(req.System)
+		}
+	}
+
+	// Count messages
+	for _, msg := range req.Messages {
+		// Try to extract text content from message
+		var content string
+		if err := json.Unmarshal(msg.Content, &content); err == nil {
+			totalChars += len(content)
+		} else {
+			// For complex content (arrays, objects), count the raw JSON
+			totalChars += len(msg.Content)
+		}
+		// Add some overhead for role
+		totalChars += len(string(msg.Role))
+	}
+
+	// Count tools
+	for _, tool := range req.Tools {
+		totalChars += len(tool.Name) + len(tool.Description)
+		// Count the input schema
+		if toolJSON, err := json.Marshal(tool.InputSchema); err == nil {
+			totalChars += len(toolJSON)
+		}
+	}
+
+	// Add some overhead for the overall request structure
+	totalChars += 100 // Rough estimate for JSON structure overhead
+
+	return EstimateTokenCountFromChars(totalChars)
+}
+
 // Anthropic API Models
 
 // AnthropicRequest represents a request to the Anthropic Messages API

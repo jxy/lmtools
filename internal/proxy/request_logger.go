@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"lmtools/internal/logger"
 	"sync/atomic"
@@ -77,7 +78,12 @@ func (rl *RequestScopedLogger) Errorf(format string, args ...interface{}) {
 
 // LogJSON logs data as JSON with request context
 func (rl *RequestScopedLogger) LogJSON(label string, data interface{}) {
-	LogJSON(rl.formatMessage(label), data)
+	b, err := json.Marshal(data)
+	if err != nil {
+		rl.Debugf("%s: [JSON marshal error: %v] %+v", rl.formatMessage(label), err, data)
+		return
+	}
+	rl.Debugf("%s: %s", rl.formatMessage(label), string(b))
 }
 
 // LogDuration logs a message with the request duration
