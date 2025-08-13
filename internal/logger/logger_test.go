@@ -17,7 +17,12 @@ func TestLoggerSuite(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Initialize logger once for all tests
-	err := Initialize(tmpDir, "info", "text", false)
+	err := InitializeWithOptions(
+		WithLogDir(tmpDir),
+		WithLevel("info"),
+		WithFormat("text"),
+		WithOutputMode(OutputBoth),
+	)
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
@@ -118,24 +123,29 @@ func testInfoAndWarnLogging(t *testing.T, tmpDir string) {
 		t.Errorf("WARN message not found in log file")
 	}
 
-	// Check timestamp format (standard log package format)
+	// Check timestamp format (new format: [LEVEL] [RFC3339Nano] message)
 	lines := strings.Split(strings.TrimSpace(logContent), "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-		// Standard log format: "2006/01/02 15:04:05 [LEVEL] message"
-		if len(line) < 19 {
-			t.Errorf("Line too short to contain timestamp: %s", line)
+		// New format: [LEVEL] [2006-01-02T15:04:05.999999999Z] message
+		// Find the timestamp between the first [ and second ]
+		start := strings.Index(line, "] [")
+		if start == -1 {
+			t.Errorf("Invalid log format, missing level/timestamp brackets: %s", line)
 			continue
 		}
-		// Extract date and time parts
-		datePart := line[:10]
-		timePart := line[11:19]
-		fullTimestamp := strings.ReplaceAll(datePart, "/", "-") + " " + timePart
-		_, err := time.Parse("2006-01-02 15:04:05", fullTimestamp)
+		start += 3 // Skip "] ["
+		end := strings.Index(line[start:], "]")
+		if end == -1 {
+			t.Errorf("Invalid log format, missing closing timestamp bracket: %s", line)
+			continue
+		}
+		timestamp := line[start : start+end]
+		_, err := time.Parse(time.RFC3339Nano, timestamp)
 		if err != nil {
-			t.Errorf("Invalid timestamp format in line: %s", line)
+			t.Errorf("Invalid timestamp format in line: %s (timestamp: %s, error: %v)", line, timestamp, err)
 		}
 	}
 }
@@ -249,7 +259,12 @@ func TestDebugLoggingBehaviors(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// Initialize logger WITH log directory (like lmc does)
-		if err := Initialize(tmpDir, "DEBUG", "text", false); err != nil {
+		if err := InitializeWithOptions(
+			WithLogDir(tmpDir),
+			WithLevel("debug"),
+			WithFormat("text"),
+			WithOutputMode(OutputBoth),
+		); err != nil {
 			t.Fatalf("Failed to initialize logger: %v", err)
 		}
 		defer Close()
@@ -259,6 +274,17 @@ func TestDebugLoggingBehaviors(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stderr = w
 
+		// Reinitialize logger to use the new stderr
+		ResetForTesting()
+		if err := InitializeWithOptions(
+			WithLogDir(tmpDir),
+			WithLevel("debug"),
+			WithFormat("text"),
+			WithOutputMode(OutputBoth),
+		); err != nil {
+			t.Fatalf("Failed to reinitialize logger: %v", err)
+		}
+
 		// Log debug and info messages
 		Debugf("This is a debug message")
 		Infof("This is an info message")
@@ -266,6 +292,17 @@ func TestDebugLoggingBehaviors(t *testing.T) {
 		// Restore stderr and read captured output
 		w.Close()
 		os.Stderr = oldStderr
+
+		// Restore logger to use original stderr
+		ResetForTesting()
+		if err := InitializeWithOptions(
+			WithLogDir(tmpDir),
+			WithLevel("debug"),
+			WithFormat("text"),
+			WithOutputMode(OutputBoth),
+		); err != nil {
+			t.Fatalf("Failed to restore logger: %v", err)
+		}
 		var buf bytes.Buffer
 		if _, err := buf.ReadFrom(r); err != nil {
 			t.Fatalf("Failed to read from pipe: %v", err)
@@ -308,7 +345,11 @@ func TestDebugLoggingBehaviors(t *testing.T) {
 		once = sync.Once{}
 
 		// Initialize logger WITHOUT log directory (like apiproxy does)
-		if err := Initialize("", "DEBUG", "text", false); err != nil {
+		if err := InitializeWithOptions(
+			WithLevel("debug"),
+			WithFormat("text"),
+			WithOutputMode(OutputStderrOnly),
+		); err != nil {
 			t.Fatalf("Failed to initialize logger: %v", err)
 		}
 		defer Close()
@@ -318,6 +359,16 @@ func TestDebugLoggingBehaviors(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stderr = w
 
+		// Reinitialize logger to use the new stderr
+		ResetForTesting()
+		if err := InitializeWithOptions(
+			WithLevel("debug"),
+			WithFormat("text"),
+			WithOutputMode(OutputStderrOnly),
+		); err != nil {
+			t.Fatalf("Failed to reinitialize logger: %v", err)
+		}
+
 		// Log debug and info messages
 		Debugf("Debug message for apiproxy")
 		Infof("Info message for apiproxy")
@@ -325,6 +376,16 @@ func TestDebugLoggingBehaviors(t *testing.T) {
 		// Restore stderr and read captured output
 		w.Close()
 		os.Stderr = oldStderr
+
+		// Restore logger to use original stderr
+		ResetForTesting()
+		if err := InitializeWithOptions(
+			WithLevel("debug"),
+			WithFormat("text"),
+			WithOutputMode(OutputStderrOnly),
+		); err != nil {
+			t.Fatalf("Failed to restore logger: %v", err)
+		}
 		var buf bytes.Buffer
 		if _, err := buf.ReadFrom(r); err != nil {
 			t.Fatalf("Failed to read from pipe: %v", err)
@@ -493,7 +554,12 @@ func TestConcurrentInitialization(t *testing.T) {
 			defer wg.Done()
 
 			tmpDir := t.TempDir()
-			err := Initialize(tmpDir, "info", "text", false)
+			err := InitializeWithOptions(
+				WithLogDir(tmpDir),
+				WithLevel("info"),
+				WithFormat("text"),
+				WithOutputMode(OutputBoth),
+			)
 			if err != nil {
 				errors <- err
 			}

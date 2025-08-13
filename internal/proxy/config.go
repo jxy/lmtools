@@ -50,8 +50,8 @@ func (c *Config) ApplyDynamicModelDefaults() {
 		c.Model = core.GetDefaultChatModel(provider)
 	}
 
-	// If SmallModel not specified or still has old default, use provider-specific default
-	if c.SmallModel == "" || c.SmallModel == "claudesonnet4" {
+	// If SmallModel not specified, use provider-specific default
+	if c.SmallModel == "" {
 		c.SmallModel = core.GetDefaultSmallModel(provider)
 	}
 }

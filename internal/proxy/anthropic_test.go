@@ -141,7 +141,11 @@ func TestConfigValidationAnthropic(t *testing.T) {
 func TestForwardToAnthropic(t *testing.T) {
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
@@ -244,7 +248,11 @@ func TestForwardToAnthropic(t *testing.T) {
 func TestStreamFromAnthropic(t *testing.T) {
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
@@ -319,7 +327,7 @@ func TestStreamFromAnthropic(t *testing.T) {
 
 	// Create handler
 	ctx := context.Background()
-	handler, err := NewAnthropicStreamHandler(w, "claude-3-opus-20240229", &RequestScopedLogger{})
+	handler, err := NewAnthropicStreamHandler(w, "claude-3-opus-20240229", NewRequestScopedLogger())
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}

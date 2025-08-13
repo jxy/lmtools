@@ -52,7 +52,7 @@ func TestDynamicModelDefaults(t *testing.T) {
 			inputModel:         "gpt-4o",
 			inputSmallModel:    "claudesonnet4",
 			expectedModel:      "gpt-4o",
-			expectedSmallModel: "gpt-5-mini", // Should use OpenAI default since claudesonnet4 matches old default
+			expectedSmallModel: "claudesonnet4",
 		},
 	}
 

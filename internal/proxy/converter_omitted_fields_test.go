@@ -9,7 +9,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func init() {
+	// Initialize logger with request counter enabled for all proxy tests
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+}
 
 func TestOmittedFieldsLogging(t *testing.T) {
 	tests := []struct {
@@ -117,7 +129,12 @@ func TestOmittedFieldsLogging(t *testing.T) {
 			logger.ResetForTesting()
 
 			// Initialize logger with debug level to capture debug logs
-			err := logger.Initialize(tempDir, "debug", "text", true)
+			err := logger.InitializeWithOptions(
+				logger.WithLogDir(tempDir),
+				logger.WithLevel("debug"),
+				logger.WithFormat("text"),
+				logger.WithOutputMode(logger.OutputBoth),
+			)
 			if err != nil {
 				t.Fatalf("Failed to initialize logger: %v", err)
 			}
@@ -183,20 +200,21 @@ func TestOmittedFieldsLogging(t *testing.T) {
 
 // TestOmittedFieldsLoggingWithoutFile tests that debug logs are written to stderr when no log file is configured
 func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
-	// Reset logger for testing
-	logger.ResetForTesting()
-
-	// Initialize logger without log directory (debug goes to stderr)
-	err := logger.Initialize("", "debug", "text", true)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
-	defer logger.Close()
-
-	// Capture stderr
+	// Capture stderr BEFORE reinitializing logger to avoid race conditions
 	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
+
+	// Reinitialize logger with stderr output after setting up the pipe
+	// This ensures the logger will write to our pipe
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
 
 	// Create converter and test request with minimal config
 	config := &Config{
@@ -204,6 +222,10 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 	}
 	mapper := NewModelMapper(config)
 	converter := NewConverter(mapper)
+
+	// Create a context with request logger to ensure logs go through properly
+	reqLogger := NewRequestScopedLogger()
+	ctx := WithRequestLogger(context.Background(), reqLogger)
 
 	topK := 10
 	req := &AnthropicRequest{
@@ -219,18 +241,46 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 	}
 
 	// Convert to trigger logging
-	_, err = converter.ConvertAnthropicToOpenAI(context.Background(), req)
+	_, err := converter.ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("Failed to convert: %v", err)
 	}
 
-	// Restore stderr and read captured output
+	// Force a small delay to ensure logs are written
+	// This is needed because the logger writes asynchronously
+	time.Sleep(10 * time.Millisecond)
+
+	// Close the writer to signal EOF
 	w.Close()
-	os.Stderr = oldStderr
+
+	// Read all captured output
 	captured, _ := io.ReadAll(r)
 
+	// Restore stderr
+	os.Stderr = oldStderr
+
+	// Restore the logger to its original state for other tests
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+
 	// Check that debug log was written to stderr
-	if !strings.Contains(string(captured), "Omitting top_k=10") {
-		t.Errorf("Expected debug log not found in stderr output: %s", string(captured))
+	capturedStr := string(captured)
+	if !strings.Contains(capturedStr, "Omitting top_k=10") {
+		t.Errorf("Expected debug log not found in stderr output: %s", capturedStr)
+		// Also check if the log contains the request ID prefix
+		if strings.Contains(capturedStr, "[#") {
+			t.Logf("Found request ID prefix in output")
+		}
+		// Log what we actually captured
+		t.Logf("Captured output length: %d", len(capturedStr))
+		if len(capturedStr) > 0 {
+			t.Logf("First 200 chars: %s", capturedStr[:min(200, len(capturedStr))])
+		}
 	}
 }

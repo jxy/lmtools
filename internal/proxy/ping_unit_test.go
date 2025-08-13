@@ -33,7 +33,11 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
@@ -164,7 +168,11 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 func TestPingEventsQuickResponse(t *testing.T) {
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
@@ -245,7 +253,11 @@ func TestPingEventsQuickResponse(t *testing.T) {
 func TestPingIntervalClamping(t *testing.T) {
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 

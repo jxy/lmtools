@@ -165,7 +165,14 @@ func main() {
 	}
 
 	// Configure logging
-	if err := logger.Initialize("", logLevel, logFormat, noColor); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel(logLevel),
+		logger.WithFormat(logFormat),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("apiproxy"),
+		logger.WithRequestCounter(true),
+		logger.WithColor(!noColor),
+	); err != nil {
 		log.Printf("Failed to initialize logger: %v", err)
 	}
 

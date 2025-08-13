@@ -5,13 +5,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"lmtools/internal/logger"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func init() {
+	// Initialize logger with request counter enabled for all proxy tests
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+}
 
 // LogCapture captures logs for testing
 type LogCapture struct {
@@ -428,37 +442,304 @@ func TestPingIntervalLogging(t *testing.T) {
 	}
 }
 
+func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("json"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req AnthropicRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		resp := AnthropicResponse{ID: "msg", Type: "message", Role: "assistant", Content: []AnthropicContentBlock{{Type: "text", Text: "ok"}}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer mockAnthropic.Close()
+	config := &Config{Provider: "anthropic", AnthropicAPIKey: "k", AnthropicURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	server := NewServer(config)
+	r, w, _ := os.Pipe()
+	old := os.Stderr
+	os.Stderr = w
+	reqBody := `{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	time.Sleep(100 * time.Millisecond)
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	lines := strings.Split(buf.String(), "\n")
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			continue
+		}
+		msg, _ := m["message"].(string)
+		if strings.HasPrefix(msg, "Incoming Anthropic Request: ") {
+			payload := strings.TrimPrefix(msg, "Incoming Anthropic Request: ")
+			var pj map[string]interface{}
+			if json.Unmarshal([]byte(payload), &pj) == nil && pj["model"] != nil {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("missing JSON Incoming Anthropic Request log")
+	}
+}
+
+func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("json"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "event: message_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n")
+		fmt.Fprintf(w, "event: message_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer mockAnthropic.Close()
+	config := &Config{Provider: "anthropic", AnthropicAPIKey: "k", AnthropicURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	server := NewServer(config)
+	r, w, _ := os.Pipe()
+	old := os.Stderr
+	os.Stderr = w
+	reqBody := `{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"Hello"}],"max_tokens":10,"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	time.Sleep(100 * time.Millisecond)
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	lines := strings.Split(buf.String(), "\n")
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			continue
+		}
+		msg, _ := m["message"].(string)
+		if strings.HasPrefix(msg, "Incoming Anthropic Streaming Request: ") {
+			payload := strings.TrimPrefix(msg, "Incoming Anthropic Streaming Request: ")
+			var pj map[string]interface{}
+			if json.Unmarshal([]byte(payload), &pj) == nil && pj["stream"] == true {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Logf("Captured logs:\n%s", buf.String())
+		t.Errorf("missing JSON Incoming Anthropic Streaming Request log")
+	}
+}
+
+func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("json"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer mockArgo.Close()
+	config := &Config{Provider: "argo", ArgoUser: "u", ArgoBaseURL: mockArgo.URL, Model: "claude-3-haiku-20240307", SmallModel: "claude-3-haiku-20240307", MaxRequestBodySize: 10 * 1024 * 1024}
+	server := NewServer(config)
+	r, w, _ := os.Pipe()
+	old := os.Stderr
+	os.Stderr = w
+	reqBody := `{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"Hello"}],"max_tokens":10,"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	time.Sleep(100 * time.Millisecond)
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	lines := strings.Split(buf.String(), "\n")
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			continue
+		}
+		msg, _ := m["message"].(string)
+		if strings.HasPrefix(msg, "Outgoing Argo Streaming Request: ") {
+			payload := strings.TrimPrefix(msg, "Outgoing Argo Streaming Request: ")
+			var pj map[string]interface{}
+			if json.Unmarshal([]byte(payload), &pj) == nil && pj["model"] != nil {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Logf("Captured logs:\n%s", buf.String())
+		t.Errorf("missing JSON Outgoing Argo Streaming Request log")
+	}
+}
+
+func TestJSONLog_ToolCallInfo(t *testing.T) {
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("json"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := AnthropicResponse{ID: "msg", Type: "message", Role: "assistant", Content: []AnthropicContentBlock{{Type: "tool_use", ID: "id1", Name: "sum", Input: map[string]interface{}{"a": 1, "b": 2}}}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer mockAnthropic.Close()
+	config := &Config{Provider: "anthropic", AnthropicAPIKey: "k", AnthropicURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	server := NewServer(config)
+	r, w, _ := os.Pipe()
+	old := os.Stderr
+	os.Stderr = w
+	reqBody := `{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	time.Sleep(100 * time.Millisecond)
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	lines := strings.Split(buf.String(), "\n")
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			continue
+		}
+		msg, _ := m["message"].(string)
+		if strings.HasPrefix(msg, "Tool call: ") {
+			payload := strings.TrimPrefix(msg, "Tool call: ")
+			var pj map[string]interface{}
+			if json.Unmarshal([]byte(payload), &pj) == nil && pj["name"] == "sum" {
+				if inp, ok := pj["input"].(map[string]interface{}); ok && inp["a"].(float64) == 1 {
+					found = true
+					break
+				}
+			}
+		}
+	}
+	if !found {
+		t.Logf("Captured logs:\n%s", buf.String())
+		t.Errorf("missing JSON Tool call info log")
+	}
+}
+
 func TestLogTimestamps(t *testing.T) {
 	// Test that all logs have proper ISO 8601 timestamps
-	logger := NewRequestScopedLogger()
+	// Capture the actual logged output
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
 
-	// Get formatted message - now only contains request ID, not timestamp
-	formatted := logger.formatMessage("Test message")
+	// Reinitialize logger to use the new stderr
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
 
-	// New format: [#1] Test message
-	// Timestamp is added by core logger, not in formatMessage
-	if !strings.HasPrefix(formatted, "[#") {
-		t.Errorf("Expected formatted message to start with [#, got: %s", formatted)
+	// Create a new request logger after reinitializing
+	reqLogger := NewRequestScopedLogger()
+
+	// Log a test message
+	reqLogger.Infof("Test message")
+
+	// Restore stderr and read captured output
+	w.Close()
+	os.Stderr = oldStderr
+
+	// Restore logger to use original stderr
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+		logger.WithRequestCounter(true),
+	)
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("Failed to read from pipe: %v", err)
+	}
+	output := buf.String()
+
+	// New format includes request ID: [#N]
+	if !strings.Contains(output, "[#") {
+		t.Errorf("Expected output to contain [#, got: %s", output)
 	}
 
 	// Verify request ID is present
-	expectedPrefix := fmt.Sprintf("[#%d]", logger.GetRequestID())
-	if !strings.HasPrefix(formatted, expectedPrefix) {
-		t.Errorf("Expected formatted message to start with %s, got: %s", expectedPrefix, formatted)
+	if reqLogger != nil {
+		expectedID := fmt.Sprintf("[#%d]", reqLogger.GetRequestID())
+		if !strings.Contains(output, expectedID) {
+			t.Errorf("Expected output to contain %s, got: %s", expectedID, output)
+		}
 	}
 
 	// Verify the message content is preserved
-	if !strings.Contains(formatted, "Test message") {
-		t.Errorf("Expected formatted message to contain 'Test message', got: %s", formatted)
+	if !strings.Contains(output, "Test message") {
+		t.Errorf("Expected output to contain 'Test message', got: %s", output)
 	}
 
 	// Verify that start time was set
-	if logger.GetStartTime().IsZero() {
+	if reqLogger.GetStartTime().IsZero() {
 		t.Error("Start time was not set")
 	}
 
 	// Verify that start time is recent
-	if time.Since(logger.GetStartTime()) > time.Second {
+	if time.Since(reqLogger.GetStartTime()) > time.Second {
 		t.Error("Start time seems too old")
 	}
 }

@@ -1,13 +1,14 @@
 package logger
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,16 +31,58 @@ var (
 	}
 )
 
+// Option is a functional option for configuring the logger
+type Option func(*Config)
+
+// OutputMode for backward compatibility (deprecated)
+type OutputMode int
+
+const (
+	OutputAuto OutputMode = iota
+	OutputStderrOnly
+	OutputFileOnly
+	OutputBoth
+)
+
+// Config holds logger configuration
+type Config struct {
+	LogDir         string
+	Level          int
+	Format         string // "text" or "json"
+	Color          bool
+	ToStderr       bool // Write to stderr
+	ToFile         bool // Write to file (requires LogDir)
+	StderrMinLevel int
+	FileMinLevel   int
+	Component      string
+	RequestCounter bool
+}
+
 // Logger handles logging with levels and formatting
 type Logger struct {
 	mu          sync.Mutex
-	file        *os.File
-	stdLogger   *log.Logger
 	level       int
-	useJSON     bool
-	useColor    bool
-	colors      Colors
+	logFile     *os.File
+	component   string
 	initialized bool
+
+	// Output configuration
+	toStderr       bool
+	toFile         bool
+	stderrMinLevel int
+	fileMinLevel   int
+
+	// Request scoping
+	requestCounterEnabled bool
+	counter               int64 // atomic
+
+	// Error tracking
+	writeErrors int64 // atomic counter for write failures
+
+	// Formatting options
+	useJSON  bool
+	useColor bool
+	colors   Colors
 }
 
 // Colors for terminal output
@@ -104,36 +147,93 @@ func (c Colors) Dim(s string) string {
 	return "\033[2m" + s + "\033[0m"
 }
 
-// Initialize sets up the global logger
-func Initialize(logDir, level, format string, noColor bool) error {
+// InitializeWithOptions sets up the global logger with options
+func InitializeWithOptions(opts ...Option) error {
 	var err error
 	once.Do(func() {
-		globalLogger = &Logger{
-			level:    parseLevel(level),
-			useJSON:  format == "json",
-			useColor: !noColor && isTerminal(),
-			colors:   Colors{Enabled: !noColor && isTerminal()},
+		cfg := defaultConfig()
+		for _, o := range opts {
+			o(&cfg)
 		}
-
-		if logDir != "" {
-			err = globalLogger.initFileLogging(logDir)
-		}
-
+		applyAutoDefaults(&cfg)
+		globalLogger = newLogger(cfg)
+		err = globalLogger.initSinks(cfg)
 		globalLogger.initialized = true
 	})
 	return err
 }
 
-// InitializeSimple initializes with just a log directory (for backward compatibility)
-func InitializeSimple(logDir string) error {
-	return Initialize(logDir, "info", "text", false)
+// Option functions
+func WithLogDir(dir string) Option {
+	return func(c *Config) { c.LogDir = dir }
+}
+
+func WithLevel(level string) Option {
+	return func(c *Config) { c.Level = parseLevel(level) }
+}
+
+func WithFormat(format string) Option {
+	return func(c *Config) { c.Format = format }
+}
+
+func WithColor(enabled bool) Option {
+	return func(c *Config) { c.Color = enabled }
+}
+
+func WithStderr(enabled bool) Option {
+	return func(c *Config) { c.ToStderr = enabled }
+}
+
+func WithFile(enabled bool) Option {
+	return func(c *Config) { c.ToFile = enabled }
+}
+
+// WithOutputMode for backward compatibility (deprecated)
+func WithOutputMode(m OutputMode) Option {
+	return func(c *Config) {
+		switch m {
+		case OutputStderrOnly:
+			c.ToStderr = true
+			c.ToFile = false
+			c.StderrMinLevel = c.Level // Use configured level for stderr
+		case OutputFileOnly:
+			c.ToStderr = false
+			c.ToFile = true
+		case OutputBoth:
+			c.ToStderr = true
+			c.ToFile = true
+		default: // OutputAuto
+			// Will be handled by applyAutoDefaults
+		}
+	}
+}
+
+func WithStderrMinLevel(level string) Option {
+	return func(c *Config) { c.StderrMinLevel = parseLevel(level) }
+}
+
+func WithFileMinLevel(level string) Option {
+	return func(c *Config) { c.FileMinLevel = parseLevel(level) }
+}
+
+func WithComponent(name string) Option {
+	return func(c *Config) { c.Component = name }
+}
+
+func WithRequestCounter(enabled bool) Option {
+	return func(c *Config) { c.RequestCounter = enabled }
 }
 
 // GetLogger returns the global logger instance
 func GetLogger() *Logger {
 	if globalLogger == nil {
 		// Create a default logger if not initialized
-		_ = Initialize("", "info", "text", false)
+		_ = InitializeWithOptions(
+			WithLevel("info"),
+			WithFormat("text"),
+			WithStderr(true),
+			WithFile(false),
+		)
 	}
 	return globalLogger
 }
@@ -156,28 +256,75 @@ func ResetForTesting() {
 	once = sync.Once{}
 }
 
-// initFileLogging sets up file-based logging
-func (l *Logger) initFileLogging(logDir string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Create log directory if it doesn't exist
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create log directory: %w", err)
+// defaultConfig returns default configuration
+func defaultConfig() Config {
+	return Config{
+		Level:          LevelInfo,
+		Format:         "text",
+		Color:          isTerminal(),
+		ToStderr:       true,
+		ToFile:         false,
+		StderrMinLevel: LevelInfo,
+		FileMinLevel:   LevelDebug,
 	}
+}
 
-	// Create log file with timestamp and PID
-	timestamp := time.Now().Format("20060102T150405")
-	filename := fmt.Sprintf("%s_lmc_%d.log", timestamp, os.Getpid())
-	logPath := filepath.Join(logDir, filename)
-
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
+// applyAutoDefaults applies auto mode defaults based on logDir
+func applyAutoDefaults(cfg *Config) {
+	// Auto-detect based on LogDir if not explicitly set
+	if cfg.LogDir != "" {
+		cfg.ToFile = true
+		// With log dir: file gets all, stderr gets info+
+		cfg.FileMinLevel = LevelDebug
+		cfg.StderrMinLevel = LevelInfo
+	} else {
+		// No log dir: stderr only, all levels match configured level
+		cfg.ToFile = false
+		cfg.StderrMinLevel = cfg.Level
 	}
+}
 
-	l.file = file
-	l.stdLogger = log.New(file, "", log.LstdFlags)
+// newLogger creates a new logger instance
+func newLogger(cfg Config) *Logger {
+	return &Logger{
+		level:                 cfg.Level,
+		component:             cfg.Component,
+		requestCounterEnabled: cfg.RequestCounter,
+		// Output configuration
+		toStderr:       cfg.ToStderr,
+		toFile:         cfg.ToFile,
+		stderrMinLevel: cfg.StderrMinLevel,
+		fileMinLevel:   cfg.FileMinLevel,
+		// Formatting options
+		useJSON:  cfg.Format == "json",
+		useColor: cfg.Color,
+		colors:   Colors{Enabled: cfg.Color},
+	}
+}
+
+// initSinks initializes log outputs based on configuration
+func (l *Logger) initSinks(cfg Config) error {
+	// File output
+	if cfg.ToFile && cfg.LogDir != "" {
+		if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create log directory: %w", err)
+		}
+
+		// Create log file with timestamp and PID
+		timestamp := time.Now().Format("20060102T150405")
+		component := cfg.Component
+		if component == "" {
+			component = "lmc"
+		}
+		filename := fmt.Sprintf("%s_%s_%d.log", timestamp, component, os.Getpid())
+		logPath := filepath.Join(cfg.LogDir, filename)
+
+		file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return fmt.Errorf("failed to open log file: %w", err)
+		}
+		l.logFile = file
+	}
 
 	return nil
 }
@@ -187,9 +334,9 @@ func (l *Logger) Close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.file != nil {
-		l.file.Close()
-		l.file = nil
+	if l.logFile != nil {
+		l.logFile.Close()
+		l.logFile = nil
 	}
 }
 
@@ -216,33 +363,49 @@ func (l *Logger) logf(level int, format string, args ...interface{}) {
 		return
 	}
 
+	now := time.Now().UTC()
+	message := fmt.Sprintf(format, args...)
+
+	// Format the message once
+	var buf []byte
+	if l.useJSON {
+		// JSON format
+		m := map[string]interface{}{
+			"time":    now.Format(time.RFC3339Nano),
+			"level":   levelNames[level],
+			"message": message,
+		}
+		if l.component != "" {
+			m["component"] = l.component
+		}
+		buf, _ = json.Marshal(m)
+		buf = append(buf, '\n')
+	} else {
+		// Text format
+		b := &bytes.Buffer{}
+		fmt.Fprintf(b, "[%s] [%s]", levelNames[level], now.Format(time.RFC3339Nano))
+		if l.component != "" {
+			fmt.Fprintf(b, " [%s]", l.component)
+		}
+		fmt.Fprintf(b, " %s\n", message)
+		buf = b.Bytes()
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	message := fmt.Sprintf(format, args...)
-	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-
-	// Write to file if configured
-	if l.stdLogger != nil {
-		if l.useJSON {
-			entry := map[string]interface{}{
-				"time":    timestamp,
-				"level":   levelNames[level],
-				"message": message,
-			}
-			if data, err := json.Marshal(entry); err == nil {
-				l.stdLogger.Println(string(data))
-			}
-		} else {
-			l.stdLogger.Printf("[%s] [%s] %s", levelNames[level], timestamp, message)
+	// Write to stderr if enabled and level meets threshold
+	if l.toStderr && level >= l.stderrMinLevel {
+		if _, err := os.Stderr.Write(buf); err != nil {
+			atomic.AddInt64(&l.writeErrors, 1)
 		}
 	}
 
-	// Write to stderr for visibility
-	// For apiproxy (no log dir), always write to stderr including debug
-	// For lmc (with log dir), only write non-debug to stderr
-	if level > LevelDebug || l.stdLogger == nil {
-		fmt.Fprintf(os.Stderr, "[%s] [%s] %s\n", levelNames[level], timestamp, message)
+	// Write to file if enabled and level meets threshold
+	if l.toFile && l.logFile != nil && level >= l.fileMinLevel {
+		if _, err := l.logFile.Write(buf); err != nil {
+			atomic.AddInt64(&l.writeErrors, 1)
+		}
 	}
 }
 
@@ -309,6 +472,114 @@ func sanitizeOp(op string) string {
 	return replacer.Replace(op)
 }
 
+// ScopedLogger provides request-scoped logging
+type ScopedLogger struct {
+	parent *Logger
+	id     int64
+	start  time.Time
+}
+
+// NewScope creates a new scoped logger
+func (l *Logger) NewScope(name string) *ScopedLogger {
+	id := atomic.AddInt64(&l.counter, 1)
+	sc := &ScopedLogger{parent: l, id: id, start: time.Now()}
+	if name != "" && l.requestCounterEnabled && id > 0 {
+		sc.Infof("start: %s", name)
+	}
+	return sc
+}
+
+// Done logs the completion with duration
+func (sc *ScopedLogger) Done() {
+	if sc.id > 0 {
+		dur := time.Since(sc.start)
+		sc.Infof("done in %v", dur)
+	}
+}
+
+// GetRequestID returns the request ID
+func (sc *ScopedLogger) GetRequestID() int64 {
+	return sc.id
+}
+
+// GetDuration returns the time elapsed since the scope started
+func (sc *ScopedLogger) GetDuration() time.Duration {
+	return time.Since(sc.start)
+}
+
+// Logging methods for ScopedLogger
+func (sc *ScopedLogger) Debugf(format string, args ...interface{}) {
+	sc.logf(LevelDebug, format, args...)
+}
+
+func (sc *ScopedLogger) Infof(format string, args ...interface{}) {
+	sc.logf(LevelInfo, format, args...)
+}
+
+func (sc *ScopedLogger) Warnf(format string, args ...interface{}) {
+	sc.logf(LevelWarn, format, args...)
+}
+
+func (sc *ScopedLogger) Errorf(format string, args ...interface{}) {
+	sc.logf(LevelError, format, args...)
+}
+
+// logf is the core logging function for scoped logger
+func (sc *ScopedLogger) logf(level int, format string, args ...interface{}) {
+	if sc.parent == nil || level < sc.parent.level {
+		return
+	}
+
+	now := time.Now().UTC()
+	message := fmt.Sprintf(format, args...)
+
+	// Format the message once
+	var buf []byte
+	if sc.parent.useJSON {
+		// JSON format
+		m := map[string]interface{}{
+			"time":       now.Format(time.RFC3339Nano),
+			"level":      levelNames[level],
+			"message":    message,
+			"request_id": sc.id,
+		}
+		if sc.parent.component != "" {
+			m["component"] = sc.parent.component
+		}
+		buf, _ = json.Marshal(m)
+		buf = append(buf, '\n')
+	} else {
+		// Text format
+		b := &bytes.Buffer{}
+		fmt.Fprintf(b, "[%s] [%s]", levelNames[level], now.Format(time.RFC3339Nano))
+		if sc.parent.component != "" {
+			fmt.Fprintf(b, " [%s]", sc.parent.component)
+		}
+		if sc.id > 0 {
+			fmt.Fprintf(b, " [#%d]", sc.id)
+		}
+		fmt.Fprintf(b, " %s\n", message)
+		buf = b.Bytes()
+	}
+
+	sc.parent.mu.Lock()
+	defer sc.parent.mu.Unlock()
+
+	// Write to stderr if enabled and level meets threshold
+	if sc.parent.toStderr && level >= sc.parent.stderrMinLevel {
+		if _, err := os.Stderr.Write(buf); err != nil {
+			atomic.AddInt64(&sc.parent.writeErrors, 1)
+		}
+	}
+
+	// Write to file if enabled and level meets threshold
+	if sc.parent.toFile && sc.parent.logFile != nil && level >= sc.parent.fileMinLevel {
+		if _, err := sc.parent.logFile.Write(buf); err != nil {
+			atomic.AddInt64(&sc.parent.writeErrors, 1)
+		}
+	}
+}
+
 // Global convenience functions
 func Debugf(format string, args ...interface{}) {
 	GetLogger().Debugf(format, args...)
@@ -330,6 +601,12 @@ func LogJSON(dir, operation string, data []byte) error {
 	return GetLogger().LogJSON(dir, operation, data)
 }
 
+func ResetRequestCounter() {
+	if globalLogger != nil {
+		atomic.StoreInt64(&globalLogger.counter, 0)
+	}
+}
+
 // GetLogDir returns the default log directory
 func GetLogDir() string {
 	homeDir, err := os.UserHomeDir()
@@ -337,4 +614,12 @@ func GetLogDir() string {
 		return filepath.Join(".", ".lmc", "logs")
 	}
 	return filepath.Join(homeDir, ".lmc", "logs")
+}
+
+// GetWriteErrorCount returns the number of write errors encountered
+func GetWriteErrorCount() int64 {
+	if globalLogger == nil {
+		return 0
+	}
+	return atomic.LoadInt64(&globalLogger.writeErrors)
 }

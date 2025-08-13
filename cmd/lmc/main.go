@@ -50,7 +50,14 @@ func run() error {
 
 	// Initialize logging
 	logDir := logger.GetLogDir()
-	if err := logger.InitializeSimple(logDir); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLogDir(logDir),
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputAuto),
+		logger.WithComponent("lmc"),
+		logger.WithStderrMinLevel("error"), // Only errors to stderr for lmc
+	); err != nil {
 		// Log error to stderr but continue - logging is not critical
 		fmt.Fprintf(os.Stderr, "Warning: failed to initialize logging: %v\n", err)
 	}

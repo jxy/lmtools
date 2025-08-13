@@ -21,7 +21,11 @@ import (
 func TestDebugLoggingToStderr(t *testing.T) {
 	// Reset logger to allow reinitialization with DEBUG level
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
@@ -62,6 +66,16 @@ func TestDebugLoggingToStderr(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
+	
+	// Reinitialize logger to use the new stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to reinitialize logger: %v", err)
+	}
 	
 	// Start goroutine to copy from pipe to buffer
 	done := make(chan bool)
@@ -124,6 +138,16 @@ func TestDebugLoggingToStderr(t *testing.T) {
 	os.Stderr = oldStderr
 	<-done
 	
+	// Restore logger to use original stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to restore logger: %v", err)
+	}
+	
 	// Get the captured output
 	mu.Lock()
 	stderrOutput := stderrBuf.String()
@@ -153,7 +177,11 @@ func TestDebugLoggingToStderr(t *testing.T) {
 func TestInfoLoggingToStderr(t *testing.T) {
 	// Reset logger to allow reinitialization with INFO level
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "INFO", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
@@ -162,6 +190,16 @@ func TestInfoLoggingToStderr(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
+	
+	// Reinitialize logger to use the new stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to reinitialize logger: %v", err)
+	}
 
 	// Log an info message directly
 	logger.Infof("Test info message")
@@ -174,6 +212,16 @@ func TestInfoLoggingToStderr(t *testing.T) {
 		t.Fatalf("Failed to read from pipe: %v", err)
 	}
 	stderrOutput := buf.String()
+	
+	// Restore logger to use original stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to restore logger: %v", err)
+	}
 
 	// Verify info message is in stderr (now includes timestamp)
 	if !strings.Contains(stderrOutput, "[INFO]") || !strings.Contains(stderrOutput, "Test info message") {
@@ -185,7 +233,11 @@ func TestInfoLoggingToStderr(t *testing.T) {
 func TestDebugLoggingDisabledAtInfoLevel(t *testing.T) {
 	// Reset logger to allow reinitialization with INFO level
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "INFO", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
@@ -194,6 +246,16 @@ func TestDebugLoggingDisabledAtInfoLevel(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
+	
+	// Reinitialize logger to use the new stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to reinitialize logger: %v", err)
+	}
 
 	// Log a debug message
 	logger.Debugf("%s", "This debug message should not appear")
@@ -209,6 +271,16 @@ func TestDebugLoggingDisabledAtInfoLevel(t *testing.T) {
 		t.Fatalf("Failed to read from pipe: %v", err)
 	}
 	stderrOutput := buf.String()
+	
+	// Restore logger to use original stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("info"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to restore logger: %v", err)
+	}
 
 	// Verify debug message is NOT in stderr
 	if strings.Contains(stderrOutput, "This debug message should not appear") {
@@ -225,7 +297,11 @@ func TestDebugLoggingDisabledAtInfoLevel(t *testing.T) {
 func TestArgoToolDetectionLogging(t *testing.T) {
 	// Reset logger to allow reinitialization with DEBUG level
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
@@ -269,6 +345,16 @@ func TestArgoToolDetectionLogging(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
+	
+	// Reinitialize logger to use the new stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to reinitialize logger: %v", err)
+	}
 	
 	done := make(chan bool)
 	go func() {
@@ -323,6 +409,16 @@ func TestArgoToolDetectionLogging(t *testing.T) {
 	w.Close()
 	os.Stderr = oldStderr
 	<-done
+	
+	// Restore logger to use original stderr
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
+		t.Fatalf("Failed to restore logger: %v", err)
+	}
 	
 	mu.Lock()
 	stderrOutput := stderrBuf.String()

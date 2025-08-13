@@ -4,26 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/logger"
-	"sync/atomic"
 	"time"
 )
 
-// Global atomic counter for request IDs
-var requestCounter int64
-
-// RequestScopedLogger provides request-scoped logging with automatic request ID and timestamp inclusion
+// RequestScopedLogger wraps the logger's ScopedLogger for backward compatibility
 type RequestScopedLogger struct {
+	*logger.ScopedLogger
 	requestID int64
-	startTime time.Time
-	logger    *logger.Logger
 }
 
-// NewRequestScopedLogger creates a new request-scoped logger with a unique sequential ID
+// NewRequestScopedLogger creates a new request-scoped logger
 func NewRequestScopedLogger() *RequestScopedLogger {
+	scope := logger.GetLogger().NewScope("")
 	return &RequestScopedLogger{
-		requestID: atomic.AddInt64(&requestCounter, 1),
-		startTime: time.Now(),
-		logger:    logger.GetLogger(),
+		ScopedLogger: scope,
+		requestID:    scope.GetRequestID(),
 	}
 }
 
@@ -32,58 +27,45 @@ func (rl *RequestScopedLogger) GetRequestID() int64 {
 	return rl.requestID
 }
 
-// GetStartTime returns the request start time
+// GetStartTime returns the request start time (for backward compatibility)
 func (rl *RequestScopedLogger) GetStartTime() time.Time {
-	return rl.startTime
+	// Calculate start time from duration
+	return time.Now().Add(-rl.GetDuration())
 }
 
-// GetDuration returns the time elapsed since the request started
-func (rl *RequestScopedLogger) GetDuration() time.Duration {
-	return time.Since(rl.startTime)
-}
-
-// formatMessage adds request ID to the message
-func (rl *RequestScopedLogger) formatMessage(format string, args ...interface{}) string {
-	message := fmt.Sprintf(format, args...)
-	return fmt.Sprintf("[#%d] %s", rl.requestID, message)
-}
-
-// Debugf logs a debug message with request context
+// Override logging methods - ScopedLogger already handles request ID formatting
 func (rl *RequestScopedLogger) Debugf(format string, args ...interface{}) {
-	if rl.logger != nil {
-		rl.logger.Debugf(rl.formatMessage(format, args...))
-	}
+	rl.ScopedLogger.Debugf(format, args...)
 }
 
-// Infof logs an info message with request context
 func (rl *RequestScopedLogger) Infof(format string, args ...interface{}) {
-	if rl.logger != nil {
-		rl.logger.Infof(rl.formatMessage(format, args...))
-	}
+	rl.ScopedLogger.Infof(format, args...)
 }
 
-// Warnf logs a warning message with request context
 func (rl *RequestScopedLogger) Warnf(format string, args ...interface{}) {
-	if rl.logger != nil {
-		rl.logger.Warnf(rl.formatMessage(format, args...))
-	}
+	rl.ScopedLogger.Warnf(format, args...)
 }
 
-// Errorf logs an error message with request context
 func (rl *RequestScopedLogger) Errorf(format string, args ...interface{}) {
-	if rl.logger != nil {
-		rl.logger.Errorf(rl.formatMessage(format, args...))
-	}
+	rl.ScopedLogger.Errorf(format, args...)
 }
 
-// LogJSON logs data as JSON with request context
 func (rl *RequestScopedLogger) LogJSON(label string, data interface{}) {
 	b, err := json.Marshal(data)
 	if err != nil {
-		rl.Debugf("%s: [JSON marshal error: %v] %+v", label, err, data)
+		rl.Debugf("%s: <marshal_error> %v", label, err)
 		return
 	}
 	rl.Debugf("%s: %s", label, string(b))
+}
+
+func (rl *RequestScopedLogger) InfoJSON(label string, data interface{}) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		rl.Infof("%s: <marshal_error> %v", label, err)
+		return
+	}
+	rl.Infof("%s: %s", label, string(b))
 }
 
 // LogDuration logs a message with the request duration
@@ -117,7 +99,7 @@ func (rl *RequestScopedLogger) LogRequest(method, path, originalModel, mappedMod
 		method, path, originalModel, mappedModel, provider, numMessages, numTools, statusCode, streaming, durationStr)
 }
 
-// ResetCounter resets the request counter (useful for testing)
+// ResetCounter resets the request counter (no longer needed, handled by logger)
 func ResetCounter() {
-	atomic.StoreInt64(&requestCounter, 0)
+	logger.ResetRequestCounter()
 }

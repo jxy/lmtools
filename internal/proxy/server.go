@@ -241,21 +241,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	if anthResp != nil && anthResp.Content != nil {
 		for _, block := range anthResp.Content {
 			if block.Type == "tool_use" && block.Name != "" {
-				if len(block.Input) > 0 {
-					// Create a brief summary of parameters with values
-					params := make([]string, 0, len(block.Input))
-					for key, value := range block.Input {
-						// Format value as string, truncate if too long
-						valStr := fmt.Sprintf("%v", value)
-						if len(valStr) > 100 {
-							valStr = valStr[:97] + "..."
-						}
-						params = append(params, fmt.Sprintf("%s=%s", key, valStr))
-					}
-					reqLogger.Infof("Tool call: %s (params: %s)", block.Name, strings.Join(params, ", "))
-				} else {
-					reqLogger.Infof("Tool call: %s (no params)", block.Name)
-				}
+				reqLogger.InfoJSON("Tool call", map[string]interface{}{"name": block.Name, "input": block.Input})
 			}
 		}
 	}
@@ -1263,22 +1249,7 @@ func (s *Server) streamTextBlock(content string, handler *AnthropicStreamHandler
 func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
 	reqLogger := GetRequestLogger(ctx)
 
-	// Log tool call at INFO level with parameters
-	if len(block.Input) > 0 {
-		// Create a brief summary of parameters with values
-		params := make([]string, 0, len(block.Input))
-		for key, value := range block.Input {
-			// Format value as string, truncate if too long
-			valStr := fmt.Sprintf("%v", value)
-			if len(valStr) > 100 {
-				valStr = valStr[:97] + "..."
-			}
-			params = append(params, fmt.Sprintf("%s=%s", key, valStr))
-		}
-		reqLogger.Infof("Tool call: %s (params: %s)", block.Name, strings.Join(params, ", "))
-	} else {
-		reqLogger.Infof("Tool call: %s (no params)", block.Name)
-	}
+	reqLogger.InfoJSON("Tool call", map[string]interface{}{"name": block.Name, "input": block.Input})
 
 	// Validate tool block
 	if block.ID == "" {

@@ -137,22 +137,20 @@ func TestLoggingIntegration(t *testing.T) {
 						continue
 					}
 					
-					// Should have timestamp format at start
-					if len(line) < 19 {
-						t.Errorf("Log line too short: %s", line)
+					// Log format is now: [LEVEL] [RFC3339Nano timestamp] [component] message
+					// Example: [INFO] [2025-08-13T03:42:20.524221955Z] [lmc] message
+					
+					// Should contain [INFO] or [WARN] or [DEBUG] or [ERROR]
+					if !strings.Contains(line, "[INFO]") && !strings.Contains(line, "[WARN]") && 
+					   !strings.Contains(line, "[DEBUG]") && !strings.Contains(line, "[ERROR]") {
+						t.Errorf("Log line missing level: %s", line)
 						continue
 					}
 
-					// Verify timestamp can be parsed
-					timestamp := line[:19]
-					_, err := time.Parse("2006/01/02 15:04:05", timestamp)
-					if err != nil {
-						t.Errorf("Invalid timestamp in log: %s", line)
-					}
-
-					// Should contain [INFO] or [WARN]
-					if !strings.Contains(line, "[INFO]") && !strings.Contains(line, "[WARN]") {
-						t.Errorf("Log line missing level: %s", line)
+					// Check for timestamp in RFC3339Nano format between brackets
+					// Pattern: [2025-08-13T03:42:20.524221955Z]
+					if !strings.Contains(line, "[20") || !strings.Contains(line, "T") || !strings.Contains(line, "Z]") {
+						t.Errorf("Log line missing or invalid timestamp format: %s", line)
 					}
 				}
 				

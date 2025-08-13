@@ -16,7 +16,11 @@ import (
 func TestContextCancellationDuringPing(t *testing.T) {
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
@@ -139,7 +143,11 @@ func TestContextCancellationDuringPing(t *testing.T) {
 func TestFastResponseNoPingDuringWait(t *testing.T) {
 	// Initialize logger for testing
 	logger.ResetForTesting()
-	if err := logger.Initialize("", "DEBUG", "text", false); err != nil {
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
 
