@@ -134,8 +134,8 @@ func TestProviderURLOverride(t *testing.T) {
 			if config.OpenAIURL != tt.expectedOpenAI {
 				t.Errorf("Expected OpenAIURL=%s, got %s", tt.expectedOpenAI, config.OpenAIURL)
 			}
-			if config.GeminiURL != tt.expectedGemini {
-				t.Errorf("Expected GeminiURL=%s, got %s", tt.expectedGemini, config.GeminiURL)
+			if config.GoogleURL != tt.expectedGemini {
+				t.Errorf("Expected GoogleURL=%s, got %s", tt.expectedGemini, config.GoogleURL)
 			}
 			if config.ArgoBaseURL != tt.expectedArgo {
 				t.Errorf("Expected ArgoBaseURL=%s, got %s", tt.expectedArgo, config.ArgoBaseURL)
@@ -210,7 +210,7 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 			config := &Config{
 				Provider:     tt.provider,
 				OpenAIAPIKey: tt.openAIKey,
-				GeminiAPIKey: tt.geminiKey,
+				GoogleAPIKey: tt.geminiKey,
 				ArgoUser:     tt.argoUser,
 				ProviderURL:  tt.providerURL,
 			}

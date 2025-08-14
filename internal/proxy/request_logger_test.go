@@ -18,7 +18,6 @@ func init() {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 }
 
@@ -66,7 +65,6 @@ func TestRequestLoggerFormatting(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	// Create request logger after reinitializing
@@ -86,7 +84,6 @@ func TestRequestLoggerFormatting(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(r); err != nil {
@@ -110,7 +107,6 @@ func TestRequestLoggerFormatting(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	// Create new request logger
@@ -126,7 +122,6 @@ func TestRequestLoggerFormatting(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	var buf2 bytes.Buffer
 	if _, err := buf2.ReadFrom(r2); err != nil {
@@ -209,9 +204,18 @@ func TestRequestLoggerContext(t *testing.T) {
 			logger.GetRequestID(), retrieved.GetRequestID())
 	}
 
-	// Test retrieving from context without logger (should create new one)
+	// Test retrieving from context without logger (should return nil)
 	emptyCtx := context.Background()
-	defaultLogger := GetRequestLogger(emptyCtx)
+	nilLogger := GetRequestLogger(emptyCtx)
+	if nilLogger != nil {
+		t.Error("Expected nil logger from empty context")
+	}
+
+	// Test GetRequestLoggerOrDefault creates new logger
+	defaultLogger := GetRequestLoggerOrDefault(emptyCtx)
+	if defaultLogger == nil {
+		t.Fatal("Expected GetRequestLoggerOrDefault to return non-nil logger")
+	}
 	if defaultLogger.GetRequestID() == 0 {
 		t.Error("Expected default logger to have non-zero ID")
 	}

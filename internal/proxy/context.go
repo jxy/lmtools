@@ -17,6 +17,14 @@ func GetRequestLogger(ctx context.Context) *RequestScopedLogger {
 	if logger, ok := ctx.Value(RequestLoggerKey{}).(*RequestScopedLogger); ok {
 		return logger
 	}
-	// Return a default logger if none in context (shouldn't happen in normal flow)
+	// Return nil if none in context
+	return nil
+}
+
+// GetRequestLoggerOrDefault retrieves the request logger from context or returns a new one
+func GetRequestLoggerOrDefault(ctx context.Context) *RequestScopedLogger {
+	if logger := GetRequestLogger(ctx); logger != nil {
+		return logger
+	}
 	return NewRequestScopedLogger()
 }

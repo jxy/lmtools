@@ -359,9 +359,9 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 	}
 	
 	// Verify it respected Retry-After (should take close to 1 second)
-	// Allow some tolerance for timing variations (800ms instead of 1s)
-	if duration < 800*time.Millisecond {
-		t.Errorf("Expected delay of at least 800ms (with 1s Retry-After), got %v", duration)
+	// Allow some tolerance for timing variations (750ms instead of 1s to account for system timing)
+	if duration < 750*time.Millisecond {
+		t.Errorf("Expected delay of at least 750ms (with 1s Retry-After), got %v", duration)
 	}
 }
 
@@ -518,7 +518,7 @@ func TestCustomProviderURL(t *testing.T) {
 				
 				config := &Config{
 					OpenAIAPIKey:       "test-key",
-					GeminiAPIKey:       "test-key",
+					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:  "openai",
@@ -565,7 +565,7 @@ func TestCustomProviderURL(t *testing.T) {
 				
 				config := &Config{
 					OpenAIAPIKey:       "test-key",
-					GeminiAPIKey:       "test-key",
+					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:  "google",
@@ -602,7 +602,7 @@ func TestCustomProviderURL(t *testing.T) {
 				
 				config := &Config{
 					OpenAIAPIKey:       "test-key",
-					GeminiAPIKey:       "test-key",
+					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:  "argo",

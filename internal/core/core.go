@@ -147,13 +147,13 @@ const (
 	DefaultArgoChatModel      = "gpt5"
 	DefaultOpenAIChatModel    = "gpt-5"
 	DefaultAnthropicChatModel = "claude-opus-4-1-20250805"
-	DefaultGeminiChatModel    = "gemini-2.5-pro"
+	DefaultGoogleChatModel    = "gemini-2.5-pro"
 
 	// Provider-specific default small models
 	DefaultArgoSmallModel      = "gpt5mini"
 	DefaultOpenAISmallModel    = "gpt-5-mini"
 	DefaultAnthropicSmallModel = "claude-3-5-haiku-20241022"
-	DefaultGeminiSmallModel    = "gemini-2.5-flash"
+	DefaultGoogleSmallModel    = "gemini-2.5-flash"
 )
 
 // API endpoints
@@ -174,8 +174,8 @@ func GetDefaultChatModel(provider string) string {
 		return DefaultOpenAIChatModel
 	case "anthropic":
 		return DefaultAnthropicChatModel
-	case "gemini":
-		return DefaultGeminiChatModel
+	case "google":
+		return DefaultGoogleChatModel
 	case "argo", "":
 		return DefaultArgoChatModel
 	default:
@@ -191,8 +191,8 @@ func GetDefaultSmallModel(provider string) string {
 		return DefaultOpenAISmallModel
 	case "anthropic":
 		return DefaultAnthropicSmallModel
-	case "gemini", "google":
-		return DefaultGeminiSmallModel
+	case "google":
+		return DefaultGoogleSmallModel
 	case "argo", "":
 		return DefaultArgoSmallModel
 	default:
@@ -331,8 +331,8 @@ func BuildRequest(cfg RequestConfig, input string) (*http.Request, []byte, error
 		return buildArgoRequest(cfg, input)
 	case "openai":
 		return buildOpenAIDirectRequest(cfg, input)
-	case "gemini":
-		return buildGeminiDirectRequest(cfg, input)
+	case "google":
+		return buildGoogleDirectRequest(cfg, input)
 	case "anthropic":
 		return buildAnthropicDirectRequest(cfg, input)
 	default:
@@ -480,13 +480,13 @@ func buildOpenAIDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	return httpReq, body, nil
 }
 
-// buildGeminiDirectRequest builds a request for Gemini API directly
-func buildGeminiDirectRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
+// buildGoogleDirectRequest builds a request for Google Gemini API directly
+func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
 	var apiKey string
 
 	// Only require API key for standard endpoints
 	if cfg.GetProviderURL() == "" {
-		// Read API key (required for standard Gemini endpoint)
+		// Read API key (required for standard Google endpoint)
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
@@ -494,7 +494,7 @@ func buildGeminiDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 		}
 
 		// Validate API key
-		if err := auth.ValidateAPIKey(apiKey, "gemini"); err != nil {
+		if err := auth.ValidateAPIKey(apiKey, "google"); err != nil {
 			return nil, nil, fmt.Errorf("invalid API key: %w", err)
 		}
 	} else if cfg.GetAPIKeyFile() != "" {
@@ -509,17 +509,17 @@ func buildGeminiDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 
 	model := cfg.GetModel()
 	if model == "" {
-		model = GetDefaultChatModel("gemini")
+		model = GetDefaultChatModel("google")
 	}
 
 	// No longer validate model for provider
 
-	// Gemini doesn't have separate embedding endpoint
+	// Google doesn't have separate embedding endpoint
 	if cfg.IsEmbed() {
-		return nil, nil, fmt.Errorf("gemini provider does not support embedding mode")
+		return nil, nil, fmt.Errorf("google provider does not support embedding mode")
 	}
 
-	// Build Gemini format request
+	// Build Google Gemini format request
 	req := map[string]interface{}{
 		"contents": []map[string]interface{}{
 			{
@@ -543,11 +543,11 @@ func buildGeminiDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	// Determine endpoint
 	url := cfg.GetProviderURL()
 	if url == "" {
-		// Standard Gemini endpoint requires API key
+		// Standard Google endpoint requires API key
 		if apiKey == "" {
-			return nil, nil, fmt.Errorf("API key is required for standard Gemini endpoint")
+			return nil, nil, fmt.Errorf("API key is required for standard Google endpoint")
 		}
-		// Use default Gemini base URL
+		// Use default Google Gemini base URL
 		url = "https://generativelanguage.googleapis.com/v1beta"
 	}
 
@@ -574,7 +574,7 @@ func buildGeminiDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	}
 
 	// Use centralized header setting
-	auth.SetRequestHeaders(httpReq, true, false, "gemini")
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "google")
 
 	return httpReq, body, nil
 }
@@ -739,7 +739,7 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 		return parseArgoResponse(data, cfg.IsEmbed())
 	case "openai":
 		return parseOpenAIResponse(data, cfg.IsEmbed())
-	case "gemini":
+	case "google":
 		return parseGeminiResponse(data, cfg.IsEmbed())
 	case "anthropic":
 		return parseAnthropicResponse(data, cfg.IsEmbed())

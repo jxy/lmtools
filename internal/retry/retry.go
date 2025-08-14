@@ -47,8 +47,8 @@ func ProviderConfig(provider string) *Config {
 			MaxBackoff:     60 * time.Second,
 			BackoffFactor:  2.0,
 		}
-	case "gemini":
-		// Gemini is generally more lenient
+	case "google":
+		// Google is generally more lenient
 		return &Config{
 			MaxRetries:     8,
 			InitialBackoff: 1 * time.Second,

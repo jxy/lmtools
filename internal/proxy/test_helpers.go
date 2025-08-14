@@ -16,13 +16,13 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 	t.Helper()
 	// Create mock providers
 	openAIMock := httptest.NewServer(NewMockOpenAI(t))
-	geminiMock := httptest.NewServer(NewMockGemini(t))
+	googleMock := httptest.NewServer(NewMockGoogle(t))
 	argoMock := httptest.NewServer(NewMockArgo(t))
 
 	// Create config
 	config := &Config{
 		OpenAIAPIKey:       "test-openai-key",
-		GeminiAPIKey:       "test-gemini-key",
+		GoogleAPIKey:       "test-google-key",
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
 		Provider:           "openai",
@@ -31,7 +31,7 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 		// Set mock URLs
 		OpenAIURL:   openAIMock.URL + "/v1/chat/completions",
-		GeminiURL:   geminiMock.URL + "/v1beta/models",
+		GoogleURL:   googleMock.URL + "/v1beta/models",
 		ArgoBaseURL: argoMock.URL,
 	}
 
@@ -42,7 +42,7 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 	server := NewServer(config)
 	proxyServer := httptest.NewServer(server)
 
-	return proxyServer, openAIMock, geminiMock, argoMock
+	return proxyServer, openAIMock, googleMock, argoMock
 }
 
 // MockOpenAI creates a mock OpenAI server
@@ -123,11 +123,11 @@ func NewMockOpenAI(t *testing.T) http.Handler {
 	})
 }
 
-// MockGemini creates a mock Gemini server
-func NewMockGemini(t *testing.T) http.Handler {
+// MockGoogle creates a mock Google server
+func NewMockGoogle(t *testing.T) http.Handler {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Logf("Mock Gemini: %s %s", r.Method, r.URL.Path)
+		t.Logf("Mock Google: %s %s", r.Method, r.URL.Path)
 
 		// Check API key in URL
 		if !strings.Contains(r.URL.String(), "key=") {
@@ -143,7 +143,7 @@ func NewMockGemini(t *testing.T) http.Handler {
 			// Send streaming response
 			chunks := []string{
 				`data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}`,
-				`data: {"candidates":[{"content":{"parts":[{"text":" from Gemini"}]}}]}`,
+				`data: {"candidates":[{"content":{"parts":[{"text":" from Google"}]}}]}`,
 				`data: {"candidates":[{"finishReason":"STOP"}]}`,
 			}
 
@@ -160,7 +160,7 @@ func NewMockGemini(t *testing.T) http.Handler {
 				{
 					Content: GeminiContent{
 						Parts: []GeminiPart{
-							{Text: "Hello from mock Gemini!"},
+							{Text: "Hello from mock Google!"},
 						},
 					},
 					FinishReason: "STOP",

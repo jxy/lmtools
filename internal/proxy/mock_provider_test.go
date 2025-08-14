@@ -35,8 +35,8 @@ func (m *MockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch m.provider {
 	case "openai":
 		m.handleOpenAI(w, r, body)
-	case "gemini":
-		m.handleGemini(w, r, body)
+	case "google":
+		m.handleGoogle(w, r, body)
 	case "argo":
 		m.handleArgo(w, r, body)
 	default:
@@ -114,9 +114,9 @@ func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body
 	}
 }
 
-func (m *MockProvider) handleGemini(w http.ResponseWriter, r *http.Request, body []byte) {
+func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body []byte) {
 	// Check API key in query
-	if !strings.Contains(r.URL.Query().Get("key"), "gemini-key") {
+	if r.URL.Query().Get("key") == "" {
 		http.Error(w, "Invalid API key", http.StatusForbidden)
 		return
 	}
@@ -150,7 +150,7 @@ func (m *MockProvider) handleGemini(w http.ResponseWriter, r *http.Request, body
 					{
 						"content": map[string]interface{}{
 							"parts": []map[string]interface{}{
-								{"text": " from Gemini"},
+								{"text": " from Google"},
 							},
 						},
 						"finishReason": "STOP",
@@ -184,7 +184,7 @@ func (m *MockProvider) handleGemini(w http.ResponseWriter, r *http.Request, body
 				Content: GeminiContent{
 					Role: "model",
 					Parts: []GeminiPart{
-						{Text: "Hello from mock Gemini!"},
+						{Text: "Hello from mock Google!"},
 					},
 				},
 				FinishReason: "STOP",
@@ -198,7 +198,7 @@ func (m *MockProvider) handleGemini(w http.ResponseWriter, r *http.Request, body
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		m.t.Logf("Failed to encode Gemini response: %v", err)
+		m.t.Logf("Failed to encode Google response: %v", err)
 	}
 }
 

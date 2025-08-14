@@ -21,7 +21,6 @@ func init() {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 }
 
@@ -47,7 +46,6 @@ func captureStderr(t *testing.T, f func()) string {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	// Capture output in goroutine
@@ -75,7 +73,6 @@ func captureStderr(t *testing.T, f func()) string {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	return buf.String()

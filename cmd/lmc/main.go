@@ -197,7 +197,16 @@ func run() error {
 	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.GetLogger())
 
 	// Send request with retry using pooled client
-	logger.Infof("Sending request to %s", req.URL.String())
+	// Redact API key from URL before logging
+	logURL := req.URL.String()
+	if req.URL.Query().Get("key") != "" {
+		u := *req.URL
+		q := u.Query()
+		q.Set("key", "REDACTED")
+		u.RawQuery = q.Encode()
+		logURL = u.String()
+	}
+	logger.Infof("Sending request to %s", logURL)
 	resp, err := retryClient.Do(ctx, req, "lmc")
 	// Handle error with response cleanup
 	if err != nil {
@@ -333,7 +342,7 @@ func listModels(cfg config.Config) error {
 			}
 		case "openai":
 			url = "https://api.openai.com/v1/models"
-		case "gemini":
+		case "google":
 			url = "https://generativelanguage.googleapis.com/v1beta/models"
 		case "anthropic":
 			url = "https://api.anthropic.com/v1/models"
@@ -363,9 +372,9 @@ func listModels(cfg config.Config) error {
 		// Use centralized header setting
 		auth.SetProviderHeaders(req, provider, apiKey)
 
-		// Handle Gemini's special case (API key in URL)
-		if provider == "gemini" {
-			// Gemini uses API key in URL
+		// Handle Google's special case (API key in URL)
+		if provider == "google" {
+			// Google uses API key in URL
 			if !strings.Contains(url, "?") {
 				url += "?key=" + apiKey
 			} else {
@@ -405,8 +414,8 @@ func listModels(cfg config.Config) error {
 		return displayArgoModels(data)
 	case "openai":
 		return displayOpenAIModels(data)
-	case "gemini":
-		return displayGeminiModels(data)
+	case "google":
+		return displayGoogleModels(data)
 	case "anthropic":
 		return displayAnthropicModels(data)
 	default:
@@ -510,7 +519,7 @@ func displayOpenAIModels(data []byte) error {
 	return nil
 }
 
-func displayGeminiModels(data []byte) error {
+func displayGoogleModels(data []byte) error {
 	var response struct {
 		Models []struct {
 			Name             string   `json:"name"`
@@ -519,7 +528,7 @@ func displayGeminiModels(data []byte) error {
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
-		return fmt.Errorf("failed to parse Gemini models: %w", err)
+		return fmt.Errorf("failed to parse Google models: %w", err)
 	}
 
 	// Sort by model ID (extracted from name)
@@ -529,7 +538,7 @@ func displayGeminiModels(data []byte) error {
 		return idI < idJ
 	})
 
-	fmt.Println("Available Gemini models:")
+	fmt.Println("Available Google models:")
 	for _, model := range response.Models {
 		// Extract model ID from name (format: models/model-id)
 		modelID := strings.TrimPrefix(model.Name, "models/")

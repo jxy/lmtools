@@ -11,7 +11,7 @@ type Config struct {
 	// API Keys
 	AnthropicAPIKey string
 	OpenAIAPIKey    string
-	GeminiAPIKey    string
+	GoogleAPIKey    string
 
 	// Argo Configuration
 	ArgoUser string
@@ -31,7 +31,7 @@ type Config struct {
 
 	// API Endpoints
 	OpenAIURL    string // OpenAI API endpoint
-	GeminiURL    string // Google Gemini API endpoint
+	GoogleURL    string // Google API endpoint
 	AnthropicURL string // Anthropic API endpoint
 	ArgoBaseURL  string // Argo API base URL (environment-specific)
 }
@@ -39,11 +39,8 @@ type Config struct {
 // ApplyDynamicModelDefaults applies provider-specific model defaults
 // when the user hasn't specified models
 func (c *Config) ApplyDynamicModelDefaults() {
-	// Normalize provider name
+	// Use provider name as-is
 	provider := strings.ToLower(c.Provider)
-	if provider == "google" {
-		provider = "gemini"
-	}
 
 	// If Model not specified, use provider-specific default
 	if c.Model == "" {
@@ -65,8 +62,8 @@ func (c *Config) InitializeURLs() {
 	if c.OpenAIURL == "" {
 		c.OpenAIURL = "https://api.openai.com/v1/chat/completions"
 	}
-	if c.GeminiURL == "" {
-		c.GeminiURL = "https://generativelanguage.googleapis.com/v1beta/models"
+	if c.GoogleURL == "" {
+		c.GoogleURL = "https://generativelanguage.googleapis.com/v1beta/models"
 	}
 	if c.AnthropicURL == "" {
 		c.AnthropicURL = "https://api.anthropic.com/v1/messages"
@@ -86,7 +83,7 @@ func (c *Config) InitializeURLs() {
 		case "openai":
 			c.OpenAIURL = c.ProviderURL
 		case "google":
-			c.GeminiURL = c.ProviderURL
+			c.GoogleURL = c.ProviderURL
 		case "anthropic":
 			c.AnthropicURL = c.ProviderURL
 		case "argo":
@@ -122,7 +119,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("-api-key-file is required when -provider is 'openai' (unless using -provider-url)")
 		}
 	case "google":
-		if c.GeminiAPIKey == "" && c.ProviderURL == "" {
+		if c.GoogleAPIKey == "" && c.ProviderURL == "" {
 			return fmt.Errorf("-api-key-file is required when -provider is 'google' (unless using -provider-url)")
 		}
 	case "anthropic":

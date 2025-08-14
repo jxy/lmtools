@@ -23,7 +23,6 @@ func init() {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 }
 
@@ -449,7 +448,6 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		logger.WithFormat("json"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req AnthropicRequest
@@ -469,7 +467,6 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
-	time.Sleep(100 * time.Millisecond)
 	w.Close()
 	os.Stderr = old
 	var buf bytes.Buffer
@@ -506,7 +503,6 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		logger.WithFormat("json"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -529,7 +525,6 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
-	time.Sleep(100 * time.Millisecond)
 	w.Close()
 	os.Stderr = old
 	var buf bytes.Buffer
@@ -567,7 +562,6 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 		logger.WithFormat("json"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
@@ -584,7 +578,6 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
-	time.Sleep(100 * time.Millisecond)
 	w.Close()
 	os.Stderr = old
 	var buf bytes.Buffer
@@ -622,7 +615,6 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 		logger.WithFormat("json"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := AnthropicResponse{ID: "msg", Type: "message", Role: "assistant", Content: []AnthropicContentBlock{{Type: "tool_use", ID: "id1", Name: "sum", Input: map[string]interface{}{"a": 1, "b": 2}}}}
@@ -640,7 +632,6 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
-	time.Sleep(100 * time.Millisecond)
 	w.Close()
 	os.Stderr = old
 	var buf bytes.Buffer
@@ -657,12 +648,15 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 		}
 		msg, _ := m["message"].(string)
 		if strings.HasPrefix(msg, "Tool call: ") {
-			payload := strings.TrimPrefix(msg, "Tool call: ")
-			var pj map[string]interface{}
-			if json.Unmarshal([]byte(payload), &pj) == nil && pj["name"] == "sum" {
-				if inp, ok := pj["input"].(map[string]interface{}); ok && inp["a"].(float64) == 1 {
-					found = true
-					break
+			// New format: "Tool call: <name> | Data: <json>"
+			parts := strings.SplitN(strings.TrimPrefix(msg, "Tool call: "), " | Data: ", 2)
+			if len(parts) == 2 && parts[0] == "sum" {
+				var inputData map[string]interface{}
+				if json.Unmarshal([]byte(parts[1]), &inputData) == nil {
+					if a, ok := inputData["a"].(float64); ok && a == 1 {
+						found = true
+						break
+					}
 				}
 			}
 		}
@@ -687,7 +681,6 @@ func TestLogTimestamps(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	// Create a new request logger after reinitializing
@@ -707,7 +700,6 @@ func TestLogTimestamps(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(r); err != nil {

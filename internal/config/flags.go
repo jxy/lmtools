@@ -34,7 +34,7 @@ type Config struct {
 	SkipFlockCheck bool          // skip file locking check
 
 	// Provider support
-	Provider    string // provider: argo (default), openai, gemini, anthropic
+	Provider    string // provider: argo (default), openai, google, anthropic
 	ProviderURL string // custom provider API endpoint
 	APIKeyFile  string // path to API key file (required for non-Argo providers)
 	ListModels  bool   // list available models from provider
@@ -65,7 +65,7 @@ func ParseFlags(args []string) (Config, error) {
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
 
 	// Provider support
-	fs.StringVar(&cfg.Provider, "provider", "argo", "provider: argo, openai, gemini, anthropic")
+	fs.StringVar(&cfg.Provider, "provider", "argo", "provider: argo, openai, google, anthropic")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "custom provider API endpoint")
 	fs.StringVar(&cfg.APIKeyFile, "api-key-file", "", "path to API key file (required for non-Argo providers)")
 	fs.BoolVar(&cfg.ListModels, "list-models", false, "list available models from provider")
@@ -147,7 +147,7 @@ func ParseFlags(args []string) (Config, error) {
 	cfg.Provider = strings.ToLower(cfg.Provider)
 
 	// Validate provider
-	validProviders := []string{"argo", "openai", "gemini", "anthropic"}
+	validProviders := []string{"argo", "openai", "google", "anthropic"}
 	isValidProvider := false
 	for _, p := range validProviders {
 		if cfg.Provider == p {
@@ -191,7 +191,7 @@ lmc is a command-line interface for AI model interactions.
 
 Model Options:
   -model string  Model to use (default varies by provider: gpt5 for argo, gpt-5 for openai,
-                 claude-opus-4-1-20250805 for anthropic, gemini-2.5-pro for gemini)
+                 claude-opus-4-1-20250805 for anthropic, gemini-2.5-pro for google)
                  Use -list-models to see available models for your provider
   -e             Enable embed mode instead of chat (default: false)
 
@@ -205,7 +205,7 @@ Configuration:
   -timeout dur       HTTP request timeout (default: 10m)
 
 Provider Options:
-  -provider string       Provider: argo, openai, gemini, anthropic (default: "argo")
+  -provider string       Provider: argo, openai, google, anthropic (default: "argo")
   -provider-url string   Custom provider API base URL with version (e.g., http://localhost:8080/v1)
   -api-key-file string   Path to API key file (required for standard non-Argo providers)
   -list-models           List available models from the provider
@@ -230,8 +230,8 @@ Examples:
   # Use OpenAI provider with API key
   echo "Explain quantum physics" | %s -provider openai -api-key-file ~/.openai-key
 
-  # Use Gemini provider 
-  echo "Tell me about AI" | %s -provider gemini -api-key-file ~/.gemini-key
+  # Use Google provider 
+  echo "Tell me about AI" | %s -provider google -api-key-file ~/.google-key
 
   # Use Anthropic provider with specific model
   echo "Write a poem" | %s -provider anthropic -api-key-file ~/.anthropic-key -model claude-3-opus-20240229

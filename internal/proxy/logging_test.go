@@ -163,8 +163,8 @@ func TestDebugLoggingToStderr(t *testing.T) {
 		// Check what provider was selected
 		if strings.Contains(stderrOutput, "via openai") {
 			t.Errorf("Model was incorrectly routed to OpenAI instead of Argo")
-		} else if strings.Contains(stderrOutput, "via gemini") {
-			t.Errorf("Model was incorrectly routed to Gemini instead of Argo")
+		} else if strings.Contains(stderrOutput, "via google") {
+			t.Errorf("Model was incorrectly routed to Google instead of Argo")
 		} else {
 			t.Errorf("Expected Argo tool detection message not found")
 		}
@@ -435,8 +435,8 @@ func TestArgoToolDetectionLogging(t *testing.T) {
 		if strings.Contains(stderrOutput, "via openai") {
 			t.Errorf("ERROR: Model was routed to OpenAI instead of Argo!")
 		}
-		if strings.Contains(stderrOutput, "via gemini") {
-			t.Errorf("ERROR: Model was routed to Gemini instead of Argo!")
+		if strings.Contains(stderrOutput, "via google") {
+			t.Errorf("ERROR: Model was routed to Google instead of Argo!")
 		}
 	}
 }

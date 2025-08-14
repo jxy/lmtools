@@ -28,13 +28,13 @@ type E2ETestSuite struct {
 func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 	// Create mock providers
 	openAIMock := httptest.NewServer(NewE2EMockProvider(t, "openai"))
-	geminiMock := httptest.NewServer(NewE2EMockProvider(t, "gemini"))
+	googleMock := httptest.NewServer(NewE2EMockProvider(t, "google"))
 	argoMock := httptest.NewServer(NewE2EMockProvider(t, "argo"))
 
 	// Create config
 	config := &Config{
 		OpenAIAPIKey:       "test-openai-key",
-		GeminiAPIKey:       "test-gemini-key",
+		GoogleAPIKey:       "test-google-key",
 		ArgoUser:           "testuser",
 		Provider:  "openai",
 		SmallModel:         "gpt-4o-mini",
@@ -44,7 +44,7 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 
 	// Set mock URLs in config
 	config.OpenAIURL = openAIMock.URL + "/v1/chat/completions"
-	config.GeminiURL = geminiMock.URL + "/v1beta/models"
+	config.GoogleURL = googleMock.URL + "/v1beta/models"
 	config.ArgoBaseURL = argoMock.URL
 
 	// Create proxy server
@@ -55,7 +55,7 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 		config: config,
 		mockProviders: map[string]*httptest.Server{
 			"openai": openAIMock,
-			"gemini": geminiMock,
+			"google": googleMock,
 			"argo":   argoMock,
 		},
 	}
@@ -64,7 +64,7 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 	t.Cleanup(func() {
 		proxyServer.Close()
 		openAIMock.Close()
-		geminiMock.Close()
+		googleMock.Close()
 		argoMock.Close()
 	})
 
@@ -110,8 +110,8 @@ func (m *E2EMockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch m.provider {
 	case "openai":
 		m.handleOpenAIE2E(w, r, body)
-	case "gemini":
-		m.handleGeminiE2E(w, r, body)
+	case "google":
+		m.handleGoogleE2E(w, r, body)
 	case "argo":
 		m.handleArgoE2E(w, r, body)
 	}
@@ -234,7 +234,7 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (m *E2EMockProvider) handleGeminiE2E(w http.ResponseWriter, r *http.Request, body []byte) {
+func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req GeminiRequest
 	json.Unmarshal(body, &req)
 
@@ -599,7 +599,7 @@ func TestE2EToolUse(t *testing.T) {
 		provider string
 	}{
 		{"claude-3-sonnet-20240229", "openai"},
-		{"gemini-1.5-pro", "gemini"},
+		{"gemini-1.5-pro", "google"},
 	}
 
 	for _, p := range providers {
@@ -961,7 +961,7 @@ func TestProviderFlagPrecedence(t *testing.T) {
 		provider       string
 		model          string
 		hasOpenAI      bool
-		hasGemini      bool
+		hasGoogle      bool
 		hasArgo        bool
 		expectProvider string
 		expectError    bool
@@ -984,8 +984,8 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			name:           "Provider=google with gpt model",
 			provider:       "google",
 			model:          "gpt-4",
-			hasGemini:      true,
-			expectProvider: "gemini",
+			hasGoogle:      true,
+			expectProvider: "google",
 		},
 		{
 			name:           "Provider=openai with custom model",
@@ -1015,8 +1015,8 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			openAIMock := httptest.NewServer(NewMockOpenAI(t))
 			defer openAIMock.Close()
 			
-			geminiMock := httptest.NewServer(NewMockGemini(t))
-			defer geminiMock.Close()
+			googleMock := httptest.NewServer(NewMockGoogle(t))
+			defer googleMock.Close()
 			
 			argoMock := httptest.NewServer(NewMockArgo(t))
 			defer argoMock.Close()
@@ -1033,8 +1033,8 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			if tc.hasOpenAI {
 				config.OpenAIAPIKey = "test-key"
 			}
-			if tc.hasGemini {
-				config.GeminiAPIKey = "test-key"
+			if tc.hasGoogle {
+				config.GoogleAPIKey = "test-key"
 			}
 			if tc.hasArgo {
 				config.ArgoUser = "testuser"
@@ -1042,7 +1042,7 @@ func TestProviderFlagPrecedence(t *testing.T) {
 
 			// Set mock URLs
 			config.OpenAIURL = openAIMock.URL + "/v1/chat/completions"
-			config.GeminiURL = geminiMock.URL + "/v1beta/models"
+			config.GoogleURL = googleMock.URL + "/v1beta/models"
 			config.ArgoBaseURL = argoMock.URL
 			config.InitializeURLs()
 
@@ -1104,9 +1104,9 @@ func TestProviderFlagPrecedence(t *testing.T) {
 				if !strings.Contains(content, "OpenAI") {
 					t.Errorf("Expected OpenAI response, got: %s", content)
 				}
-			case "gemini":
-				if !strings.Contains(content, "Gemini") {
-					t.Errorf("Expected Gemini response, got: %s", content)
+			case "google":
+				if !strings.Contains(content, "Google") {
+					t.Errorf("Expected Google response, got: %s", content)
 				}
 			case "argo":
 				if !strings.Contains(content, "Argo") {
@@ -1167,12 +1167,12 @@ func TestE2ERealAPIs(t *testing.T) {
 	// Only run in CI/CD or with proper credentials
 	config := &Config{
 		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
-		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
+		GoogleAPIKey: os.Getenv("GOOGLE_API_KEY"),
 		ArgoUser:     os.Getenv("ARGO_USER"),
 		// ... other config
 	}
 
-	if config.OpenAIAPIKey == "" || config.GeminiAPIKey == "" {
+	if config.OpenAIAPIKey == "" || config.GoogleAPIKey == "" {
 		t.Skip("Missing API keys for real API tests")
 	}
 

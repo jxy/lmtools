@@ -18,6 +18,7 @@ var (
 	once         sync.Once
 
 	// Log levels
+	LevelUnset = -1 // Sentinel value for unset level
 	LevelDebug = 0
 	LevelInfo  = 1
 	LevelWarn  = 2
@@ -49,13 +50,11 @@ type Config struct {
 	LogDir         string
 	Level          int
 	Format         string // "text" or "json"
-	Color          bool
-	ToStderr       bool // Write to stderr
-	ToFile         bool // Write to file (requires LogDir)
+	ToStderr       bool   // Write to stderr
+	ToFile         bool   // Write to file (requires LogDir)
 	StderrMinLevel int
 	FileMinLevel   int
 	Component      string
-	RequestCounter bool
 }
 
 // Logger handles logging with levels and formatting
@@ -73,78 +72,13 @@ type Logger struct {
 	fileMinLevel   int
 
 	// Request scoping
-	requestCounterEnabled bool
-	counter               int64 // atomic
+	counter int64 // atomic
 
 	// Error tracking
 	writeErrors int64 // atomic counter for write failures
 
 	// Formatting options
-	useJSON  bool
-	useColor bool
-	colors   Colors
-}
-
-// Colors for terminal output
-type Colors struct {
-	Enabled bool
-}
-
-// Color functions
-func (c Colors) Cyan(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[36m" + s + "\033[0m"
-}
-
-func (c Colors) Blue(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[34m" + s + "\033[0m"
-}
-
-func (c Colors) Green(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[32m" + s + "\033[0m"
-}
-
-func (c Colors) Yellow(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[33m" + s + "\033[0m"
-}
-
-func (c Colors) Red(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[31m" + s + "\033[0m"
-}
-
-func (c Colors) Magenta(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[35m" + s + "\033[0m"
-}
-
-func (c Colors) Bold(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[1m" + s + "\033[0m"
-}
-
-func (c Colors) Dim(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return "\033[2m" + s + "\033[0m"
+	useJSON bool
 }
 
 // InitializeWithOptions sets up the global logger with options
@@ -174,10 +108,6 @@ func WithLevel(level string) Option {
 
 func WithFormat(format string) Option {
 	return func(c *Config) { c.Format = format }
-}
-
-func WithColor(enabled bool) Option {
-	return func(c *Config) { c.Color = enabled }
 }
 
 func WithStderr(enabled bool) Option {
@@ -220,10 +150,6 @@ func WithComponent(name string) Option {
 	return func(c *Config) { c.Component = name }
 }
 
-func WithRequestCounter(enabled bool) Option {
-	return func(c *Config) { c.RequestCounter = enabled }
-}
-
 // GetLogger returns the global logger instance
 func GetLogger() *Logger {
 	if globalLogger == nil {
@@ -261,11 +187,10 @@ func defaultConfig() Config {
 	return Config{
 		Level:          LevelInfo,
 		Format:         "text",
-		Color:          isTerminal(),
 		ToStderr:       true,
 		ToFile:         false,
-		StderrMinLevel: LevelInfo,
-		FileMinLevel:   LevelDebug,
+		StderrMinLevel: LevelUnset, // Use sentinel for unset
+		FileMinLevel:   LevelUnset, // Use sentinel for unset
 	}
 }
 
@@ -275,30 +200,35 @@ func applyAutoDefaults(cfg *Config) {
 	if cfg.LogDir != "" {
 		cfg.ToFile = true
 		// With log dir: file gets all, stderr gets info+
-		cfg.FileMinLevel = LevelDebug
-		cfg.StderrMinLevel = LevelInfo
+		// Only set defaults if not explicitly configured
+		if cfg.FileMinLevel == LevelUnset {
+			cfg.FileMinLevel = LevelDebug
+		}
+		if cfg.StderrMinLevel == LevelUnset {
+			cfg.StderrMinLevel = LevelInfo
+		}
 	} else {
 		// No log dir: stderr only, all levels match configured level
 		cfg.ToFile = false
-		cfg.StderrMinLevel = cfg.Level
+		// Only set if not explicitly configured
+		if cfg.StderrMinLevel == LevelUnset {
+			cfg.StderrMinLevel = cfg.Level
+		}
 	}
 }
 
 // newLogger creates a new logger instance
 func newLogger(cfg Config) *Logger {
 	return &Logger{
-		level:                 cfg.Level,
-		component:             cfg.Component,
-		requestCounterEnabled: cfg.RequestCounter,
+		level:     cfg.Level,
+		component: cfg.Component,
 		// Output configuration
 		toStderr:       cfg.ToStderr,
 		toFile:         cfg.ToFile,
 		stderrMinLevel: cfg.StderrMinLevel,
 		fileMinLevel:   cfg.FileMinLevel,
 		// Formatting options
-		useJSON:  cfg.Format == "json",
-		useColor: cfg.Color,
-		colors:   Colors{Enabled: cfg.Color},
+		useJSON: cfg.Format == "json",
 	}
 }
 
@@ -447,14 +377,6 @@ func parseLevel(level string) int {
 	}
 }
 
-func isTerminal() bool {
-	fileInfo, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return (fileInfo.Mode() & os.ModeCharDevice) != 0
-}
-
 func sanitizeOp(op string) string {
 	// Replace problematic characters with underscores
 	replacer := strings.NewReplacer(
@@ -483,9 +405,6 @@ type ScopedLogger struct {
 func (l *Logger) NewScope(name string) *ScopedLogger {
 	id := atomic.AddInt64(&l.counter, 1)
 	sc := &ScopedLogger{parent: l, id: id, start: time.Now()}
-	if name != "" && l.requestCounterEnabled && id > 0 {
-		sc.Infof("start: %s", name)
-	}
 	return sc
 }
 
@@ -505,6 +424,11 @@ func (sc *ScopedLogger) GetRequestID() int64 {
 // GetDuration returns the time elapsed since the scope started
 func (sc *ScopedLogger) GetDuration() time.Duration {
 	return time.Since(sc.start)
+}
+
+// GetStartTime returns the time when the scope started
+func (sc *ScopedLogger) GetStartTime() time.Time {
+	return sc.start
 }
 
 // Logging methods for ScopedLogger

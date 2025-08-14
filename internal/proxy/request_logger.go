@@ -29,8 +29,8 @@ func (rl *RequestScopedLogger) GetRequestID() int64 {
 
 // GetStartTime returns the request start time (for backward compatibility)
 func (rl *RequestScopedLogger) GetStartTime() time.Time {
-	// Calculate start time from duration
-	return time.Now().Add(-rl.GetDuration())
+	// Return the actual start time from ScopedLogger
+	return rl.ScopedLogger.GetStartTime()
 }
 
 // Override logging methods - ScopedLogger already handles request ID formatting
@@ -60,12 +60,35 @@ func (rl *RequestScopedLogger) LogJSON(label string, data interface{}) {
 }
 
 func (rl *RequestScopedLogger) InfoJSON(label string, data interface{}) {
+	// For all JSON logging at INFO level
 	b, err := json.Marshal(data)
 	if err != nil {
 		rl.Infof("%s: <marshal_error> %v", label, err)
 		return
 	}
-	rl.Infof("%s: %s", label, string(b))
+	// Log size at INFO, full content at DEBUG
+	rl.Infof("%s: size=%dB", label, len(b))
+	rl.Debugf("%s: %s", label, string(b))
+}
+
+// LogToolCall logs a tool call with appropriate formatting for INFO and DEBUG levels
+func (rl *RequestScopedLogger) LogToolCall(toolName string, toolData interface{}) {
+	// Truncate the data first for INFO level
+	truncated := truncateValue(toolData, 64)
+	truncatedJSON, err := json.Marshal(truncated)
+	if err != nil {
+		rl.Infof("Tool call: %s | Data: <marshal_error> %v", toolName, err)
+		return
+	}
+	rl.Infof("Tool call: %s | Data: %s", toolName, string(truncatedJSON))
+
+	// Also log full data at DEBUG level
+	fullJSON, err := json.Marshal(toolData)
+	if err != nil {
+		rl.Debugf("Tool call: %s | Data: <marshal_error> %v", toolName, err)
+		return
+	}
+	rl.Debugf("Tool call: %s | Data: %s", toolName, string(fullJSON))
 }
 
 // LogDuration logs a message with the request duration

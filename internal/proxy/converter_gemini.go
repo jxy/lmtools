@@ -10,7 +10,7 @@ import (
 func (c *Converter) ConvertAnthropicToGemini(ctx context.Context, req *AnthropicRequest) (*GeminiRequest, error) {
 	// Log omitted fields at DEBUG level
 	if len(req.Metadata) > 0 {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by Gemini): %v", req.Metadata))
+		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by Gemini): %s", formatJSONForLog(req.Metadata)))
 	}
 	if req.ToolChoice != nil {
 		LogDebugCtx(ctx, fmt.Sprintf("Omitting tool_choice from Anthropic request (Gemini uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name))

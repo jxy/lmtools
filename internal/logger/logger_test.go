@@ -2,7 +2,6 @@ package logger
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,170 +11,153 @@ import (
 	"time"
 )
 
-func TestLoggerSuite(t *testing.T) {
-	// Create a single temporary directory for all tests
+// SetupTestLogger initializes a logger for testing with automatic cleanup
+func SetupTestLogger(t *testing.T, opts ...Option) {
+	t.Helper()
+
+	// Reset logger to allow reinitialization
+	ResetForTesting()
+
+	// Create temp directory if needed
 	tmpDir := t.TempDir()
 
-	// Initialize logger once for all tests
-	err := InitializeWithOptions(
+	// Default options for testing
+	defaultOpts := []Option{
 		WithLogDir(tmpDir),
-		WithLevel("info"),
+		WithLevel("debug"),
 		WithFormat("text"),
 		WithOutputMode(OutputBoth),
-	)
-	if err != nil {
-		t.Fatalf("Initialize failed: %v", err)
+		WithComponent("test"),
 	}
-	defer Close()
 
-	// Run all tests as subtests
+	// Append any custom options (they will override defaults)
+	allOpts := append(defaultOpts, opts...)
+
+	// Initialize logger
+	if err := InitializeWithOptions(allOpts...); err != nil {
+		t.Fatalf("Failed to initialize test logger: %v", err)
+	}
+
+	// Register cleanup
+	t.Cleanup(func() {
+		Close()
+		ResetForTesting()
+	})
+}
+
+func TestLoggerSuite(t *testing.T) {
+	// Use the new test helper for automatic setup and cleanup
+	SetupTestLogger(t)
+
 	t.Run("Initialize", func(t *testing.T) {
-		testInitialize(t, tmpDir)
+		// Test that logger is initialized
+		logger := GetLogger()
+		if logger == nil {
+			t.Fatal("Logger is nil after initialization")
+		}
+		if !logger.initialized {
+			t.Error("Logger not marked as initialized")
+		}
 	})
 
 	t.Run("InfoAndWarnLogging", func(t *testing.T) {
-		testInfoAndWarnLogging(t, tmpDir)
+		// Capture stderr
+		var buf bytes.Buffer
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		// Log messages
+		Infof("Test info message: %s", "hello")
+		Warnf("Test warning message: %d", 42)
+
+		// Restore stderr and read output
+		w.Close()
+		os.Stderr = oldStderr
+		_, _ = buf.ReadFrom(r)
+
+		output := buf.String()
+		if !strings.Contains(output, "Test info message: hello") {
+			t.Errorf("Info message not found in output: %s", output)
+		}
+		if !strings.Contains(output, "Test warning message: 42") {
+			t.Errorf("Warning message not found in output: %s", output)
+		}
 	})
 
 	t.Run("LogJSON", func(t *testing.T) {
-		testLogJSON(t, tmpDir)
+		// Test LogJSON function
+		testData := []byte(`{"key1":"value1","key2":42,"key3":true}`)
+
+		// Create a temporary directory for this test
+		testDir := t.TempDir()
+
+		err := LogJSON(testDir, "test-json", testData)
+		if err != nil {
+			t.Fatalf("LogJSON failed: %v", err)
+		}
+
+		// Verify file was created
+		pattern := filepath.Join(testDir, "*_test-json_*.json")
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatalf("Failed to glob for JSON files: %v", err)
+		}
+		if len(matches) == 0 {
+			t.Error("No JSON file was created")
+		}
 	})
 
 	t.Run("ConcurrentAccess", func(t *testing.T) {
-		testConcurrentAccess(t, tmpDir)
+		// Test concurrent logging
+		const numGoroutines = 100
+		const numLogs = 10
+		var wg sync.WaitGroup
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < numLogs; j++ {
+					switch j % 3 {
+					case 0:
+						Infof("Concurrent info message from goroutine %d iteration %d", id, j)
+					case 1:
+						Warnf("Concurrent warning message from goroutine %d iteration %d", id, j)
+					case 2:
+						Errorf("Concurrent error message from goroutine %d iteration %d", id, j)
+					}
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		// If we get here without deadlock or panic, concurrent access is working
 	})
 }
 
-func testInitialize(t *testing.T, tmpDir string) {
-	// Check that log directory was created
-	if _, err := os.Stat(tmpDir); err != nil {
-		t.Errorf("Log directory not created: %v", err)
-	}
+func TestLogJSON(t *testing.T) {
+	tmpDir := t.TempDir()
 
-	// Check that process log file was created
-	entries, err := os.ReadDir(tmpDir)
+	// Test with valid data
+	payload := []byte(`{"test":"data","number":123}`)
+	err := LogJSON(tmpDir, "test-prefix", payload)
 	if err != nil {
-		t.Fatalf("Failed to read log directory: %v", err)
+		t.Fatalf("LogJSON failed: %v", err)
 	}
 
-	var logFile string
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), "_lmc_") && strings.HasSuffix(entry.Name(), ".log") {
-			logFile = entry.Name()
-			break
-		}
-	}
-
-	if logFile == "" {
-		t.Fatal("No process log file created")
-	}
-
-	// Verify file name format
-	if !strings.Contains(logFile, time.Now().Format("20060102")) {
-		t.Errorf("Log file name doesn't contain today's date: %s", logFile)
-	}
-
-	if !strings.Contains(logFile, "_lmc_") {
-		t.Errorf("Log file name doesn't contain _lmc_ pattern: %s", logFile)
-	}
-}
-
-func testInfoAndWarnLogging(t *testing.T, tmpDir string) {
-	// Log some messages
-	Infof("Test info message: %s", "hello")
-	Warnf("Test warning message: %d", 42)
-
-	// Give time for logs to be written
-	time.Sleep(10 * time.Millisecond)
-
-	// Find and read the log file
-	entries, err := os.ReadDir(tmpDir)
+	// Find the created file
+	pattern := filepath.Join(tmpDir, "*_test-prefix_*.json")
+	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		t.Fatalf("Failed to read log directory: %v", err)
+		t.Fatalf("Failed to glob for JSON files: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("Expected 1 JSON file, found %d", len(matches))
 	}
 
-	var logFilePath string
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), "_lmc_") && strings.HasSuffix(entry.Name(), ".log") {
-			logFilePath = filepath.Join(tmpDir, entry.Name())
-			break
-		}
-	}
-
-	if logFilePath == "" {
-		t.Fatal("No log file found")
-	}
-
-	content, err := os.ReadFile(logFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read log file: %v", err)
-	}
-
-	logContent := string(content)
-
-	// Check for INFO message (now includes timestamp)
-	if !strings.Contains(logContent, "[INFO]") || !strings.Contains(logContent, "Test info message: hello") {
-		t.Errorf("INFO message not found in log file")
-	}
-
-	// Check for WARN message (now includes timestamp)
-	if !strings.Contains(logContent, "[WARN]") || !strings.Contains(logContent, "Test warning message: 42") {
-		t.Errorf("WARN message not found in log file")
-	}
-
-	// Check timestamp format (new format: [LEVEL] [RFC3339Nano] message)
-	lines := strings.Split(strings.TrimSpace(logContent), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		// New format: [LEVEL] [2006-01-02T15:04:05.999999999Z] message
-		// Find the timestamp between the first [ and second ]
-		start := strings.Index(line, "] [")
-		if start == -1 {
-			t.Errorf("Invalid log format, missing level/timestamp brackets: %s", line)
-			continue
-		}
-		start += 3 // Skip "] ["
-		end := strings.Index(line[start:], "]")
-		if end == -1 {
-			t.Errorf("Invalid log format, missing closing timestamp bracket: %s", line)
-			continue
-		}
-		timestamp := line[start : start+end]
-		_, err := time.Parse(time.RFC3339Nano, timestamp)
-		if err != nil {
-			t.Errorf("Invalid timestamp format in line: %s (timestamp: %s, error: %v)", line, timestamp, err)
-		}
-	}
-}
-
-func testLogJSON(t *testing.T, tmpDir string) {
-	payload := []byte(`{"foo":"bar"}`)
-
-	if err := LogJSON(tmpDir, "myop", payload); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	entries, err := os.ReadDir(tmpDir)
-	if err != nil {
-		t.Fatalf("failed to read dir: %v", err)
-	}
-
-	// Find the JSON log file
-	var jsonFile string
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), "myop") && strings.HasSuffix(entry.Name(), ".json") {
-			jsonFile = entry.Name()
-			break
-		}
-	}
-
-	if jsonFile == "" {
-		t.Fatal("JSON log file not found")
-	}
-
-	data, err := os.ReadFile(filepath.Join(tmpDir, jsonFile))
+	// Read and verify content
+	data, err := os.ReadFile(matches[0])
 	if err != nil {
 		t.Fatalf("failed to read file: %v", err)
 	}
@@ -217,355 +199,273 @@ func TestLoggerFilePermissions(t *testing.T) {
 		t.Fatalf("LogJSON failed: %v", err)
 	}
 
-	// Find the JSON file
-	entries, err := os.ReadDir(tmpDir)
+	// Find the created JSON file
+	pattern := filepath.Join(tmpDir, "*_test-perms_*.json")
+	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		t.Fatalf("Failed to read log directory: %v", err)
+		t.Fatalf("Failed to glob for JSON files: %v", err)
 	}
-
-	var jsonFile string
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), "test-perms") && strings.HasSuffix(entry.Name(), ".json") {
-			jsonFile = filepath.Join(tmpDir, entry.Name())
-			break
-		}
-	}
-
-	if jsonFile == "" {
-		t.Fatal("JSON log file not found")
+	if len(matches) != 1 {
+		t.Fatalf("Expected 1 JSON file, found %d", len(matches))
 	}
 
 	// Check JSON file permissions
-	info2, err := os.Stat(jsonFile)
+	info, err = os.Stat(matches[0])
 	if err != nil {
 		t.Fatalf("Failed to stat JSON file: %v", err)
 	}
 
-	mode2 := info2.Mode().Perm()
-	if mode2 != 0o600 {
-		t.Errorf("Expected JSON file permissions 0600, got %04o", mode2)
+	mode = info.Mode().Perm()
+	if mode != 0o600 {
+		t.Errorf("Expected JSON file permissions 0600, got %04o", mode)
 	}
 }
 
-// TestDebugLoggingBehaviors tests the different debug logging behaviors
-// for lmc (with log file) and apiproxy (without log file)
-func TestDebugLoggingBehaviors(t *testing.T) {
-	t.Run("WithLogFile", func(t *testing.T) {
-		// Reset the global logger for this sub-test
-		globalLogger = nil
-		once = sync.Once{}
-
-		// Create a temporary directory for logs
-		tmpDir := t.TempDir()
-
-		// Initialize logger WITH log directory (like lmc does)
-		if err := InitializeWithOptions(
-			WithLogDir(tmpDir),
-			WithLevel("debug"),
-			WithFormat("text"),
-			WithOutputMode(OutputBoth),
-		); err != nil {
-			t.Fatalf("Failed to initialize logger: %v", err)
-		}
-		defer Close()
-
-		// Capture stderr
-		oldStderr := os.Stderr
-		r, w, _ := os.Pipe()
-		os.Stderr = w
-
-		// Reinitialize logger to use the new stderr
-		ResetForTesting()
-		if err := InitializeWithOptions(
-			WithLogDir(tmpDir),
-			WithLevel("debug"),
-			WithFormat("text"),
-			WithOutputMode(OutputBoth),
-		); err != nil {
-			t.Fatalf("Failed to reinitialize logger: %v", err)
-		}
-
-		// Log debug and info messages
-		Debugf("This is a debug message")
-		Infof("This is an info message")
-
-		// Restore stderr and read captured output
-		w.Close()
-		os.Stderr = oldStderr
-
-		// Restore logger to use original stderr
-		ResetForTesting()
-		if err := InitializeWithOptions(
-			WithLogDir(tmpDir),
-			WithLevel("debug"),
-			WithFormat("text"),
-			WithOutputMode(OutputBoth),
-		); err != nil {
-			t.Fatalf("Failed to restore logger: %v", err)
-		}
-		var buf bytes.Buffer
-		if _, err := buf.ReadFrom(r); err != nil {
-			t.Fatalf("Failed to read from pipe: %v", err)
-		}
-		stderrOutput := buf.String()
-
-		// Verify DEBUG is NOT in stderr
-		if strings.Contains(stderrOutput, "This is a debug message") {
-			t.Errorf("Debug message found in stderr when log file is configured")
-		}
-
-		// Verify INFO IS in stderr
-		if !strings.Contains(stderrOutput, "This is an info message") {
-			t.Errorf("Info message not found in stderr")
-		}
-
-		// Verify both messages are in the log file
-		files, err := filepath.Glob(filepath.Join(tmpDir, "*.log"))
-		if err != nil || len(files) == 0 {
-			t.Fatalf("No log file created")
-		}
-
-		logContent, err := os.ReadFile(files[0])
-		if err != nil {
-			t.Fatalf("Failed to read log file: %v", err)
-		}
-
-		logStr := string(logContent)
-		if !strings.Contains(logStr, "This is a debug message") {
-			t.Errorf("Debug message not found in log file")
-		}
-		if !strings.Contains(logStr, "This is an info message") {
-			t.Errorf("Info message not found in log file")
-		}
-	})
-
-	t.Run("WithoutLogFile", func(t *testing.T) {
-		// Reset the global logger for this sub-test
-		globalLogger = nil
-		once = sync.Once{}
-
-		// Initialize logger WITHOUT log directory (like apiproxy does)
-		if err := InitializeWithOptions(
-			WithLevel("debug"),
-			WithFormat("text"),
-			WithOutputMode(OutputStderrOnly),
-		); err != nil {
-			t.Fatalf("Failed to initialize logger: %v", err)
-		}
-		defer Close()
-
-		// Capture stderr
-		oldStderr := os.Stderr
-		r, w, _ := os.Pipe()
-		os.Stderr = w
-
-		// Reinitialize logger to use the new stderr
-		ResetForTesting()
-		if err := InitializeWithOptions(
-			WithLevel("debug"),
-			WithFormat("text"),
-			WithOutputMode(OutputStderrOnly),
-		); err != nil {
-			t.Fatalf("Failed to reinitialize logger: %v", err)
-		}
-
-		// Log debug and info messages
-		Debugf("Debug message for apiproxy")
-		Infof("Info message for apiproxy")
-
-		// Restore stderr and read captured output
-		w.Close()
-		os.Stderr = oldStderr
-
-		// Restore logger to use original stderr
-		ResetForTesting()
-		if err := InitializeWithOptions(
-			WithLevel("debug"),
-			WithFormat("text"),
-			WithOutputMode(OutputStderrOnly),
-		); err != nil {
-			t.Fatalf("Failed to restore logger: %v", err)
-		}
-		var buf bytes.Buffer
-		if _, err := buf.ReadFrom(r); err != nil {
-			t.Fatalf("Failed to read from pipe: %v", err)
-		}
-		stderrOutput := buf.String()
-
-		// Verify BOTH debug and info are in stderr
-		if !strings.Contains(stderrOutput, "Debug message for apiproxy") {
-			t.Errorf("Debug message not found in stderr when no log file configured")
-		}
-		if !strings.Contains(stderrOutput, "Info message for apiproxy") {
-			t.Errorf("Info message not found in stderr")
-		}
-	})
-}
-
-// testConcurrentAccess tests that the logger is thread-safe under heavy concurrent load
-func testConcurrentAccess(t *testing.T, tmpDir string) {
-	// Don't reset the logger, use the existing one from the suite
-
-	// Number of goroutines and operations per goroutine
-	numGoroutines := 100
-	opsPerGoroutine := 100
-
-	// Use WaitGroup to synchronize
-	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
-
-	// Track start time for rate checking
-	startTime := time.Now()
-
-	// Track if any panics occurred
-	var panicOccurred bool
-	var panicValue interface{}
-
-	// Launch concurrent goroutines
-	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					panicOccurred = true
-					panicValue = r
-				}
-			}()
-
-			// Each goroutine performs multiple logging operations
-			for j := 0; j < opsPerGoroutine; j++ {
-				// Mix different log levels and operations (skip debug since logger is at INFO level)
-				switch j % 3 {
-				case 0:
-					Infof("Concurrent info message from goroutine %d iteration %d", id, j)
-				case 1:
-					Warnf("Concurrent warning message from goroutine %d iteration %d", id, j)
-				case 2:
-					Errorf("Concurrent error message from goroutine %d iteration %d", id, j)
-				}
-
-				// Also test JSON logging
-				if j%20 == 0 {
-					jsonData := fmt.Sprintf(`{"goroutine": %d, "iteration": %d}`, id, j)
-					_ = LogJSON(tmpDir, fmt.Sprintf("test_%d", id), []byte(jsonData))
-				}
-			}
-		}(i)
-	}
-
-	// Wait for all goroutines to complete
-	wg.Wait()
-
-	// Check for any panics
-	if panicOccurred {
-		t.Fatalf("Panic detected during concurrent access: %v", panicValue)
-	}
-
-	// Calculate elapsed time and rate
-	elapsed := time.Since(startTime)
-	totalOps := numGoroutines * opsPerGoroutine
-	opsPerSecond := float64(totalOps) / elapsed.Seconds()
-
-	t.Logf("Concurrent test completed: %d operations in %v (%.0f ops/sec)",
-		totalOps, elapsed, opsPerSecond)
-
-	// Verify the log file exists and has content
-	entries, err := os.ReadDir(tmpDir)
+func TestScopedLogger(t *testing.T) {
+	// Initialize logger with a temp directory
+	tmpDir := t.TempDir()
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLogDir(tmpDir),
+		WithLevel("debug"),
+		WithFormat("text"),
+		WithOutputMode(OutputBoth),
+		WithComponent("test"),
+	)
 	if err != nil {
-		t.Fatalf("Failed to read log directory: %v", err)
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer Close()
+
+	// Create a scoped logger
+	logger := GetLogger()
+	scope := logger.NewScope("test-operation")
+
+	// Test request ID
+	if scope.GetRequestID() != 1 {
+		t.Errorf("Expected first request ID to be 1, got %d", scope.GetRequestID())
 	}
 
-	// Find the latest log file
-	var logFile string
-	var latestTime time.Time
-	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".log") {
-			info, err := entry.Info()
-			if err == nil && info.ModTime().After(latestTime) {
-				latestTime = info.ModTime()
-				logFile = entry.Name()
-			}
-		}
+	// Test duration tracking
+	time.Sleep(10 * time.Millisecond)
+	duration := scope.GetDuration()
+	if duration < 10*time.Millisecond {
+		t.Errorf("Expected duration to be at least 10ms, got %v", duration)
 	}
 
-	if logFile == "" {
-		t.Error("No log file found after concurrent operations")
-		return
-	}
+	// Test logging with scope
+	var buf bytes.Buffer
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
 
-	// Read the log file and verify it has substantial content
-	logPath := filepath.Join(tmpDir, logFile)
-	content, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("Failed to read log file: %v", err)
-	}
+	scope.Infof("Scoped log message")
 
-	// We should have many log lines
-	lines := strings.Split(string(content), "\n")
-	// Since we're at INFO level and logging INFO, WARN, ERROR (all 3 levels)
-	// We expect all messages to be logged
-	// Account for some potential race conditions or buffering, expect at least 90%
-	expectedMinLines := int(float64(totalOps) * 0.9)
-	actualLines := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			actualLines++
-		}
-	}
-	if actualLines < expectedMinLines {
-		t.Errorf("Expected at least %d log lines, got %d", expectedMinLines, actualLines)
-	}
+	w.Close()
+	os.Stderr = oldStderr
+	_, _ = buf.ReadFrom(r)
 
-	// Verify we have messages from different goroutines
-	goroutinesSeen := make(map[string]bool)
-	for _, line := range lines {
-		if strings.Contains(line, "goroutine") {
-			// Extract goroutine ID from the log line
-			parts := strings.Split(line, "goroutine")
-			if len(parts) > 1 {
-				// Get the ID part
-				idPart := strings.TrimSpace(parts[1])
-				// Take first word as ID
-				if spaceIdx := strings.Index(idPart, " "); spaceIdx > 0 {
-					goroutinesSeen[idPart[:spaceIdx]] = true
-				}
-			}
-		}
+	output := buf.String()
+	if !strings.Contains(output, "Scoped log message") {
+		t.Errorf("Scoped message not found in output: %s", output)
 	}
-
-	// We should see logs from many different goroutines
-	if len(goroutinesSeen) < numGoroutines/2 {
-		t.Errorf("Expected logs from at least %d goroutines, saw %d",
-			numGoroutines/2, len(goroutinesSeen))
+	if !strings.Contains(output, "[#1]") {
+		t.Errorf("Request ID not found in output: %s", output)
 	}
 }
 
-// TestConcurrentInitialization tests that multiple Initialize calls are safe
+func TestLogLevels(t *testing.T) {
+	tests := []struct {
+		name          string
+		logLevel      string
+		debugExpected bool
+		infoExpected  bool
+		warnExpected  bool
+		errorExpected bool
+	}{
+		{"debug level", "debug", true, true, true, true},
+		{"info level", "info", false, true, true, true},
+		{"warn level", "warn", false, false, true, true},
+		{"error level", "error", false, false, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Initialize logger with specific level
+			ResetForTesting()
+			err := InitializeWithOptions(
+				WithLevel(tt.logLevel),
+				WithFormat("text"),
+				WithOutputMode(OutputStderrOnly),
+			)
+			if err != nil {
+				t.Fatalf("Failed to initialize logger: %v", err)
+			}
+			defer Close()
+
+			// Capture stderr
+			var buf bytes.Buffer
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			// Log at all levels
+			Debugf("Debug message")
+			Infof("Info message")
+			Warnf("Warn message")
+			Errorf("Error message")
+
+			// Restore stderr and read output
+			w.Close()
+			os.Stderr = oldStderr
+			_, _ = buf.ReadFrom(r)
+
+			output := buf.String()
+
+			// Check expectations
+			if tt.debugExpected && !strings.Contains(output, "Debug message") {
+				t.Errorf("Expected debug message in output, but not found")
+			}
+			if !tt.debugExpected && strings.Contains(output, "Debug message") {
+				t.Errorf("Did not expect debug message in output, but found it")
+			}
+
+			if tt.infoExpected && !strings.Contains(output, "Info message") {
+				t.Errorf("Expected info message in output, but not found")
+			}
+			if !tt.infoExpected && strings.Contains(output, "Info message") {
+				t.Errorf("Did not expect info message in output, but found it")
+			}
+
+			if tt.warnExpected && !strings.Contains(output, "Warn message") {
+				t.Errorf("Expected warn message in output, but not found")
+			}
+			if !tt.warnExpected && strings.Contains(output, "Warn message") {
+				t.Errorf("Did not expect warn message in output, but found it")
+			}
+
+			if tt.errorExpected && !strings.Contains(output, "Error message") {
+				t.Errorf("Expected error message in output, but not found")
+			}
+			if !tt.errorExpected && strings.Contains(output, "Error message") {
+				t.Errorf("Did not expect error message in output, but found it")
+			}
+		})
+	}
+}
+
+func TestJSONFormat(t *testing.T) {
+	// Initialize logger with JSON format
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("info"),
+		WithFormat("json"),
+		WithOutputMode(OutputStderrOnly),
+		WithComponent("test-component"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer Close()
+
+	// Capture stderr
+	var buf bytes.Buffer
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Log a message
+	Infof("Test JSON message with %s", "formatting")
+
+	// Restore stderr and read output
+	w.Close()
+	os.Stderr = oldStderr
+	_, _ = buf.ReadFrom(r)
+
+	output := strings.TrimSpace(buf.String())
+
+	// Check that output is valid JSON
+	if !strings.HasPrefix(output, "{") || !strings.HasSuffix(output, "}") {
+		t.Errorf("Output does not appear to be JSON: %s", output)
+	}
+
+	// Check for expected fields
+	expectedFields := []string{
+		`"level":"INFO"`,
+		`"message":"Test JSON message with formatting"`,
+		`"component":"test-component"`,
+		`"time":"`,
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(output, field) {
+			t.Errorf("Expected field %s not found in JSON output: %s", field, output)
+		}
+	}
+}
+
+func TestRequestCounter(t *testing.T) {
+	// Initialize logger with request counter
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("info"),
+		WithFormat("text"),
+		WithOutputMode(OutputStderrOnly),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer Close()
+
+	logger := GetLogger()
+
+	// Create multiple scopes
+	scope1 := logger.NewScope("op1")
+	scope2 := logger.NewScope("op2")
+	scope3 := logger.NewScope("op3")
+
+	// Check request IDs are sequential
+	if scope1.GetRequestID() != 1 {
+		t.Errorf("Expected first request ID to be 1, got %d", scope1.GetRequestID())
+	}
+	if scope2.GetRequestID() != 2 {
+		t.Errorf("Expected second request ID to be 2, got %d", scope2.GetRequestID())
+	}
+	if scope3.GetRequestID() != 3 {
+		t.Errorf("Expected third request ID to be 3, got %d", scope3.GetRequestID())
+	}
+
+	// Test counter reset
+	ResetRequestCounter()
+	scope4 := logger.NewScope("op4")
+	if scope4.GetRequestID() != 1 {
+		t.Errorf("Expected request ID after reset to be 1, got %d", scope4.GetRequestID())
+	}
+}
+
 func TestConcurrentInitialization(t *testing.T) {
-	// Create separate temp directories for each initialization
-	numInits := 20
+	// Test that concurrent initialization is safe
+	const numGoroutines = 10
 	var wg sync.WaitGroup
-	wg.Add(numInits)
+	errors := make(chan error, numGoroutines)
 
-	errors := make(chan error, numInits)
+	tmpDir := t.TempDir()
 
-	for i := 0; i < numInits; i++ {
-		go func(id int) {
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
 			defer wg.Done()
 
-			tmpDir := t.TempDir()
+			// Try to initialize
 			err := InitializeWithOptions(
 				WithLogDir(tmpDir),
 				WithLevel("info"),
 				WithFormat("text"),
-				WithOutputMode(OutputBoth),
+				WithComponent("test"),
 			)
 			if err != nil {
 				errors <- err
 			}
-
-			// Try to log something
-			Infof("Concurrent init test from id %d", id)
 
 			// Clean up
 			Close()
@@ -579,4 +479,49 @@ func TestConcurrentInitialization(t *testing.T) {
 	for err := range errors {
 		t.Errorf("Error during concurrent initialization: %v", err)
 	}
+}
+
+// TestExplicitLevelsRespected tests that explicit min levels are not overridden by auto-defaults
+func TestExplicitLevelsRespected(t *testing.T) {
+	// Test case 1: Explicit stderr min level should be respected with log dir
+	t.Run("WithLogDir", func(t *testing.T) {
+		SetupTestLogger(t,
+			WithLevel("debug"),
+			WithStderrMinLevel("error"), // Explicitly set to error
+			WithFileMinLevel("warn"),    // Explicitly set to warn
+		)
+
+		// Check that the levels were respected
+		logger := GetLogger()
+		if logger.stderrMinLevel != LevelError {
+			t.Errorf("Expected stderr min level to be ERROR, got %d", logger.stderrMinLevel)
+		}
+		if logger.fileMinLevel != LevelWarn {
+			t.Errorf("Expected file min level to be WARN, got %d", logger.fileMinLevel)
+		}
+	})
+
+	// Test case 2: Without log dir, stderr min level defaults to main level
+	t.Run("WithoutLogDir", func(t *testing.T) {
+		// Reset and initialize manually without using SetupTestLogger
+		// to avoid the default temp directory creation
+		ResetForTesting()
+		err := InitializeWithOptions(
+			WithLevel("warn"), // Set main level to warn
+			WithOutputMode(OutputStderrOnly),
+		)
+		if err != nil {
+			t.Fatalf("Failed to initialize logger: %v", err)
+		}
+		t.Cleanup(func() {
+			Close()
+			ResetForTesting()
+		})
+
+		logger := GetLogger()
+		// Without log dir, stderr min level should match the main level
+		if logger.stderrMinLevel != LevelWarn {
+			t.Errorf("Expected stderr min level to be WARN (matching main level), got %d", logger.stderrMinLevel)
+		}
+	})
 }

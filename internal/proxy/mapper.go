@@ -58,8 +58,8 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 			return "anthropic", smallModel
 		}
 	case "google":
-		if m.config.GeminiAPIKey != "" {
-			return "gemini", smallModel
+		if m.config.GoogleAPIKey != "" {
+			return "google", smallModel
 		}
 	case "argo":
 		if m.config.ArgoUser != "" {
@@ -78,8 +78,8 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", smallModel
 	}
-	if m.config.GeminiAPIKey != "" {
-		return "gemini", smallModel
+	if m.config.GoogleAPIKey != "" {
+		return "google", smallModel
 	}
 	if m.config.ArgoUser != "" {
 		return "argo", smallModel
@@ -100,8 +100,8 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 			return "anthropic", model
 		}
 	case "google":
-		if m.config.GeminiAPIKey != "" {
-			return "gemini", model
+		if m.config.GoogleAPIKey != "" {
+			return "google", model
 		}
 	case "argo":
 		if m.config.ArgoUser != "" {
@@ -120,8 +120,8 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", model
 	}
-	if m.config.GeminiAPIKey != "" {
-		return "gemini", model
+	if m.config.GoogleAPIKey != "" {
+		return "google", model
 	}
 	if m.config.ArgoUser != "" {
 		return "argo", model
@@ -140,8 +140,8 @@ func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string)
 			return "anthropic", model
 		}
 	case "google":
-		if m.config.GeminiAPIKey != "" {
-			return "gemini", model
+		if m.config.GoogleAPIKey != "" {
+			return "google", model
 		}
 	case "argo":
 		if m.config.ArgoUser != "" {
@@ -160,8 +160,8 @@ func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string)
 	if m.config.OpenAIAPIKey != "" {
 		return "openai", model
 	}
-	if m.config.GeminiAPIKey != "" {
-		return "gemini", model
+	if m.config.GoogleAPIKey != "" {
+		return "google", model
 	}
 	if m.config.ArgoUser != "" {
 		return "argo", model
@@ -176,8 +176,8 @@ func (m *ModelMapper) GetAPIKey(provider string) string {
 	switch provider {
 	case "openai":
 		return m.config.OpenAIAPIKey
-	case "gemini":
-		return m.config.GeminiAPIKey
+	case "google":
+		return m.config.GoogleAPIKey
 	case "anthropic":
 		return m.config.AnthropicAPIKey
 	default:

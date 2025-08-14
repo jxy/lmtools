@@ -7,7 +7,6 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/logger"
 	"lmtools/internal/proxy"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,7 +18,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: %s [options]
 
 apiproxy is an HTTP proxy server that provides an Anthropic-compatible API interface 
-for OpenAI, Google Gemini, and Argo providers.
+for OpenAI, Google, and Argo providers.
 
 Server Options:
   -host string               Host to bind the server to (default: "127.0.0.1")
@@ -52,8 +51,8 @@ Examples:
   # Start proxy with OpenAI provider
   %s -provider openai -api-key-file ~/.openai-key
 
-  # Start proxy with Gemini provider
-  %s -provider google -api-key-file ~/.gemini-key
+  # Start proxy with Google provider
+  %s -provider google -api-key-file ~/.google-key
 
   # Start proxy with custom provider URL (no API key required)
   %s -provider openai -provider-url http://localhost:11434/v1
@@ -88,7 +87,6 @@ func main() {
 		// Logging
 		logLevel  string
 		logFormat string
-		noColor   bool
 	)
 
 	// Server flags
@@ -110,17 +108,17 @@ func main() {
 	// Logging flags
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (DEBUG, INFO, WARN, ERROR)")
 	flag.StringVar(&logFormat, "log-format", "text", "Log format (text, json)")
-	flag.BoolVar(&noColor, "no-color", false, "Disable colored output")
 
 	flag.Parse()
 
 	// Read API key from file based on provider
-	var openAIAPIKey, geminiAPIKey string
+	var openAIAPIKey, googleAPIKey string
 
 	if apiKeyFile != "" {
 		apiKey, err := auth.ReadKeyFile(apiKeyFile)
 		if err != nil {
-			log.Fatalf("Failed to read API key file: %v", err)
+			fmt.Fprintf(os.Stderr, "Failed to read API key file: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Assign the API key to the appropriate provider
@@ -128,22 +126,24 @@ func main() {
 		case "openai":
 			openAIAPIKey = apiKey
 		case "google":
-			geminiAPIKey = apiKey
+			googleAPIKey = apiKey
 		case "argo":
 			// Argo doesn't use API keys, ignore
 		default:
-			log.Fatalf("Unknown provider: %s", preferredProvider)
+			fmt.Fprintf(os.Stderr, "Unknown provider: %s\n", preferredProvider)
+			os.Exit(1)
 		}
 	} else if preferredProvider != "argo" && providerURL == "" {
 		// For non-Argo providers without custom URL, API key is required
-		log.Fatalf("API key file is required for %s provider. Use -api-key-file flag.", preferredProvider)
+		fmt.Fprintf(os.Stderr, "API key file is required for %s provider. Use -api-key-file flag.\n", preferredProvider)
+		os.Exit(1)
 	}
 
 	// Create configuration from flags
 	config := &proxy.Config{
 		AnthropicAPIKey:    "",
 		OpenAIAPIKey:       openAIAPIKey,
-		GeminiAPIKey:       geminiAPIKey,
+		GoogleAPIKey:       googleAPIKey,
 		ArgoUser:           argoUser,
 		ArgoEnv:            argoEnv,
 		Provider:           preferredProvider,
@@ -161,7 +161,8 @@ func main() {
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
-		log.Fatalf("Failed to validate configuration: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Configure logging
@@ -170,10 +171,8 @@ func main() {
 		logger.WithFormat(logFormat),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("apiproxy"),
-		logger.WithRequestCounter(true),
-		logger.WithColor(!noColor),
 	); err != nil {
-		log.Printf("Failed to initialize logger: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 	}
 
 	// Create and configure server
@@ -214,5 +213,5 @@ func main() {
 		logger.Errorf("Server forced to shutdown: %v", err)
 	}
 
-	log.Println("Server exited")
+	logger.Infof("Server exited")
 }

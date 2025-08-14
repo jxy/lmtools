@@ -14,7 +14,7 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 		LogDebugCtx(ctx, fmt.Sprintf("Omitting top_k=%d from Anthropic request (not supported by OpenAI)", *req.TopK))
 	}
 	if len(req.Metadata) > 0 {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by OpenAI): %v", req.Metadata))
+		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by OpenAI): %s", formatJSONForLog(req.Metadata)))
 	}
 
 	openAIReq := &OpenAIRequest{

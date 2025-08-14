@@ -40,7 +40,7 @@ func NewClientWithOptions(timeout time.Duration, maxRetries int, logger Logger, 
 
 	// If maxRetries is specified, override provider defaults
 	retryers := make(map[string]*Retryer)
-	for _, provider := range []string{"openai", "gemini", "argo", "lmc", "default"} {
+	for _, provider := range []string{"openai", "google", "argo", "lmc", "default"} {
 		config := ProviderConfig(provider)
 		if provider == "default" {
 			config = DefaultConfig()

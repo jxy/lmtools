@@ -59,10 +59,10 @@ func ValidateAPIKey(key string, provider string) error {
 		if !strings.HasPrefix(key, "sk-ant-") && len(key) < 20 {
 			return fmt.Errorf("anthropic API key appears to be invalid")
 		}
-	case "gemini":
-		// Gemini/Google API keys typically start with "AIza"
+	case "google":
+		// Google API keys typically start with "AIza"
 		if !strings.HasPrefix(key, "AIza") && len(key) < 20 {
-			return fmt.Errorf("gemini API key appears to be invalid")
+			return fmt.Errorf("google API key appears to be invalid")
 		}
 	}
 
@@ -82,8 +82,8 @@ func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 		}
 		// Always set version header for Anthropic
 		req.Header.Set("anthropic-version", "2023-06-01")
-	case "gemini":
-		// Gemini uses API key in URL, not headers
+	case "google":
+		// Google uses API key in URL, not headers
 	case "argo":
 		// Argo doesn't use API key headers
 	}

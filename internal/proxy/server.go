@@ -92,7 +92,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/messages/count_tokens":
 		s.handleCountTokens(w, r)
 	default:
-		reqLogger := GetRequestLogger(r.Context())
+		reqLogger := GetRequestLoggerOrDefault(r.Context())
 		reqLogger.Warnf("%s %s | Path not found", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	}
@@ -101,7 +101,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // handleRoot handles the root endpoint
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// Get request logger from context
-	reqLogger := GetRequestLogger(r.Context())
+	reqLogger := GetRequestLoggerOrDefault(r.Context())
 
 	// Log at INFO level
 	reqLogger.Infof("%s %s | Root endpoint accessed", r.Method, r.URL.Path)
@@ -115,7 +115,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 // handleMessages handles the /v1/messages endpoint
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Get request logger from context
-	reqLogger := GetRequestLogger(r.Context())
+	reqLogger := GetRequestLoggerOrDefault(r.Context())
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -187,7 +187,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 // handleNonStreamingRequest handles non-streaming message requests
 func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel, mappedModel string) {
-	reqLogger := GetRequestLogger(r.Context())
+	reqLogger := GetRequestLoggerOrDefault(r.Context())
 
 	var response interface{}
 	var err error
@@ -195,7 +195,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	switch provider {
 	case "openai":
 		response, err = s.forwardToOpenAI(r.Context(), anthReq)
-	case "gemini":
+	case "google":
 		response, err = s.forwardToGemini(r.Context(), anthReq)
 	case "anthropic":
 		response, err = s.forwardToAnthropic(r.Context(), anthReq)
@@ -241,7 +241,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	if anthResp != nil && anthResp.Content != nil {
 		for _, block := range anthResp.Content {
 			if block.Type == "tool_use" && block.Name != "" {
-				reqLogger.InfoJSON("Tool call", map[string]interface{}{"name": block.Name, "input": block.Input})
+				reqLogger.LogToolCall(block.Name, block.Input)
 			}
 		}
 	}
@@ -263,8 +263,10 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 
 		// Log request completion summary
 		if anthResp != nil {
-			// Count tool calls in response
-			toolCallCount := 0
+			// Count tool calls in request messages
+			toolCallCount := countToolCallsInMessages(anthReq.Messages)
+
+			// Also count tool calls in response
 			if anthResp.Content != nil {
 				for _, block := range anthResp.Content {
 					if block.Type == "tool_use" {
@@ -290,7 +292,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 
 // forwardToOpenAI forwards the request to OpenAI
 func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
@@ -345,7 +347,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 
 // forwardToGemini forwards the request to Google Gemini
 func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest) (*GeminiResponse, error) {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Convert to Gemini format
 	geminiReq, err := s.converter.ConvertAnthropicToGemini(ctx, anthReq)
@@ -363,11 +365,11 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Build URL with model
-	baseURL := s.config.GeminiURL
+	baseURL := s.config.GoogleURL
 	url := fmt.Sprintf("%s/%s:generateContent?key=%s",
 		baseURL,
 		anthReq.Model,
-		s.mapper.GetAPIKey("gemini"))
+		s.mapper.GetAPIKey("google"))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -377,7 +379,7 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send request with retry
-	resp, err := s.client.Do(ctx, req, "gemini")
+	resp, err := s.client.Do(ctx, req, "google")
 	if err != nil {
 		return nil, fmt.Errorf("request error: %w", err)
 	}
@@ -387,7 +389,7 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
 		s.logErrorResponse(reqLogger, "Gemini", resp.StatusCode, body)
-		return nil, fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("google API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
@@ -397,14 +399,14 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Log response
-	reqLogger.LogJSON("Gemini Response", geminiResp)
+	reqLogger.LogJSON("Google Response", geminiResp)
 
 	return &geminiResp, nil
 }
 
 // forwardToArgo forwards the request to Argo
 func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (*ArgoChatResponse, error) {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
@@ -466,7 +468,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 
 // forwardToAnthropic forwards the request to Anthropic
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Log outgoing request
 	reqLogger.LogJSON("Outgoing Anthropic Request", anthReq)
@@ -517,7 +519,7 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 // handleCountTokens handles the /v1/messages/count_tokens endpoint
 func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	// Get request logger from context
-	reqLogger := GetRequestLogger(r.Context())
+	reqLogger := GetRequestLoggerOrDefault(r.Context())
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -594,7 +596,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 // handleStreamingRequest handles streaming message requests
 func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel, mappedModel string) {
-	reqLogger := GetRequestLogger(r.Context())
+	reqLogger := GetRequestLoggerOrDefault(r.Context())
 
 	// Log the streaming request start
 	reqLogger.Infof("Starting streaming request: %s->%s via %s", originalModel, mappedModel, provider)
@@ -634,9 +636,9 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
 			}
 		}
-	case "gemini":
+	case "google":
 		if err := s.streamFromGemini(r.Context(), anthReq, handler); err != nil {
-			reqLogger.Errorf("Gemini streaming error: %v", err)
+			reqLogger.Errorf("Google streaming error: %v", err)
 			if completeErr := handler.Complete("error"); completeErr != nil {
 				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
 			}
@@ -689,7 +691,12 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 
 		// Log request completion summary for streaming
 		if handler != nil && handler.state != nil {
-			toolCallCount := len(handler.state.ToolCalls)
+			// Count tool calls in request messages
+			toolCallCount := countToolCallsInMessages(anthReq.Messages)
+
+			// Also count tool calls from streaming response
+			toolCallCount += len(handler.state.ToolCalls)
+
 			inputTokens := handler.state.InputTokens
 			outputTokens := handler.state.OutputTokens
 
@@ -702,7 +709,7 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 
 // streamFromOpenAI streams from OpenAI
 func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
@@ -759,7 +766,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 
 // streamFromGemini streams from Google Gemini
 func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Convert to Gemini format
 	geminiReq, err := s.converter.ConvertAnthropicToGemini(ctx, anthReq)
@@ -768,14 +775,14 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Gemini Streaming Request", geminiReq)
+	reqLogger.LogJSON("Outgoing Google Streaming Request", geminiReq)
 
 	// Build URL with streaming endpoint
-	baseURL := s.config.GeminiURL
+	baseURL := s.config.GoogleURL
 	url := fmt.Sprintf("%s/%s:streamGenerateContent?key=%s&alt=sse",
 		baseURL,
 		anthReq.Model,
-		s.mapper.GetAPIKey("gemini"))
+		s.mapper.GetAPIKey("google"))
 
 	// Prepare request
 	jsonData, err := json.Marshal(geminiReq)
@@ -791,7 +798,7 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send request with retry
-	resp, err := s.client.Do(ctx, req, "gemini")
+	resp, err := s.client.Do(ctx, req, "google")
 	if err != nil {
 		return fmt.Errorf("request error: %w", err)
 	}
@@ -800,8 +807,8 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Gemini Streaming", resp.StatusCode, body)
-		return fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, string(body))
+		s.logErrorResponse(reqLogger, "Google Streaming", resp.StatusCode, body)
+		return fmt.Errorf("google API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	// Parse streaming response
@@ -811,7 +818,7 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 
 // streamFromArgo streams from Argo
 func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Estimate and set input tokens for Argo streaming
 	// Argo doesn't provide token counts, so we must estimate them
@@ -852,7 +859,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 
 // streamFromArgoWithPings sends the request to Argo streamchat and handles pings while waiting
 func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Create a cancellable context for the API call
 	callCtx, cancel := context.WithCancel(ctx)
@@ -934,7 +941,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 
 // streamFromAnthropic streams from Anthropic
 func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Force streaming
 	anthReq.Stream = true
@@ -1094,15 +1101,15 @@ func (s *Server) simulateStreamingFromArgo(ctx context.Context, anthReq *Anthrop
 func (s *Server) validatePingInterval(pingInterval time.Duration) time.Duration {
 	// Validate ping interval to prevent panic and CPU spinning
 	if pingInterval <= 0 {
-		logger.Debugf("WARNING: Invalid pingInterval %v, using default %v", pingInterval, defaultPingInterval)
+		logger.Warnf("WARNING: Invalid pingInterval %v, using default %v", pingInterval, defaultPingInterval)
 		return defaultPingInterval
 	}
 	if pingInterval < minPingInterval {
-		logger.Debugf("WARNING: pingInterval %v too small, using minimum %v", pingInterval, minPingInterval)
+		logger.Warnf("WARNING: pingInterval %v too small, using minimum %v", pingInterval, minPingInterval)
 		return minPingInterval
 	}
 	if pingInterval > maxPingInterval {
-		logger.Debugf("WARNING: pingInterval %v too large, using maximum %v", pingInterval, maxPingInterval)
+		logger.Warnf("WARNING: pingInterval %v too large, using maximum %v", pingInterval, maxPingInterval)
 		return maxPingInterval
 	}
 	return pingInterval
@@ -1110,7 +1117,7 @@ func (s *Server) validatePingInterval(pingInterval time.Duration) time.Duration 
 
 // waitForArgoResponseWithPings fetches the Argo response while sending periodic pings
 func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) (*ArgoChatResponse, error) {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Create a cancellable context for the API call
 	callCtx, cancel := context.WithCancel(ctx)
@@ -1178,7 +1185,7 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 
 // streamArgoResponseContent streams the content blocks from an Argo response
 func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *AnthropicResponse, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	reqLogger.Debugf("Processing %d content blocks for simulated streaming", len(anthResp.Content))
 
@@ -1247,9 +1254,9 @@ func (s *Server) streamTextBlock(content string, handler *AnthropicStreamHandler
 
 // streamToolBlock streams a tool use block
 func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
-	reqLogger.InfoJSON("Tool call", map[string]interface{}{"name": block.Name, "input": block.Input})
+	reqLogger.LogToolCall(block.Name, block.Input)
 
 	// Validate tool block
 	if block.ID == "" {
@@ -1307,7 +1314,7 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 
 // simulateStreamingFromArgoWithInterval simulates streaming with configurable ping interval
 func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
-	reqLogger := GetRequestLogger(ctx)
+	reqLogger := GetRequestLoggerOrDefault(ctx)
 
 	// Validate ping interval
 	pingInterval = s.validatePingInterval(pingInterval)

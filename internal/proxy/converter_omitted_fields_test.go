@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func init() {
@@ -19,7 +18,6 @@ func init() {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 }
 
@@ -213,7 +211,6 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	// Create converter and test request with minimal config
@@ -246,10 +243,6 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 		t.Fatalf("Failed to convert: %v", err)
 	}
 
-	// Force a small delay to ensure logs are written
-	// This is needed because the logger writes asynchronously
-	time.Sleep(10 * time.Millisecond)
-
 	// Close the writer to signal EOF
 	w.Close()
 
@@ -266,7 +259,6 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 		logger.WithFormat("text"),
 		logger.WithOutputMode(logger.OutputStderrOnly),
 		logger.WithComponent("test"),
-		logger.WithRequestCounter(true),
 	)
 
 	// Check that debug log was written to stderr

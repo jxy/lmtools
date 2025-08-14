@@ -42,10 +42,10 @@ func TestModelMapper(t *testing.T) {
 				Provider:     "google",
 				SmallModel:   "gemini-2.0-flash",
 				Model:        "gemini-2.5-pro-preview-03-25",
-				GeminiAPIKey: "test-key",
+				GoogleAPIKey: "test-key",
 			},
 			inputModel:       "claude-3-haiku",
-			expectedProvider: "gemini",
+			expectedProvider: "google",
 			expectedModel:    "gemini-2.0-flash",
 		},
 		{
@@ -74,10 +74,10 @@ func TestModelMapper(t *testing.T) {
 			name: "direct gemini model",
 			config: &Config{
 				Provider:     "openai",
-				GeminiAPIKey: "test-key",
+				GoogleAPIKey: "test-key",
 			},
 			inputModel:       "gemini-2.0-flash",
-			expectedProvider: "gemini",
+			expectedProvider: "google",
 			expectedModel:    "gemini-2.0-flash",
 		},
 		{
@@ -131,7 +131,7 @@ func TestModelMapper(t *testing.T) {
 func TestGetAPIKey(t *testing.T) {
 	config := &Config{
 		OpenAIAPIKey:    "sk-openai-key",
-		GeminiAPIKey:    "gemini-key",
+		GoogleAPIKey:    "gemini-key",
 		AnthropicAPIKey: "anthropic-key",
 	}
 	mapper := NewModelMapper(config)
@@ -141,7 +141,7 @@ func TestGetAPIKey(t *testing.T) {
 		expected string
 	}{
 		{"openai", "sk-openai-key"},
-		{"gemini", "gemini-key"},
+		{"google", "gemini-key"},
 		{"anthropic", "anthropic-key"},
 		{"unknown", ""},
 	}

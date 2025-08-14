@@ -15,10 +15,10 @@ func TestSimulatedStreamingFormat(t *testing.T) {
 	t.Parallel()
 
 	// Setup test server with mocks
-	proxyServer, openAIMock, geminiMock, argoMock := SetupTestServer(t)
+	proxyServer, openAIMock, googleMock, argoMock := SetupTestServer(t)
 	defer proxyServer.Close()
 	defer openAIMock.Close()
-	defer geminiMock.Close()
+	defer googleMock.Close()
 	defer argoMock.Close()
 
 	// Test simulated streaming with Argo

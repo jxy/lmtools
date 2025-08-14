@@ -2,8 +2,6 @@ package proxy
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"lmtools/internal/logger"
 	"net/http"
@@ -30,7 +28,7 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 1. Request ID (was RequestIDMiddleware)
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" {
-		requestID = m.generateRequestID()
+		requestID = GenerateRequestID()
 	}
 	w.Header().Set("X-Request-ID", requestID)
 	ctx := context.WithValue(r.Context(), RequestIDKey{}, requestID)
@@ -71,15 +69,6 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Process the request
 	m.next.ServeHTTP(rw, r)
-}
-
-// generateRequestID creates a unique request ID
-func (m *ProxyMiddleware) generateRequestID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return "req_fallback"
-	}
-	return "req_" + hex.EncodeToString(b)
 }
 
 // proxyResponseWriter combines all response writer functionality
