@@ -1,6 +1,8 @@
 package main
 
 import (
+	"lmtools/internal/config"
+	"lmtools/internal/core"
 	"os"
 	"testing"
 )
@@ -70,6 +72,81 @@ func TestGetExitCode(t *testing.T) {
 func TestGetOperationName(t *testing.T) {
 	// This is a compilation test to ensure the function exists
 	// We can't test it directly without creating a config
+}
+
+func TestGetActualModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      config.Config
+		expected string
+	}{
+		{
+			name: "explicit model provided",
+			cfg: config.Config{
+				Model:    "custom-model",
+				Provider: "argo",
+			},
+			expected: "custom-model",
+		},
+		{
+			name: "embed mode without explicit model",
+			cfg: config.Config{
+				Model:    "",
+				Embed:    true,
+				Provider: "argo",
+			},
+			expected: core.DefaultEmbedModel,
+		},
+		{
+			name: "argo provider default",
+			cfg: config.Config{
+				Model:    "",
+				Provider: "argo",
+			},
+			expected: "gpt5",
+		},
+		{
+			name: "empty provider defaults to argo",
+			cfg: config.Config{
+				Model:    "",
+				Provider: "",
+			},
+			expected: "gpt5",
+		},
+		{
+			name: "openai provider default",
+			cfg: config.Config{
+				Model:    "",
+				Provider: "openai",
+			},
+			expected: "gpt-5",
+		},
+		{
+			name: "google provider default",
+			cfg: config.Config{
+				Model:    "",
+				Provider: "google",
+			},
+			expected: "gemini-2.5-pro",
+		},
+		{
+			name: "anthropic provider default",
+			cfg: config.Config{
+				Model:    "",
+				Provider: "anthropic",
+			},
+			expected: "claude-opus-4-1-20250805",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := getActualModel(tt.cfg)
+			if actual != tt.expected {
+				t.Errorf("getActualModel() = %q, want %q", actual, tt.expected)
+			}
+		})
+	}
 }
 
 // Helper to create simple errors for testing

@@ -161,7 +161,7 @@ func run() error {
 
 	// Log request start
 	startTime := time.Now()
-	logger.Infof("Starting request | Model: %s | Provider: %s", cfg.Model, cfg.Provider)
+	logger.Infof("Starting request | Model: %s | Provider: %s", getActualModel(cfg), cfg.Provider)
 
 	if sess != nil {
 		if isRegeneration {
