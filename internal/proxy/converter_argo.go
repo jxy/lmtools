@@ -578,8 +578,19 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		}
 
 		// Add tool calls (OpenAI-style format)
-		if toolCalls, ok := r["tool_calls"].([]interface{}); ok {
-			for _, tc := range toolCalls {
+		// Handle both array and single object formats
+		if toolCallsRaw, ok := r["tool_calls"]; ok {
+			var toolCallsArray []interface{}
+
+			// Check if it's an array or a single object
+			if arr, ok := toolCallsRaw.([]interface{}); ok {
+				toolCallsArray = arr
+			} else if obj, ok := toolCallsRaw.(map[string]interface{}); ok {
+				// Single object - wrap in array
+				toolCallsArray = []interface{}{obj}
+			}
+
+			for _, tc := range toolCallsArray {
 				toolCall, ok := tc.(map[string]interface{})
 				if !ok {
 					continue
