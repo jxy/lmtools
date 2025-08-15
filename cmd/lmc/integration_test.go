@@ -193,7 +193,8 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	}
 	
 	// Create a long-running process that holds a lock
-	cmd1 := exec.Command(lmcBin, "-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID,  "-argo-env", mockURL, "-sessions-dir", sessionsDir)
+	logDir := t.TempDir() // Isolate test logs
+	cmd1 := exec.Command(lmcBin, "-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID,  "-argo-env", mockURL, "-sessions-dir", sessionsDir, "-log-dir", logDir)
 	cmd1.Stdin = strings.NewReader("This is a long message that will take time to process")
 	
 	// Start first process
@@ -222,9 +223,6 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	} else {
 		t.Logf("Second process waited %.2f seconds for lock", elapsed.Seconds())
 	}
-	
-	// Clean up first process
-	cmd1.Process.Kill()
 }
 
 // TestCrossProcessSiblingCreation tests concurrent sibling creation

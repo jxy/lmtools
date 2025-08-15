@@ -221,6 +221,93 @@ func TestLoggerFilePermissions(t *testing.T) {
 	}
 }
 
+func TestLogJSON_UsesExplicitDir(t *testing.T) {
+	// Initialize logger with one directory
+	tmp1 := t.TempDir()
+	tmp2 := t.TempDir()
+
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLogDir(tmp1),
+		WithLevel("info"),
+		WithFormat("text"),
+		WithOutputMode(OutputFileOnly),
+		WithComponent("test"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer Close()
+
+	// Call LogJSON with a different directory
+	payload := []byte(`{"test":"explicit_dir"}`)
+	err = LogJSON(tmp2, "explicit_test", payload)
+	if err != nil {
+		t.Fatalf("LogJSON failed: %v", err)
+	}
+
+	// Verify file was created in tmp2, not tmp1
+	files, err := os.ReadDir(tmp2)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	if len(files) == 0 {
+		t.Error("Expected file in explicit directory, but found none")
+	}
+
+	// Verify no JSON files in tmp1
+	files, err = os.ReadDir(tmp1)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	jsonCount := 0
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".json") {
+			jsonCount++
+		}
+	}
+	if jsonCount > 0 {
+		t.Errorf("Expected no JSON files in logger's directory, but found %d", jsonCount)
+	}
+}
+
+func TestLogJSON_DirectoryPermissions(t *testing.T) {
+	// Use a subdirectory to test creation permissions
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "subdir", "logs")
+
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLogDir(tmpDir),
+		WithLevel("info"),
+		WithFormat("text"),
+		WithOutputMode(OutputFileOnly),
+		WithComponent("test"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer Close()
+
+	// Call LogJSON to create the subdirectory
+	payload := []byte(`{"test":"dir_perms"}`)
+	err = LogJSON(subDir, "perms_test", payload)
+	if err != nil {
+		t.Fatalf("LogJSON failed: %v", err)
+	}
+
+	// Check directory permissions
+	info, err := os.Stat(subDir)
+	if err != nil {
+		t.Fatalf("Failed to stat directory: %v", err)
+	}
+
+	mode := info.Mode().Perm()
+	if mode != DirPerm {
+		t.Errorf("Expected directory permissions %04o, got %04o", DirPerm, mode)
+	}
+}
+
 func TestScopedLogger(t *testing.T) {
 	// Initialize logger with a temp directory
 	tmpDir := t.TempDir()

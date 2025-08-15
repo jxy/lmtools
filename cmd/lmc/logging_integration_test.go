@@ -26,11 +26,8 @@ func TestLoggingIntegration(t *testing.T) {
 	ms := mockserver.NewMockServer()
 	defer ms.Close()
 
-	// Set up log directory
-	logDir := filepath.Join(tmpHome, ".lmc", "logs")
-
 	// Test 1: Embedding request with logging
-	stdout, stderr, err := runLmcCommand(t, lmcBin,
+	stdout, stderr, logDir, err := runLmcCommandWithLogDir(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-e", "-model", "v3large",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
 		"Test message for embedding")
 
@@ -74,17 +71,17 @@ func TestLoggingIntegration(t *testing.T) {
 
 	t.Logf("Recent log files found: %v", recentLogs)
 
-	// Note: Process logs are only created when logger is initialized with a log directory
-	// The lmc binary doesn't create process logs by default
+	// Note: Process logs are created when a log directory is configured
+	// Tests use -log-dir to isolate logs from production directories
 
 	if !requestLogFound {
 		t.Error("Request log file not found")
 	}
 
-	// Test 2: Chat request with logging
-	stdout, stderr, err = runLmcCommand(t, lmcBin,
+	// Test 2: Chat request with logging (use same log dir)
+	stdout, stderr, err = runLmcCommandWithSpecificLogDir(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-model", "gpt4o",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-		"Test chat message")
+		"Test chat message", logDir)
 
 	if err != nil {
 		t.Fatalf("Failed to run chat: %v\nStderr: %s", err, stderr)
@@ -174,15 +171,19 @@ func TestConcurrentLogging(t *testing.T) {
 	ms := mockserver.NewMockServer()
 	defer ms.Close()
 
-	// Run multiple argo processes concurrently
+	// Create shared log directory for this test
+	logDir := t.TempDir()
+
+	// Run multiple argo processes concurrently with same log directory
 	const numProcesses = 5
 	done := make(chan error, numProcesses)
 
 	for i := 0; i < numProcesses; i++ {
 		go func(id int) {
-			_, stderr, err := runLmcCommand(t, lmcBin,
+			// Use specific log dir for concurrent test
+			_, stderr, err := runLmcCommandWithSpecificLogDir(t, lmcBin,
 				[]string{"-argo-user", "testuser", "-e",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-				"Concurrent test message")
+				"Concurrent test message", logDir)
 			if err != nil {
 				t.Logf("Process %d failed: %v, stderr: %s", id, err, stderr)
 			}
@@ -200,8 +201,7 @@ func TestConcurrentLogging(t *testing.T) {
 	// Give a moment for log files to be written
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify multiple log files were created
-	logDir := filepath.Join(tmpHome, ".lmc", "logs")
+	// Verify multiple log files were created in the specified directory
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		t.Fatalf("Failed to read log directory: %v", err)
@@ -224,7 +224,7 @@ func TestConcurrentLogging(t *testing.T) {
 		}
 	}
 
-	t.Logf("Found %d process logs and %d request logs", processLogs, requestLogs)
+	t.Logf("Found %d process logs and %d request logs in %s", processLogs, requestLogs, logDir)
 
 	// We should have at least numProcesses of each type
 	if processLogs < numProcesses {

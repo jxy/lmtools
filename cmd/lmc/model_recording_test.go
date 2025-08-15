@@ -7,9 +7,7 @@ import (
 	"lmtools/internal/mockserver"
 	"lmtools/internal/session"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -68,12 +66,10 @@ func TestModelRecordingInSessions(t *testing.T) {
 				args = append(args, "-embed")
 			}
 
-			// Run the command
-			cmd := exec.Command(binPath, args...)
-			cmd.Stdin = strings.NewReader("test message")
-			output, err := cmd.CombinedOutput()
+			// Run the command using test helper to isolate logs
+			_, stderr, err := runLmcCommand(t, binPath, args, "test message")
 			if err != nil {
-				t.Fatalf("Failed to run command: %v\nOutput: %s", err, output)
+				t.Fatalf("Failed to run command: %v\nStderr: %s", err, stderr)
 			}
 
 			// For embed mode, we don't save responses to sessions

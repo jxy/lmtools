@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// DirPerm is the standard directory permission for log directories
+const DirPerm = 0o750
+
 var (
 	// Global logger instance
 	globalLogger *Logger
@@ -59,9 +62,12 @@ type Config struct {
 
 // Logger handles logging with levels and formatting
 type Logger struct {
-	mu          sync.Mutex
-	level       int
-	logFile     *os.File
+	mu      sync.Mutex
+	level   int
+	logFile *os.File
+	// logDir is the configured directory for process logs and is set during InitializeWithOptions.
+	// JSON logs use the dir passed to LogJSON and do not implicitly fall back to this value.
+	logDir      string
 	component   string
 	initialized bool
 
@@ -221,6 +227,7 @@ func applyAutoDefaults(cfg *Config) {
 func newLogger(cfg Config) *Logger {
 	return &Logger{
 		level:     cfg.Level,
+		logDir:    cfg.LogDir,
 		component: cfg.Component,
 		// Output configuration
 		toStderr:       cfg.ToStderr,
@@ -236,7 +243,7 @@ func newLogger(cfg Config) *Logger {
 func (l *Logger) initSinks(cfg Config) error {
 	// File output
 	if cfg.ToFile && cfg.LogDir != "" {
-		if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
+		if err := os.MkdirAll(cfg.LogDir, DirPerm); err != nil {
 			return fmt.Errorf("failed to create log directory: %w", err)
 		}
 
@@ -341,12 +348,20 @@ func (l *Logger) logf(level int, format string, args ...interface{}) {
 
 // LogJSON logs data as JSON
 func (l *Logger) LogJSON(dir, operation string, data []byte) error {
-	if dir == "" || !l.initialized {
+	// Skip if no directory provided
+	if dir == "" {
+		if l.initialized {
+			l.Debugf("LogJSON skipped: empty log directory")
+		}
+		return nil
+	}
+
+	if !l.initialized {
 		return nil
 	}
 
 	// Ensure directory exists
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 

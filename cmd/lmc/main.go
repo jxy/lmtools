@@ -50,6 +50,30 @@ func run() error {
 
 	// Initialize logging
 	logDir := logger.GetLogDir()
+	if cfg.LogDir != "" {
+		// Validate and convert to absolute path if needed
+		absLogDir, err := filepath.Abs(cfg.LogDir)
+		if err != nil {
+			return fmt.Errorf("invalid log directory: %w", err)
+		}
+
+		// Create directory if it doesn't exist
+		if err := os.MkdirAll(absLogDir, logger.DirPerm); err != nil {
+			return fmt.Errorf("failed to create log directory: %w", err)
+		}
+
+		// Verify it's a directory (not a file)
+		info, err := os.Stat(absLogDir)
+		if err != nil {
+			return fmt.Errorf("failed to access log directory: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("log-dir path exists but is not a directory: %s", absLogDir)
+		}
+
+		logDir = absLogDir
+	}
+
 	if err := logger.InitializeWithOptions(
 		logger.WithLogDir(logDir),
 		logger.WithLevel("info"),
@@ -72,7 +96,7 @@ func run() error {
 		}
 
 		// Create directory if it doesn't exist
-		if err := os.MkdirAll(absDir, 0o750); err != nil {
+		if err := os.MkdirAll(absDir, logger.DirPerm); err != nil {
 			return fmt.Errorf("failed to create sessions directory: %w", err)
 		}
 
@@ -111,7 +135,7 @@ func run() error {
 
 	// Handle list-models flag
 	if cfg.ListModels {
-		return listModels(cfg)
+		return listModels(cfg, logDir)
 	}
 
 	// Check if we're branching from an assistant message (regeneration)
@@ -189,8 +213,9 @@ func run() error {
 
 	// Log request
 	opName := getOperationName(&cfg)
-	if err := logger.LogJSON(logger.GetLogDir(), opName, body); err != nil {
-		return fmt.Errorf("failed to log request: %w", err)
+	if err := logger.LogJSON(logDir, opName, body); err != nil {
+		// Log error but don't fail the request - logging is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to log request: %v\n", err)
 	}
 
 	// Create pooled HTTP client with retry logic
@@ -256,9 +281,6 @@ func run() error {
 		}
 	}
 
-	// Explicit cancel before returning (good practice)
-	cancel()
-
 	if out != "" {
 		fmt.Print(out)
 	}
@@ -319,7 +341,7 @@ func handleSession(cfg *config.Config, inputStr string, isRegeneration bool) (*s
 }
 
 // listModels queries and displays available models for the configured provider
-func listModels(cfg config.Config) error {
+func listModels(cfg config.Config, logDir string) error {
 	// Determine provider
 	provider := cfg.Provider
 	if provider == "" {
@@ -380,7 +402,11 @@ func listModels(cfg config.Config) error {
 			} else {
 				url += "&key=" + apiKey
 			}
-			req.URL, _ = req.URL.Parse(url)
+			u, err := req.URL.Parse(url)
+			if err != nil {
+				return fmt.Errorf("failed to parse URL %s: %w", url, err)
+			}
+			req.URL = u
 		}
 	}
 
@@ -404,7 +430,7 @@ func listModels(cfg config.Config) error {
 	}
 
 	// Log the raw response for debugging
-	if err := logger.LogJSON(logger.GetLogDir(), "list_models_response", data); err != nil {
+	if err := logger.LogJSON(logDir, "list_models_response", data); err != nil {
 		logger.Warnf("Failed to log models response: %v", err)
 	}
 

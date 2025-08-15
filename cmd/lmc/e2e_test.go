@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -347,14 +346,14 @@ func TestE2E_StreamingMode(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	server := newE2ETestServer(t)
 	
-	// Use exec.Command directly to capture streaming output
-	cmd := exec.Command(lmcBin, "-argo-user", "dave", "-model", "gpt4o",  "-stream",  "-argo-env", server.URL)
-	cmd.Stdin = strings.NewReader("Test streaming response")
-	
-	output, err := cmd.CombinedOutput()
+	// Use test helper to capture streaming output and isolate logs
+	stdout, stderr, err := runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "dave", "-model", "gpt4o",  "-stream",  "-argo-env", server.URL},
+		"Test streaming response")
 	if err != nil {
-		t.Fatalf("Failed to run streaming command: %v\nOutput: %s", err, output)
+		t.Fatalf("Failed to run streaming command: %v\nStderr: %s", err, stderr)
 	}
+	output := []byte(stdout)
 	
 	// Verify we got streaming response (check for SSE format)
 	outputStr := string(output)

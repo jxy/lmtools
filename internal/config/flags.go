@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// LogDir configuration removed - logs now always go to ~/.lmc/logs
-
 func getDefaultUser() string {
 	return "" // No default, always require -u flag
 }
@@ -31,6 +29,7 @@ type Config struct {
 	Delete         string        // node path to delete
 	Show           string        // show session or message by ID/path
 	SessionsDir    string        // custom sessions directory
+	LogDir         string        // custom log directory
 	SkipFlockCheck bool          // skip file locking check
 
 	// Provider support
@@ -81,6 +80,7 @@ func ParseFlags(args []string) (Config, error) {
 	fs.StringVar(&cfg.Delete, "delete", "", "delete node and its descendants")
 	fs.StringVar(&cfg.Show, "show", "", "show session or message by ID/path")
 	fs.StringVar(&cfg.SessionsDir, "sessions-dir", "", "custom sessions directory (default: ~/.lmc/sessions)")
+	fs.StringVar(&cfg.LogDir, "log-dir", "", "custom log directory (default: ~/.lmc/logs)")
 	fs.BoolVar(&cfg.SkipFlockCheck, "skip-flock-check", false, "skip file locking check")
 
 	// Check if -no-session was explicitly set before parsing
@@ -221,6 +221,7 @@ Session Options:
   -delete string      Delete node and its descendants
   -show string        Show session or message by ID/path
   -sessions-dir string Custom sessions directory (default: ~/.lmc/sessions)
+  -log-dir string    Custom log directory (default: ~/.lmc/logs)
   -skip-flock-check  Skip file locking check
 
 Examples:
