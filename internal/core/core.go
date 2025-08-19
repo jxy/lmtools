@@ -4,6 +4,7 @@
 package core
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -667,7 +668,11 @@ type Logger interface {
 	CreateLogFile(logDir, prefix string) (*os.File, string, error)
 }
 
-// HandleResponse processes an HTTP response based on configuration
+// HandleResponse processes an HTTP response based on configuration.
+// For streaming responses, it has dual behavior:
+// 1. Prints the streamed content directly to os.Stdout in real-time
+// 2. Returns the full accumulated content as a string for session storage
+// The response body is closed by this function - callers should not close it.
 func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response, logger Logger) (string, error) {
 	defer resp.Body.Close()
 
@@ -688,7 +693,7 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 		return "", NewHTTPError(resp.StatusCode, string(errorData))
 	}
 
-	// Handle streaming responses (provider-agnostic for now, just pass through)
+	// Handle streaming responses with provider-specific parsing
 	if cfg.IsStreamChat() {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
@@ -700,21 +705,34 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 			}
 		}()
 
-		// Use context-aware copy to handle interrupts
-		done := make(chan error, 1)
-		go func() {
-			_, err := io.Copy(io.MultiWriter(os.Stdout, f), resp.Body)
-			done <- err
-		}()
+		// Stream and parse based on provider
+		switch provider {
+		case "argo":
+			return handleArgoStream(ctx, resp.Body, f)
+		case "openai":
+			return handleOpenAIStream(ctx, resp.Body, f)
+		case "anthropic":
+			return handleAnthropicStream(ctx, resp.Body, f)
+		case "google":
+			return handleGoogleStream(ctx, resp.Body, f)
+		default:
+			// Fallback: just copy raw stream
+			var buf bytes.Buffer
+			done := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.MultiWriter(os.Stdout, f, &buf), resp.Body)
+				done <- err
+			}()
 
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("streaming interrupted: %w", ctx.Err())
-		case err := <-done:
-			if err != nil {
-				return "", fmt.Errorf("error streaming response to stdout and log file %s: %w", path, err)
+			select {
+			case <-ctx.Done():
+				return buf.String(), fmt.Errorf("streaming interrupted: %w", ctx.Err())
+			case err := <-done:
+				if err != nil {
+					return buf.String(), fmt.Errorf("error streaming response: %w", err)
+				}
+				return buf.String(), nil
 			}
-			return "", nil
 		}
 	}
 
@@ -730,7 +748,7 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 		logPrefix = "embed_output"
 	}
 	if err := logger.LogJSON(logger.GetLogDir(), logPrefix, data); err != nil {
-		return "", fmt.Errorf("failed to log response: %w", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to log response: %v\n", err)
 	}
 
 	// Route to provider-specific parser
@@ -898,6 +916,29 @@ func BuildRequestWithSession(cfg RequestConfig, sess Session, getLineage GetLine
 		return nil, nil, fmt.Errorf("failed to get conversation history: %w", err)
 	}
 
+	// Get provider, default to argo
+	provider := cfg.GetProvider()
+	if provider == "" {
+		provider = "argo"
+	}
+
+	// Route to provider-specific builder
+	switch provider {
+	case "argo":
+		return buildArgoRequestWithSession(cfg, messages)
+	case "openai":
+		return buildOpenAIRequestWithSession(cfg, messages)
+	case "google":
+		return buildGoogleRequestWithSession(cfg, messages)
+	case "anthropic":
+		return buildAnthropicRequestWithSession(cfg, messages)
+	default:
+		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+}
+
+// buildArgoRequestWithSession builds an Argo request with session history
+func buildArgoRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
 	// Convert to ChatMessage format
 	chatMessages := []SimpleChatMessage{{Role: "system", Content: cfg.GetSystem()}}
 	for _, msg := range messages {
@@ -909,8 +950,6 @@ func BuildRequestWithSession(cfg RequestConfig, sess Session, getLineage GetLine
 	if model == "" {
 		model = GetDefaultChatModel("argo")
 	}
-
-	// No longer validate chat model
 
 	req := SimpleChatRequest{
 		User:     cfg.GetUser(),
@@ -939,34 +978,50 @@ func BuildRequestWithSession(cfg RequestConfig, sess Session, getLineage GetLine
 	return httpReq, body, nil
 }
 
-// BuildRegenerationRequest builds a request for regenerating a response
-func BuildRegenerationRequest(cfg RequestConfig, sess Session, getLineage GetLineageFunc) (*http.Request, []byte, error) {
-	// The session has already been created in handleSession, so we use it directly
-	// Get the lineage for this new branch
-	messages, err := getLineage(sess.GetPath())
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get lineage: %w", err)
+// buildOpenAIRequestWithSession builds an OpenAI request with session history
+func buildOpenAIRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
+	var apiKey string
+
+	// Only require API key for standard endpoints
+	if cfg.GetProviderURL() == "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
+		}
+
+		if err := auth.ValidateAPIKey(apiKey, "openai"); err != nil {
+			return nil, nil, fmt.Errorf("invalid API key: %w", err)
+		}
+	} else if cfg.GetAPIKeyFile() != "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
+		}
 	}
 
-	// Convert to chat messages
-	chatMessages := []SimpleChatMessage{{Role: "system", Content: cfg.GetSystem()}}
-	for _, msg := range messages {
-		chatMessages = append(chatMessages, SimpleChatMessage(msg))
-	}
-
-	// Build the request
-	urlBase := GetBaseURL(cfg.GetEnv())
 	model := cfg.GetModel()
 	if model == "" {
-		model = GetDefaultChatModel("argo")
+		model = GetDefaultChatModel("openai")
 	}
 
-	// No longer validate chat model
+	// Build OpenAI format messages
+	openAIMessages := []map[string]string{
+		{"role": "system", "content": cfg.GetSystem()},
+	}
+	for _, msg := range messages {
+		openAIMessages = append(openAIMessages, map[string]string{
+			"role":    msg.Role,
+			"content": msg.Content,
+		})
+	}
 
-	req := SimpleChatRequest{
-		User:     cfg.GetUser(),
-		Model:    model,
-		Messages: chatMessages,
+	// OpenAI chat format
+	req := map[string]interface{}{
+		"model":    model,
+		"messages": openAIMessages,
+		"stream":   cfg.IsStreamChat(),
 	}
 
 	body, err := json.Marshal(req)
@@ -974,18 +1029,444 @@ func BuildRegenerationRequest(cfg RequestConfig, sess Session, getLineage GetLin
 		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("%s/chat/", urlBase)
-	if cfg.IsStreamChat() {
-		endpoint = fmt.Sprintf("%s/streamchat/", urlBase)
+	// Determine endpoint
+	url := cfg.GetProviderURL()
+	if url == "" {
+		url = "https://api.openai.com/v1"
 	}
+	url = strings.TrimRight(url, "/") + "/chat/completions"
 
-	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	// Use centralized header setting
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "argo")
+	auth.SetProviderHeaders(httpReq, "openai", apiKey)
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "openai")
 
 	return httpReq, body, nil
+}
+
+// buildGoogleRequestWithSession builds a Google request with session history
+func buildGoogleRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
+	var apiKey string
+
+	// Only require API key for standard endpoints
+	if cfg.GetProviderURL() == "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
+		}
+
+		if err := auth.ValidateAPIKey(apiKey, "google"); err != nil {
+			return nil, nil, fmt.Errorf("invalid API key: %w", err)
+		}
+	} else if cfg.GetAPIKeyFile() != "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
+		}
+	}
+
+	model := cfg.GetModel()
+	if model == "" {
+		model = GetDefaultChatModel("google")
+	}
+
+	// Build Google Gemini format - combine all messages into contents
+	var contents []map[string]interface{}
+	for _, msg := range messages {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			role := "user"
+			if msg.Role == "assistant" {
+				role = "model"
+			}
+			contents = append(contents, map[string]interface{}{
+				"role": role,
+				"parts": []map[string]string{
+					{"text": msg.Content},
+				},
+			})
+		}
+	}
+
+	req := map[string]interface{}{
+		"contents": contents,
+		"systemInstruction": map[string]interface{}{
+			"parts": []map[string]string{
+				{"text": cfg.GetSystem()},
+			},
+		},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Determine endpoint
+	url := cfg.GetProviderURL()
+	if url == "" {
+		if apiKey == "" {
+			return nil, nil, fmt.Errorf("API key is required for standard Google endpoint")
+		}
+		url = "https://generativelanguage.googleapis.com/v1beta"
+	}
+
+	url = strings.TrimRight(url, "/")
+	if cfg.IsStreamChat() {
+		url = fmt.Sprintf("%s/models/%s:streamGenerateContent", url, model)
+	} else {
+		url = fmt.Sprintf("%s/models/%s:generateContent", url, model)
+	}
+
+	// Add API key as query parameter
+	if apiKey != "" {
+		if strings.Contains(url, "?") {
+			url += "&key=" + apiKey
+		} else {
+			url += "?key=" + apiKey
+		}
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Use centralized header setting
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "google")
+
+	return httpReq, body, nil
+}
+
+// buildAnthropicRequestWithSession builds an Anthropic request with session history
+func buildAnthropicRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
+	var apiKey string
+
+	// Only require API key for standard endpoints
+	if cfg.GetProviderURL() == "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
+		}
+
+		if err := auth.ValidateAPIKey(apiKey, "anthropic"); err != nil {
+			return nil, nil, fmt.Errorf("invalid API key: %w", err)
+		}
+	} else if cfg.GetAPIKeyFile() != "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
+		}
+	}
+
+	model := cfg.GetModel()
+	if model == "" {
+		model = GetDefaultChatModel("anthropic")
+	}
+
+	// Build Anthropic format messages
+	anthropicMessages := []map[string]string{}
+	for _, msg := range messages {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			anthropicMessages = append(anthropicMessages, map[string]string{
+				"role":    msg.Role,
+				"content": msg.Content,
+			})
+		}
+	}
+
+	// Anthropic format request
+	req := map[string]interface{}{
+		"model":      model,
+		"max_tokens": 4096,
+		"messages":   anthropicMessages,
+		"system":     cfg.GetSystem(),
+		"stream":     cfg.IsStreamChat(),
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Determine endpoint
+	url := cfg.GetProviderURL()
+	if url == "" {
+		url = "https://api.anthropic.com/v1"
+	}
+	url = strings.TrimRight(url, "/") + "/messages"
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Use centralized header setting
+	auth.SetProviderHeaders(httpReq, "anthropic", apiKey)
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "anthropic")
+
+	return httpReq, body, nil
+}
+
+// BuildRegenerationRequest builds a request for regenerating a response
+func BuildRegenerationRequest(cfg RequestConfig, sess Session, getLineage GetLineageFunc) (*http.Request, []byte, error) {
+	return BuildRequestWithSession(cfg, sess, getLineage)
+}
+
+// ============================================================================
+// Streaming Response Handlers
+// ============================================================================
+
+// streamParser defines a function that processes a line from a stream
+// and returns the content to be printed/accumulated, whether parsing is done,
+// and any error encountered
+type streamParser func(line string, state interface{}) (content string, done bool, err error)
+
+// handleGenericStream is a reusable stream handler that processes streaming responses
+// using a provided parser function
+func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.File, parser streamParser, initialState interface{}) (string, error) {
+	// Body is closed by HandleResponse, not here
+
+	var accumulated strings.Builder
+	scanner := bufio.NewScanner(body)
+	// Increase buffer size to handle large SSE lines (default is ~64KB)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 2MB max
+
+	state := initialState
+	var sseBuf []string
+
+	// Helper to flush accumulated SSE data lines
+	flushSSE := func() (bool, error) {
+		if len(sseBuf) == 0 {
+			return false, nil
+		}
+
+		// Join accumulated data lines
+		joined := strings.Join(sseBuf, "\n")
+		sseBuf = sseBuf[:0]
+
+		// Log the complete data event
+		_, _ = logFile.WriteString("data: " + joined + "\n\n")
+
+		// Parse the complete data
+		content, done, err := parser("data: "+joined, state)
+		if err != nil {
+			// Log parsing error to file, not stderr
+			_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
+			return false, nil
+		}
+
+		if content != "" {
+			fmt.Print(content)
+			accumulated.WriteString(content)
+		}
+
+		return done, nil
+	}
+
+scanLoop:
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return accumulated.String(), ctx.Err()
+		default:
+			line := scanner.Text()
+
+			// Handle different SSE line types
+			if line == "" {
+				// Empty line signals end of SSE event
+				if done, _ := flushSSE(); done {
+					break scanLoop
+				}
+				continue
+			}
+
+			if strings.HasPrefix(line, ":") {
+				// SSE comment line - log but ignore
+				_, _ = logFile.WriteString(line + "\n")
+				continue
+			}
+
+			if strings.HasPrefix(line, "data: ") {
+				// Accumulate data line (strip "data: " prefix)
+				sseBuf = append(sseBuf, strings.TrimPrefix(line, "data: "))
+				continue
+			}
+
+			// Other SSE fields (event:, id:, retry:) - log as-is
+			_, _ = logFile.WriteString(line + "\n")
+
+			// For non-data lines, still try to parse them with the parser
+			// This maintains backward compatibility with parsers expecting raw lines
+			content, done, err := parser(line, state)
+			if err != nil {
+				_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
+				continue
+			}
+			if done {
+				break scanLoop
+			}
+			if content != "" {
+				fmt.Print(content)
+				accumulated.WriteString(content)
+			}
+		}
+	}
+
+	// Flush any remaining SSE data
+	_, _ = flushSSE()
+
+	if err := scanner.Err(); err != nil {
+		return accumulated.String(), err
+	}
+
+	return accumulated.String(), nil
+}
+
+// handleArgoStream handles Argo's plain text streaming format
+func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
+	// Body is closed by HandleResponse, not here
+
+	var accumulated strings.Builder
+	buffer := make([]byte, 4096) // 4KB chunks for real-time streaming
+
+	for {
+		select {
+		case <-ctx.Done():
+			return accumulated.String(), ctx.Err()
+		default:
+			n, err := body.Read(buffer)
+			if n > 0 {
+				chunk := string(buffer[:n])
+				fmt.Print(chunk)
+				accumulated.WriteString(chunk)
+				_, _ = logFile.WriteString(chunk)
+			}
+			if err == io.EOF {
+				return accumulated.String(), nil
+			}
+			if err != nil {
+				return accumulated.String(), err
+			}
+		}
+	}
+}
+
+// parseOpenAIStreamLine parses a line from OpenAI's SSE stream
+func parseOpenAIStreamLine(line string, state interface{}) (string, bool, error) {
+	if strings.HasPrefix(line, "data: ") {
+		data := strings.TrimPrefix(line, "data: ")
+
+		// Check for completion marker
+		if data == "[DONE]" {
+			return "", true, nil // done
+		}
+
+		// Parse JSON chunk
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", false, err
+		}
+
+		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			return chunk.Choices[0].Delta.Content, false, nil
+		}
+	}
+
+	return "", false, nil
+}
+
+// handleOpenAIStream handles OpenAI's SSE format with JSON payloads
+func handleOpenAIStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
+	return handleGenericStream(ctx, body, logFile, parseOpenAIStreamLine, nil)
+}
+
+// anthropicStreamState tracks the current event type for Anthropic's SSE format
+type anthropicStreamState struct {
+	currentEvent string
+}
+
+// parseAnthropicStreamLine parses a line from Anthropic's SSE stream
+func parseAnthropicStreamLine(line string, state interface{}) (string, bool, error) {
+	s := state.(*anthropicStreamState)
+
+	if strings.HasPrefix(line, "event: ") {
+		s.currentEvent = strings.TrimPrefix(line, "event: ")
+		return "", false, nil
+	}
+
+	if strings.HasPrefix(line, "data: ") && s.currentEvent == "content_block_delta" {
+		data := strings.TrimPrefix(line, "data: ")
+
+		// Parse JSON delta
+		var delta struct {
+			Delta struct {
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+
+		if err := json.Unmarshal([]byte(data), &delta); err != nil {
+			return "", false, err
+		}
+
+		return delta.Delta.Text, false, nil
+	}
+
+	return "", false, nil
+}
+
+// handleAnthropicStream handles Anthropic's SSE format with event types
+func handleAnthropicStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
+	state := &anthropicStreamState{}
+	return handleGenericStream(ctx, body, logFile, parseAnthropicStreamLine, state)
+}
+
+// parseGoogleStreamLine parses a line from Google's SSE stream
+func parseGoogleStreamLine(line string, state interface{}) (string, bool, error) {
+	if strings.HasPrefix(line, "data: ") {
+		data := strings.TrimPrefix(line, "data: ")
+
+		// Parse JSON chunk
+		var chunk struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", false, err
+		}
+
+		// Extract text from first candidate's first part
+		if len(chunk.Candidates) > 0 &&
+			len(chunk.Candidates[0].Content.Parts) > 0 &&
+			chunk.Candidates[0].Content.Parts[0].Text != "" {
+			return chunk.Candidates[0].Content.Parts[0].Text, false, nil
+		}
+	}
+
+	return "", false, nil
+}
+
+// handleGoogleStream handles Google's SSE format for Gemini
+func handleGoogleStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
+	return handleGenericStream(ctx, body, logFile, parseGoogleStreamLine, nil)
 }

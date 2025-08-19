@@ -264,46 +264,24 @@ func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, b
 	}
 
 	// Set headers for streaming
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Stream response in chunks
+	// For Argo, stream plain text response
 	response := ms.defaultResponse
-	words := strings.Fields(response)
 
-	for i, word := range words {
-		chunk := word
-		if i < len(words)-1 {
-			chunk += " "
-		}
-
-		data := map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{
-					"delta": map[string]string{
-						"content": chunk,
-					},
-				},
-			},
-		}
-
-		jsonData, _ := json.Marshal(data)
-		fmt.Fprintf(w, "data: %s\n\n", jsonData)
-
+	// Write response as plain text stream
+	for _, char := range response {
+		fmt.Fprintf(w, "%c", char)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-
-		time.Sleep(10 * time.Millisecond) // Simulate typing
+		time.Sleep(5 * time.Millisecond) // Simulate streaming
 	}
 
-	// Send done signal
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	// Final newline
+	fmt.Fprintln(w)
 }
 
 // GetRequests returns all captured requests

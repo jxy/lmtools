@@ -120,23 +120,19 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 		e2e.requests = append(e2e.requests, req)
 		e2e.mu.Unlock()
 		
-		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Cache-Control", "no-cache")
 		
-		// Stream a simple response
-		words := []string{"This", "is", "a", "streaming", "response."}
-		for _, word := range words {
-			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"%s \"}}]}\n\n", word)
+		// Stream a simple response as plain text (Argo format)
+		response := "This is a streaming response."
+		for _, char := range response {
+			fmt.Fprintf(w, "%c", char)
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		
-		fmt.Fprintf(w, "data: [DONE]\n\n")
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
+		fmt.Fprintln(w) // Final newline
 	})
 	
 	e2e.Server = httptest.NewServer(mux)
@@ -183,15 +179,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 	}
 	
 	// Extract session ID
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
-	
+	sessionID := extractFirstSessionID(stdout)
 	if sessionID == "" {
 		t.Fatal("Failed to extract session ID from show-sessions output")
 	}
@@ -260,14 +248,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 		t.Fatalf("Failed to show sessions: %v", err)
 	}
 	
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
+	sessionID := extractFirstSessionID(stdout)
 	
 	// Add second message
 	_, _, err = runLmcCommand(t, lmcBin,
@@ -344,21 +325,86 @@ func TestE2E_StreamingMode(t *testing.T) {
 	lmcBin := buildLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	sessionsDir := t.TempDir()
 	server := newE2ETestServer(t)
 	
-	// Use test helper to capture streaming output and isolate logs
-	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "dave", "-model", "gpt4o",  "-stream",  "-argo-env", server.URL},
+	// Use test helper to capture streaming output and log directory
+	stdout, stderr, logDir, err := runLmcCommandWithLogDir(t, lmcBin,
+		[]string{"-argo-user", "dave", "-model", "gpt4o", "-stream", "-argo-env", server.URL, "-sessions-dir", sessionsDir},
 		"Test streaming response")
 	if err != nil {
 		t.Fatalf("Failed to run streaming command: %v\nStderr: %s", err, stderr)
 	}
-	output := []byte(stdout)
 	
-	// Verify we got streaming response (check for SSE format)
-	outputStr := string(output)
-	if !strings.Contains(outputStr, "data:") || !strings.Contains(outputStr, "[DONE]") {
-		t.Errorf("Expected streaming response in SSE format, got: %s", outputStr)
+	// For Argo provider, streaming should show the plain text response
+	// (The mock server now sends plain text for streaming responses)
+	outputStr := stdout
+	if !strings.Contains(outputStr, "This is a streaming response.") {
+		t.Errorf("Expected streaming text output, got: %s", outputStr)
+	}
+	
+	// Check for stream_chat_output log file
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("Failed to read log directory: %v", err)
+	}
+	
+	streamLogFound := false
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "stream_chat_output") && strings.HasSuffix(entry.Name(), ".log") {
+			streamLogFound = true
+			// Read and verify log content
+			logPath := filepath.Join(logDir, entry.Name())
+			content, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Errorf("Failed to read stream log: %v", err)
+			} else if len(content) == 0 {
+				t.Error("Stream log file is empty")
+			} else {
+				t.Logf("Stream log contains %d bytes", len(content))
+			}
+			break
+		}
+	}
+	
+	if !streamLogFound {
+		t.Error("stream_chat_output log file not found")
+	}
+	
+	// Verify session was created with assistant message
+	stdout, _, err = runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "dave", "-show-sessions", "-sessions-dir", sessionsDir},
+		"")
+	
+	if err != nil {
+		t.Fatalf("Failed to show sessions: %v", err)
+	}
+	
+	// Extract session ID
+	sessionID := extractFirstSessionID(stdout)
+	
+	if sessionID == "" {
+		t.Fatal("No session created for streaming response")
+	}
+	
+	// Show the session to verify assistant message
+	stdout, _, err = runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "dave", "-show", sessionID, "-sessions-dir", sessionsDir},
+		"")
+	
+	if err != nil {
+		t.Fatalf("Failed to show session: %v", err)
+	}
+	
+	// Verify both user and assistant messages are present
+	if !strings.Contains(stdout, "Test streaming response") {
+		t.Error("User message not found in session")
+	}
+	if !strings.Contains(stdout, "This is a streaming response.") {
+		t.Error("Assistant response not found in session")
+	}
+	if !strings.Contains(stdout, "[assistant/gpt4o]") {
+		t.Error("Model information not recorded in assistant message")
 	}
 }
 
@@ -388,14 +434,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 		t.Fatalf("Failed to show sessions: %v", err)
 	}
 	
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
+	sessionID := extractFirstSessionID(stdout)
 	
 	// Verify session exists
 	_, _, err = runLmcCommand(t, lmcBin,
@@ -451,14 +490,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 		t.Fatalf("Failed to show sessions: %v", err)
 	}
 	
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
+	sessionID := extractFirstSessionID(stdout)
 	
 	// Run multiple concurrent resumes
 	done := make(chan struct{})

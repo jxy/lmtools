@@ -51,30 +51,7 @@ func TestLoggingIntegration(t *testing.T) {
 		t.Fatalf("Failed to read log directory: %v", err)
 	}
 
-	var requestLogFound bool
-	var recentLogs []string
-
-	now := time.Now()
-	for _, entry := range entries {
-		name := entry.Name()
-		
-		// Check if it's a recent file (within last minute)
-		info, err := entry.Info()
-		if err == nil && now.Sub(info.ModTime()) < time.Minute {
-			recentLogs = append(recentLogs, name)
-			
-			if strings.Contains(name, "_embed_input") && strings.HasSuffix(name, ".json") {
-				requestLogFound = true
-			}
-		}
-	}
-
-	t.Logf("Recent log files found: %v", recentLogs)
-
-	// Note: Process logs are created when a log directory is configured
-	// Tests use -log-dir to isolate logs from production directories
-
-	if !requestLogFound {
+	if !assertRecentLogFiles(t, logDir, "_embed_input", ".json") {
 		t.Error("Request log file not found")
 	}
 
@@ -93,22 +70,12 @@ func TestLoggingIntegration(t *testing.T) {
 		t.Fatalf("Failed to read log directory: %v", err)
 	}
 
-	var chatRequestLogFound bool
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), "_chat_input") && strings.HasSuffix(entry.Name(), ".json") {
-			info, err := entry.Info()
-			if err == nil && now.Sub(info.ModTime()) < time.Minute {
-				chatRequestLogFound = true
-				break
-			}
-		}
-	}
-
-	if !chatRequestLogFound {
+	if !assertRecentLogFiles(t, logDir, "_chat_input", ".json") {
 		t.Error("Chat request log file not found")
 	}
 
 	// Test 3: Verify log content format
+	now := time.Now()
 	for _, entry := range entries {
 		if strings.Contains(entry.Name(), "_lmc_") && strings.HasSuffix(entry.Name(), ".log") {
 			info, err := entry.Info()
@@ -155,6 +122,76 @@ func TestLoggingIntegration(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestStreamingLogging(t *testing.T) {
+	// Build lmc binary
+	lmcBin := buildLmcBinary(t)
+
+	// Create temporary directories
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	sessionsDir := t.TempDir()
+	logDir := t.TempDir()
+
+	// Create mock server
+	ms := mockserver.NewMockServer()
+	defer ms.Close()
+
+	// Test streaming request with custom log directory
+	stdout, stderr, err := runLmcCommandWithSpecificLogDir(t, lmcBin,
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-stream", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+		"Test streaming message", logDir)
+
+	if err != nil {
+		t.Fatalf("Failed to run streaming: %v\nStderr: %s", err, stderr)
+	}
+
+	// Verify output contains the response text
+	if !strings.Contains(stdout, "This is a mock response") {
+		t.Errorf("Expected streaming output to contain response text, got: %s", stdout)
+	}
+
+	// Check log files
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("Failed to read log directory: %v", err)
+	}
+
+	if !assertRecentLogFiles(t, logDir, "_stream_chat_input", ".json") {
+		t.Error("Stream input log file not found")
+	}
+	if !assertRecentLogFiles(t, logDir, "_stream_chat_output", ".log") {
+		t.Error("Stream output log file not found")
+	} else {
+		// Verify content
+		for _, entry := range entries {
+			if strings.Contains(entry.Name(), "_stream_chat_output") && strings.HasSuffix(entry.Name(), ".log") {
+				logPath := filepath.Join(logDir, entry.Name())
+				content, err := os.ReadFile(logPath)
+				if err != nil {
+					t.Errorf("Failed to read stream output log: %v", err)
+				} else if len(content) == 0 {
+					t.Error("Stream output log is empty")
+				}
+				break
+			}
+		}
+	}
+
+	// Verify session was created
+	stdout, _, err = runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "testuser", "-show-sessions", "-sessions-dir", sessionsDir},
+		"")
+	
+	if err != nil {
+		t.Fatalf("Failed to show sessions: %v", err)
+	}
+
+	// Should have at least one session
+	if !strings.Contains(stdout, " • ") {
+		t.Error("No session created for streaming request")
 	}
 }
 

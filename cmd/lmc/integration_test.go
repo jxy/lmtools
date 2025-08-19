@@ -70,15 +70,7 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 	}
 	
 	// Parse session ID from output (format: "0001 • 2025-07-16 15:04:05 • 1 messages • XXB")
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
-	
+	sessionID := extractFirstSessionID(stdout)
 	if sessionID == "" {
 		t.Fatalf("Failed to extract session ID from show-sessions output: %s", stdout)
 	}
@@ -183,14 +175,7 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	}
 	
 	// Extract session ID
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
+	sessionID := extractFirstSessionID(stdout)
 	
 	// Create a long-running process that holds a lock
 	logDir := t.TempDir() // Isolate test logs
@@ -245,14 +230,7 @@ func TestCrossProcessSiblingCreation(t *testing.T) {
 		t.Fatalf("Failed to show sessions: %v", err)
 	}
 	
-	var sessionID string
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			sessionID = strings.TrimSpace(strings.Split(line, " • ")[0])
-			break
-		}
-	}
+	sessionID := extractFirstSessionID(stdout)
 	
 	// Add another message
 	_, _, err = runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID,  "-argo-env", mockURL, "-sessions-dir", sessionsDir}, "Message 2")

@@ -245,13 +245,6 @@ func run() error {
 	// Log response received
 	logger.Infof("Response received | Status: %d | Duration: %v", resp.StatusCode, time.Since(startTime))
 
-	// Defer response cleanup for success case
-	defer func() {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-	}()
-
 	out, err := core.HandleResponse(ctx, cfg, resp, logger.DefaultLogger())
 	if err != nil {
 		logger.Errorf("Response handling failed: %v", err)
@@ -263,6 +256,7 @@ func run() error {
 
 	// Save response to session if enabled
 	if sess != nil && out != "" {
+		logger.Debugf("Saving response to session | Length: %d | Streaming: %v", len(out), cfg.StreamChat)
 		responseMsg := session.Message{
 			Role:      "assistant",
 			Content:   strings.TrimSpace(out),
@@ -273,15 +267,21 @@ func run() error {
 		if err != nil {
 			// Log error but don't fail the request
 			fmt.Fprintf(os.Stderr, "Warning: failed to save response to session: %v\n", err)
+			logger.Errorf("Failed to save response to session: %v", err)
 		} else if path != sess.Path {
 			// Update session path if a sibling was created
 			sess.Path = path
 			fmt.Fprintf(os.Stderr, "Note: Response saved to sibling branch %s as message %s\n",
 				session.GetSessionID(path), msgID)
+		} else {
+			logger.Debugf("Response saved to session %s as message %s", session.GetSessionID(path), msgID)
 		}
+	} else {
+		logger.Debugf("Not saving response | Session: %v | Output length: %d", sess != nil, len(out))
 	}
 
-	if out != "" {
+	// Only print output if not streaming (streaming already printed during response handling)
+	if out != "" && !cfg.StreamChat {
 		fmt.Print(out)
 	}
 	return nil

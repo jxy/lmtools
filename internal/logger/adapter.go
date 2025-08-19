@@ -6,6 +6,11 @@ import "os"
 type LoggerAdapter struct{}
 
 func (l LoggerAdapter) GetLogDir() string {
+	// If logger is initialized with a custom log directory, use that
+	if globalLogger != nil && globalLogger.logDir != "" {
+		return globalLogger.logDir
+	}
+	// Otherwise fall back to default
 	return GetLogDir()
 }
 

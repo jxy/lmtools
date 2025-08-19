@@ -248,7 +248,7 @@ func (l *Logger) initSinks(cfg Config) error {
 		}
 
 		// Create log file with timestamp and PID
-		timestamp := time.Now().Format("20060102T150405")
+		timestamp := time.Now().Format("20060102T150405.000")
 		component := cfg.Component
 		if component == "" {
 			component = "lmc"

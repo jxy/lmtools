@@ -10,13 +10,13 @@ import (
 // CreateLogFile creates a log file with a timestamp
 func CreateLogFile(dir, operation string) (*os.File, string, error) {
 	// Ensure directory exists
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return nil, "", fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	// Create filename with timestamp
+	// Create filename with timestamp and PID
 	timestamp := time.Now().Format("20060102T150405.000")
-	filename := fmt.Sprintf("%s_%s.log", timestamp, sanitizeOp(operation))
+	filename := fmt.Sprintf("%s_%s_%d.log", timestamp, sanitizeOp(operation), os.Getpid())
 	logPath := filepath.Join(dir, filename)
 
 	// Create file with secure permissions (0600)

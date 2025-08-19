@@ -5,10 +5,12 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // buildLmcBinary builds the lmc binary for testing
@@ -86,4 +88,37 @@ func runLmcCommandWithSpecificLogDir(t *testing.T, lmcBin string, args []string,
 	
 	err = cmd.Run()
 	return stdoutBuf.String(), stderrBuf.String(), err
+}
+
+// extractFirstSessionID parses the first session ID from -show-sessions output
+func extractFirstSessionID(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
+			return strings.TrimSpace(strings.Split(line, " • ")[0])
+		}
+	}
+	return ""
+}
+
+// assertRecentLogFiles checks that recent log files exist with given substring and suffix
+func assertRecentLogFiles(t *testing.T, dir string, includeSubstr string, suffix string) bool {
+	t.Helper()
+	
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("Failed to read directory %s: %v", dir, err)
+	}
+	
+	now := time.Now()
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.Contains(name, includeSubstr) && strings.HasSuffix(name, suffix) {
+			info, err := entry.Info()
+			if err == nil && now.Sub(info.ModTime()) < time.Minute {
+				return true
+			}
+		}
+	}
+	return false
 }

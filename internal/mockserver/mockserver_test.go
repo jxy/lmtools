@@ -141,8 +141,8 @@ func TestMockServer_StreamChat(t *testing.T) {
 
 	// Verify streaming response headers
 	contentType := resp.Header.Get("Content-Type")
-	if contentType != "text/event-stream" {
-		t.Errorf("Expected text/event-stream, got %s", contentType)
+	if contentType != "text/plain" {
+		t.Errorf("Expected text/plain, got %s", contentType)
 	}
 }
 

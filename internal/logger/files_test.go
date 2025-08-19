@@ -22,9 +22,9 @@ func TestCreateLogFile(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("file not created: %v", err)
 	}
-	// Updated pattern to match new filename format with milliseconds
+	// Updated pattern to match new filename format with milliseconds and PID
 	name := filepath.Base(path)
-	re := regexp.MustCompile(`^\d{8}T\d{6}\.\d{3}_test-op\.log$`)
+	re := regexp.MustCompile(`^\d{8}T\d{6}\.\d{3}_test-op_\d+\.log$`)
 	if !re.MatchString(name) {
 		t.Errorf("filename %q does not match expected pattern", name)
 	}
