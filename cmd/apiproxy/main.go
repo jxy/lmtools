@@ -18,14 +18,14 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: %s [options]
 
 apiproxy is an HTTP proxy server that provides an Anthropic-compatible API interface 
-for OpenAI, Google, and Argo providers.
+for Anthropic, OpenAI, Google, and Argo providers.
 
 Server Options:
   -host string               Host to bind the server to (default: "127.0.0.1")
   -port int                  Port to bind the server to (default: 8082)
 
 Provider Options:
-  -provider string           Provider: argo, openai, google (default: "argo")
+  -provider string           Provider: argo, anthropic, openai, google (default: "argo")
   -provider-url string       Custom URL for the selected provider (overrides default)
   -api-key-file string       Path to file containing API key for the selected provider
                             (required for non-Argo providers when not using custom URL)
@@ -48,6 +48,9 @@ Examples:
   # Start proxy with Argo provider
   %s -argo-user myuser
 
+  # Start proxy with Anthropic provider
+  %s -provider anthropic -api-key-file ~/.anthropic-key
+
   # Start proxy with OpenAI provider
   %s -provider openai -api-key-file ~/.openai-key
 
@@ -61,7 +64,7 @@ Examples:
   %s -port 8080 -log-level DEBUG -argo-user myuser
 `,
 		os.Args[0],
-		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 func main() {
@@ -112,7 +115,7 @@ func main() {
 	flag.Parse()
 
 	// Read API key from file based on provider
-	var openAIAPIKey, googleAPIKey string
+	var anthropicAPIKey, openAIAPIKey, googleAPIKey string
 
 	if apiKeyFile != "" {
 		apiKey, err := auth.ReadKeyFile(apiKeyFile)
@@ -123,6 +126,8 @@ func main() {
 
 		// Assign the API key to the appropriate provider
 		switch preferredProvider {
+		case "anthropic":
+			anthropicAPIKey = apiKey
 		case "openai":
 			openAIAPIKey = apiKey
 		case "google":
@@ -141,7 +146,7 @@ func main() {
 
 	// Create configuration from flags
 	config := &proxy.Config{
-		AnthropicAPIKey:    "",
+		AnthropicAPIKey:    anthropicAPIKey,
 		OpenAIAPIKey:       openAIAPIKey,
 		GoogleAPIKey:       googleAPIKey,
 		ArgoUser:           argoUser,
