@@ -73,8 +73,17 @@ func (rl *RequestScopedLogger) InfoJSON(label string, data interface{}) {
 
 // LogToolCall logs a tool call with appropriate formatting for INFO and DEBUG levels
 func (rl *RequestScopedLogger) LogToolCall(toolName string, toolData interface{}) {
-	// Truncate the data first for INFO level
-	truncated := truncateValue(toolData, 64)
+	// For INFO level, extract just the input data if we received a full block
+	var inputData interface{}
+	if block, ok := toolData.(AnthropicContentBlock); ok {
+		inputData = block.Input
+	} else {
+		// Assume toolData is already the input data (for backward compatibility)
+		inputData = toolData
+	}
+
+	// Truncate the input data for INFO level
+	truncated := truncateValue(inputData, 64)
 	truncatedJSON, err := json.Marshal(truncated)
 	if err != nil {
 		rl.Infof("Tool call: %s | Data: <marshal_error> %v", toolName, err)
@@ -82,13 +91,13 @@ func (rl *RequestScopedLogger) LogToolCall(toolName string, toolData interface{}
 	}
 	rl.Infof("Tool call: %s | Data: %s", toolName, string(truncatedJSON))
 
-	// Also log full data at DEBUG level
+	// DEBUG level: log the entire data structure (could be just input or full block)
 	fullJSON, err := json.Marshal(toolData)
 	if err != nil {
-		rl.Debugf("Tool call: %s | Data: <marshal_error> %v", toolName, err)
+		rl.Debugf("Tool call: <marshal_error> %v", err)
 		return
 	}
-	rl.Debugf("Tool call: %s | Data: %s", toolName, string(fullJSON))
+	rl.Debugf("Tool call: %s", string(fullJSON))
 }
 
 // LogDuration logs a message with the request duration

@@ -241,7 +241,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	if anthResp != nil && anthResp.Content != nil {
 		for _, block := range anthResp.Content {
 			if block.Type == "tool_use" && block.Name != "" {
-				reqLogger.LogToolCall(block.Name, block.Input)
+				reqLogger.LogToolCall(block.Name, block)
 			}
 		}
 	}
@@ -1264,7 +1264,7 @@ func (s *Server) streamTextBlock(content string, handler *AnthropicStreamHandler
 func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
 	reqLogger := GetRequestLoggerOrDefault(ctx)
 
-	reqLogger.LogToolCall(block.Name, block.Input)
+	reqLogger.LogToolCall(block.Name, block)
 
 	// Validate tool block
 	if block.ID == "" {

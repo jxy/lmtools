@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"lmtools/internal/logger"
 	"os"
 	"strings"
@@ -268,4 +269,326 @@ func BenchmarkConcurrentLoggerCreation(b *testing.B) {
 			_ = NewRequestScopedLogger()
 		}
 	})
+}
+
+func TestLogToolCall(t *testing.T) {
+	tests := []struct {
+		name          string
+		toolName      string
+		toolData      interface{}
+		wantInfoLog   string
+		wantDebugLog  string
+		wantInfoPipe  bool
+		debugShouldBe string // "input_only" or "full_block"
+	}{
+		{
+			name:     "Simple input data (backward compatibility)",
+			toolName: "search_tool",
+			toolData: map[string]interface{}{
+				"query": "test query",
+				"limit": 10,
+			},
+			wantInfoLog:   `Tool call: search_tool | Data: {"limit":10,"query":"test query"}`,
+			wantDebugLog:  `Tool call: {"limit":10,"query":"test query"}`,
+			wantInfoPipe:  true,
+			debugShouldBe: "input_only",
+		},
+		{
+			name:     "Full AnthropicContentBlock",
+			toolName: "web_search",
+			toolData: AnthropicContentBlock{
+				Type: "tool_use",
+				ID:   "toolu_123456",
+				Name: "web_search",
+				Input: map[string]interface{}{
+					"query": "AI news",
+					"filters": map[string]interface{}{
+						"date": "recent",
+					},
+				},
+			},
+			wantInfoLog:   `Tool call: web_search | Data: {"filters":{"date":"recent"},"query":"AI news"}`,
+			wantDebugLog:  `Tool call: {"type":"tool_use","id":"toolu_123456","name":"web_search","input":{"filters":{"date":"recent"},"query":"AI news"}}`,
+			wantInfoPipe:  true,
+			debugShouldBe: "full_block",
+		},
+		{
+			name:     "Large input data gets truncated at INFO level",
+			toolName: "process_data",
+			toolData: map[string]interface{}{
+				"data": strings.Repeat("x", 100), // Long string that should be truncated
+				"mode": "fast",
+			},
+			wantInfoLog:   `Tool call: process_data | Data: {"data":"` + strings.Repeat("x", 64) + `...","mode":"fast"}`,
+			wantDebugLog:  `Tool call: {"data":"` + strings.Repeat("x", 100) + `","mode":"fast"}`,
+			wantInfoPipe:  true,
+			debugShouldBe: "input_only",
+		},
+		{
+			name:     "Nested data structure",
+			toolName: "complex_tool",
+			toolData: map[string]interface{}{
+				"level1": map[string]interface{}{
+					"level2": map[string]interface{}{
+						"deep_value": "test",
+						"array":      []interface{}{1, 2, 3},
+					},
+				},
+			},
+			wantInfoLog:   `Tool call: complex_tool | Data: {"level1":{"level2":{"array":[1,2,3],"deep_value":"test"}}}`,
+			wantDebugLog:  `Tool call: {"level1":{"level2":{"array":[1,2,3],"deep_value":"test"}}}`,
+			wantInfoPipe:  true,
+			debugShouldBe: "input_only",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Capture stderr output
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			// Reinitialize logger
+			logger.ResetForTesting()
+			_ = logger.InitializeWithOptions(
+				logger.WithLevel("debug"),
+				logger.WithFormat("text"),
+				logger.WithOutputMode(logger.OutputStderrOnly),
+				logger.WithComponent("test"),
+			)
+
+			// Create request logger and log tool call
+			reqLogger := NewRequestScopedLogger()
+			reqLogger.LogToolCall(tt.toolName, tt.toolData)
+
+			// Restore stderr and read output
+			w.Close()
+			os.Stderr = oldStderr
+
+			var buf bytes.Buffer
+			if _, err := buf.ReadFrom(r); err != nil {
+				t.Fatalf("Failed to read from pipe: %v", err)
+			}
+			output := buf.String()
+
+			// Split into lines
+			lines := strings.Split(strings.TrimSpace(output), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("Expected 2 log lines (INFO and DEBUG), got %d: %v", len(lines), lines)
+			}
+
+			// Check INFO log
+			infoLine := lines[0]
+			if !strings.Contains(infoLine, "[INFO]") {
+				t.Errorf("First line should be INFO level, got: %s", infoLine)
+			}
+			if tt.wantInfoPipe && !strings.Contains(infoLine, " | Data: ") {
+				t.Errorf("INFO log should contain pipe separator, got: %s", infoLine)
+			}
+			if !strings.Contains(infoLine, tt.toolName) {
+				t.Errorf("INFO log should contain tool name %s, got: %s", tt.toolName, infoLine)
+			}
+
+			// Check DEBUG log
+			debugLine := lines[1]
+			if !strings.Contains(debugLine, "[DEBUG]") {
+				t.Errorf("Second line should be DEBUG level, got: %s", debugLine)
+			}
+
+			// Extract JSON from debug line
+			debugPrefix := "Tool call: "
+			idx := strings.Index(debugLine, debugPrefix)
+			if idx == -1 {
+				t.Fatalf("DEBUG log should contain 'Tool call: ', got: %s", debugLine)
+			}
+			jsonStr := debugLine[idx+len(debugPrefix):]
+
+			// Parse and verify JSON structure
+			var parsed map[string]interface{}
+			if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+				t.Errorf("Failed to parse DEBUG log JSON: %v, json: %s", err, jsonStr)
+			}
+
+			// Check structure based on expected type
+			switch tt.debugShouldBe {
+			case "input_only":
+				// Should not have type, id, name at top level
+				if _, hasType := parsed["type"]; hasType {
+					t.Errorf("DEBUG log should not have 'type' field for input-only data, got: %v", parsed)
+				}
+				if _, hasID := parsed["id"]; hasID {
+					t.Errorf("DEBUG log should not have 'id' field for input-only data, got: %v", parsed)
+				}
+			case "full_block":
+				// Should have type, id, name, input fields
+				if parsed["type"] != "tool_use" {
+					t.Errorf("DEBUG log should have type='tool_use', got: %v", parsed["type"])
+				}
+				if _, hasID := parsed["id"]; !hasID {
+					t.Errorf("DEBUG log should have 'id' field for full block, got: %v", parsed)
+				}
+				if parsed["name"] != tt.toolName {
+					t.Errorf("DEBUG log should have name='%s', got: %v", tt.toolName, parsed["name"])
+				}
+				if _, hasInput := parsed["input"]; !hasInput {
+					t.Errorf("DEBUG log should have 'input' field for full block, got: %v", parsed)
+				}
+			}
+		})
+	}
+
+	// Restore logger
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+	)
+}
+
+func TestLogToolCallWithEmptyBlock(t *testing.T) {
+	// Test with an empty AnthropicContentBlock
+	block := AnthropicContentBlock{
+		Type:  "tool_use",
+		ID:    "toolu_empty",
+		Name:  "empty_tool",
+		Input: nil, // nil input
+	}
+
+	// Capture stderr output
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Reinitialize logger
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+	)
+
+	// Create request logger and log tool call
+	reqLogger := NewRequestScopedLogger()
+	reqLogger.LogToolCall(block.Name, block)
+
+	// Restore stderr and read output
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("Failed to read from pipe: %v", err)
+	}
+	output := buf.String()
+
+	// Should still produce logs even with nil input
+	if !strings.Contains(output, "[INFO]") {
+		t.Errorf("Should have INFO log even with nil input, got: %s", output)
+	}
+	if !strings.Contains(output, "[DEBUG]") {
+		t.Errorf("Should have DEBUG log even with nil input, got: %s", output)
+	}
+
+	// Restore logger
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+	)
+}
+
+func TestLogToolCallTruncation(t *testing.T) {
+	// Test that truncation preserves structure for nested data
+	deepData := map[string]interface{}{
+		"short": "ok",
+		"long":  strings.Repeat("x", 100),
+		"nested": map[string]interface{}{
+			"deep_long": strings.Repeat("y", 100),
+		},
+		"array": []interface{}{
+			strings.Repeat("z", 100),
+			"short_item",
+		},
+	}
+
+	// Capture stderr output
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Reinitialize logger
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+	)
+
+	// Create request logger and log tool call
+	reqLogger := NewRequestScopedLogger()
+	reqLogger.LogToolCall("truncation_test", deepData)
+
+	// Restore stderr and read output
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("Failed to read from pipe: %v", err)
+	}
+	output := buf.String()
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Expected 2 log lines, got %d", len(lines))
+	}
+
+	// Check INFO line has truncation
+	infoLine := lines[0]
+	if !strings.Contains(infoLine, "...") {
+		t.Errorf("INFO log should contain truncation marker '...', got: %s", infoLine)
+	}
+
+	// Check DEBUG line has full data
+	debugLine := lines[1]
+	if strings.Contains(debugLine, "...") {
+		t.Errorf("DEBUG log should not contain truncation marker '...', got: %s", debugLine)
+	}
+
+	// Verify structure is preserved in INFO log
+	infoPrefix := "Tool call: truncation_test | Data: "
+	idx := strings.Index(infoLine, infoPrefix)
+	if idx == -1 {
+		t.Fatalf("INFO log should contain expected prefix, got: %s", infoLine)
+	}
+	infoJSON := infoLine[idx+len(infoPrefix):]
+
+	var infoParsed map[string]interface{}
+	if err := json.Unmarshal([]byte(infoJSON), &infoParsed); err != nil {
+		t.Errorf("Failed to parse INFO log JSON: %v", err)
+	}
+
+	// Check that all keys are present
+	expectedKeys := []string{"short", "long", "nested", "array"}
+	for _, key := range expectedKeys {
+		if _, ok := infoParsed[key]; !ok {
+			t.Errorf("INFO log should preserve key '%s' even with truncation", key)
+		}
+	}
+
+	// Restore logger
+	logger.ResetForTesting()
+	_ = logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithComponent("test"),
+	)
 }
