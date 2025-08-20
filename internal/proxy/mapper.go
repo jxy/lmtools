@@ -54,11 +54,11 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 	// Use preferred provider if credentials are available
 	switch m.config.Provider {
 	case "anthropic":
-		if m.config.AnthropicAPIKey != "" {
+		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
 			return "anthropic", smallModel
 		}
 	case "google":
-		if m.config.GoogleAPIKey != "" {
+		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
 			return "google", smallModel
 		}
 	case "argo":
@@ -66,7 +66,7 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 			return "argo", smallModel
 		}
 	default: // "openai" or any other value defaults to OpenAI
-		if m.config.OpenAIAPIKey != "" {
+		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
 			return "openai", smallModel
 		}
 	}
@@ -96,11 +96,11 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 	// Use preferred provider if credentials are available
 	switch m.config.Provider {
 	case "anthropic":
-		if m.config.AnthropicAPIKey != "" {
+		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
 			return "anthropic", model
 		}
 	case "google":
-		if m.config.GoogleAPIKey != "" {
+		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
 			return "google", model
 		}
 	case "argo":
@@ -108,7 +108,7 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 			return "argo", model
 		}
 	default: // "openai" or any other value defaults to OpenAI
-		if m.config.OpenAIAPIKey != "" {
+		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
 			return "openai", model
 		}
 	}
@@ -136,11 +136,11 @@ func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string)
 	// Use the configured provider if credentials are available
 	switch m.config.Provider {
 	case "anthropic":
-		if m.config.AnthropicAPIKey != "" {
+		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
 			return "anthropic", model
 		}
 	case "google":
-		if m.config.GoogleAPIKey != "" {
+		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
 			return "google", model
 		}
 	case "argo":
@@ -148,7 +148,7 @@ func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string)
 			return "argo", model
 		}
 	default: // "openai" or any other value defaults to OpenAI
-		if m.config.OpenAIAPIKey != "" {
+		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
 			return "openai", model
 		}
 	}

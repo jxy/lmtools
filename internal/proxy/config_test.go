@@ -91,7 +91,7 @@ func TestProviderURLOverride(t *testing.T) {
 			name:              "OpenAI custom URL",
 			preferredProvider: "openai",
 			providerURL:       "https://custom-openai.com/v1/chat",
-			expectedOpenAI:    "https://custom-openai.com/v1/chat",
+			expectedOpenAI:    "https://custom-openai.com/v1/chat/chat/completions",
 			expectedGemini:    "https://generativelanguage.googleapis.com/v1beta/models",
 			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
 		},
@@ -226,6 +226,75 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestOpenAIProviderURLNormalization(t *testing.T) {
+	tests := []struct {
+		name        string
+		providerURL string
+		expectedURL string
+	}{
+		{
+			name:        "Base URL without trailing slash",
+			providerURL: "http://localhost:11434",
+			expectedURL: "http://localhost:11434/chat/completions",
+		},
+		{
+			name:        "Base URL with trailing slash",
+			providerURL: "http://localhost:11434/",
+			expectedURL: "http://localhost:11434/chat/completions",
+		},
+		{
+			name:        "URL ending with /v1",
+			providerURL: "http://localhost:11434/v1",
+			expectedURL: "http://localhost:11434/v1/chat/completions",
+		},
+		{
+			name:        "URL ending with /v1/",
+			providerURL: "http://localhost:11434/v1/",
+			expectedURL: "http://localhost:11434/v1/chat/completions",
+		},
+		{
+			name:        "URL with custom path",
+			providerURL: "http://localhost:11434/custom/endpoint",
+			expectedURL: "http://localhost:11434/custom/endpoint/chat/completions",
+		},
+		{
+			name:        "URL already with chat/completions",
+			providerURL: "http://localhost:11434/v1/chat/completions",
+			expectedURL: "http://localhost:11434/v1/chat/completions/chat/completions",
+		},
+		{
+			name:        "HTTPS URL ending with /v1",
+			providerURL: "https://api.custom.com/v1",
+			expectedURL: "https://api.custom.com/v1/chat/completions",
+		},
+		{
+			name:        "URL with multiple trailing slashes",
+			providerURL: "http://localhost:11434///",
+			expectedURL: "http://localhost:11434/chat/completions",
+		},
+		{
+			name:        "URL with path ending in /v1 but not base URL",
+			providerURL: "https://api.custom.com/api/v1",
+			expectedURL: "https://api.custom.com/api/v1/chat/completions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Provider:    "openai",
+				ProviderURL: tt.providerURL,
+			}
+
+			config.InitializeURLs()
+
+			if config.OpenAIURL != tt.expectedURL {
+				t.Errorf("Expected OpenAIURL=%s, got %s", tt.expectedURL, config.OpenAIURL)
 			}
 		})
 	}

@@ -310,6 +310,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	url := s.config.OpenAIURL
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -317,7 +318,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.mapper.GetAPIKey("openai")))
+	auth.SetProviderHeaders(req, "openai", s.mapper.GetAPIKey("openai"))
 
 	// Send request with retry
 	resp, err := s.client.Do(ctx, req, "openai")
@@ -366,10 +367,11 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 
 	// Build URL with model
 	baseURL := s.config.GoogleURL
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s",
-		baseURL,
-		anthReq.Model,
-		s.mapper.GetAPIKey("google"))
+	url := fmt.Sprintf("%s/%s:generateContent", baseURL, anthReq.Model)
+	if key := s.mapper.GetAPIKey("google"); key != "" {
+		url += "?key=" + key
+	}
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -430,6 +432,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	}
 
 	url := s.config.GetArgoURL(endpoint)
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -480,6 +483,7 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 	}
 
 	url := s.config.AnthropicURL
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -730,6 +734,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	url := s.config.OpenAIURL
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -737,7 +742,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.mapper.GetAPIKey("openai")))
+	auth.SetProviderHeaders(req, "openai", s.mapper.GetAPIKey("openai"))
 
 	// Send request with retry
 	resp, err := s.client.Do(ctx, req, "openai")
@@ -779,10 +784,11 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 
 	// Build URL with streaming endpoint
 	baseURL := s.config.GoogleURL
-	url := fmt.Sprintf("%s/%s:streamGenerateContent?key=%s&alt=sse",
-		baseURL,
-		anthReq.Model,
-		s.mapper.GetAPIKey("google"))
+	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse", baseURL, anthReq.Model)
+	if key := s.mapper.GetAPIKey("google"); key != "" {
+		url += "&key=" + key
+	}
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	// Prepare request
 	jsonData, err := json.Marshal(geminiReq)
@@ -843,6 +849,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 	}
 
 	url := s.config.GetArgoURL("streamchat")
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -956,6 +963,7 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 	}
 
 	url := s.config.AnthropicURL
+	reqLogger.Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {

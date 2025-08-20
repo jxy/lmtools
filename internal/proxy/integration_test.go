@@ -486,9 +486,9 @@ func TestCustomProviderURL(t *testing.T) {
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					t.Logf("Custom OpenAI mock received: %s %s", r.Method, r.URL.Path)
 					
-					// Verify the expected path
-					if r.URL.Path != "/custom/openai/path" {
-						t.Errorf("Expected path /custom/openai/path, got %s", r.URL.Path)
+					// Verify the expected path (now includes /chat/completions)
+					if r.URL.Path != "/custom/openai/path/chat/completions" {
+						t.Errorf("Expected path /custom/openai/path/chat/completions, got %s", r.URL.Path)
 					}
 					
 					// Return a simple response
@@ -531,7 +531,7 @@ func TestCustomProviderURL(t *testing.T) {
 				
 				return config, customMock
 			},
-			expectedPath: "/custom/openai/path",
+			expectedPath: "/custom/openai/path/chat/completions",
 		},
 		{
 			name:              "Gemini custom URL",

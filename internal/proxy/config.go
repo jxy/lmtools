@@ -81,7 +81,8 @@ func (c *Config) InitializeURLs() {
 	if c.ProviderURL != "" {
 		switch c.Provider {
 		case "openai":
-			c.OpenAIURL = c.ProviderURL
+			// Always treat ProviderURL as a base URL and append the endpoint
+			c.OpenAIURL = strings.TrimRight(c.ProviderURL, "/") + "/chat/completions"
 		case "google":
 			c.GoogleURL = c.ProviderURL
 		case "anthropic":

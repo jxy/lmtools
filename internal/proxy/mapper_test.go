@@ -128,6 +128,85 @@ func TestModelMapper(t *testing.T) {
 	}
 }
 
+func TestProviderURLAsCredential(t *testing.T) {
+	tests := []struct {
+		name             string
+		config           *Config
+		inputModel       string
+		expectedProvider string
+		expectedModel    string
+		description      string
+	}{
+		{
+			name: "ProviderURL with OpenAI allows selection without API key",
+			config: &Config{
+				Provider:        "openai",
+				ProviderURL:     "http://localhost:11434/v1",
+				Model:           "gpt-4o",
+				AnthropicAPIKey: "valid-key", // Has another valid key
+			},
+			inputModel:       "claude-3-sonnet",
+			expectedProvider: "openai",
+			expectedModel:    "gpt-4o",
+			description:      "Should select OpenAI when ProviderURL is set, even without API key",
+		},
+		{
+			name: "ProviderURL with Google allows selection without API key",
+			config: &Config{
+				Provider:     "google",
+				ProviderURL:  "http://localhost:8080/gemini",
+				SmallModel:   "gemini-flash",
+				OpenAIAPIKey: "valid-key", // Has another valid key
+			},
+			inputModel:       "claude-3-haiku",
+			expectedProvider: "google",
+			expectedModel:    "gemini-flash",
+			description:      "Should select Google when ProviderURL is set, even without API key",
+		},
+		{
+			name: "ProviderURL with Anthropic allows selection without API key",
+			config: &Config{
+				Provider:     "anthropic",
+				ProviderURL:  "http://localhost:8080/anthropic",
+				Model:        "claude-3-opus",
+				OpenAIAPIKey: "valid-key", // Has another valid key
+			},
+			inputModel:       "claude-3-opus",
+			expectedProvider: "anthropic",
+			expectedModel:    "claude-3-opus",
+			description:      "Should select Anthropic when ProviderURL is set, even without API key",
+		},
+		{
+			name: "No ProviderURL and no API key falls back to available provider",
+			config: &Config{
+				Provider:        "openai",
+				Model:           "gpt-4o",
+				AnthropicAPIKey: "valid-key", // Only Anthropic has key
+			},
+			inputModel:       "claude-3-sonnet",
+			expectedProvider: "anthropic",
+			expectedModel:    "gpt-4o",
+			description:      "Should fallback to Anthropic when OpenAI has no credentials",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapper := NewModelMapper(tt.config)
+			provider, model := mapper.MapModel(tt.inputModel)
+
+			if provider != tt.expectedProvider {
+				t.Errorf("%s: MapModel() provider = %v, want %v",
+					tt.description, provider, tt.expectedProvider)
+			}
+			if model != tt.expectedModel {
+				t.Errorf("%s: MapModel() model = %v, want %v",
+					tt.description, model, tt.expectedModel)
+			}
+		})
+	}
+}
+
 func TestGetAPIKey(t *testing.T) {
 	config := &Config{
 		OpenAIAPIKey:    "sk-openai-key",
