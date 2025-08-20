@@ -578,18 +578,18 @@ func (p *OpenAIStreamParser) processChunk(chunk map[string]interface{}) error {
 	return nil
 }
 
-// GeminiStreamParser parses Gemini streaming responses
-type GeminiStreamParser struct {
+// GoogleStreamParser parses Google AI streaming responses
+type GoogleStreamParser struct {
 	handler *AnthropicStreamHandler
 }
 
-// NewGeminiStreamParser creates a new Gemini stream parser
-func NewGeminiStreamParser(handler *AnthropicStreamHandler) *GeminiStreamParser {
-	return &GeminiStreamParser{handler: handler}
+// NewGoogleStreamParser creates a new Google AI stream parser
+func NewGoogleStreamParser(handler *AnthropicStreamHandler) *GoogleStreamParser {
+	return &GoogleStreamParser{handler: handler}
 }
 
-// Parse parses a Gemini streaming response
-func (p *GeminiStreamParser) Parse(reader io.Reader) error {
+// Parse parses a Google AI streaming response
+func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 	decoder := json.NewDecoder(reader)
 
 	for {
@@ -602,11 +602,11 @@ func (p *GeminiStreamParser) Parse(reader io.Reader) error {
 		}
 
 		// Log the received chunk
-		p.handler.reqLogger.LogJSON("Gemini Stream Chunk", chunk)
+		p.handler.reqLogger.LogJSON("Google Stream Chunk", chunk)
 
 		// Process the chunk
 		if err := p.processChunk(chunk); err != nil {
-			logger.Errorf("%s: %v", "Failed to process Gemini stream chunk", err)
+			logger.Errorf("%s: %v", "Failed to process Google stream chunk", err)
 			// Send error event to client
 			if err := p.handler.sse.WriteJSON("error", map[string]string{
 				"type":    "error",
@@ -621,9 +621,9 @@ func (p *GeminiStreamParser) Parse(reader io.Reader) error {
 	return p.handler.Complete("end_turn")
 }
 
-// processChunk processes a single Gemini streaming chunk
-func (p *GeminiStreamParser) processChunk(chunk map[string]interface{}) error {
-	// Check for usage metadata in the chunk (Gemini may send this)
+// processChunk processes a single Google AI streaming chunk
+func (p *GoogleStreamParser) processChunk(chunk map[string]interface{}) error {
+	// Check for usage metadata in the chunk (Google may send this)
 	if usageMetadata, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
 		if promptTokens, ok := usageMetadata["promptTokenCount"].(float64); ok {
 			p.handler.state.InputTokens = int(promptTokens)
@@ -668,7 +668,7 @@ func (p *GeminiStreamParser) processChunk(chunk map[string]interface{}) error {
 			if err := p.handler.SendTextDelta(text); err != nil {
 				return err
 			}
-			// Note: Gemini provides actual token counts in the usageMetadata field,
+			// Note: Google provides actual token counts in the usageMetadata field,
 			// so we don't need to estimate tokens here
 		}
 

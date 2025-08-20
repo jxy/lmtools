@@ -17,10 +17,10 @@ import (
 
 
 func TestIntegrationBasicChat(t *testing.T) {
-	proxyServer, openAIMock, geminiMock, argoMock := SetupTestServer(t)
+	proxyServer, openAIMock, googleMock, argoMock := SetupTestServer(t)
 	defer proxyServer.Close()
 	defer openAIMock.Close()
-	defer geminiMock.Close()
+	defer googleMock.Close()
 	defer argoMock.Close()
 
 	tests := []struct {
@@ -53,7 +53,7 @@ func TestIntegrationBasicChat(t *testing.T) {
 			},
 		},
 		{
-			name: "direct Gemini model",
+			name: "direct Google AI model",
 			request: AnthropicRequest{
 				Model:     "gemini-2.0-flash",
 				MaxTokens: 100,
@@ -68,7 +68,7 @@ func TestIntegrationBasicChat(t *testing.T) {
 				if len(resp.Content) == 0 {
 					t.Fatal("Expected content in response")
 				}
-				// With provider=openai, Gemini models also go to OpenAI
+				// With provider=openai, Google AI models also go to OpenAI
 				if !strings.Contains(resp.Content[0].Text, "OpenAI") {
 					t.Errorf("Expected OpenAI response, got %s", resp.Content[0].Text)
 				}
@@ -113,10 +113,10 @@ func TestIntegrationBasicChat(t *testing.T) {
 }
 
 func TestIntegrationStreaming(t *testing.T) {
-	proxyServer, openAIMock, geminiMock, argoMock := SetupTestServer(t)
+	proxyServer, openAIMock, googleMock, argoMock := SetupTestServer(t)
 	defer proxyServer.Close()
 	defer openAIMock.Close()
-	defer geminiMock.Close()
+	defer googleMock.Close()
 	defer argoMock.Close()
 
 	// Make streaming request
@@ -194,7 +194,7 @@ func TestIntegrationRetry(t *testing.T) {
 	
 	// Create config with retry settings
 	config := &Config{
-		// Don't set OpenAI/Gemini keys so Argo is used
+		// Don't set OpenAI/Google keys so Argo is used
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
 		ArgoBaseURL:        retryMock.URL, // Use ArgoBaseURL instead
@@ -291,7 +291,7 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 	
 	// Create config
 	config := &Config{
-		// Don't set OpenAI/Gemini keys so Argo is used
+		// Don't set OpenAI/Google keys so Argo is used
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
 		ArgoBaseURL:        rateLimitMock.URL, // Use ArgoBaseURL instead
@@ -534,25 +534,25 @@ func TestCustomProviderURL(t *testing.T) {
 			expectedPath: "/custom/openai/path/chat/completions",
 		},
 		{
-			name:              "Gemini custom URL",
+			name:              "Google custom URL",
 			preferredProvider: "google",
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					t.Logf("Custom Gemini mock received: %s %s", r.Method, r.URL.Path)
+					t.Logf("Custom Google mock received: %s %s", r.Method, r.URL.Path)
 					
-					// Gemini URLs include the model in the path
-					if !strings.Contains(r.URL.Path, "/custom/gemini/models/") {
-						t.Errorf("Expected path to contain /custom/gemini/models/, got %s", r.URL.Path)
+					// Google URLs include the model in the path
+					if !strings.Contains(r.URL.Path, "/custom/google/models/") {
+						t.Errorf("Expected path to contain /custom/google/models/, got %s", r.URL.Path)
 					}
 					
 					// Return a simple response
-					resp := GeminiResponse{
-						Candidates: []GeminiCandidate{
+					resp := GoogleResponse{
+						Candidates: []GoogleCandidate{
 							{
-								Content: GeminiContent{
-									Parts: []GeminiPart{
-										{Text: "Response from custom Gemini endpoint"},
+								Content: GoogleContent{
+									Parts: []GooglePart{
+										{Text: "Response from custom Google endpoint"},
 									},
 									Role: "model",
 								},
@@ -569,7 +569,7 @@ func TestCustomProviderURL(t *testing.T) {
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:  "google",
-					ProviderURL:        customMock.URL + "/custom/gemini/models",
+					ProviderURL:        customMock.URL + "/custom/google/models",
 					SmallModel:         "gemini-2.0-flash",
 					Model:              "gemini-2.5-pro-preview-03-25",
 					MaxRequestBodySize: 10 * 1024 * 1024,
@@ -578,7 +578,7 @@ func TestCustomProviderURL(t *testing.T) {
 				
 				return config, customMock
 			},
-			expectedPath: "/custom/gemini/models",
+			expectedPath: "/custom/google/models",
 		},
 		{
 			name:              "Argo custom URL",

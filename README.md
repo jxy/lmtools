@@ -143,13 +143,13 @@ ada002, v3large, v3small
 
 # API Proxy - Anthropic to OpenAI/Google/Argo
 
-The lmtools suite includes an API proxy that translates between Anthropic's Messages API format and OpenAI, Google Gemini, or Argo APIs.
+The lmtools suite includes an API proxy that translates between Anthropic's Messages API format and OpenAI, Google AI, or Argo APIs.
 
 ## API Proxy Features
 
-- **Protocol Translation**: Seamlessly converts between Anthropic, OpenAI, Google Gemini, and Argo API formats
+- **Protocol Translation**: Seamlessly converts between Anthropic, OpenAI, Google AI, and Argo API formats
 - **Model Mapping**: Automatically maps Claude model names (haiku/sonnet) to configured models
-- **Multi-Provider Support**: Route requests to OpenAI, Google Gemini, or Argo based on configuration
+- **Multi-Provider Support**: Route requests to OpenAI, Google AI, or Argo based on configuration
 - **Pure Go**: No external dependencies, uses only Go standard library
 - **Streaming Support**: Server-Sent Events for real-time responses
 - **Token Counting**: Estimate token usage for requests
@@ -161,7 +161,7 @@ The lmtools suite includes an API proxy that translates between Anthropic's Mess
 - Go 1.19 or later
 - API keys for the providers you want to use:
   - OpenAI API key
-  - Google AI Studio (Gemini) API key
+  - Google AI Studio API key
   - Argo user credentials
 
 ### Installation
@@ -181,7 +181,7 @@ Configure the proxy using command-line flags:
 ```bash
 # API Key configuration (pass files containing keys, not the keys directly)
 -openai-api-key-file       Path to file containing OpenAI API key
--gemini-api-key-file       Path to file containing Gemini API key  
+-google-api-key-file       Path to file containing Google API key  
 -anthropic-api-key-file    Path to file containing Anthropic API key
 
 # Other configuration flags
@@ -208,14 +208,14 @@ Configure the proxy using command-line flags:
 ```bash
 # First, save your API keys to files (one key per file)
 echo "sk-..." > ~/.openai-key
-echo "AIza..." > ~/.gemini-key
-chmod 600 ~/.openai-key ~/.gemini-key  # Secure the files
+echo "AIza..." > ~/.google-key
+chmod 600 ~/.openai-key ~/.google-key  # Secure the files
 
 # Start with minimal configuration (OpenAI as default provider)
 ./bin/apiproxy -openai-api-key-file="$HOME/.openai-key"
 
-# Use Google Gemini as provider
-./bin/apiproxy -gemini-api-key-file="$HOME/.gemini-key" -provider="google"
+# Use Google AI as provider
+./bin/apiproxy -google-api-key-file="$HOME/.google-key" -provider="google"
 
 # Use Argo with custom models
 ./bin/apiproxy -argo-user="username" -provider="argo" \
@@ -334,16 +334,16 @@ chmod 600 ~/.openai-key
   -small-model="gpt-4o-mini"
 ```
 
-### Use Google Gemini
+### Use Google AI
 
 ```bash
 # Save API key to file
-echo "AIza..." > ~/.gemini-key
-chmod 600 ~/.gemini-key
+echo "AIza..." > ~/.google-key
+chmod 600 ~/.google-key
 
 # Run proxy
 ./bin/apiproxy \
-  -gemini-api-key-file="$HOME/.gemini-key" \
+  -google-api-key-file="$HOME/.google-key" \
   -provider="google" \
   -big-model="gemini-2.5-pro-preview-03-25" \
   -small-model="gemini-2.0-flash"
@@ -358,14 +358,14 @@ chmod 600 ~/.gemini-key
 - chatgpt-4o-latest
 - gpt-4.1, gpt-4.1-mini
 
-### Google Gemini Models
+### Google AI Models
 - gemini-2.5-pro-preview-03-25
 - gemini-2.0-flash
 
 ### Argo Models
 - All models from argolib including:
   - GPT variants: gpt35, gpt4, gpt4o, etc.
-  - Gemini variants: gemini25pro, gemini25flash
+  - Google AI variants: gemini25pro, gemini25flash
   - Claude variants: claudeopus4, claudesonnet4, etc.
 
 ## API Proxy Architecture
@@ -381,7 +381,7 @@ The proxy is built with a modular architecture:
 ## API Proxy Streaming
 
 The proxy supports full Server-Sent Events (SSE) streaming:
-- Native streaming for OpenAI and Gemini providers
+- Native streaming for OpenAI and Google providers
 - Simulated streaming for Argo (converts non-streaming responses)
 - Automatic ping keep-alive events to prevent timeouts
 - Provider-specific response parsing and formatting

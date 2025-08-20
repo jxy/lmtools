@@ -481,7 +481,7 @@ func buildOpenAIDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	return httpReq, body, nil
 }
 
-// buildGoogleDirectRequest builds a request for Google Gemini API directly
+// buildGoogleDirectRequest builds a request for Google AI API directly
 func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
 	var apiKey string
 
@@ -520,7 +520,7 @@ func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 		return nil, nil, fmt.Errorf("google provider does not support embedding mode")
 	}
 
-	// Build Google Gemini format request
+	// Build Google AI format request
 	req := map[string]interface{}{
 		"contents": []map[string]interface{}{
 			{
@@ -548,7 +548,7 @@ func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 		if apiKey == "" {
 			return nil, nil, fmt.Errorf("API key is required for standard Google endpoint")
 		}
-		// Use default Google Gemini base URL
+		// Use default Google AI base URL
 		url = "https://generativelanguage.googleapis.com/v1beta"
 	}
 
@@ -758,7 +758,7 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 	case "openai":
 		return parseOpenAIResponse(data, cfg.IsEmbed())
 	case "google":
-		return parseGeminiResponse(data, cfg.IsEmbed())
+		return parseGoogleResponse(data, cfg.IsEmbed())
 	case "anthropic":
 		return parseAnthropicResponse(data, cfg.IsEmbed())
 	default:
@@ -837,14 +837,14 @@ func parseOpenAIResponse(data []byte, isEmbed bool) (string, error) {
 	return chatResp.Choices[0].Message.Content, nil
 }
 
-// parseGeminiResponse parses response from Gemini API
-func parseGeminiResponse(data []byte, isEmbed bool) (string, error) {
+// parseGoogleResponse parses response from Google AI API
+func parseGoogleResponse(data []byte, isEmbed bool) (string, error) {
 	if isEmbed {
-		// Gemini doesn't support embeddings through this interface
-		return "", fmt.Errorf("gemini provider does not support embedding mode")
+		// Google AI doesn't support embeddings through this interface
+		return "", fmt.Errorf("google provider does not support embedding mode")
 	}
 
-	var geminiResp struct {
+	var googleResp struct {
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
@@ -853,16 +853,16 @@ func parseGeminiResponse(data []byte, isEmbed bool) (string, error) {
 			} `json:"content"`
 		} `json:"candidates"`
 	}
-	if err := json.Unmarshal(data, &geminiResp); err != nil {
-		return "", fmt.Errorf("failed to unmarshal Gemini response: %w", err)
+	if err := json.Unmarshal(data, &googleResp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal Google response: %w", err)
 	}
-	if len(geminiResp.Candidates) == 0 {
-		return "", fmt.Errorf("no candidates in Gemini response")
+	if len(googleResp.Candidates) == 0 {
+		return "", fmt.Errorf("no candidates in Google response")
 	}
-	if len(geminiResp.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no parts in Gemini response")
+	if len(googleResp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no parts in Google response")
 	}
-	return geminiResp.Candidates[0].Content.Parts[0].Text, nil
+	return googleResp.Candidates[0].Content.Parts[0].Text, nil
 }
 
 // parseAnthropicResponse parses response from Anthropic API
@@ -1076,7 +1076,7 @@ func buildGoogleRequestWithSession(cfg RequestConfig, messages []Message) (*http
 		model = GetDefaultChatModel("google")
 	}
 
-	// Build Google Gemini format - combine all messages into contents
+	// Build Google AI format - combine all messages into contents
 	var contents []map[string]interface{}
 	for _, msg := range messages {
 		if msg.Role == "user" || msg.Role == "assistant" {
@@ -1466,7 +1466,7 @@ func parseGoogleStreamLine(line string, state interface{}) (string, bool, error)
 	return "", false, nil
 }
 
-// handleGoogleStream handles Google's SSE format for Gemini
+// handleGoogleStream handles Google's SSE format for Google AI
 func handleGoogleStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
 	return handleGenericStream(ctx, body, logFile, parseGoogleStreamLine, nil)
 }

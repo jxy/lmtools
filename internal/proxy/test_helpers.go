@@ -155,11 +155,11 @@ func NewMockGoogle(t *testing.T) http.Handler {
 		}
 
 		// Non-streaming response
-		resp := GeminiResponse{
-			Candidates: []GeminiCandidate{
+		resp := GoogleResponse{
+			Candidates: []GoogleCandidate{
 				{
-					Content: GeminiContent{
-						Parts: []GeminiPart{
+					Content: GoogleContent{
+						Parts: []GooglePart{
 							{Text: "Hello from mock Google!"},
 						},
 					},

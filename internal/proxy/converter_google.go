@@ -6,18 +6,18 @@ import (
 	"fmt"
 )
 
-// ConvertAnthropicToGemini converts an Anthropic request to Gemini format
-func (c *Converter) ConvertAnthropicToGemini(ctx context.Context, req *AnthropicRequest) (*GeminiRequest, error) {
+// ConvertAnthropicToGoogle converts an Anthropic request to Google AI format
+func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
 	// Log omitted fields at DEBUG level
 	if len(req.Metadata) > 0 {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by Gemini): %s", formatJSONForLog(req.Metadata)))
+		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by Google): %s", formatJSONForLog(req.Metadata)))
 	}
 	if req.ToolChoice != nil {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting tool_choice from Anthropic request (Gemini uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name))
+		LogDebugCtx(ctx, fmt.Sprintf("Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name))
 	}
 
-	geminiReq := &GeminiRequest{
-		GenerationConfig: &GeminiGenerationConfig{
+	googleReq := &GoogleRequest{
+		GenerationConfig: &GoogleGenerationConfig{
 			Temperature:     req.Temperature,
 			TopP:            req.TopP,
 			MaxOutputTokens: &req.MaxTokens,
@@ -27,11 +27,11 @@ func (c *Converter) ConvertAnthropicToGemini(ctx context.Context, req *Anthropic
 
 	// Note: top_k is included in GenerationConfig if provided
 	if req.TopK != nil {
-		geminiReq.GenerationConfig.TopK = req.TopK
+		googleReq.GenerationConfig.TopK = req.TopK
 	}
 
 	// Convert messages to contents
-	contents := []GeminiContent{}
+	contents := []GoogleContent{}
 
 	// Add system instruction if present
 	if req.System != nil {
@@ -40,10 +40,10 @@ func (c *Converter) ConvertAnthropicToGemini(ctx context.Context, req *Anthropic
 			return nil, fmt.Errorf("failed to extract system content: %w", err)
 		}
 		if systemContent != "" {
-			// Gemini doesn't have a direct system instruction field, prepend to first message
-			contents = append(contents, GeminiContent{
+			// Google doesn't have a direct system instruction field, prepend to first message
+			contents = append(contents, GoogleContent{
 				Role: "user",
-				Parts: []GeminiPart{
+				Parts: []GooglePart{
 					{Text: "System: " + systemContent},
 				},
 			})
@@ -52,27 +52,27 @@ func (c *Converter) ConvertAnthropicToGemini(ctx context.Context, req *Anthropic
 
 	// Convert messages
 	for _, msg := range req.Messages {
-		geminiContent, err := c.convertAnthropicMessageToGemini(msg)
+		googleContent, err := c.convertAnthropicMessageToGoogle(msg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert message: %w", err)
 		}
-		contents = append(contents, geminiContent)
+		contents = append(contents, googleContent)
 	}
 
-	geminiReq.Contents = contents
+	googleReq.Contents = contents
 
 	// Convert tools
 	if len(req.Tools) > 0 {
-		tools := []GeminiTool{}
+		tools := []GoogleTool{}
 		for _, tool := range req.Tools {
-			// Filter out $schema and convert to Gemini format
+			// Filter out $schema and convert to Google format
 			filteredSchema := filterSchemaMetadata(tool.InputSchema)
-			parameters := c.convertSchemaToGeminiFormat(filteredSchema)
+			parameters := c.convertSchemaToGoogleFormat(filteredSchema)
 			// Type assert to map[string]interface{} - this should always succeed for valid schemas
 			paramsMap, _ := parameters.(map[string]interface{})
 
-			geminiTool := GeminiTool{
-				FunctionDeclarations: []GeminiFunctionDeclaration{
+			googleTool := GoogleTool{
+				FunctionDeclarations: []GoogleFunctionDeclaration{
 					{
 						Name:        tool.Name,
 						Description: tool.Description,
@@ -80,44 +80,44 @@ func (c *Converter) ConvertAnthropicToGemini(ctx context.Context, req *Anthropic
 					},
 				},
 			}
-			tools = append(tools, geminiTool)
+			tools = append(tools, googleTool)
 		}
-		geminiReq.Tools = tools
+		googleReq.Tools = tools
 	}
 
-	return geminiReq, nil
+	return googleReq, nil
 }
 
-// convertAnthropicMessageToGemini converts a single Anthropic message to Gemini format
-func (c *Converter) convertAnthropicMessageToGemini(msg AnthropicMessage) (GeminiContent, error) {
+// convertAnthropicMessageToGoogle converts a single Anthropic message to Google AI format
+func (c *Converter) convertAnthropicMessageToGoogle(msg AnthropicMessage) (GoogleContent, error) {
 	// Map roles
 	role := "user"
 	if msg.Role == RoleAssistant {
 		role = "model"
 	}
 
-	geminiContent := GeminiContent{
+	googleContent := GoogleContent{
 		Role:  role,
-		Parts: []GeminiPart{},
+		Parts: []GooglePart{},
 	}
 
 	// Handle different content types - msg.Content is json.RawMessage
 	// Try to parse as string first
 	var str string
 	if err := json.Unmarshal(msg.Content, &str); err == nil {
-		geminiContent.Parts = append(geminiContent.Parts, GeminiPart{Text: str})
-		return geminiContent, nil
+		googleContent.Parts = append(googleContent.Parts, GooglePart{Text: str})
+		return googleContent, nil
 	}
 
 	// Try as content blocks
 	var blocks []AnthropicContentBlock
 	if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-		parts, err := c.convertContentBlocksToGemini(blocks)
+		parts, err := c.convertContentBlocksToGoogle(blocks)
 		if err != nil {
-			return geminiContent, err
+			return googleContent, err
 		}
-		geminiContent.Parts = parts
-		return geminiContent, nil
+		googleContent.Parts = parts
+		return googleContent, nil
 	}
 
 	// Try as array of interfaces
@@ -153,32 +153,32 @@ func (c *Converter) convertAnthropicMessageToGemini(msg AnthropicMessage) (Gemin
 				blocks = append(blocks, block)
 			}
 		}
-		parts, err := c.convertContentBlocksToGemini(blocks)
+		parts, err := c.convertContentBlocksToGoogle(blocks)
 		if err != nil {
-			return geminiContent, err
+			return googleContent, err
 		}
-		geminiContent.Parts = parts
-		return geminiContent, nil
+		googleContent.Parts = parts
+		return googleContent, nil
 	}
 
 	// Fall back to string representation
-	geminiContent.Parts = append(geminiContent.Parts, GeminiPart{Text: string(msg.Content)})
+	googleContent.Parts = append(googleContent.Parts, GooglePart{Text: string(msg.Content)})
 
-	return geminiContent, nil
+	return googleContent, nil
 }
 
-// convertContentBlocksToGemini converts Anthropic content blocks to Gemini parts
-func (c *Converter) convertContentBlocksToGemini(blocks []AnthropicContentBlock) ([]GeminiPart, error) {
-	parts := []GeminiPart{}
+// convertContentBlocksToGoogle converts Anthropic content blocks to Google AI parts
+func (c *Converter) convertContentBlocksToGoogle(blocks []AnthropicContentBlock) ([]GooglePart, error) {
+	parts := []GooglePart{}
 
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
-			parts = append(parts, GeminiPart{Text: block.Text})
+			parts = append(parts, GooglePart{Text: block.Text})
 		case "tool_use":
 			// Convert to function call - block.Input is already map[string]interface{}
-			parts = append(parts, GeminiPart{
-				FunctionCall: &GeminiFunctionCall{
+			parts = append(parts, GooglePart{
+				FunctionCall: &GoogleFunctionCall{
 					Name: block.Name,
 					Args: block.Input,
 				},
@@ -199,9 +199,9 @@ func (c *Converter) convertContentBlocksToGemini(blocks []AnthropicContentBlock)
 			if !ok {
 				responseMap = map[string]interface{}{"result": content}
 			}
-			parts = append(parts, GeminiPart{
-				FunctionResp: &GeminiFunctionResp{
-					Name:     block.ToolUseID, // Gemini uses the function name, we use the ID
+			parts = append(parts, GooglePart{
+				FunctionResp: &GoogleFunctionResp{
+					Name:     block.ToolUseID, // Google uses the function name, we use the ID
 					Response: responseMap,
 				},
 			})
@@ -211,8 +211,8 @@ func (c *Converter) convertContentBlocksToGemini(blocks []AnthropicContentBlock)
 	return parts, nil
 }
 
-// ConvertGeminiToAnthropic converts a Gemini response to Anthropic format
-func (c *Converter) ConvertGeminiToAnthropic(resp *GeminiResponse, originalModel string) *AnthropicResponse {
+// ConvertGoogleToAnthropic converts a Google AI response to Anthropic format
+func (c *Converter) ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel string) *AnthropicResponse {
 	anthResp := &AnthropicResponse{
 		Type:  "message",
 		Model: originalModel,

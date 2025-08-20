@@ -330,16 +330,16 @@ func (c *Converter) convertToolsForArgoModel(provider string, model string, tool
 		}
 		return argoTools, "auto"
 
-	case "gemini", "google":
-		// Gemini format - unwrapped with parameters field
-		var geminiTools []map[string]interface{}
+	case "google":
+		// Google format - unwrapped with parameters field
+		var googleTools []map[string]interface{}
 		for _, tool := range tools {
-			// Filter out $schema before converting to Gemini format
+			// Filter out $schema before converting to Google format
 			filteredSchema := filterSchemaMetadata(tool.InputSchema)
-			// Convert to Gemini format with uppercase types
-			params := c.convertSchemaToGeminiFormat(filteredSchema)
+			// Convert to Google format with uppercase types
+			params := c.convertSchemaToGoogleFormat(filteredSchema)
 
-			geminiTool := map[string]interface{}{
+			googleTool := map[string]interface{}{
 				"name":        tool.Name,
 				"description": tool.Description,
 				"parameters":  params,
@@ -348,13 +348,13 @@ func (c *Converter) convertToolsForArgoModel(provider string, model string, tool
 			// Extract and add required field at top level if it exists
 			if schema, ok := filteredSchema.(map[string]interface{}); ok {
 				if required, exists := schema["required"]; exists {
-					geminiTool["required"] = required
+					googleTool["required"] = required
 				}
 			}
 
-			geminiTools = append(geminiTools, geminiTool)
+			googleTools = append(googleTools, googleTool)
 		}
-		return geminiTools, nil // Gemini doesn't use tool_choice in the same way
+		return googleTools, nil // Google doesn't use tool_choice in the same way
 
 	case "anthropic":
 		// Anthropic format - unwrapped with input_schema field
@@ -384,8 +384,8 @@ func (c *Converter) convertToolsForArgoModel(provider string, model string, tool
 			// Use Anthropic format for Claude models
 			return c.convertToolsForArgoModel("anthropic", model, tools, toolChoice)
 		} else if strings.HasPrefix(modelLower, "gemini") {
-			// Use Gemini format for Gemini models
-			return c.convertToolsForArgoModel("gemini", model, tools, toolChoice)
+			// Use Google format for these models
+			return c.convertToolsForArgoModel("google", model, tools, toolChoice)
 		} else if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "gpto") {
 			// Use OpenAI format for GPT models
 			return c.convertToolsForArgoModel("openai", model, tools, toolChoice)
@@ -410,9 +410,9 @@ func (c *Converter) determineArgoModelProvider(model string) string {
 		return "openai"
 	}
 
-	// Gemini-based models
+	// Google AI models
 	if strings.HasPrefix(modelLower, "gemini") {
-		return "gemini"
+		return "google"
 	}
 
 	// Claude-based models
@@ -424,13 +424,13 @@ func (c *Converter) determineArgoModelProvider(model string) string {
 	return "openai"
 }
 
-// convertSchemaToGeminiFormat converts JSON schema to Gemini's expected format
-func (c *Converter) convertSchemaToGeminiFormat(schema interface{}) interface{} {
-	return c.convertSchemaToGeminiFormatWithDepth(schema, 0, 10)
+// convertSchemaToGoogleFormat converts JSON schema to Google AI's expected format
+func (c *Converter) convertSchemaToGoogleFormat(schema interface{}) interface{} {
+	return c.convertSchemaToGoogleFormatWithDepth(schema, 0, 10)
 }
 
-// convertSchemaToGeminiFormatWithDepth converts JSON schema with depth limit
-func (c *Converter) convertSchemaToGeminiFormatWithDepth(schema interface{}, depth, maxDepth int) interface{} {
+// convertSchemaToGoogleFormatWithDepth converts JSON schema with depth limit
+func (c *Converter) convertSchemaToGoogleFormatWithDepth(schema interface{}, depth, maxDepth int) interface{} {
 	if depth > maxDepth {
 		return schema // Stop recursion at max depth
 	}
@@ -440,7 +440,7 @@ func (c *Converter) convertSchemaToGeminiFormatWithDepth(schema interface{}, dep
 		return schema
 	}
 
-	// Convert type names to uppercase for Gemini
+	// Convert type names to uppercase for Google AI
 	if typeVal, ok := schemaMap["type"].(string); ok {
 		schemaMap["type"] = strings.ToUpper(typeVal)
 	}
@@ -448,7 +448,7 @@ func (c *Converter) convertSchemaToGeminiFormatWithDepth(schema interface{}, dep
 	// Recursively convert properties
 	if props, ok := schemaMap["properties"].(map[string]interface{}); ok {
 		for key, val := range props {
-			props[key] = c.convertSchemaToGeminiFormatWithDepth(val, depth+1, maxDepth)
+			props[key] = c.convertSchemaToGoogleFormatWithDepth(val, depth+1, maxDepth)
 		}
 	}
 
@@ -635,12 +635,12 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 						Input: input,
 					})
 				} else if args, ok := toolCall["args"].(map[string]interface{}); ok {
-					// Gemini format
+					// Google format
 					name, _ := toolCall["name"].(string)
 
 					content = append(content, AnthropicContentBlock{
 						Type:  "tool_use",
-						ID:    generateToolUseID(), // Gemini doesn't provide IDs
+						ID:    generateToolUseID(), // Google doesn't provide IDs
 						Name:  name,
 						Input: args,
 					})

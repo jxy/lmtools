@@ -71,7 +71,7 @@ func TestModelMapper(t *testing.T) {
 			expectedModel:    "gpt-4o",
 		},
 		{
-			name: "direct gemini model",
+			name: "direct google ai model",
 			config: &Config{
 				Provider:     "openai",
 				GoogleAPIKey: "test-key",
@@ -210,7 +210,7 @@ func TestProviderURLAsCredential(t *testing.T) {
 func TestGetAPIKey(t *testing.T) {
 	config := &Config{
 		OpenAIAPIKey:    "sk-openai-key",
-		GoogleAPIKey:    "gemini-key",
+		GoogleAPIKey:    "google-key",
 		AnthropicAPIKey: "anthropic-key",
 	}
 	mapper := NewModelMapper(config)
@@ -220,7 +220,7 @@ func TestGetAPIKey(t *testing.T) {
 		expected string
 	}{
 		{"openai", "sk-openai-key"},
-		{"google", "gemini-key"},
+		{"google", "google-key"},
 		{"anthropic", "anthropic-key"},
 		{"unknown", ""},
 	}

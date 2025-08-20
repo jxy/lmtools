@@ -235,7 +235,7 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 }
 
 func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request, body []byte) {
-	var req GeminiRequest
+	var req GoogleRequest
 	json.Unmarshal(body, &req)
 
 	// Extract model from URL
@@ -247,11 +247,11 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 	var responseText string
 	switch model {
 	case "gemini-1.5-pro":
-		responseText = "This is a response from Gemini 1.5 Pro with advanced capabilities."
+		responseText = "This is a response from Google AI 1.5 Pro with advanced capabilities."
 	case "gemini-2.0-flash":
-		responseText = "This is a response from Gemini 2.0 Flash, optimized for speed."
+		responseText = "This is a response from Google AI 2.0 Flash, optimized for speed."
 	default:
-		responseText = "Response from Gemini model."
+		responseText = "Response from Google AI model."
 	}
 
 	// Handle streaming
@@ -260,7 +260,7 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusOK)
 
 		// Stream response in chunks
-		chunks := []string{"This is ", "a response ", "from Gemini ", model}
+		chunks := []string{"This is ", "a response ", "from Google AI ", model}
 		for i, chunk := range chunks {
 			data := map[string]interface{}{
 				"candidates": []map[string]interface{}{
@@ -308,14 +308,14 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 		}
 
 		if needsCalculator {
-			resp := GeminiResponse{
-				Candidates: []GeminiCandidate{
+			resp := GoogleResponse{
+				Candidates: []GoogleCandidate{
 					{
-						Content: GeminiContent{
+						Content: GoogleContent{
 							Role: "model",
-							Parts: []GeminiPart{
+							Parts: []GooglePart{
 								{
-									FunctionCall: &GeminiFunctionCall{
+									FunctionCall: &GoogleFunctionCall{
 										Name: "calculator",
 										Args: map[string]interface{}{
 											"expression": "25 * 4",
@@ -327,7 +327,7 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 						FinishReason: "STOP",
 					},
 				},
-				UsageMetadata: &GeminiUsage{
+				UsageMetadata: &GoogleUsage{
 					PromptTokenCount:     25,
 					CandidatesTokenCount: 10,
 				},
@@ -339,19 +339,19 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 	}
 
 	// Normal response
-	resp := GeminiResponse{
-		Candidates: []GeminiCandidate{
+	resp := GoogleResponse{
+		Candidates: []GoogleCandidate{
 			{
-				Content: GeminiContent{
+				Content: GoogleContent{
 					Role: "model",
-					Parts: []GeminiPart{
+					Parts: []GooglePart{
 						{Text: responseText},
 					},
 				},
 				FinishReason: "STOP",
 			},
 		},
-		UsageMetadata: &GeminiUsage{
+		UsageMetadata: &GoogleUsage{
 			PromptTokenCount:     30,
 			CandidatesTokenCount: len(strings.Split(responseText, " ")) * 2,
 		},
@@ -426,7 +426,7 @@ func TestE2EBasicChat(t *testing.T) {
 			expectContent:  "GPT-4o",
 		},
 		{
-			name:           "Direct Gemini model",
+			name:           "Direct Google AI model",
 			model:          "gemini-2.0-flash",
 			message:        "Hello",
 			expectProvider: "openai", // With provider=openai, all models go to OpenAI
@@ -974,7 +974,7 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			expectProvider: "argo",
 		},
 		{
-			name:           "Provider=argo with gemini model",
+			name:           "Provider=argo with Google AI model",
 			provider:       "argo",
 			model:          "gemini-2.0-flash",
 			hasArgo:        true,

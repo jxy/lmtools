@@ -38,7 +38,7 @@ func (m *ModelMapper) MapModel(model string) (provider, mappedModel string) {
 
 // cleanModelName removes provider prefixes from model names
 func (m *ModelMapper) cleanModelName(model string) string {
-	prefixes := []string{"anthropic/", "openai/", "gemini/", "google/", "argo/"}
+	prefixes := []string{"anthropic/", "openai/", "google/", "argo/"}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(model, prefix) {
 			return strings.TrimPrefix(model, prefix)

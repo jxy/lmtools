@@ -196,7 +196,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	case "openai":
 		response, err = s.forwardToOpenAI(r.Context(), anthReq)
 	case "google":
-		response, err = s.forwardToGemini(r.Context(), anthReq)
+		response, err = s.forwardToGoogle(r.Context(), anthReq)
 	case "anthropic":
 		response, err = s.forwardToAnthropic(r.Context(), anthReq)
 	case "argo":
@@ -224,8 +224,8 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	switch resp := response.(type) {
 	case *OpenAIResponse:
 		anthResp = s.converter.ConvertOpenAIToAnthropic(resp, originalModel)
-	case *GeminiResponse:
-		anthResp = s.converter.ConvertGeminiToAnthropic(resp, originalModel)
+	case *GoogleResponse:
+		anthResp = s.converter.ConvertGoogleToAnthropic(resp, originalModel)
 	case *ArgoChatResponse:
 		anthResp = s.converter.ConvertArgoToAnthropicWithRequest(resp, originalModel, anthReq)
 	case *AnthropicResponse:
@@ -346,21 +346,21 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	return &openAIResp, nil
 }
 
-// forwardToGemini forwards the request to Google Gemini
-func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest) (*GeminiResponse, error) {
+// forwardToGoogle forwards the request to Google AI
+func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest) (*GoogleResponse, error) {
 	reqLogger := GetRequestLoggerOrDefault(ctx)
 
-	// Convert to Gemini format
-	geminiReq, err := s.converter.ConvertAnthropicToGemini(ctx, anthReq)
+	// Convert to Google AI format
+	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("conversion error: %w", err)
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Gemini Request", geminiReq)
+	reqLogger.LogJSON("Outgoing Google Request", googleReq)
 
 	// Prepare request
-	jsonData, err := json.Marshal(geminiReq)
+	jsonData, err := json.Marshal(googleReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal error: %w", err)
 	}
@@ -390,20 +390,20 @@ func (s *Server) forwardToGemini(ctx context.Context, anthReq *AnthropicRequest)
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Gemini", resp.StatusCode, body)
+		s.logErrorResponse(reqLogger, "Google", resp.StatusCode, body)
 		return nil, fmt.Errorf("google API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
-	var geminiResp GeminiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+	var googleResp GoogleResponse
+	if err := json.NewDecoder(resp.Body).Decode(&googleResp); err != nil {
 		return nil, fmt.Errorf("response decode error: %w", err)
 	}
 
 	// Log response
-	reqLogger.LogJSON("Google Response", geminiResp)
+	reqLogger.LogJSON("Google Response", googleResp)
 
-	return &geminiResp, nil
+	return &googleResp, nil
 }
 
 // forwardToArgo forwards the request to Argo
@@ -439,9 +439,8 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 		return nil, fmt.Errorf("request creation error: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/plain")
-	req.Header.Set("Accept-Encoding", "identity")
+	auth.SetProviderHeaders(req, "argo", "")
+	auth.SetRequestHeaders(req, true, false, "argo")
 
 	// Send request with retry
 	resp, err := s.client.Do(ctx, req, "argo")
@@ -641,7 +640,7 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 	case "google":
-		if err := s.streamFromGemini(r.Context(), anthReq, handler); err != nil {
+		if err := s.streamFromGoogle(r.Context(), anthReq, handler); err != nil {
 			reqLogger.Errorf("Google streaming error: %v", err)
 			if completeErr := handler.Complete("error"); completeErr != nil {
 				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
@@ -769,18 +768,18 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	return parser.Parse(resp.Body)
 }
 
-// streamFromGemini streams from Google Gemini
-func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+// streamFromGoogle streams from Google AI
+func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	reqLogger := GetRequestLoggerOrDefault(ctx)
 
-	// Convert to Gemini format
-	geminiReq, err := s.converter.ConvertAnthropicToGemini(ctx, anthReq)
+	// Convert to Google AI format
+	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
 		return fmt.Errorf("conversion error: %w", err)
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Google Streaming Request", geminiReq)
+	reqLogger.LogJSON("Outgoing Google Streaming Request", googleReq)
 
 	// Build URL with streaming endpoint
 	baseURL := s.config.GoogleURL
@@ -791,7 +790,7 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	reqLogger.Debugf("Sending request to: %s", url)
 
 	// Prepare request
-	jsonData, err := json.Marshal(geminiReq)
+	jsonData, err := json.Marshal(googleReq)
 	if err != nil {
 		return fmt.Errorf("marshal error: %w", err)
 	}
@@ -818,7 +817,7 @@ func (s *Server) streamFromGemini(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Parse streaming response
-	parser := NewGeminiStreamParser(handler)
+	parser := NewGoogleStreamParser(handler)
 	return parser.Parse(resp.Body)
 }
 
@@ -856,9 +855,8 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 		return fmt.Errorf("request creation error: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/plain")
-	req.Header.Set("Accept-Encoding", "identity")
+	auth.SetProviderHeaders(req, "argo", "")
+	auth.SetRequestHeaders(req, true, false, "argo")
 
 	// Send request with retry while sending pings
 	return s.streamFromArgoWithPings(ctx, req, handler, defaultPingInterval)

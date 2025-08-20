@@ -84,7 +84,7 @@ func TestProviderURLOverride(t *testing.T) {
 		preferredProvider string
 		providerURL       string
 		expectedOpenAI    string
-		expectedGemini    string
+		expectedGoogle    string
 		expectedArgo      string
 	}{
 		{
@@ -92,15 +92,15 @@ func TestProviderURLOverride(t *testing.T) {
 			preferredProvider: "openai",
 			providerURL:       "https://custom-openai.com/v1/chat",
 			expectedOpenAI:    "https://custom-openai.com/v1/chat/chat/completions",
-			expectedGemini:    "https://generativelanguage.googleapis.com/v1beta/models",
+			expectedGoogle:    "https://generativelanguage.googleapis.com/v1beta/models",
 			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
 		},
 		{
-			name:              "Gemini custom URL",
+			name:              "Google custom URL",
 			preferredProvider: "google",
-			providerURL:       "https://custom-gemini.com/v1beta",
+			providerURL:       "https://custom-google.com/v1beta",
 			expectedOpenAI:    "https://api.openai.com/v1/chat/completions",
-			expectedGemini:    "https://custom-gemini.com/v1beta",
+			expectedGoogle:    "https://custom-google.com/v1beta",
 			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
 		},
 		{
@@ -108,7 +108,7 @@ func TestProviderURLOverride(t *testing.T) {
 			preferredProvider: "argo",
 			providerURL:       "https://custom-argo.com/api",
 			expectedOpenAI:    "https://api.openai.com/v1/chat/completions",
-			expectedGemini:    "https://generativelanguage.googleapis.com/v1beta/models",
+			expectedGoogle:    "https://generativelanguage.googleapis.com/v1beta/models",
 			expectedArgo:      "https://custom-argo.com/api",
 		},
 		{
@@ -116,7 +116,7 @@ func TestProviderURLOverride(t *testing.T) {
 			preferredProvider: "openai",
 			providerURL:       "",
 			expectedOpenAI:    "https://api.openai.com/v1/chat/completions",
-			expectedGemini:    "https://generativelanguage.googleapis.com/v1beta/models",
+			expectedGoogle:    "https://generativelanguage.googleapis.com/v1beta/models",
 			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
 		},
 	}
@@ -134,8 +134,8 @@ func TestProviderURLOverride(t *testing.T) {
 			if config.OpenAIURL != tt.expectedOpenAI {
 				t.Errorf("Expected OpenAIURL=%s, got %s", tt.expectedOpenAI, config.OpenAIURL)
 			}
-			if config.GoogleURL != tt.expectedGemini {
-				t.Errorf("Expected GoogleURL=%s, got %s", tt.expectedGemini, config.GoogleURL)
+			if config.GoogleURL != tt.expectedGoogle {
+				t.Errorf("Expected GoogleURL=%s, got %s", tt.expectedGoogle, config.GoogleURL)
 			}
 			if config.ArgoBaseURL != tt.expectedArgo {
 				t.Errorf("Expected ArgoBaseURL=%s, got %s", tt.expectedArgo, config.ArgoBaseURL)
@@ -149,7 +149,7 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 		name          string
 		provider      string
 		openAIKey     string
-		geminiKey     string
+		googleKey     string
 		argoUser      string
 		providerURL   string
 		expectError   bool
@@ -176,7 +176,7 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 		{
 			name:        "Google provider with API key",
 			provider:    "google",
-			geminiKey:   "test-key",
+			googleKey:   "test-key",
 			expectError: false,
 		},
 		{
@@ -210,7 +210,7 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 			config := &Config{
 				Provider:     tt.provider,
 				OpenAIAPIKey: tt.openAIKey,
-				GoogleAPIKey: tt.geminiKey,
+				GoogleAPIKey: tt.googleKey,
 				ArgoUser:     tt.argoUser,
 				ProviderURL:  tt.providerURL,
 			}

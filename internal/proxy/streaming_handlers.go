@@ -26,9 +26,9 @@ func (h *StreamingHandlers) StreamFromOpenAI(ctx context.Context, anthReq *Anthr
 	return h.server.streamFromOpenAI(ctx, anthReq, handler)
 }
 
-// StreamFromGemini handles streaming from Gemini provider
-func (h *StreamingHandlers) StreamFromGemini(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	return h.server.streamFromGemini(ctx, anthReq, handler)
+// StreamFromGoogle handles streaming from Google AI provider
+func (h *StreamingHandlers) StreamFromGoogle(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	return h.server.streamFromGoogle(ctx, anthReq, handler)
 }
 
 // StreamFromArgo handles streaming from Argo provider

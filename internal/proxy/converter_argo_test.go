@@ -17,7 +17,7 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 		toolArgs map[string]interface{}
 	}{
 		{
-			name: "tool_calls as single object (Gemini format)",
+			name: "tool_calls as single object (Google format)",
 			response: &ArgoChatResponse{
 				Response: map[string]interface{}{
 					"content": "",
@@ -116,7 +116,7 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 	}
 }
 
-func TestConvertAnthropicToArgo_GeminiMessages(t *testing.T) {
+func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 	mapper := NewModelMapper(&Config{
 		Provider: "argo",
 		Model:    "gemini25pro",
@@ -130,7 +130,7 @@ func TestConvertAnthropicToArgo_GeminiMessages(t *testing.T) {
 		wantError  bool
 	}{
 		{
-			name: "simple text message for Gemini",
+			name: "simple text message for Google",
 			messages: []AnthropicMessage{
 				{
 					Role:    RoleUser,
@@ -140,7 +140,7 @@ func TestConvertAnthropicToArgo_GeminiMessages(t *testing.T) {
 			checkParts: false, // Argo uses string content for simple messages
 		},
 		{
-			name: "assistant with tool_use for Gemini",
+			name: "assistant with tool_use for Google",
 			messages: []AnthropicMessage{
 				{
 					Role:    RoleUser,
@@ -157,7 +157,7 @@ func TestConvertAnthropicToArgo_GeminiMessages(t *testing.T) {
 			checkParts: false, // Argo uses OpenAI-style format for tool messages
 		},
 		{
-			name: "user with tool_result for Gemini",
+			name: "user with tool_result for Google",
 			messages: []AnthropicMessage{
 				{
 					Role:    RoleUser,
@@ -205,14 +205,14 @@ func TestConvertAnthropicToArgo_GeminiMessages(t *testing.T) {
 				t.Fatal("Expected non-nil result")
 			}
 
-			// For Argo's Gemini integration, check the format based on message content
+			// For Argo's Google integration, check the format based on message content
 			for i, msg := range result.Messages {
 				// Skip system messages
 				if msg.Role == "system" {
 					continue
 				}
 
-				// Check role mapping - Argo API uses "assistant" for all models including Gemini
+				// Check role mapping - Argo API uses "assistant" for all models including Google
 				if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
 					t.Errorf("Message %d: expected role to be 'user', 'assistant', or 'tool', got %s", i, msg.Role)
 				}
@@ -230,7 +230,7 @@ func TestConvertAnthropicToArgo_GeminiMessages(t *testing.T) {
 				}
 
 				// For Parts format (only used for non-tool complex messages)
-				if parts, ok := msg.Content.([]GeminiPart); ok && tt.checkParts {
+				if parts, ok := msg.Content.([]GooglePart); ok && tt.checkParts {
 					// Verify parts are properly formed
 					if len(parts) == 0 {
 						t.Errorf("Message %d: expected at least one part", i)

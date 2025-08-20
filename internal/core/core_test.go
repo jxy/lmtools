@@ -276,8 +276,8 @@ func TestParseGoogleStreamLine(t *testing.T) {
 		},
 		{
 			name:        "unicode in content",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"Hello 世界 from Gemini 🚀"}]}}]}`,
-			wantContent: "Hello 世界 from Gemini 🚀",
+			line:        `data: {"candidates":[{"content":{"parts":[{"text":"Hello 世界 from Google AI 🚀"}]}}]}`,
+			wantContent: "Hello 世界 from Google AI 🚀",
 			wantDone:    false,
 			wantErr:     false,
 		},

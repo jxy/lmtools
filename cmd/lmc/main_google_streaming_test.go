@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// TestGoogleStreamingMode tests Google/Gemini SSE streaming functionality
+// TestGoogleStreamingMode tests Google AI SSE streaming functionality
 func TestGoogleStreamingMode(t *testing.T) {
 	lmcBin := buildLmcBinary(t)
 	tmpHome := t.TempDir()
@@ -42,7 +42,7 @@ func TestGoogleStreamingMode(t *testing.T) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		
-		// Send Google/Gemini SSE format chunks
+		// Send Google AI SSE format chunks
 		chunks := []map[string]interface{}{
 			{
 				"candidates": []map[string]interface{}{

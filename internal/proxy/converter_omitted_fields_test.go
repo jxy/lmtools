@@ -52,7 +52,7 @@ func TestOmittedFieldsLogging(t *testing.T) {
 			},
 		},
 		{
-			name: "Gemini omits metadata and tool_choice",
+			name: "Google omits metadata and tool_choice",
 			setupRequest: func() *AnthropicRequest {
 				return &AnthropicRequest{
 					Model:     "claude-3-opus-20240229",
@@ -70,10 +70,10 @@ func TestOmittedFieldsLogging(t *testing.T) {
 					},
 				}
 			},
-			targetProvider: "gemini",
+			targetProvider: "google",
 			expectedLogs: []string{
-				"Omitting metadata from Anthropic request (not supported by Gemini)",
-				"Omitting tool_choice from Anthropic request (Gemini uses different tool configuration): type=tool, name=get_weather",
+				"Omitting metadata from Anthropic request (not supported by Google)",
+				"Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=tool, name=get_weather",
 			},
 		},
 		{
@@ -155,10 +155,10 @@ func TestOmittedFieldsLogging(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to convert to OpenAI: %v", err)
 				}
-			case "gemini":
-				_, err := converter.ConvertAnthropicToGemini(context.Background(), req)
+			case "google":
+				_, err := converter.ConvertAnthropicToGoogle(context.Background(), req)
 				if err != nil {
-					t.Fatalf("Failed to convert to Gemini: %v", err)
+					t.Fatalf("Failed to convert to Google: %v", err)
 				}
 			case "argo":
 				_, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")

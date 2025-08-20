@@ -121,7 +121,7 @@ func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body
 		return
 	}
 
-	var req GeminiRequest
+	var req GoogleRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
@@ -132,7 +132,7 @@ func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
-		// Send Gemini streaming format
+		// Send Google streaming format
 		chunks := []map[string]interface{}{
 			{
 				"candidates": []map[string]interface{}{
@@ -178,19 +178,19 @@ func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// Non-streaming response
-	resp := GeminiResponse{
-		Candidates: []GeminiCandidate{
+	resp := GoogleResponse{
+		Candidates: []GoogleCandidate{
 			{
-				Content: GeminiContent{
+				Content: GoogleContent{
 					Role: "model",
-					Parts: []GeminiPart{
+					Parts: []GooglePart{
 						{Text: "Hello from mock Google!"},
 					},
 				},
 				FinishReason: "STOP",
 			},
 		},
-		UsageMetadata: &GeminiUsage{
+		UsageMetadata: &GoogleUsage{
 			PromptTokenCount:     10,
 			CandidatesTokenCount: 5,
 		},

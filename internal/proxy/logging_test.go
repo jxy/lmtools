@@ -43,7 +43,7 @@ func TestDebugLoggingToStderr(t *testing.T) {
 		Model:              "claude-3-opus-20240229",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 		ArgoBaseURL:        argoMock.URL,
-		// DON'T set OpenAI/Gemini keys so Argo is selected
+		// DON'T set OpenAI/Google keys so Argo is selected
 	}
 	config.InitializeURLs()
 	server := NewServer(config)
@@ -329,7 +329,7 @@ func TestArgoToolDetectionLogging(t *testing.T) {
 		Model:             "claude-3-opus-20240229",
 		SmallModel:        "claude-3-haiku-20240307",
 		MaxRequestBodySize: 10 * 1024 * 1024,
-		// NO OpenAI or Gemini keys - this ensures Argo is used
+		// NO OpenAI or Google keys - this ensures Argo is used
 	}
 	config.InitializeURLs()
 
