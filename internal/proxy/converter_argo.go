@@ -98,17 +98,8 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		// Check if content is already an array
 		var contentArray []AnthropicContentBlock
 		if err := json.Unmarshal(msg.Content, &contentArray); err == nil {
-			// Check if there are any tool-related blocks
-			hasToolBlocks := false
-			for _, block := range contentArray {
-				if block.Type == "tool_use" || block.Type == "tool_result" {
-					hasToolBlocks = true
-					break
-				}
-			}
-
-			// For OpenAI models with tool blocks, we need special conversion
-			if provider == "openai" && hasToolBlocks {
+			// For OpenAI models, we need special conversion to handle thinking blocks and tools
+			if provider == "openai" {
 				// Process each block in the message
 				var textContent string
 				var hasText bool
@@ -119,6 +110,14 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 					case "text":
 						textContent += block.Text
 						hasText = true
+
+					case "thinking":
+						// OpenAI/GPT models don't support thinking blocks, so we drop them and log at DEBUG level
+						droppedBlock := map[string]interface{}{
+							"type":     "thinking",
+							"thinking": block.Thinking,
+						}
+						LogDebugCtx(ctx, fmt.Sprintf("Dropping thinking content block for %s model (not supported by OpenAI): %s", req.Model, formatJSONForLog(droppedBlock)))
 
 					case "tool_use":
 						// Only process tool_use in assistant messages

@@ -511,11 +511,8 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpt-4",
 				Messages: []ArgoMessage{
 					{
-						Role: "user",
-						Content: []AnthropicContentBlock{
-							{Type: "text", Text: "Part 1"},
-							{Type: "text", Text: "Part 2"},
-						},
+						Role:    "user",
+						Content: "Part 1Part 2", // OpenAI models concatenate text blocks
 					},
 				},
 			},

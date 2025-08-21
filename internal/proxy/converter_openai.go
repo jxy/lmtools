@@ -55,7 +55,7 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 
 	// Convert conversation messages
 	for _, msg := range req.Messages {
-		openAIMsg, err := c.convertAnthropicMessageToOpenAI(msg)
+		openAIMsg, err := c.convertAnthropicMessageToOpenAI(ctx, msg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert message: %w", err)
 		}
@@ -107,7 +107,7 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 }
 
 // convertAnthropicMessageToOpenAI converts a single Anthropic message to OpenAI format
-func (c *Converter) convertAnthropicMessageToOpenAI(msg AnthropicMessage) (OpenAIMessage, error) {
+func (c *Converter) convertAnthropicMessageToOpenAI(ctx context.Context, msg AnthropicMessage) (OpenAIMessage, error) {
 	openAIMsg := OpenAIMessage{
 		Role: msg.Role,
 	}
@@ -123,7 +123,7 @@ func (c *Converter) convertAnthropicMessageToOpenAI(msg AnthropicMessage) (OpenA
 	// Try as content blocks
 	var blocks []AnthropicContentBlock
 	if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-		return c.convertContentBlocksToOpenAI(string(msg.Role), blocks)
+		return c.convertContentBlocksToOpenAI(ctx, string(msg.Role), blocks)
 	}
 
 	// Try as array of interfaces
@@ -159,7 +159,7 @@ func (c *Converter) convertAnthropicMessageToOpenAI(msg AnthropicMessage) (OpenA
 				blocks = append(blocks, block)
 			}
 		}
-		return c.convertContentBlocksToOpenAI(string(msg.Role), blocks)
+		return c.convertContentBlocksToOpenAI(ctx, string(msg.Role), blocks)
 	}
 
 	// Fall back to string representation
@@ -169,7 +169,7 @@ func (c *Converter) convertAnthropicMessageToOpenAI(msg AnthropicMessage) (OpenA
 }
 
 // convertContentBlocksToOpenAI converts Anthropic content blocks to OpenAI message format
-func (c *Converter) convertContentBlocksToOpenAI(role string, blocks []AnthropicContentBlock) (OpenAIMessage, error) {
+func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role string, blocks []AnthropicContentBlock) (OpenAIMessage, error) {
 	msg := OpenAIMessage{Role: Role(role)}
 
 	// Check if this is a tool call response
@@ -181,6 +181,13 @@ func (c *Converter) convertContentBlocksToOpenAI(role string, blocks []Anthropic
 		switch block.Type {
 		case "text":
 			textContent += block.Text
+		case "thinking":
+			// OpenAI doesn't support thinking blocks, so we drop them and log at DEBUG level
+			droppedBlock := map[string]interface{}{
+				"type":     "thinking",
+				"thinking": block.Thinking,
+			}
+			LogDebugCtx(ctx, fmt.Sprintf("Dropping thinking content block (not supported by OpenAI): %s", formatJSONForLog(droppedBlock)))
 		case "tool_use":
 			hasToolCalls = true
 			// Convert tool input to JSON string
