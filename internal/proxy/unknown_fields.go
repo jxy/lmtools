@@ -70,8 +70,15 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-// logUnknownFields logs any unknown fields found in the request
+// logUnknownFields detects and logs unknown JSON fields (debug only).
+// Performance: Only runs when debug logging is enabled due to expensive reflection.
 func logUnknownFields(ctx context.Context, jsonData []byte, v interface{}, requestType string) {
+	// Skip expensive reflection if debug logging is not enabled
+	reqLogger := GetRequestLogger(ctx)
+	if reqLogger == nil || !reqLogger.IsDebugEnabled() {
+		return
+	}
+
 	unknownFields, err := detectUnknownFields(jsonData, v)
 	if err != nil {
 		LogDebugCtx(ctx, fmt.Sprintf("Failed to detect unknown fields in %s: %v", requestType, err))

@@ -569,6 +569,78 @@ func TestConcurrentInitialization(t *testing.T) {
 }
 
 // TestExplicitLevelsRespected tests that explicit min levels are not overridden by auto-defaults
+func TestIsDebugEnabled(t *testing.T) {
+	tests := []struct {
+		name          string
+		logLevel      string
+		stderrLevel   string
+		fileLevel     string
+		outputMode    OutputMode
+		expectedDebug bool
+	}{
+		{"debug level - stderr only", "debug", "", "", OutputStderrOnly, true},
+		{"info level - stderr only", "info", "", "", OutputStderrOnly, false},
+		{"warn level - stderr only", "warn", "", "", OutputStderrOnly, false},
+		{"error level - stderr only", "error", "", "", OutputStderrOnly, false},
+		{"info main, debug file", "info", "", "debug", OutputBoth, true},
+		{"info main, warn file", "info", "", "warn", OutputBoth, false},
+		{"debug stderr, warn file", "info", "debug", "warn", OutputBoth, true},
+		{"warn stderr, debug file", "info", "warn", "debug", OutputBoth, true},
+		{"file only with debug", "info", "", "debug", OutputFileOnly, true},
+		{"file only with info", "info", "", "info", OutputFileOnly, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ResetForTesting()
+
+			// Create temp log directory for file tests
+			logDir := ""
+			if tt.outputMode == OutputBoth || tt.outputMode == OutputFileOnly {
+				var err error
+				logDir, err = os.MkdirTemp("", "logger_test")
+				if err != nil {
+					t.Fatalf("Failed to create temp dir: %v", err)
+				}
+				defer os.RemoveAll(logDir)
+			}
+
+			// Build options
+			opts := []Option{
+				WithLevel(tt.logLevel),
+				WithFormat("text"),
+				WithOutputMode(tt.outputMode),
+			}
+			if logDir != "" {
+				opts = append(opts, WithLogDir(logDir))
+			}
+			if tt.stderrLevel != "" {
+				opts = append(opts, WithStderrMinLevel(tt.stderrLevel))
+			}
+			if tt.fileLevel != "" {
+				opts = append(opts, WithFileMinLevel(tt.fileLevel))
+			}
+
+			err := InitializeWithOptions(opts...)
+			if err != nil {
+				t.Fatalf("Failed to initialize logger: %v", err)
+			}
+			defer Close()
+
+			logger := GetLogger()
+			if logger.IsDebugEnabled() != tt.expectedDebug {
+				t.Errorf("Expected IsDebugEnabled()=%v, got %v", tt.expectedDebug, logger.IsDebugEnabled())
+			}
+
+			// Test ScopedLogger
+			scope := logger.NewScope("test")
+			if scope.IsDebugEnabled() != tt.expectedDebug {
+				t.Errorf("Expected ScopedLogger.IsDebugEnabled()=%v, got %v", tt.expectedDebug, scope.IsDebugEnabled())
+			}
+		})
+	}
+}
+
 func TestExplicitLevelsRespected(t *testing.T) {
 	// Test case 1: Explicit stderr min level should be respected with log dir
 	t.Run("WithLogDir", func(t *testing.T) {

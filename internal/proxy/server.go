@@ -146,7 +146,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log unknown fields if debug logging is enabled
+	// Log unknown fields (only runs in debug mode for performance)
 	logUnknownFields(r.Context(), bodyBytes, anthReq, "Anthropic request")
 
 	// Log incoming request

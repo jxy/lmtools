@@ -294,6 +294,15 @@ func (l *Logger) Errorf(format string, args ...interface{}) {
 	l.logf(LevelError, format, args...)
 }
 
+// IsDebugEnabled returns true if debug logging is enabled
+func (l *Logger) IsDebugEnabled() bool {
+	if l == nil {
+		return false
+	}
+	return (l.toStderr && LevelDebug >= l.stderrMinLevel) ||
+		(l.toFile && l.logFile != nil && LevelDebug >= l.fileMinLevel)
+}
+
 // logf is the core logging function
 func (l *Logger) logf(level int, format string, args ...interface{}) {
 	if l == nil || level < l.level {
@@ -461,6 +470,14 @@ func (sc *ScopedLogger) Warnf(format string, args ...interface{}) {
 
 func (sc *ScopedLogger) Errorf(format string, args ...interface{}) {
 	sc.logf(LevelError, format, args...)
+}
+
+// IsDebugEnabled returns true if debug logging is enabled
+func (sc *ScopedLogger) IsDebugEnabled() bool {
+	if sc == nil || sc.parent == nil {
+		return false
+	}
+	return sc.parent.IsDebugEnabled()
 }
 
 // logf is the core logging function for scoped logger

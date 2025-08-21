@@ -50,6 +50,14 @@ func (rl *RequestScopedLogger) Errorf(format string, args ...interface{}) {
 	rl.ScopedLogger.Errorf(format, args...)
 }
 
+// IsDebugEnabled returns true if debug logging is enabled
+func (rl *RequestScopedLogger) IsDebugEnabled() bool {
+	if rl == nil || rl.ScopedLogger == nil {
+		return false
+	}
+	return rl.ScopedLogger.IsDebugEnabled()
+}
+
 func (rl *RequestScopedLogger) LogJSON(label string, data interface{}) {
 	b, err := json.Marshal(data)
 	if err != nil {
