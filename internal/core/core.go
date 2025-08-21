@@ -320,68 +320,109 @@ type RequestConfig interface {
 
 // BuildRequest builds an HTTP request based on configuration and input
 func BuildRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
-	// Get provider, default to argo
+	return buildRequestInternal(cfg, input, nil)
+}
+
+// buildRequestInternal handles both single and session requests
+// For single requests: input is provided, sessionMessages is nil
+// For session requests: input is empty, sessionMessages contains the history
+func buildRequestInternal(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
 	provider := cfg.GetProvider()
 	if provider == "" {
 		provider = "argo"
 	}
 
-	// Route to provider-specific builder
+	// Handle embed mode separately (only for single requests)
+	if cfg.IsEmbed() && input != "" {
+		return buildEmbedRequest(cfg, provider, input)
+	}
+
+	// Route to provider-specific chat builder
 	switch provider {
 	case "argo":
-		return buildArgoRequest(cfg, input)
+		return buildArgoChatRequest(cfg, input, sessionMessages)
 	case "openai":
-		return buildOpenAIDirectRequest(cfg, input)
+		return buildOpenAIChatRequest(cfg, input, sessionMessages)
 	case "google":
-		return buildGoogleDirectRequest(cfg, input)
+		return buildGoogleChatRequest(cfg, input, sessionMessages)
 	case "anthropic":
-		return buildAnthropicDirectRequest(cfg, input)
+		return buildAnthropicChatRequest(cfg, input, sessionMessages)
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
 }
 
-// buildArgoRequest builds a request for the Argo proxy (existing logic)
-func buildArgoRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
-	urlBase := GetBaseURL(cfg.GetEnv())
+// buildEmbedRequest handles embedding requests for providers that support it
+func buildEmbedRequest(cfg RequestConfig, provider, input string) (*http.Request, []byte, error) {
+	switch provider {
+	case "argo":
+		return buildArgoEmbedRequest(cfg, input)
+	case "openai":
+		return buildOpenAIEmbedRequest(cfg, input)
+	default:
+		return nil, nil, fmt.Errorf("%s provider does not support embedding mode", provider)
+	}
+}
 
+// buildArgoEmbedRequest handles Argo embedding requests
+func buildArgoEmbedRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
+	urlBase := GetBaseURL(cfg.GetEnv())
 	model := cfg.GetModel()
-	var (
-		body     []byte
-		endpoint string
-		err      error
-	)
-	if cfg.IsEmbed() {
-		if model == "" {
-			model = DefaultEmbedModel
+	if model == "" {
+		model = DefaultEmbedModel
+	}
+
+	req := SimpleEmbedRequest{User: cfg.GetUser(), Model: model, Prompt: []string{input}}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal embed request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/embed/", urlBase)
+	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "argo")
+	return httpReq, body, nil
+}
+
+// buildArgoChatRequest builds an Argo chat request for both single and session modes
+func buildArgoChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
+	urlBase := GetBaseURL(cfg.GetEnv())
+	model := cfg.GetModel()
+	if model == "" {
+		model = GetDefaultChatModel("argo")
+	}
+
+	// Build messages inline - no separate function needed
+	messages := []SimpleChatMessage{{Role: "system", Content: cfg.GetSystem()}}
+
+	if len(sessionMessages) > 0 {
+		// Session mode: append all messages
+		for _, msg := range sessionMessages {
+			messages = append(messages, SimpleChatMessage(msg))
 		}
-		// No longer validate embed model
-		req := SimpleEmbedRequest{User: cfg.GetUser(), Model: model, Prompt: []string{input}}
-		if body, err = json.Marshal(req); err != nil {
-			return nil, nil, fmt.Errorf("failed to marshal embed request: %w", err)
-		}
-		endpoint = fmt.Sprintf("%s/embed/", urlBase)
 	} else {
-		if model == "" {
-			model = GetDefaultChatModel("argo")
-		}
-		// No longer validate chat model
-		req := SimpleChatRequest{
-			User:  cfg.GetUser(),
-			Model: model,
-			Messages: []SimpleChatMessage{
-				{Role: "system", Content: cfg.GetSystem()},
-				{Role: "user", Content: input},
-			},
-		}
-		if body, err = json.Marshal(req); err != nil {
-			return nil, nil, fmt.Errorf("failed to marshal chat request: %w", err)
-		}
-		if cfg.IsStreamChat() {
-			endpoint = fmt.Sprintf("%s/streamchat/", urlBase)
-		} else {
-			endpoint = fmt.Sprintf("%s/chat/", urlBase)
-		}
+		// Single mode: just add user input
+		messages = append(messages, SimpleChatMessage{Role: "user", Content: input})
+	}
+
+	req := SimpleChatRequest{
+		User:     cfg.GetUser(),
+		Model:    model,
+		Messages: messages,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal chat request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/chat/", urlBase)
+	if cfg.IsStreamChat() {
+		endpoint = fmt.Sprintf("%s/streamchat/", urlBase)
 	}
 
 	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
@@ -389,35 +430,29 @@ func buildArgoRequest(cfg RequestConfig, input string) (*http.Request, []byte, e
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	// Use centralized header setting
 	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "argo")
-
 	return httpReq, body, nil
 }
 
-// buildOpenAIDirectRequest builds a request for OpenAI API directly
-func buildOpenAIDirectRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
+// buildOpenAIEmbedRequest handles OpenAI embedding requests
+func buildOpenAIEmbedRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
 	var apiKey string
 
 	// Only require API key for standard endpoints
 	if cfg.GetProviderURL() == "" {
-		// Read API key (required for standard OpenAI endpoint)
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
 		}
 
-		// Validate API key
 		if err := auth.ValidateAPIKey(apiKey, "openai"); err != nil {
 			return nil, nil, fmt.Errorf("invalid API key: %w", err)
 		}
 	} else if cfg.GetAPIKeyFile() != "" {
-		// API key is optional for custom URLs, but use it if provided
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
-			// Log warning but don't fail
 			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
 		}
 	}
@@ -427,27 +462,10 @@ func buildOpenAIDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 		model = GetDefaultChatModel("openai")
 	}
 
-	// No longer validate model for provider
-
-	// Build OpenAI format request
-	var req map[string]interface{}
-
-	if cfg.IsEmbed() {
-		// OpenAI embedding format
-		req = map[string]interface{}{
-			"model": model,
-			"input": input,
-		}
-	} else {
-		// OpenAI chat format
-		req = map[string]interface{}{
-			"model": model,
-			"messages": []map[string]string{
-				{"role": "system", "content": cfg.GetSystem()},
-				{"role": "user", "content": input},
-			},
-			"stream": cfg.IsStreamChat(),
-		}
+	// OpenAI embedding format
+	req := map[string]interface{}{
+		"model": model,
+		"input": input,
 	}
 
 	body, err := json.Marshal(req)
@@ -458,16 +476,9 @@ func buildOpenAIDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	// Determine endpoint
 	url := cfg.GetProviderURL()
 	if url == "" {
-		// Use default OpenAI base URL
 		url = "https://api.openai.com/v1"
 	}
-
-	// Append appropriate endpoint
-	if cfg.IsEmbed() {
-		url = strings.TrimRight(url, "/") + "/embeddings"
-	} else {
-		url = strings.TrimRight(url, "/") + "/chat/completions"
-	}
+	url = strings.TrimRight(url, "/") + "/embeddings"
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -481,29 +492,109 @@ func buildOpenAIDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	return httpReq, body, nil
 }
 
-// buildGoogleDirectRequest builds a request for Google AI API directly
-func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
+// buildOpenAIChatRequest builds an OpenAI chat request for both single and session modes
+func buildOpenAIChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
 	var apiKey string
 
 	// Only require API key for standard endpoints
 	if cfg.GetProviderURL() == "" {
-		// Read API key (required for standard Google endpoint)
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
 		}
 
-		// Validate API key
+		if err := auth.ValidateAPIKey(apiKey, "openai"); err != nil {
+			return nil, nil, fmt.Errorf("invalid API key: %w", err)
+		}
+	} else if cfg.GetAPIKeyFile() != "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
+		}
+	}
+
+	model := cfg.GetModel()
+	if model == "" {
+		model = GetDefaultChatModel("openai")
+	}
+
+	// Build OpenAI format messages inline
+	openAIMessages := []map[string]string{
+		{"role": "system", "content": cfg.GetSystem()},
+	}
+
+	if len(sessionMessages) > 0 {
+		// Session mode: append all messages
+		for _, msg := range sessionMessages {
+			openAIMessages = append(openAIMessages, map[string]string{
+				"role":    msg.Role,
+				"content": msg.Content,
+			})
+		}
+	} else {
+		// Single mode: just add user input
+		openAIMessages = append(openAIMessages, map[string]string{
+			"role": "user", "content": input,
+		})
+	}
+
+	// OpenAI chat format
+	req := map[string]interface{}{
+		"model":    model,
+		"messages": openAIMessages,
+		"stream":   cfg.IsStreamChat(),
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Determine endpoint
+	url := cfg.GetProviderURL()
+	if url == "" {
+		url = "https://api.openai.com/v1"
+	}
+	url = strings.TrimRight(url, "/") + "/chat/completions"
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Use centralized header setting
+	auth.SetProviderHeaders(httpReq, "openai", apiKey)
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "openai")
+
+	return httpReq, body, nil
+}
+
+// buildGoogleChatRequest builds a Google chat request for both single and session modes
+func buildGoogleChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
+	// Google doesn't have separate embedding endpoint
+	if cfg.IsEmbed() {
+		return nil, nil, fmt.Errorf("google provider does not support embedding mode")
+	}
+
+	var apiKey string
+
+	// Only require API key for standard endpoints
+	if cfg.GetProviderURL() == "" {
+		var err error
+		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
+		}
+
 		if err := auth.ValidateAPIKey(apiKey, "google"); err != nil {
 			return nil, nil, fmt.Errorf("invalid API key: %w", err)
 		}
 	} else if cfg.GetAPIKeyFile() != "" {
-		// API key is optional for custom URLs, but use it if provided
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
-			// Log warning but don't fail
 			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
 		}
 	}
@@ -513,22 +604,39 @@ func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 		model = GetDefaultChatModel("google")
 	}
 
-	// No longer validate model for provider
+	// Build Google AI format - combine all messages into contents
+	var contents []map[string]interface{}
 
-	// Google doesn't have separate embedding endpoint
-	if cfg.IsEmbed() {
-		return nil, nil, fmt.Errorf("google provider does not support embedding mode")
-	}
-
-	// Build Google AI format request
-	req := map[string]interface{}{
-		"contents": []map[string]interface{}{
+	if len(sessionMessages) > 0 {
+		// Session mode: convert messages to Google format
+		for _, msg := range sessionMessages {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				role := "user"
+				if msg.Role == "assistant" {
+					role = "model"
+				}
+				contents = append(contents, map[string]interface{}{
+					"role": role,
+					"parts": []map[string]string{
+						{"text": msg.Content},
+					},
+				})
+			}
+		}
+	} else {
+		// Single mode: just add user input
+		contents = []map[string]interface{}{
 			{
+				"role": "user",
 				"parts": []map[string]string{
 					{"text": input},
 				},
 			},
-		},
+		}
+	}
+
+	req := map[string]interface{}{
+		"contents": contents,
 		"systemInstruction": map[string]interface{}{
 			"parts": []map[string]string{
 				{"text": cfg.GetSystem()},
@@ -544,15 +652,12 @@ func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	// Determine endpoint
 	url := cfg.GetProviderURL()
 	if url == "" {
-		// Standard Google endpoint requires API key
 		if apiKey == "" {
 			return nil, nil, fmt.Errorf("API key is required for standard Google endpoint")
 		}
-		// Use default Google AI base URL
 		url = "https://generativelanguage.googleapis.com/v1beta"
 	}
 
-	// Build complete URL with model and method
 	url = strings.TrimRight(url, "/")
 	if cfg.IsStreamChat() {
 		url = fmt.Sprintf("%s/models/%s:streamGenerateContent", url, model)
@@ -580,29 +685,30 @@ func buildGoogleDirectRequest(cfg RequestConfig, input string) (*http.Request, [
 	return httpReq, body, nil
 }
 
-// buildAnthropicDirectRequest builds a request for Anthropic API directly
-func buildAnthropicDirectRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
+// buildAnthropicChatRequest builds an Anthropic chat request for both single and session modes
+func buildAnthropicChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
+	// Anthropic doesn't have separate embedding endpoint
+	if cfg.IsEmbed() {
+		return nil, nil, fmt.Errorf("anthropic provider does not support embedding mode")
+	}
+
 	var apiKey string
 
 	// Only require API key for standard endpoints
 	if cfg.GetProviderURL() == "" {
-		// Read API key (required for standard Anthropic endpoint)
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
 		}
 
-		// Validate API key
 		if err := auth.ValidateAPIKey(apiKey, "anthropic"); err != nil {
 			return nil, nil, fmt.Errorf("invalid API key: %w", err)
 		}
 	} else if cfg.GetAPIKeyFile() != "" {
-		// API key is optional for custom URLs, but use it if provided
 		var err error
 		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
 		if err != nil {
-			// Log warning but don't fail
 			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
 		}
 	}
@@ -612,22 +718,33 @@ func buildAnthropicDirectRequest(cfg RequestConfig, input string) (*http.Request
 		model = GetDefaultChatModel("anthropic")
 	}
 
-	// No longer validate model for provider
+	// Build Anthropic format messages inline
+	var anthropicMessages []map[string]string
 
-	// Anthropic doesn't have separate embedding endpoint
-	if cfg.IsEmbed() {
-		return nil, nil, fmt.Errorf("anthropic provider does not support embedding mode")
+	if len(sessionMessages) > 0 {
+		// Session mode: append messages (filter to user/assistant only)
+		for _, msg := range sessionMessages {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				anthropicMessages = append(anthropicMessages, map[string]string{
+					"role":    msg.Role,
+					"content": msg.Content,
+				})
+			}
+		}
+	} else {
+		// Single mode: just add user input
+		anthropicMessages = []map[string]string{
+			{"role": "user", "content": input},
+		}
 	}
 
-	// Build Anthropic format request
+	// Anthropic format request
 	req := map[string]interface{}{
 		"model":      model,
 		"max_tokens": 4096,
-		"messages": []map[string]string{
-			{"role": "user", "content": input},
-		},
-		"system": cfg.GetSystem(),
-		"stream": cfg.IsStreamChat(),
+		"messages":   anthropicMessages,
+		"system":     cfg.GetSystem(),
+		"stream":     cfg.IsStreamChat(),
 	}
 
 	body, err := json.Marshal(req)
@@ -638,11 +755,8 @@ func buildAnthropicDirectRequest(cfg RequestConfig, input string) (*http.Request
 	// Determine endpoint
 	url := cfg.GetProviderURL()
 	if url == "" {
-		// Use default Anthropic base URL
 		url = "https://api.anthropic.com/v1"
 	}
-
-	// Append messages endpoint
 	url = strings.TrimRight(url, "/") + "/messages"
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -904,6 +1018,8 @@ type Message struct {
 // GetLineageFunc is a function type for getting conversation history
 type GetLineageFunc func(path string) ([]Message, error)
 
+// MessageBuilder is a function type that builds messages for a provider request
+
 // BuildRequestWithSession builds a request that includes conversation history from a session
 func BuildRequestWithSession(cfg RequestConfig, sess Session, getLineage GetLineageFunc) (*http.Request, []byte, error) {
 	if cfg.IsEmbed() {
@@ -916,303 +1032,7 @@ func BuildRequestWithSession(cfg RequestConfig, sess Session, getLineage GetLine
 		return nil, nil, fmt.Errorf("failed to get conversation history: %w", err)
 	}
 
-	// Get provider, default to argo
-	provider := cfg.GetProvider()
-	if provider == "" {
-		provider = "argo"
-	}
-
-	// Route to provider-specific builder
-	switch provider {
-	case "argo":
-		return buildArgoRequestWithSession(cfg, messages)
-	case "openai":
-		return buildOpenAIRequestWithSession(cfg, messages)
-	case "google":
-		return buildGoogleRequestWithSession(cfg, messages)
-	case "anthropic":
-		return buildAnthropicRequestWithSession(cfg, messages)
-	default:
-		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
-	}
-}
-
-// buildArgoRequestWithSession builds an Argo request with session history
-func buildArgoRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
-	// Convert to ChatMessage format
-	chatMessages := []SimpleChatMessage{{Role: "system", Content: cfg.GetSystem()}}
-	for _, msg := range messages {
-		chatMessages = append(chatMessages, SimpleChatMessage(msg))
-	}
-
-	urlBase := GetBaseURL(cfg.GetEnv())
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("argo")
-	}
-
-	req := SimpleChatRequest{
-		User:     cfg.GetUser(),
-		Model:    model,
-		Messages: chatMessages,
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal chat request: %w", err)
-	}
-
-	endpoint := fmt.Sprintf("%s/chat/", urlBase)
-	if cfg.IsStreamChat() {
-		endpoint = fmt.Sprintf("%s/streamchat/", urlBase)
-	}
-
-	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "argo")
-
-	return httpReq, body, nil
-}
-
-// buildOpenAIRequestWithSession builds an OpenAI request with session history
-func buildOpenAIRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "openai"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("openai")
-	}
-
-	// Build OpenAI format messages
-	openAIMessages := []map[string]string{
-		{"role": "system", "content": cfg.GetSystem()},
-	}
-	for _, msg := range messages {
-		openAIMessages = append(openAIMessages, map[string]string{
-			"role":    msg.Role,
-			"content": msg.Content,
-		})
-	}
-
-	// OpenAI chat format
-	req := map[string]interface{}{
-		"model":    model,
-		"messages": openAIMessages,
-		"stream":   cfg.IsStreamChat(),
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Determine endpoint
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://api.openai.com/v1"
-	}
-	url = strings.TrimRight(url, "/") + "/chat/completions"
-
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetProviderHeaders(httpReq, "openai", apiKey)
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "openai")
-
-	return httpReq, body, nil
-}
-
-// buildGoogleRequestWithSession builds a Google request with session history
-func buildGoogleRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "google"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("google")
-	}
-
-	// Build Google AI format - combine all messages into contents
-	var contents []map[string]interface{}
-	for _, msg := range messages {
-		if msg.Role == "user" || msg.Role == "assistant" {
-			role := "user"
-			if msg.Role == "assistant" {
-				role = "model"
-			}
-			contents = append(contents, map[string]interface{}{
-				"role": role,
-				"parts": []map[string]string{
-					{"text": msg.Content},
-				},
-			})
-		}
-	}
-
-	req := map[string]interface{}{
-		"contents": contents,
-		"systemInstruction": map[string]interface{}{
-			"parts": []map[string]string{
-				{"text": cfg.GetSystem()},
-			},
-		},
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Determine endpoint
-	url := cfg.GetProviderURL()
-	if url == "" {
-		if apiKey == "" {
-			return nil, nil, fmt.Errorf("API key is required for standard Google endpoint")
-		}
-		url = "https://generativelanguage.googleapis.com/v1beta"
-	}
-
-	url = strings.TrimRight(url, "/")
-	if cfg.IsStreamChat() {
-		url = fmt.Sprintf("%s/models/%s:streamGenerateContent", url, model)
-	} else {
-		url = fmt.Sprintf("%s/models/%s:generateContent", url, model)
-	}
-
-	// Add API key as query parameter
-	if apiKey != "" {
-		if strings.Contains(url, "?") {
-			url += "&key=" + apiKey
-		} else {
-			url += "?key=" + apiKey
-		}
-	}
-
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "google")
-
-	return httpReq, body, nil
-}
-
-// buildAnthropicRequestWithSession builds an Anthropic request with session history
-func buildAnthropicRequestWithSession(cfg RequestConfig, messages []Message) (*http.Request, []byte, error) {
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "anthropic"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("anthropic")
-	}
-
-	// Build Anthropic format messages
-	anthropicMessages := []map[string]string{}
-	for _, msg := range messages {
-		if msg.Role == "user" || msg.Role == "assistant" {
-			anthropicMessages = append(anthropicMessages, map[string]string{
-				"role":    msg.Role,
-				"content": msg.Content,
-			})
-		}
-	}
-
-	// Anthropic format request
-	req := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 4096,
-		"messages":   anthropicMessages,
-		"system":     cfg.GetSystem(),
-		"stream":     cfg.IsStreamChat(),
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Determine endpoint
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://api.anthropic.com/v1"
-	}
-	url = strings.TrimRight(url, "/") + "/messages"
-
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetProviderHeaders(httpReq, "anthropic", apiKey)
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "anthropic")
-
-	return httpReq, body, nil
+	return buildRequestInternal(cfg, "", messages)
 }
 
 // BuildRegenerationRequest builds a request for regenerating a response
