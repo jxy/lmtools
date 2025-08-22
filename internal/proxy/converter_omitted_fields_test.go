@@ -169,28 +169,42 @@ func TestOmittedFieldsLogging(t *testing.T) {
 
 			// Read the log file to check for expected logs
 			logFiles, err := filepath.Glob(filepath.Join(tempDir, "*.log"))
-			if err != nil || len(logFiles) == 0 {
-				t.Fatalf("No log files found in %s", tempDir)
-			}
-
-			// Read the log file
-			logContent, err := os.ReadFile(logFiles[0])
 			if err != nil {
-				t.Fatalf("Failed to read log file: %v", err)
+				t.Fatalf("Failed to glob log files: %v", err)
+			}
+			
+			// If no logs are expected and no log file was created (lazy initialization), that's fine
+			if len(tt.expectedLogs) == 0 && len(logFiles) == 0 {
+				// No logs expected and no log file created - this is correct behavior
+				return
+			}
+			
+			// If we expect logs, there should be a log file
+			if len(tt.expectedLogs) > 0 && len(logFiles) == 0 {
+				t.Fatalf("Expected logs but no log files found in %s", tempDir)
 			}
 
-			logOutput := string(logContent)
-
-			// Check logs
-			for _, expectedLog := range tt.expectedLogs {
-				if !strings.Contains(logOutput, expectedLog) {
-					t.Errorf("Expected log not found: %s\nActual logs:\n%s", expectedLog, logOutput)
+			// If a log file exists, read and check it
+			if len(logFiles) > 0 {
+				// Read the log file
+				logContent, err := os.ReadFile(logFiles[0])
+				if err != nil {
+					t.Fatalf("Failed to read log file: %v", err)
 				}
-			}
 
-			// Also check that we don't have unexpected logs
-			if len(tt.expectedLogs) == 0 && strings.Contains(logOutput, "Omitting") {
-				t.Errorf("Unexpected omission logs found when none expected:\n%s", logOutput)
+				logOutput := string(logContent)
+
+				// Check logs
+				for _, expectedLog := range tt.expectedLogs {
+					if !strings.Contains(logOutput, expectedLog) {
+						t.Errorf("Expected log not found: %s\nActual logs:\n%s", expectedLog, logOutput)
+					}
+				}
+
+				// Also check that we don't have unexpected logs
+				if len(tt.expectedLogs) == 0 && strings.Contains(logOutput, "Omitting") {
+					t.Errorf("Unexpected omission logs found when none expected:\n%s", logOutput)
+				}
 			}
 		})
 	}

@@ -78,6 +78,9 @@ type Logger struct {
 	stderrMinLevel int
 	fileMinLevel   int
 
+	// Lazy file creation - prevents empty log files for read-only operations
+	filePath string // path for lazy creation (empty string means disabled)
+
 	// Request scoping
 	counter int64 // atomic
 
@@ -242,33 +245,48 @@ func newLogger(cfg Config) *Logger {
 
 // initSinks initializes log outputs based on configuration
 func (l *Logger) initSinks(cfg Config) error {
-	// File output
+	// File output - prepare for lazy creation
 	if cfg.ToFile && cfg.LogDir != "" {
 		if err := os.MkdirAll(cfg.LogDir, DirPerm); err != nil {
 			return fmt.Errorf("failed to create log directory: %w", err)
 		}
 
-		// Create log file with timestamp and PID
+		// Store the path for lazy creation (don't create file yet)
 		timestamp := time.Now().Format("20060102T150405.000")
 		component := cfg.Component
 		if component == "" {
 			component = "lmc"
 		}
 		filename := fmt.Sprintf("%s_%s_%d.log", timestamp, component, os.Getpid())
-		logPath := filepath.Join(cfg.LogDir, filename)
-
-		file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			return fmt.Errorf("failed to open log file: %w", err)
-		}
-		l.logFile = file
+		l.filePath = filepath.Join(cfg.LogDir, filename)
+		// Don't create the file yet - will be created on first write
 	}
 
 	return nil
 }
 
-// Close closes the log file
+// ensureFileOpenLocked creates the log file if not already created (lazy initialization).
+// IMPORTANT: Caller must hold l.mu mutex.
+func (l *Logger) ensureFileOpenLocked() error {
+	if l.logFile != nil || l.filePath == "" {
+		return nil // Already open or disabled
+	}
+	
+	file, err := os.OpenFile(l.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	l.logFile = file
+	return nil
+}
+
+// Close closes the log file and permanently disables file logging.
+// After Close, no new log file will be created even if logging is attempted.
 func (l *Logger) Close() {
+	if l == nil {
+		return
+	}
+	
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -276,6 +294,9 @@ func (l *Logger) Close() {
 		l.logFile.Close()
 		l.logFile = nil
 	}
+	
+	// Prevent any future file creation by clearing the path
+	l.filePath = ""
 }
 
 // Log methods
@@ -301,7 +322,7 @@ func (l *Logger) IsDebugEnabled() bool {
 		return false
 	}
 	return (l.toStderr && LevelDebug >= l.stderrMinLevel) ||
-		(l.toFile && l.logFile != nil && LevelDebug >= l.fileMinLevel)
+		(l.toFile && LevelDebug >= l.fileMinLevel)
 }
 
 // IsInfoEnabled returns true if info logging is enabled
@@ -310,7 +331,7 @@ func (l *Logger) IsInfoEnabled() bool {
 		return false
 	}
 	return (l.toStderr && LevelInfo >= l.stderrMinLevel) ||
-		(l.toFile && l.logFile != nil && LevelInfo >= l.fileMinLevel)
+		(l.toFile && LevelInfo >= l.fileMinLevel)
 }
 
 // logf is the core logging function
@@ -358,9 +379,14 @@ func (l *Logger) logf(level int, format string, args ...interface{}) {
 	}
 
 	// Write to file if enabled and level meets threshold
-	if l.toFile && l.logFile != nil && level >= l.fileMinLevel {
-		if _, err := l.logFile.Write(buf); err != nil {
+	if l.toFile && level >= l.fileMinLevel {
+		// Ensure file is open (lazy initialization) - already holding mutex
+		if err := l.ensureFileOpenLocked(); err != nil {
 			atomic.AddInt64(&l.writeErrors, 1)
+		} else if l.logFile != nil {
+			if _, err := l.logFile.Write(buf); err != nil {
+				atomic.AddInt64(&l.writeErrors, 1)
+			}
 		}
 	}
 }
@@ -589,9 +615,14 @@ func (sc *ScopedLogger) logf(level int, format string, args ...interface{}) {
 	}
 
 	// Write to file if enabled and level meets threshold
-	if sc.parent.toFile && sc.parent.logFile != nil && level >= sc.parent.fileMinLevel {
-		if _, err := sc.parent.logFile.Write(buf); err != nil {
+	if sc.parent.toFile && level >= sc.parent.fileMinLevel {
+		// Ensure file is open (lazy initialization) - already holding mutex
+		if err := sc.parent.ensureFileOpenLocked(); err != nil {
 			atomic.AddInt64(&sc.parent.writeErrors, 1)
+		} else if sc.parent.logFile != nil {
+			if _, err := sc.parent.logFile.Write(buf); err != nil {
+				atomic.AddInt64(&sc.parent.writeErrors, 1)
+			}
 		}
 	}
 }

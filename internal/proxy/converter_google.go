@@ -10,7 +10,7 @@ import (
 // ConvertAnthropicToGoogle converts an Anthropic request to Google AI format
 func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
 	// Log omitted fields at DEBUG level
-	if len(req.Metadata) > 0 {
+	if req.Metadata != nil && len(req.Metadata) > 0 {
 		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by Google)", req.Metadata)
 	}
 	if req.ToolChoice != nil {
