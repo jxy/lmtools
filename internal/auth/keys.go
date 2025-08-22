@@ -95,10 +95,11 @@ func SetRequestHeaders(req *http.Request, isJSON bool, isStreaming bool, provide
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	if provider == "argo" {
-		req.Header.Set("Accept", "text/plain")
-		req.Header.Set("Accept-Encoding", "identity")
-	} else if isStreaming {
+	if isStreaming {
 		req.Header.Set("Accept", "text/event-stream")
+		// Argo's streaming endpoint may compress responses, causing issues
+		if provider == "argo" {
+			req.Header.Set("Accept-Encoding", "identity")
+		}
 	}
 }
