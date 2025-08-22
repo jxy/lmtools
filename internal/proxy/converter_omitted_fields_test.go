@@ -221,7 +221,7 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 	converter := NewConverter(mapper)
 
 	// Create a context with request logger to ensure logs go through properly
-	reqLogger := NewRequestScopedLogger()
+	reqLogger := logger.GetLogger().NewScope("")
 	ctx := WithRequestLogger(context.Background(), reqLogger)
 
 	topK := 10

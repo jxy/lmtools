@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/logger"
 	"strings"
 )
 
@@ -11,10 +12,10 @@ import (
 func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *AnthropicRequest) (*OpenAIRequest, error) {
 	// Log omitted fields at DEBUG level
 	if req.TopK != nil {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting top_k=%d from Anthropic request (not supported by OpenAI)", *req.TopK))
+		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by OpenAI)", *req.TopK)
 	}
 	if len(req.Metadata) > 0 {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by OpenAI): %s", formatJSONForLog(req.Metadata)))
+		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by OpenAI)", req.Metadata)
 	}
 
 	openAIReq := &OpenAIRequest{
@@ -32,7 +33,7 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
 			// For GPT and O3/O4 models, convert to reasoning_effort
 			openAIReq.ReasoningEffort = "high"
-			LogDebugCtx(ctx, fmt.Sprintf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model))
+			logger.From(ctx).Debugf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model)
 		}
 	}
 
@@ -187,7 +188,7 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 				"type":     "thinking",
 				"thinking": block.Thinking,
 			}
-			LogDebugCtx(ctx, fmt.Sprintf("Dropping thinking content block (not supported by OpenAI): %s", formatJSONForLog(droppedBlock)))
+			logger.From(ctx).DebugJSON("Dropping thinking content block (not supported by OpenAI)", droppedBlock)
 		case "tool_use":
 			hasToolCalls = true
 			// Convert tool input to JSON string

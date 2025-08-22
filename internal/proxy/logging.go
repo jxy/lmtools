@@ -5,45 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/logger"
+	"time"
 )
 
-// Context-aware logging functions that use request logger when available
-
-// LogErrorCtx logs an error with request context if available
-func LogErrorCtx(ctx context.Context, contextStr string, err error) {
-	if reqLogger := GetRequestLogger(ctx); reqLogger != nil {
-		reqLogger.Errorf("%s: %v", contextStr, err)
-	} else {
-		logger.Errorf("%s: %v", contextStr, err)
+// RequestSummary logs a formatted request summary line
+func RequestSummary(ctx context.Context, method, path, originalModel, mappedModel, provider string,
+	numMessages, numTools, statusCode int, isStreaming bool, duration time.Duration,
+) {
+	streaming := ""
+	if isStreaming {
+		streaming = " | Stream"
 	}
+
+	durationStr := formatDuration(duration)
+
+	logger.From(ctx).Infof("%s %s | Model: %s->%s | Provider: %s | Messages: %d | Tools: %d | Status: %d%s | Duration: %s",
+		method, path, originalModel, mappedModel, provider, numMessages, numTools, statusCode, streaming, durationStr)
 }
 
-// LogInfoCtx logs an info message with request context if available
-func LogInfoCtx(ctx context.Context, message string) {
-	if reqLogger := GetRequestLogger(ctx); reqLogger != nil {
-		reqLogger.Infof("%s", message)
-	} else {
-		logger.Infof("%s", message)
+// formatDuration formats a duration for logging
+func formatDuration(duration time.Duration) string {
+	if duration >= time.Second {
+		return fmt.Sprintf("%.2fs", duration.Seconds())
 	}
-}
-
-// LogDebugCtx logs a debug message with request context if available
-func LogDebugCtx(ctx context.Context, message string) {
-	if reqLogger := GetRequestLogger(ctx); reqLogger != nil {
-		reqLogger.Debugf("%s", message)
-	} else {
-		logger.Debugf("%s", message)
-	}
-}
-
-// formatJSONForLog formats a value as JSON for logging
-// Always returns full JSON representation
-func formatJSONForLog(value interface{}) string {
-	jsonBytes, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Sprintf("<json_error: %v>", err)
-	}
-	return string(jsonBytes)
+	return fmt.Sprintf("%dms", duration.Milliseconds())
 }
 
 // truncateValue recursively truncates string values in a data structure
@@ -86,4 +71,21 @@ func countToolCallsInMessages(messages []AnthropicMessage) int {
 		}
 	}
 	return count
+}
+
+// logToolCall logs tool calls at appropriate levels with truncation
+func logToolCall(ctx context.Context, name string, input interface{}) {
+	l := logger.From(ctx)
+
+	// INFO level: truncated for readability
+	truncated := truncateValue(input, 64)
+	l.InfoJSON("Tool call: "+name, truncated)
+
+	// DEBUG level: full data for debugging
+	if l.IsDebugEnabled() {
+		l.DebugJSON("Tool call full", map[string]interface{}{
+			"name":  name,
+			"input": input,
+		})
+	}
 }

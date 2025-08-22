@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/logger"
 	"strings"
 )
 
@@ -11,10 +12,10 @@ import (
 func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRequest, user string) (*ArgoChatRequest, error) {
 	// Log omitted fields at DEBUG level
 	if req.TopK != nil {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting top_k=%d from Anthropic request (not supported by Argo)", *req.TopK))
+		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by Argo)", *req.TopK)
 	}
 	if len(req.Metadata) > 0 {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by Argo): %s", formatJSONForLog(req.Metadata)))
+		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by Argo)", req.Metadata)
 	}
 
 	argoReq := &ArgoChatRequest{
@@ -31,11 +32,11 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
 			// For GPT and O3/O4 models, convert to reasoning_effort
 			argoReq.ReasoningEffort = "high"
-			LogDebugCtx(ctx, fmt.Sprintf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model))
+			logger.From(ctx).Debugf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model)
 		} else if strings.HasPrefix(modelLower, "claude") {
 			// For Claude models (opus/sonnet), pass through the thinking structure
 			argoReq.Thinking = req.Thinking
-			LogDebugCtx(ctx, fmt.Sprintf("Passing through thinking structure for Claude model %s", req.Model))
+			logger.From(ctx).Debugf("Passing through thinking structure for Claude model %s", req.Model)
 		}
 	}
 
@@ -50,7 +51,7 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		// For non-OpenAI models, handle max_tokens for Argo non-streaming requests
 		if !req.Stream && req.MaxTokens >= 21000 {
 			// Drop max_tokens field entirely if >= 21000
-			LogDebugCtx(ctx, fmt.Sprintf("Dropping max_tokens field (was %d) for Argo non-streaming request", req.MaxTokens))
+			logger.From(ctx).Debugf("Dropping max_tokens field (was %d) for Argo non-streaming request", req.MaxTokens)
 			// MaxTokens will remain nil/0, which means it won't be included in JSON
 		} else {
 			argoReq.MaxTokens = req.MaxTokens
@@ -117,7 +118,7 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 							"type":     "thinking",
 							"thinking": block.Thinking,
 						}
-						LogDebugCtx(ctx, fmt.Sprintf("Dropping thinking content block for %s model (not supported by OpenAI): %s", req.Model, formatJSONForLog(droppedBlock)))
+						logger.From(ctx).DebugJSON(fmt.Sprintf("Dropping thinking content block for %s model (not supported by OpenAI)", req.Model), droppedBlock)
 
 					case "tool_use":
 						// Only process tool_use in assistant messages

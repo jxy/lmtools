@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/logger"
 	"net/http"
 )
 
@@ -88,7 +89,7 @@ func (e *APIError) MarshalJSON() ([]byte, error) {
 // sendAPIError sends an API error response
 func (s *Server) sendAPIError(ctx context.Context, w http.ResponseWriter, apiErr *APIError) {
 	// Log the error
-	LogErrorCtx(ctx, "API Error", apiErr)
+	logger.From(ctx).Errorf("API Error: %v", apiErr)
 
 	// Determine status code based on error type
 	statusCode := http.StatusInternalServerError
@@ -113,6 +114,6 @@ func (s *Server) sendAPIError(ctx context.Context, w http.ResponseWriter, apiErr
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(apiErr); err != nil {
-		LogErrorCtx(ctx, "Failed to encode error response", err)
+		logger.From(ctx).Errorf("Failed to encode error response: %v", err)
 	}
 }

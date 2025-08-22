@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/logger"
 )
 
 // ConvertAnthropicToGoogle converts an Anthropic request to Google AI format
 func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
 	// Log omitted fields at DEBUG level
 	if len(req.Metadata) > 0 {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting metadata from Anthropic request (not supported by Google): %s", formatJSONForLog(req.Metadata)))
+		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by Google)", req.Metadata)
 	}
 	if req.ToolChoice != nil {
-		LogDebugCtx(ctx, fmt.Sprintf("Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name))
+		logger.From(ctx).Debugf("Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name)
 	}
 
 	googleReq := &GoogleRequest{

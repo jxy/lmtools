@@ -92,19 +92,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/messages/count_tokens":
 		s.handleCountTokens(w, r)
 	default:
-		reqLogger := GetRequestLoggerOrDefault(r.Context())
-		reqLogger.Warnf("%s %s | Path not found", r.Method, r.URL.Path)
+		logger.From(r.Context()).Warnf("%s %s | Path not found", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	}
 }
 
 // handleRoot handles the root endpoint
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	// Get request logger from context
-	reqLogger := GetRequestLoggerOrDefault(r.Context())
-
 	// Log at INFO level
-	reqLogger.Infof("%s %s | Root endpoint accessed", r.Method, r.URL.Path)
+	logger.From(r.Context()).Infof("%s %s | Root endpoint accessed", r.Method, r.URL.Path)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -114,9 +110,6 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 // handleMessages handles the /v1/messages endpoint
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
-	// Get request logger from context
-	reqLogger := GetRequestLoggerOrDefault(r.Context())
-
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -150,7 +143,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	logUnknownFields(r.Context(), bodyBytes, anthReq, "Anthropic request")
 
 	// Log incoming request
-	reqLogger.LogJSON("Incoming Anthropic Request", anthReq)
+	logger.From(r.Context()).DebugJSON("Incoming Anthropic Request", anthReq)
 
 	// Validate message array is not empty
 	if len(anthReq.Messages) == 0 {
@@ -173,7 +166,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	anthReq.Model = mappedModel
 
-	reqLogger.Debugf("Model mapping: %s -> %s/%s", originalModel, provider, mappedModel)
+	logger.From(r.Context()).Debugf("Model mapping: %s -> %s/%s", originalModel, provider, mappedModel)
 
 	// Handle streaming if requested
 	if anthReq.Stream {
@@ -187,8 +180,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 // handleNonStreamingRequest handles non-streaming message requests
 func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel, mappedModel string) {
-	reqLogger := GetRequestLoggerOrDefault(r.Context())
-
 	var response interface{}
 	var err error
 
@@ -210,7 +201,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		// Check if error is due to context cancellation
 		if r.Context().Err() != nil {
-			reqLogger.Debugf("Request cancelled by client")
+			logger.From(r.Context()).Debugf("Request cancelled by client")
 			// Don't send error response if client disconnected
 			return
 		}
@@ -241,25 +232,30 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	if anthResp != nil && anthResp.Content != nil {
 		for _, block := range anthResp.Content {
 			if block.Type == "tool_use" && block.Name != "" {
-				reqLogger.LogToolCall(block.Name, block)
+				// Log tool call
+				logToolCall(r.Context(), block.Name, block.Input)
 			}
 		}
 	}
 
 	// Log final response
-	reqLogger.LogJSON("Outgoing Anthropic Response", anthResp)
+	logger.From(r.Context()).DebugJSON("Outgoing Anthropic Response", anthResp)
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(anthResp); err != nil {
-		reqLogger.Errorf("Failed to encode response: %v", err)
+		logger.From(r.Context()).Errorf("Failed to encode response: %v", err)
 	}
 
 	// Get response writer to access status code
 	if rw, ok := w.(*proxyResponseWriter); ok {
+		// Get duration from scoped logger
+		scope := logger.From(r.Context())
+		duration := scope.GetDuration()
+
 		// Log request completion with model mapping
-		reqLogger.LogRequest(r.Method, r.URL.Path, originalModel, anthReq.Model, provider,
-			len(anthReq.Messages), len(anthReq.Tools), rw.statusCode, false)
+		RequestSummary(r.Context(), r.Method, r.URL.Path, originalModel, anthReq.Model, provider,
+			len(anthReq.Messages), len(anthReq.Tools), rw.statusCode, false, duration)
 
 		// Log request completion summary
 		if anthResp != nil {
@@ -284,16 +280,14 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 			}
 
 			// Log summary
-			reqLogger.Infof("Request completed | Messages: %d | Tool calls: %d | Tokens: %d in, %d out | Duration: %v",
-				len(anthReq.Messages), toolCallCount, inputTokens, outputTokens, reqLogger.GetDuration())
+			logger.From(r.Context()).Infof("Request completed | Messages: %d | Tool calls: %d | Tokens: %d in, %d out | Duration: %v",
+				len(anthReq.Messages), toolCallCount, inputTokens, outputTokens, duration)
 		}
 	}
 }
 
 // forwardToOpenAI forwards the request to OpenAI
 func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
@@ -301,7 +295,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing OpenAI Request", openAIReq)
+	logger.From(ctx).DebugJSON("Outgoing OpenAI Request", openAIReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(openAIReq)
@@ -310,7 +304,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	url := s.config.OpenAIURL
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -330,7 +324,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "OpenAI", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "OpenAI", resp.StatusCode, body)
 		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -341,15 +335,13 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Log response
-	reqLogger.LogJSON("OpenAI Response", openAIResp)
+	logger.From(ctx).DebugJSON("OpenAI Response", openAIResp)
 
 	return &openAIResp, nil
 }
 
 // forwardToGoogle forwards the request to Google AI
 func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest) (*GoogleResponse, error) {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Convert to Google AI format
 	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
@@ -357,7 +349,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Google Request", googleReq)
+	logger.From(ctx).DebugJSON("Outgoing Google Request", googleReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(googleReq)
@@ -371,7 +363,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	if key := s.mapper.GetAPIKey("google"); key != "" {
 		url += "?key=" + key
 	}
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -390,7 +382,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Google", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "Google", resp.StatusCode, body)
 		return nil, fmt.Errorf("google API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -401,15 +393,13 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Log response
-	reqLogger.LogJSON("Google Response", googleResp)
+	logger.From(ctx).DebugJSON("Google Response", googleResp)
 
 	return &googleResp, nil
 }
 
 // forwardToArgo forwards the request to Argo
 func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (*ArgoChatResponse, error) {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
@@ -417,7 +407,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Argo Request", argoReq)
+	logger.From(ctx).DebugJSON("Outgoing Argo Request", argoReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(argoReq)
@@ -432,7 +422,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	}
 
 	url := s.config.GetArgoURL(endpoint)
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -452,7 +442,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Argo", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "Argo", resp.StatusCode, body)
 		return nil, fmt.Errorf("argo API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -463,17 +453,15 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	}
 
 	// Log response
-	reqLogger.LogJSON("Argo Response", argoResp)
+	logger.From(ctx).DebugJSON("Argo Response", argoResp)
 
 	return &argoResp, nil
 }
 
 // forwardToAnthropic forwards the request to Anthropic
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Anthropic Request", anthReq)
+	logger.From(ctx).DebugJSON("Outgoing Anthropic Request", anthReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(anthReq)
@@ -482,7 +470,7 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 	}
 
 	url := s.config.AnthropicURL
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -503,7 +491,7 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Anthropic", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "Anthropic", resp.StatusCode, body)
 		return nil, fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -514,7 +502,7 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 	}
 
 	// Log response
-	reqLogger.LogJSON("Anthropic Response", anthResp)
+	logger.From(ctx).DebugJSON("Anthropic Response", anthResp)
 
 	return &anthResp, nil
 }
@@ -522,7 +510,6 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 // handleCountTokens handles the /v1/messages/count_tokens endpoint
 func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	// Get request logger from context
-	reqLogger := GetRequestLoggerOrDefault(r.Context())
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -545,7 +532,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log incoming request at DEBUG level
-	reqLogger.LogJSON("Incoming Token Count Request", tokenReq)
+	logger.From(r.Context()).DebugJSON("Incoming Token Count Request", tokenReq)
 
 	// Validate message array is not empty
 	if len(tokenReq.Messages) == 0 {
@@ -587,10 +574,10 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log response at DEBUG level
-	reqLogger.LogJSON("Token Count Response", resp)
+	logger.From(r.Context()).DebugJSON("Token Count Response", resp)
 
 	// Log request summary with token count at INFO level
-	reqLogger.Infof("POST %s | Messages: %d | Tools: %d | Input tokens: %d | Status: 200",
+	logger.From(r.Context()).Infof("POST %s | Messages: %d | Tools: %d | Input tokens: %d | Status: 200",
 		r.URL.Path, len(tokenReq.Messages), len(tokenReq.Tools), tokens)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -599,18 +586,17 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 // handleStreamingRequest handles streaming message requests
 func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel, mappedModel string) {
-	reqLogger := GetRequestLoggerOrDefault(r.Context())
-
 	// Log the streaming request start
-	reqLogger.Infof("Starting streaming request: %s->%s via %s", originalModel, mappedModel, provider)
+	logger.From(r.Context()).Infof("Starting streaming request: %s->%s via %s", originalModel, mappedModel, provider)
 
 	// Log the incoming request JSON for streaming (this was missing)
-	reqLogger.LogJSON("Incoming Anthropic Streaming Request", anthReq)
+	logger.From(r.Context()).DebugJSON("Incoming Anthropic Streaming Request", anthReq)
 
 	// Create Anthropic stream handler
+	reqLogger := logger.From(r.Context())
 	handler, err := NewAnthropicStreamHandler(w, originalModel, reqLogger)
 	if err != nil {
-		reqLogger.Errorf("Failed to create stream handler: %v", err)
+		logger.From(r.Context()).Errorf("Failed to create stream handler: %v", err)
 		apiErr := NewAPIError(ErrTypeServer, "handleStreamingRequest", fmt.Sprintf("Failed to create stream handler: %v", err), err)
 		s.sendAPIError(r.Context(), w, apiErr)
 		return
@@ -618,15 +604,15 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 
 	// Send initial events
 	if err := handler.SendMessageStart(); err != nil {
-		reqLogger.Errorf("Failed to send message_start: %v", err)
+		logger.From(r.Context()).Errorf("Failed to send message_start: %v", err)
 		return
 	}
 	if err := handler.SendContentBlockStart(0, "text"); err != nil {
-		reqLogger.Errorf("Failed to send content_block_start: %v", err)
+		logger.From(r.Context()).Errorf("Failed to send content_block_start: %v", err)
 		return
 	}
 	if err := handler.SendPing(); err != nil {
-		reqLogger.Errorf("Failed to send ping: %v", err)
+		logger.From(r.Context()).Errorf("Failed to send ping: %v", err)
 		return
 	}
 
@@ -634,63 +620,67 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 	switch provider {
 	case "openai":
 		if err := s.streamFromOpenAI(r.Context(), anthReq, handler); err != nil {
-			reqLogger.Errorf("OpenAI streaming error: %v", err)
+			logger.From(r.Context()).Errorf("OpenAI streaming error: %v", err)
 			if completeErr := handler.Complete("error"); completeErr != nil {
-				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+				logger.From(r.Context()).Errorf("Failed to send error completion: %v", completeErr)
 			}
 		}
 	case "google":
 		if err := s.streamFromGoogle(r.Context(), anthReq, handler); err != nil {
-			reqLogger.Errorf("Google streaming error: %v", err)
+			logger.From(r.Context()).Errorf("Google streaming error: %v", err)
 			if completeErr := handler.Complete("error"); completeErr != nil {
-				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+				logger.From(r.Context()).Errorf("Failed to send error completion: %v", completeErr)
 			}
 		}
 	case "anthropic":
 		if err := s.streamFromAnthropic(r.Context(), anthReq, handler); err != nil {
-			reqLogger.Errorf("Anthropic streaming error: %v", err)
+			logger.From(r.Context()).Errorf("Anthropic streaming error: %v", err)
 			if completeErr := handler.Complete("error"); completeErr != nil {
-				reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+				logger.From(r.Context()).Errorf("Failed to send error completion: %v", completeErr)
 			}
 		}
 	case "argo":
 		// Check if request has tools - Argo streamchat doesn't handle them correctly
 		if len(anthReq.Tools) > 0 {
-			reqLogger.Debugf("Request has %d tools defined, using simulated streaming for Argo", len(anthReq.Tools))
+			logger.From(r.Context()).Debugf("Request has %d tools defined, using simulated streaming for Argo", len(anthReq.Tools))
 			if err := s.simulateStreamingFromArgo(r.Context(), anthReq, handler); err != nil {
-				reqLogger.Errorf("Argo simulated streaming error: %v", err)
+				logger.From(r.Context()).Errorf("Argo simulated streaming error: %v", err)
 				if completeErr := handler.Complete("error"); completeErr != nil {
-					reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+					logger.From(r.Context()).Errorf("Failed to send error completion: %v", completeErr)
 				}
 			}
 		} else {
-			reqLogger.Debugf("Request has no tools, using native Argo streaming")
+			logger.From(r.Context()).Debugf("Request has no tools, using native Argo streaming")
 			if err := s.streamFromArgo(r.Context(), anthReq, handler); err != nil {
-				reqLogger.Errorf("Argo native streaming failed: %v", err)
+				logger.From(r.Context()).Errorf("Argo native streaming failed: %v", err)
 				// Try to fallback to simulated streaming
-				reqLogger.Debugf("=== Fallback: Attempting simulated streaming after native streaming failure ===")
-				reqLogger.Debugf("Native streaming error was: %v", err)
+				logger.From(r.Context()).Debugf("=== Fallback: Attempting simulated streaming after native streaming failure ===")
+				logger.From(r.Context()).Debugf("Native streaming error was: %v", err)
 
 				if err := s.simulateStreamingFromArgo(r.Context(), anthReq, handler); err != nil {
-					reqLogger.Errorf("Fallback to simulated streaming also failed: %v", err)
+					logger.From(r.Context()).Errorf("Fallback to simulated streaming also failed: %v", err)
 					if completeErr := handler.Complete("error"); completeErr != nil {
-						reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+						logger.From(r.Context()).Errorf("Failed to send error completion: %v", completeErr)
 					}
 				} else {
-					reqLogger.Debugf("Fallback to simulated streaming succeeded")
+					logger.From(r.Context()).Debugf("Fallback to simulated streaming succeeded")
 				}
 			}
 		}
 	default:
 		if completeErr := handler.Complete("error"); completeErr != nil {
-			reqLogger.Errorf("Failed to send error completion: %v", completeErr)
+			logger.From(r.Context()).Errorf("Failed to send error completion: %v", completeErr)
 		}
 	}
 
 	// Log request completion with model mapping
 	if rw, ok := w.(*proxyResponseWriter); ok {
-		reqLogger.LogRequest(r.Method, r.URL.Path, originalModel, anthReq.Model, provider,
-			len(anthReq.Messages), len(anthReq.Tools), rw.statusCode, true)
+		// Get duration from scoped logger
+		scope := logger.From(r.Context())
+		duration := scope.GetDuration()
+
+		RequestSummary(r.Context(), r.Method, r.URL.Path, originalModel, anthReq.Model, provider,
+			len(anthReq.Messages), len(anthReq.Tools), rw.statusCode, true, duration)
 
 		// Log request completion summary for streaming
 		if handler != nil && handler.state != nil {
@@ -704,16 +694,14 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 			outputTokens := handler.state.OutputTokens
 
 			// Log summary
-			reqLogger.Infof("Request completed | Messages: %d | Tool calls: %d | Tokens: %d in, %d out | Duration: %v",
-				len(anthReq.Messages), toolCallCount, inputTokens, outputTokens, reqLogger.GetDuration())
+			logger.From(r.Context()).Infof("Request completed | Messages: %d | Tool calls: %d | Tokens: %d in, %d out | Duration: %v",
+				len(anthReq.Messages), toolCallCount, inputTokens, outputTokens, duration)
 		}
 	}
 }
 
 // streamFromOpenAI streams from OpenAI
 func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
@@ -724,7 +712,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	openAIReq.Stream = true
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing OpenAI Streaming Request", openAIReq)
+	logger.From(ctx).DebugJSON("Outgoing OpenAI Streaming Request", openAIReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(openAIReq)
@@ -733,7 +721,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	url := s.config.OpenAIURL
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -759,7 +747,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "OpenAI Streaming", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "OpenAI Streaming", resp.StatusCode, body)
 		return fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -770,8 +758,6 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 
 // streamFromGoogle streams from Google AI
 func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Convert to Google AI format
 	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
@@ -779,7 +765,7 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Google Streaming Request", googleReq)
+	logger.From(ctx).DebugJSON("Outgoing Google Streaming Request", googleReq)
 
 	// Build URL with streaming endpoint
 	baseURL := s.config.GoogleURL
@@ -787,7 +773,7 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 	if key := s.mapper.GetAPIKey("google"); key != "" {
 		url += "&key=" + key
 	}
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	// Prepare request
 	jsonData, err := json.Marshal(googleReq)
@@ -812,7 +798,7 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Google Streaming", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "Google Streaming", resp.StatusCode, body)
 		return fmt.Errorf("google API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -823,8 +809,6 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 
 // streamFromArgo streams from Argo
 func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Estimate and set input tokens for Argo streaming
 	// Argo doesn't provide token counts, so we must estimate them
 	inputTokens := EstimateRequestTokens(anthReq)
@@ -839,7 +823,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 	}
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Argo Streaming Request", argoReq)
+	logger.From(ctx).DebugJSON("Outgoing Argo Streaming Request", argoReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(argoReq)
@@ -848,7 +832,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 	}
 
 	url := s.config.GetArgoURL("streamchat")
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -864,8 +848,6 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 
 // streamFromArgoWithPings sends the request to Argo streamchat and handles pings while waiting
 func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Create a cancellable context for the API call
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -882,7 +864,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 		resp, err := s.client.Do(callCtx, req, "argo")
 		// Check if parent context is already cancelled before trying to send
 		if ctx.Err() != nil {
-			reqLogger.Debugf("Parent context already cancelled, not sending result")
+			logger.From(ctx).Debugf("Parent context already cancelled, not sending result")
 			if resp != nil {
 				resp.Body.Close()
 			}
@@ -893,7 +875,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 			// Successfully sent result
 		case <-ctx.Done():
 			// Context was cancelled, don't block on send
-			reqLogger.Debugf("Context cancelled before sending result to channel")
+			logger.From(ctx).Debugf("Context cancelled before sending result to channel")
 			if resp != nil {
 				resp.Body.Close()
 			}
@@ -902,7 +884,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 
 	// Send pings while waiting for initial response
 	waitStartTime := time.Now()
-	reqLogger.Debugf("Waiting for Argo streaming response (ping interval: %v)", pingInterval)
+	logger.From(ctx).Debugf("Waiting for Argo streaming response (ping interval: %v)", pingInterval)
 
 	pingTicker := time.NewTicker(pingInterval)
 	defer pingTicker.Stop()
@@ -910,7 +892,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 	for {
 		select {
 		case result := <-resultChan:
-			reqLogger.Debugf("Received response from Argo streamchat after %v", time.Since(waitStartTime))
+			logger.From(ctx).Debugf("Received response from Argo streamchat after %v", time.Since(waitStartTime))
 			if result.err != nil {
 				return fmt.Errorf("request error: %w", result.err)
 			}
@@ -920,7 +902,7 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 			// Check status
 			if result.resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(result.resp.Body)
-				s.logErrorResponse(reqLogger, "Argo Streaming", result.resp.StatusCode, body)
+				s.logErrorResponse(ctx, "Argo Streaming", result.resp.StatusCode, body)
 				return fmt.Errorf("argo API error (status %d): %s", result.resp.StatusCode, string(body))
 			}
 
@@ -929,16 +911,16 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 			return parser.ParseWithPingInterval(result.resp.Body, pingInterval)
 
 		case <-pingTicker.C:
-			reqLogger.Debugf("Sending ping while waiting for Argo streaming response")
+			logger.From(ctx).Debugf("Sending ping while waiting for Argo streaming response")
 			if err := handler.SendPing(); err != nil {
-				reqLogger.Errorf("Failed to send ping, client likely disconnected: %v", err)
+				logger.From(ctx).Errorf("Failed to send ping, client likely disconnected: %v", err)
 				// Cancel the API call since client is gone
 				cancel()
 				return fmt.Errorf("client disconnected: %w", err)
 			}
 
 		case <-ctx.Done():
-			reqLogger.Debugf("Context cancelled while waiting for Argo streaming response")
+			logger.From(ctx).Debugf("Context cancelled while waiting for Argo streaming response")
 			return ctx.Err()
 		}
 	}
@@ -946,13 +928,11 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, req *http.Request,
 
 // streamFromAnthropic streams from Anthropic
 func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Force streaming
 	anthReq.Stream = true
 
 	// Log outgoing request
-	reqLogger.LogJSON("Outgoing Anthropic Streaming Request", anthReq)
+	logger.From(ctx).DebugJSON("Outgoing Anthropic Streaming Request", anthReq)
 
 	// Prepare request
 	jsonData, err := json.Marshal(anthReq)
@@ -961,7 +941,7 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 	}
 
 	url := s.config.AnthropicURL
-	reqLogger.Debugf("Sending request to: %s", url)
+	logger.From(ctx).Debugf("Sending request to: %s", url)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
@@ -982,7 +962,7 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 	// Check status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := s.readResponseBody(resp)
-		s.logErrorResponse(reqLogger, "Anthropic Streaming", resp.StatusCode, body)
+		s.logErrorResponse(ctx, "Anthropic Streaming", resp.StatusCode, body)
 		return fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -1123,8 +1103,6 @@ func (s *Server) validatePingInterval(pingInterval time.Duration) time.Duration 
 
 // waitForArgoResponseWithPings fetches the Argo response while sending periodic pings
 func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) (*ArgoChatResponse, error) {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Create a cancellable context for the API call
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1145,7 +1123,7 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 		resp, err := s.forwardToArgo(callCtx, &nonStreamingReq)
 		// Check if parent context is already cancelled before trying to send
 		if ctx.Err() != nil {
-			reqLogger.Debugf("Parent context already cancelled, not sending result")
+			logger.From(ctx).Debugf("Parent context already cancelled, not sending result")
 			return
 		}
 		select {
@@ -1153,13 +1131,13 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 			// Successfully sent result
 		case <-ctx.Done():
 			// Context was cancelled, don't block on send
-			reqLogger.Debugf("Context cancelled before sending result to channel")
+			logger.From(ctx).Debugf("Context cancelled before sending result to channel")
 		}
 	}()
 
 	// Send pings while waiting for API response
 	waitStartTime := time.Now()
-	reqLogger.Debugf("Waiting for Argo API response (ping interval: %v)", pingInterval)
+	logger.From(ctx).Debugf("Waiting for Argo API response (ping interval: %v)", pingInterval)
 
 	pingTicker := time.NewTicker(pingInterval)
 	defer pingTicker.Stop()
@@ -1167,23 +1145,23 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 	for {
 		select {
 		case result := <-resultChan:
-			reqLogger.Debugf("Received response from Argo API after %v", time.Since(waitStartTime))
+			logger.From(ctx).Debugf("Received response from Argo API after %v", time.Since(waitStartTime))
 			if result.err != nil {
 				return nil, result.err
 			}
 			return result.resp, nil
 
 		case <-pingTicker.C:
-			reqLogger.Debugf("Sending ping while waiting for Argo API response")
+			logger.From(ctx).Debugf("Sending ping while waiting for Argo API response")
 			if err := handler.SendPing(); err != nil {
-				reqLogger.Errorf("Failed to send ping, client likely disconnected: %v", err)
+				logger.From(ctx).Errorf("Failed to send ping, client likely disconnected: %v", err)
 				// Cancel the API call since client is gone
 				cancel()
 				return nil, fmt.Errorf("client disconnected: %w", err)
 			}
 
 		case <-ctx.Done():
-			reqLogger.Debugf("Context cancelled while waiting for Argo API response")
+			logger.From(ctx).Debugf("Context cancelled while waiting for Argo API response")
 			return nil, ctx.Err()
 		}
 	}
@@ -1191,9 +1169,7 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 
 // streamArgoResponseContent streams the content blocks from an Argo response
 func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *AnthropicResponse, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
-	reqLogger.Debugf("Processing %d content blocks for simulated streaming", len(anthResp.Content))
+	logger.From(ctx).Debugf("Processing %d content blocks for simulated streaming", len(anthResp.Content))
 
 	// Process each content block
 	blockIndex := 0 // Index for tool blocks (text is always index 0)
@@ -1211,7 +1187,7 @@ func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *Anthro
 			// Close text block if needed
 			if textBlockProcessed && !handler.state.TextBlockClosed {
 				if err := handler.SendContentBlockStop(0); err != nil {
-					reqLogger.Errorf("Failed to close text block: %v", err)
+					logger.From(ctx).Errorf("Failed to close text block: %v", err)
 					return fmt.Errorf("failed to close text block: %w", err)
 				}
 				handler.state.TextBlockClosed = true
@@ -1224,7 +1200,7 @@ func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *Anthro
 			}
 
 		default:
-			reqLogger.Debugf("WARNING: Unknown block type: %s", block.Type)
+			logger.From(ctx).Debugf("WARNING: Unknown block type: %s", block.Type)
 		}
 	}
 
@@ -1260,16 +1236,15 @@ func (s *Server) streamTextBlock(content string, handler *AnthropicStreamHandler
 
 // streamToolBlock streams a tool use block
 func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
-	reqLogger.LogToolCall(block.Name, block)
+	// Log tool call
+	logToolCall(ctx, block.Name, block.Input)
 
 	// Validate tool block
 	if block.ID == "" {
-		reqLogger.Debugf("WARNING: Tool block has empty ID")
+		logger.From(ctx).Debugf("WARNING: Tool block has empty ID")
 	}
 	if block.Name == "" {
-		reqLogger.Debugf("WARNING: Tool block has empty name")
+		logger.From(ctx).Debugf("WARNING: Tool block has empty name")
 	}
 	if block.Input == nil {
 		block.Input = make(map[string]interface{})
@@ -1277,20 +1252,20 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 
 	// Send tool use start
 	if err := handler.SendToolUseStart(blockIndex, block.ID, block.Name); err != nil {
-		reqLogger.Errorf("Failed to send tool_use start for block index %d: %v", blockIndex, err)
+		logger.From(ctx).Errorf("Failed to send tool_use start for block index %d: %v", blockIndex, err)
 		return fmt.Errorf("failed to send tool_use start (index=%d): %w", blockIndex, err)
 	}
 
 	// Send tool input as JSON chunks
 	inputJSON, err := json.Marshal(block.Input)
 	if err != nil {
-		reqLogger.Errorf("Failed to marshal tool input for %s: %v", block.Name, err)
+		logger.From(ctx).Errorf("Failed to marshal tool input for %s: %v", block.Name, err)
 		return fmt.Errorf("failed to marshal tool input for %s: %w", block.Name, err)
 	}
 
 	// Send empty initial delta to match Anthropic format
 	if err := handler.SendToolInputDelta(blockIndex, ""); err != nil {
-		reqLogger.Errorf("Failed to send initial empty delta: %v", err)
+		logger.From(ctx).Errorf("Failed to send initial empty delta: %v", err)
 		return fmt.Errorf("failed to send initial empty delta: %w", err)
 	}
 
@@ -1299,7 +1274,7 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 	chunks := splitTextForStreaming(jsonStr, defaultJSONChunkSize)
 	for _, chunk := range chunks {
 		if err := handler.SendToolInputDelta(blockIndex, chunk); err != nil {
-			reqLogger.Errorf("Failed to send tool input chunk: %v", err)
+			logger.From(ctx).Errorf("Failed to send tool input chunk: %v", err)
 			return fmt.Errorf("failed to send tool input chunk: %w", err)
 		}
 		// No artificial delay - let network be the natural throttle
@@ -1307,7 +1282,7 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 
 	// Close tool block
 	if err := handler.SendContentBlockStop(blockIndex); err != nil {
-		reqLogger.Errorf("Failed to close tool block index %d: %v", blockIndex, err)
+		logger.From(ctx).Errorf("Failed to close tool block index %d: %v", blockIndex, err)
 		return fmt.Errorf("failed to close tool block (index=%d): %w", blockIndex, err)
 	}
 
@@ -1320,18 +1295,16 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 
 // simulateStreamingFromArgoWithInterval simulates streaming with configurable ping interval
 func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
-	reqLogger := GetRequestLoggerOrDefault(ctx)
-
 	// Validate ping interval
 	pingInterval = s.validatePingInterval(pingInterval)
 
-	reqLogger.Debugf("Using simulated streaming (%d tools)", len(anthReq.Tools))
+	logger.From(ctx).Debugf("Using simulated streaming (%d tools)", len(anthReq.Tools))
 	handler.simulatedStreaming = true
 
 	// Get response from Argo while sending pings
 	argoResp, err := s.waitForArgoResponseWithPings(ctx, anthReq, handler, pingInterval)
 	if err != nil {
-		reqLogger.Errorf("Failed to get non-streaming response from Argo: %v", err)
+		logger.From(ctx).Errorf("Failed to get non-streaming response from Argo: %v", err)
 		return fmt.Errorf("failed to get non-streaming response: %w", err)
 	}
 
@@ -1340,7 +1313,7 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 
 	// Validate response
 	if anthResp == nil {
-		reqLogger.Errorf("Converted response is nil")
+		logger.From(ctx).Errorf("Converted response is nil: %v", fmt.Errorf("nil response"))
 		return fmt.Errorf("converted response is nil")
 	}
 
@@ -1348,13 +1321,13 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 	return s.streamArgoResponseContent(ctx, anthResp, handler)
 }
 
-func (s *Server) logErrorResponse(reqLogger *RequestScopedLogger, provider string, statusCode int, body []byte) {
+func (s *Server) logErrorResponse(ctx context.Context, provider string, statusCode int, body []byte) {
 	// Try to parse as JSON for better logging
 	var errorData interface{}
 	if err := json.Unmarshal(body, &errorData); err == nil {
-		reqLogger.LogJSON(fmt.Sprintf("%s Error Response (status %d)", provider, statusCode), errorData)
+		logger.From(ctx).DebugJSON(fmt.Sprintf("%s Error Response (status %d)", provider, statusCode), errorData)
 	} else {
-		reqLogger.Debugf("%s Error Response (status %d, raw): %s", provider, statusCode, string(body))
+		logger.From(ctx).Debugf("%s Error Response (status %d, raw): %s", provider, statusCode, string(body))
 	}
 }
 

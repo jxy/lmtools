@@ -2,29 +2,33 @@ package proxy
 
 import (
 	"context"
+	"lmtools/internal/logger"
 )
 
-// RequestLoggerKey is the context key for request logger
-type RequestLoggerKey struct{}
+type requestLoggerKey struct{}
 
 // WithRequestLogger adds a request logger to the context
-func WithRequestLogger(ctx context.Context, logger *RequestScopedLogger) context.Context {
-	return context.WithValue(ctx, RequestLoggerKey{}, logger)
+// This is now a thin wrapper around logger.WithContext for backward compatibility
+func WithRequestLogger(ctx context.Context, scope *logger.ScopedLogger) context.Context {
+	if scope == nil {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, requestLoggerKey{}, scope)
+	return logger.WithContext(ctx, scope)
 }
 
 // GetRequestLogger retrieves the request logger from context
-func GetRequestLogger(ctx context.Context) *RequestScopedLogger {
-	if logger, ok := ctx.Value(RequestLoggerKey{}).(*RequestScopedLogger); ok {
-		return logger
+// Returns nil if not found (preserves existing behavior)
+// NOTE: This is deprecated - use logger.From(ctx) directly
+func GetRequestLogger(ctx context.Context) *logger.ScopedLogger {
+	if sc, ok := ctx.Value(requestLoggerKey{}).(*logger.ScopedLogger); ok {
+		return sc
 	}
-	// Return nil if none in context
 	return nil
 }
 
 // GetRequestLoggerOrDefault retrieves the request logger from context or returns a new one
-func GetRequestLoggerOrDefault(ctx context.Context) *RequestScopedLogger {
-	if logger := GetRequestLogger(ctx); logger != nil {
-		return logger
-	}
-	return NewRequestScopedLogger()
+// This is now a thin wrapper around logger.From for backward compatibility
+func GetRequestLoggerOrDefault(ctx context.Context) *logger.ScopedLogger {
+	return logger.From(ctx)
 }

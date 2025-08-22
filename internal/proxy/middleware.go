@@ -37,8 +37,12 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, m.config.MaxRequestBodySize)
 
 	// 3. Request logging setup (was RequestLogger)
-	reqLogger := NewRequestScopedLogger()
-	ctx = WithRequestLogger(ctx, reqLogger)
+	reqLogger := logger.GetLogger().NewScope("")
+	ctx = logger.WithContext(ctx, reqLogger)
+
+	// Log X-Request-ID for correlation
+	logger.From(ctx).Debugf("Request start | X-Request-ID: %s", requestID)
+
 	r = r.WithContext(ctx)
 
 	// 4. Response writer wrapper for status capture and streaming detection
@@ -76,7 +80,7 @@ type proxyResponseWriter struct {
 	http.ResponseWriter
 	statusCode     int
 	written        bool
-	reqLogger      *RequestScopedLogger
+	reqLogger      *logger.ScopedLogger
 	request        *http.Request
 	streamDetected bool
 }

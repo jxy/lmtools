@@ -327,7 +327,7 @@ func TestStreamFromAnthropic(t *testing.T) {
 
 	// Create handler
 	ctx := context.Background()
-	handler, err := NewAnthropicStreamHandler(w, "claude-3-opus-20240229", NewRequestScopedLogger())
+	handler, err := NewAnthropicStreamHandler(w, "claude-3-opus-20240229", logger.GetLogger().NewScope(""))
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}

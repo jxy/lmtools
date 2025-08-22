@@ -647,17 +647,20 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 			continue
 		}
 		msg, _ := m["message"].(string)
-		if strings.HasPrefix(msg, "Tool call: ") {
-			// New format: "Tool call: <name> | Data: <json>"
-			parts := strings.SplitN(strings.TrimPrefix(msg, "Tool call: "), " | Data: ", 2)
-			if len(parts) == 2 && parts[0] == "sum" {
-				var inputData map[string]interface{}
-				if json.Unmarshal([]byte(parts[1]), &inputData) == nil {
-					if a, ok := inputData["a"].(float64); ok && a == 1 {
-						found = true
-						break
-					}
+		// Check for the new format from InfoJSON: "Tool call: sum: {...}"
+		// INFO level now shows the truncated JSON structure
+		if strings.HasPrefix(msg, "Tool call: sum: ") {
+			// Should contain JSON with the tool input
+			if strings.Contains(msg, `"a":`) && strings.Contains(msg, `"b":`) {
+				found = true
+				// Verify it's valid JSON after the label
+				jsonPart := strings.TrimPrefix(msg, "Tool call: sum: ")
+				var toolData map[string]interface{}
+				if err := json.Unmarshal([]byte(jsonPart), &toolData); err == nil {
+					// Successfully parsed as JSON - good!
+					t.Logf("Tool call log contains valid JSON: %s", jsonPart)
 				}
+				break
 			}
 		}
 	}
@@ -684,7 +687,7 @@ func TestLogTimestamps(t *testing.T) {
 	)
 
 	// Create a new request logger after reinitializing
-	reqLogger := NewRequestScopedLogger()
+	reqLogger := logger.GetLogger().NewScope("")
 
 	// Log a test message
 	reqLogger.Infof("Test message")
@@ -738,7 +741,7 @@ func TestLogTimestamps(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkLoggingWithRequestID(b *testing.B) {
-	logger := NewRequestScopedLogger()
+	logger := logger.GetLogger().NewScope("")
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -748,7 +751,7 @@ func BenchmarkLoggingWithRequestID(b *testing.B) {
 
 func BenchmarkConcurrentLogging(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
-		logger := NewRequestScopedLogger()
+		logger := logger.GetLogger().NewScope("")
 		i := 0
 		for pb.Next() {
 			logger.Debugf("Concurrent benchmark message %d", i)

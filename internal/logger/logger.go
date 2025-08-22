@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -303,6 +304,15 @@ func (l *Logger) IsDebugEnabled() bool {
 		(l.toFile && l.logFile != nil && LevelDebug >= l.fileMinLevel)
 }
 
+// IsInfoEnabled returns true if info logging is enabled
+func (l *Logger) IsInfoEnabled() bool {
+	if l == nil {
+		return false
+	}
+	return (l.toStderr && LevelInfo >= l.stderrMinLevel) ||
+		(l.toFile && l.logFile != nil && LevelInfo >= l.fileMinLevel)
+}
+
 // logf is the core logging function
 func (l *Logger) logf(level int, format string, args ...interface{}) {
 	if l == nil || level < l.level {
@@ -418,6 +428,22 @@ func sanitizeOp(op string) string {
 	return replacer.Replace(op)
 }
 
+// ctxKey is the context key for storing ScopedLogger
+type ctxKey struct{}
+
+// WithContext stores a ScopedLogger in the context
+func WithContext(ctx context.Context, sc *ScopedLogger) context.Context {
+	return context.WithValue(ctx, ctxKey{}, sc)
+}
+
+// From retrieves ScopedLogger from context, or returns a default
+func From(ctx context.Context) *ScopedLogger {
+	if sc, ok := ctx.Value(ctxKey{}).(*ScopedLogger); ok && sc != nil {
+		return sc
+	}
+	return GetLogger().NewScope("")
+}
+
 // ScopedLogger provides request-scoped logging
 type ScopedLogger struct {
 	parent *Logger
@@ -478,6 +504,40 @@ func (sc *ScopedLogger) IsDebugEnabled() bool {
 		return false
 	}
 	return sc.parent.IsDebugEnabled()
+}
+
+// IsInfoEnabled returns true if info logging is enabled
+func (sc *ScopedLogger) IsInfoEnabled() bool {
+	if sc == nil || sc.parent == nil {
+		return false
+	}
+	return sc.parent.IsInfoEnabled()
+}
+
+// JSON helper methods
+
+// DebugJSON logs JSON data at debug level
+func (sc *ScopedLogger) DebugJSON(label string, v interface{}) {
+	if !sc.IsDebugEnabled() {
+		return
+	}
+	if b, err := json.Marshal(v); err == nil {
+		sc.Debugf("%s: %s", label, string(b))
+	} else {
+		sc.Debugf("%s: <marshal error: %v>", label, err)
+	}
+}
+
+// InfoJSON logs JSON at info level (typically pre-truncated by caller)
+func (sc *ScopedLogger) InfoJSON(label string, v interface{}) {
+	if !sc.IsInfoEnabled() {
+		return
+	}
+	if b, err := json.Marshal(v); err == nil {
+		sc.Infof("%s: %s", label, string(b))
+	} else {
+		sc.Infof("%s: <marshal error>", label)
+	}
 }
 
 // logf is the core logging function for scoped logger

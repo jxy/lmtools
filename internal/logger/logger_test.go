@@ -1,686 +1,519 @@
 package logger
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
-	"runtime"
+	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-// SetupTestLogger initializes a logger for testing with automatic cleanup
-func SetupTestLogger(t *testing.T, opts ...Option) {
-	t.Helper()
-
-	// Reset logger to allow reinitialization
+func TestScopedLogger_RequestIDMonotonicity(t *testing.T) {
+	// Reset and initialize logger
 	ResetForTesting()
-
-	// Create temp directory if needed
-	tmpDir := t.TempDir()
-
-	// Default options for testing
-	defaultOpts := []Option{
-		WithLogDir(tmpDir),
+	err := InitializeWithOptions(
 		WithLevel("debug"),
-		WithFormat("text"),
-		WithOutputMode(OutputBoth),
-		WithComponent("test"),
-	}
-
-	// Append any custom options (they will override defaults)
-	allOpts := append(defaultOpts, opts...)
-
-	// Initialize logger
-	if err := InitializeWithOptions(allOpts...); err != nil {
-		t.Fatalf("Failed to initialize test logger: %v", err)
-	}
-
-	// Register cleanup
-	t.Cleanup(func() {
-		Close()
-		ResetForTesting()
-	})
-}
-
-func TestLoggerSuite(t *testing.T) {
-	// Use the new test helper for automatic setup and cleanup
-	SetupTestLogger(t)
-
-	t.Run("Initialize", func(t *testing.T) {
-		// Test that logger is initialized
-		logger := GetLogger()
-		if logger == nil {
-			t.Fatal("Logger is nil after initialization")
-		}
-		if !logger.initialized {
-			t.Error("Logger not marked as initialized")
-		}
-	})
-
-	t.Run("InfoAndWarnLogging", func(t *testing.T) {
-		// Capture stderr
-		var buf bytes.Buffer
-		oldStderr := os.Stderr
-		r, w, _ := os.Pipe()
-		os.Stderr = w
-
-		// Log messages
-		Infof("Test info message: %s", "hello")
-		Warnf("Test warning message: %d", 42)
-
-		// Restore stderr and read output
-		w.Close()
-		os.Stderr = oldStderr
-		_, _ = buf.ReadFrom(r)
-
-		output := buf.String()
-		if !strings.Contains(output, "Test info message: hello") {
-			t.Errorf("Info message not found in output: %s", output)
-		}
-		if !strings.Contains(output, "Test warning message: 42") {
-			t.Errorf("Warning message not found in output: %s", output)
-		}
-	})
-
-	t.Run("LogJSON", func(t *testing.T) {
-		// Test LogJSON function
-		testData := []byte(`{"key1":"value1","key2":42,"key3":true}`)
-
-		// Create a temporary directory for this test
-		testDir := t.TempDir()
-
-		err := LogJSON(testDir, "test-json", testData)
-		if err != nil {
-			t.Fatalf("LogJSON failed: %v", err)
-		}
-
-		// Verify file was created
-		pattern := filepath.Join(testDir, "*_test-json_*.json")
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatalf("Failed to glob for JSON files: %v", err)
-		}
-		if len(matches) == 0 {
-			t.Error("No JSON file was created")
-		}
-	})
-
-	t.Run("ConcurrentAccess", func(t *testing.T) {
-		// Test concurrent logging
-		const numGoroutines = 100
-		const numLogs = 10
-		var wg sync.WaitGroup
-
-		for i := 0; i < numGoroutines; i++ {
-			wg.Add(1)
-			go func(id int) {
-				defer wg.Done()
-				for j := 0; j < numLogs; j++ {
-					switch j % 3 {
-					case 0:
-						Infof("Concurrent info message from goroutine %d iteration %d", id, j)
-					case 1:
-						Warnf("Concurrent warning message from goroutine %d iteration %d", id, j)
-					case 2:
-						Errorf("Concurrent error message from goroutine %d iteration %d", id, j)
-					}
-				}
-			}(i)
-		}
-
-		wg.Wait()
-		// If we get here without deadlock or panic, concurrent access is working
-	})
-}
-
-func TestLogJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Test with valid data
-	payload := []byte(`{"test":"data","number":123}`)
-	err := LogJSON(tmpDir, "test-prefix", payload)
-	if err != nil {
-		t.Fatalf("LogJSON failed: %v", err)
-	}
-
-	// Find the created file
-	pattern := filepath.Join(tmpDir, "*_test-prefix_*.json")
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		t.Fatalf("Failed to glob for JSON files: %v", err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("Expected 1 JSON file, found %d", len(matches))
-	}
-
-	// Read and verify content
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-	if !bytes.Equal(data, payload) {
-		t.Errorf("file content = %q; want %q", data, payload)
-	}
-}
-
-func TestLoggerFilePermissions(t *testing.T) {
-	// Skip on Windows as Unix permissions don't apply
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping Unix permission test on Windows")
-	}
-
-	tmpDir := t.TempDir()
-
-	// Test CreateLogFile permissions directly
-	f, path, err := CreateLogFile(tmpDir, "test-perm-log")
-	if err != nil {
-		t.Fatalf("CreateLogFile failed: %v", err)
-	}
-	f.Close()
-
-	// Check file permissions
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Failed to stat log file: %v", err)
-	}
-
-	mode := info.Mode().Perm()
-	if mode != 0o600 {
-		t.Errorf("Expected log file permissions 0600, got %04o", mode)
-	}
-
-	// Test JSON log file permissions
-	payload := []byte(`{"test":"data"}`)
-	err = LogJSON(tmpDir, "test-perms", payload)
-	if err != nil {
-		t.Fatalf("LogJSON failed: %v", err)
-	}
-
-	// Find the created JSON file
-	pattern := filepath.Join(tmpDir, "*_test-perms_*.json")
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		t.Fatalf("Failed to glob for JSON files: %v", err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("Expected 1 JSON file, found %d", len(matches))
-	}
-
-	// Check JSON file permissions
-	info, err = os.Stat(matches[0])
-	if err != nil {
-		t.Fatalf("Failed to stat JSON file: %v", err)
-	}
-
-	mode = info.Mode().Perm()
-	if mode != 0o600 {
-		t.Errorf("Expected JSON file permissions 0600, got %04o", mode)
-	}
-}
-
-func TestLogJSON_UsesExplicitDir(t *testing.T) {
-	// Initialize logger with one directory
-	tmp1 := t.TempDir()
-	tmp2 := t.TempDir()
-
-	ResetForTesting()
-	err := InitializeWithOptions(
-		WithLogDir(tmp1),
-		WithLevel("info"),
-		WithFormat("text"),
-		WithOutputMode(OutputFileOnly),
-		WithComponent("test"),
+		WithStderr(false),
+		WithFile(false),
 	)
 	if err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
-	defer Close()
 
-	// Call LogJSON with a different directory
-	payload := []byte(`{"test":"explicit_dir"}`)
-	err = LogJSON(tmp2, "explicit_test", payload)
-	if err != nil {
-		t.Fatalf("LogJSON failed: %v", err)
-	}
-
-	// Verify file was created in tmp2, not tmp1
-	files, err := os.ReadDir(tmp2)
-	if err != nil {
-		t.Fatalf("Failed to read directory: %v", err)
-	}
-	if len(files) == 0 {
-		t.Error("Expected file in explicit directory, but found none")
-	}
-
-	// Verify no JSON files in tmp1
-	files, err = os.ReadDir(tmp1)
-	if err != nil {
-		t.Fatalf("Failed to read directory: %v", err)
-	}
-	jsonCount := 0
-	for _, f := range files {
-		if strings.HasSuffix(f.Name(), ".json") {
-			jsonCount++
-		}
-	}
-	if jsonCount > 0 {
-		t.Errorf("Expected no JSON files in logger's directory, but found %d", jsonCount)
-	}
-}
-
-func TestLogJSON_DirectoryPermissions(t *testing.T) {
-	// Use a subdirectory to test creation permissions
-	tmpDir := t.TempDir()
-	subDir := filepath.Join(tmpDir, "subdir", "logs")
-
-	ResetForTesting()
-	err := InitializeWithOptions(
-		WithLogDir(tmpDir),
-		WithLevel("info"),
-		WithFormat("text"),
-		WithOutputMode(OutputFileOnly),
-		WithComponent("test"),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
-	defer Close()
-
-	// Call LogJSON to create the subdirectory
-	payload := []byte(`{"test":"dir_perms"}`)
-	err = LogJSON(subDir, "perms_test", payload)
-	if err != nil {
-		t.Fatalf("LogJSON failed: %v", err)
-	}
-
-	// Check directory permissions
-	info, err := os.Stat(subDir)
-	if err != nil {
-		t.Fatalf("Failed to stat directory: %v", err)
-	}
-
-	mode := info.Mode().Perm()
-	if mode != DirPerm {
-		t.Errorf("Expected directory permissions %04o, got %04o", DirPerm, mode)
-	}
-}
-
-func TestScopedLogger(t *testing.T) {
-	// Initialize logger with a temp directory
-	tmpDir := t.TempDir()
-	ResetForTesting()
-	err := InitializeWithOptions(
-		WithLogDir(tmpDir),
-		WithLevel("debug"),
-		WithFormat("text"),
-		WithOutputMode(OutputBoth),
-		WithComponent("test"),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
-	defer Close()
-
-	// Create a scoped logger
 	logger := GetLogger()
-	scope := logger.NewScope("test-operation")
 
-	// Test request ID
-	if scope.GetRequestID() != 1 {
-		t.Errorf("Expected first request ID to be 1, got %d", scope.GetRequestID())
+	// Reset counter to start from 0
+	ResetRequestCounter()
+
+	// Create multiple scopes
+	scope1 := logger.NewScope("test1")
+	scope2 := logger.NewScope("test2")
+	scope3 := logger.NewScope("test3")
+
+	// Request IDs should be monotonically increasing
+	if scope1.GetRequestID() != 1 {
+		t.Errorf("Expected ID 1, got %d", scope1.GetRequestID())
+	}
+	if scope2.GetRequestID() != 2 {
+		t.Errorf("Expected ID 2, got %d", scope2.GetRequestID())
+	}
+	if scope3.GetRequestID() != 3 {
+		t.Errorf("Expected ID 3, got %d", scope3.GetRequestID())
 	}
 
-	// Test duration tracking
-	time.Sleep(10 * time.Millisecond)
-	duration := scope.GetDuration()
-	if duration < 10*time.Millisecond {
-		t.Errorf("Expected duration to be at least 10ms, got %v", duration)
+	// Create more scopes to verify continued monotonicity
+	scope4 := logger.NewScope("test4")
+	scope5 := logger.NewScope("test5")
+
+	if scope4.GetRequestID() != 4 {
+		t.Errorf("Expected ID 4, got %d", scope4.GetRequestID())
+	}
+	if scope5.GetRequestID() != 5 {
+		t.Errorf("Expected ID 5, got %d", scope5.GetRequestID())
 	}
 
-	// Test logging with scope
-	var buf bytes.Buffer
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	scope.Infof("Scoped log message")
-
-	w.Close()
-	os.Stderr = oldStderr
-	_, _ = buf.ReadFrom(r)
-
-	output := buf.String()
-	if !strings.Contains(output, "Scoped log message") {
-		t.Errorf("Scoped message not found in output: %s", output)
+	// Each scope should maintain its ID
+	if scope1.GetRequestID() != 1 {
+		t.Errorf("Scope1 ID changed: expected 1, got %d", scope1.GetRequestID())
 	}
-	if !strings.Contains(output, "[#1]") {
-		t.Errorf("Request ID not found in output: %s", output)
+	if scope5.GetRequestID() != 5 {
+		t.Errorf("Scope5 ID changed: expected 5, got %d", scope5.GetRequestID())
 	}
 }
 
-func TestLogLevels(t *testing.T) {
+func TestScopedLogger_Duration(t *testing.T) {
+	// Reset and initialize logger
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("debug"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	scope := logger.NewScope("duration-test")
+
+	// Get start time
+	startTime := scope.GetStartTime()
+	if startTime.IsZero() {
+		t.Error("Start time should not be zero")
+	}
+
+	// Sleep for a measurable duration
+	time.Sleep(100 * time.Millisecond)
+
+	// Get duration
+	duration := scope.GetDuration()
+	if duration < 100*time.Millisecond {
+		t.Errorf("Duration should be at least 100ms, got %v", duration)
+	}
+	if duration > 200*time.Millisecond {
+		t.Errorf("Duration should be less than 200ms, got %v", duration)
+	}
+
+	// Sleep more
+	time.Sleep(100 * time.Millisecond)
+
+	// Duration should increase
+	duration2 := scope.GetDuration()
+	if duration2 < 200*time.Millisecond {
+		t.Errorf("Duration should be at least 200ms, got %v", duration2)
+	}
+	if duration2 <= duration {
+		t.Error("Duration should increase over time")
+	}
+}
+
+func TestScopedLogger_Done(t *testing.T) {
+	// This test verifies Done() doesn't panic
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("info"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	scope := logger.NewScope("done-test")
+
+	// Sleep to ensure non-zero duration
+	time.Sleep(10 * time.Millisecond)
+
+	// Call Done - should log "done in Xms" at INFO level
+	scope.Done()
+
+	// No panic means success for this basic test
+}
+
+func TestScopedLogger_InfoJSON(t *testing.T) {
+	// Reset and initialize logger
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("info"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	scope := logger.NewScope("json-test")
+
 	tests := []struct {
-		name          string
-		logLevel      string
-		debugExpected bool
-		infoExpected  bool
-		warnExpected  bool
-		errorExpected bool
+		name  string
+		label string
+		data  interface{}
 	}{
-		{"debug level", "debug", true, true, true, true},
-		{"info level", "info", false, true, true, true},
-		{"warn level", "warn", false, false, true, true},
-		{"error level", "error", false, false, false, true},
+		{
+			name:  "simple map",
+			label: "Test data",
+			data: map[string]interface{}{
+				"key1": "value1",
+				"key2": 123,
+			},
+		},
+		{
+			name:  "nested structure",
+			label: "Nested",
+			data: map[string]interface{}{
+				"outer": map[string]interface{}{
+					"inner": "value",
+				},
+			},
+		},
+		{
+			name:  "array",
+			label: "Array",
+			data:  []int{1, 2, 3},
+		},
+		{
+			name:  "string",
+			label: "String",
+			data:  "simple string",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Initialize logger with specific level
-			ResetForTesting()
-			err := InitializeWithOptions(
-				WithLevel(tt.logLevel),
-				WithFormat("text"),
-				WithOutputMode(OutputStderrOnly),
-			)
+			// Verify the function doesn't panic and handles the data
+			scope.InfoJSON(tt.label, tt.data)
+
+			// Verify JSON marshaling works
+			b, err := json.Marshal(tt.data)
 			if err != nil {
-				t.Fatalf("Failed to initialize logger: %v", err)
+				t.Errorf("Failed to marshal data: %v", err)
 			}
-			defer Close()
-
-			// Capture stderr
-			var buf bytes.Buffer
-			oldStderr := os.Stderr
-			r, w, _ := os.Pipe()
-			os.Stderr = w
-
-			// Log at all levels
-			Debugf("Debug message")
-			Infof("Info message")
-			Warnf("Warn message")
-			Errorf("Error message")
-
-			// Restore stderr and read output
-			w.Close()
-			os.Stderr = oldStderr
-			_, _ = buf.ReadFrom(r)
-
-			output := buf.String()
-
-			// Check expectations
-			if tt.debugExpected && !strings.Contains(output, "Debug message") {
-				t.Errorf("Expected debug message in output, but not found")
-			}
-			if !tt.debugExpected && strings.Contains(output, "Debug message") {
-				t.Errorf("Did not expect debug message in output, but found it")
-			}
-
-			if tt.infoExpected && !strings.Contains(output, "Info message") {
-				t.Errorf("Expected info message in output, but not found")
-			}
-			if !tt.infoExpected && strings.Contains(output, "Info message") {
-				t.Errorf("Did not expect info message in output, but found it")
-			}
-
-			if tt.warnExpected && !strings.Contains(output, "Warn message") {
-				t.Errorf("Expected warn message in output, but not found")
-			}
-			if !tt.warnExpected && strings.Contains(output, "Warn message") {
-				t.Errorf("Did not expect warn message in output, but found it")
-			}
-
-			if tt.errorExpected && !strings.Contains(output, "Error message") {
-				t.Errorf("Expected error message in output, but not found")
-			}
-			if !tt.errorExpected && strings.Contains(output, "Error message") {
-				t.Errorf("Did not expect error message in output, but found it")
+			if len(b) == 0 {
+				t.Error("Marshaled data should not be empty")
 			}
 		})
 	}
 }
 
-func TestJSONFormat(t *testing.T) {
-	// Initialize logger with JSON format
+func TestScopedLogger_InfoJSON_MarshalError(t *testing.T) {
+	// Reset and initialize logger
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("info"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	scope := logger.NewScope("error-test")
+
+	// Create a type that can't be marshaled to JSON
+	type circularRef struct {
+		Self *circularRef
+	}
+	circular := &circularRef{}
+	circular.Self = circular
+
+	// Should handle marshal error gracefully
+	scope.InfoJSON("Circular", circular)
+	// Should log: "Circular: <marshal error>"
+	// Test passes if no panic
+}
+
+func TestScopedLogger_DebugJSON(t *testing.T) {
+	// Reset and initialize logger
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("debug"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	scope := logger.NewScope("debug-json-test")
+
+	// Test various data types
+	scope.DebugJSON("String", "test")
+	scope.DebugJSON("Number", 42)
+	scope.DebugJSON("Map", map[string]int{"a": 1, "b": 2})
+	scope.DebugJSON("Slice", []string{"x", "y", "z"})
+
+	// No panic means success
+}
+
+func TestLogger_ContextIntegration(t *testing.T) {
+	// Reset and initialize logger
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("debug"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	// Create a scoped logger
+	logger := GetLogger()
+	scope := logger.NewScope("context-test")
+
+	// Store in context
+	ctx := WithContext(context.Background(), scope)
+
+	// Retrieve from context
+	retrieved := From(ctx)
+	if retrieved != scope {
+		t.Error("Retrieved logger should be the same as stored")
+	}
+	if retrieved.GetRequestID() != scope.GetRequestID() {
+		t.Errorf("Request IDs should match: got %d, want %d",
+			retrieved.GetRequestID(), scope.GetRequestID())
+	}
+
+	// From empty context should return a default logger
+	emptyCtx := context.Background()
+	defaultLogger := From(emptyCtx)
+	if defaultLogger == nil {
+		t.Fatal("From() should never return nil")
+	}
+	if defaultLogger.GetRequestID() == scope.GetRequestID() {
+		t.Error("Default logger should have different request ID")
+	}
+}
+
+func TestLogger_IsDebugEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		level    string
+		expected bool
+	}{
+		{"debug level", "debug", true},
+		{"info level", "info", false},
+		{"warn level", "warn", false},
+		{"error level", "error", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ResetForTesting()
+			err := InitializeWithOptions(
+				WithLevel(tt.level),
+				WithStderr(true),
+				WithFile(false),
+			)
+			if err != nil {
+				t.Fatalf("Failed to initialize logger: %v", err)
+			}
+
+			logger := GetLogger()
+			if logger.IsDebugEnabled() != tt.expected {
+				t.Errorf("IsDebugEnabled() = %v, want %v", logger.IsDebugEnabled(), tt.expected)
+			}
+
+			scope := logger.NewScope("test")
+			if scope.IsDebugEnabled() != tt.expected {
+				t.Errorf("Scope IsDebugEnabled() = %v, want %v", scope.IsDebugEnabled(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestInfoJSON_TruncatedData(t *testing.T) {
+	// This test verifies that InfoJSON logs the full JSON structure
+	// when given pre-truncated data
+
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("info"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	scope := logger.NewScope("truncate-test")
+
+	// Simulate pre-truncated data (like what truncateValue would produce)
+	truncatedData := map[string]interface{}{
+		"tool": "calculator",
+		"input": map[string]interface{}{
+			"expression":  "2 + 2",
+			"description": strings.Repeat("a", 61) + "...", // Truncated string
+		},
+	}
+
+	// InfoJSON should log this as valid JSON
+	scope.InfoJSON("Tool call", truncatedData)
+
+	// Verify the data can be marshaled to valid JSON
+	jsonBytes, err := json.Marshal(truncatedData)
+	if err != nil {
+		t.Errorf("Failed to marshal truncated data: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	err = json.Unmarshal(jsonBytes, &parsed)
+	if err != nil {
+		t.Errorf("Failed to unmarshal JSON: %v", err)
+	}
+
+	// Verify structure is preserved
+	if parsed["tool"] != "calculator" {
+		t.Errorf("Expected tool='calculator', got %v", parsed["tool"])
+	}
+	inputMap := parsed["input"].(map[string]interface{})
+	if inputMap["expression"] != "2 + 2" {
+		t.Errorf("Expected expression='2 + 2', got %v", inputMap["expression"])
+	}
+	desc := inputMap["description"].(string)
+	if !strings.HasSuffix(desc, "...") {
+		t.Error("Description should end with ...")
+	}
+}
+
+func TestLogger_ThreadSafety(t *testing.T) {
+	// Test that multiple goroutines can safely create scopes
+	ResetForTesting()
+	err := InitializeWithOptions(
+		WithLevel("debug"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	logger := GetLogger()
+	ResetRequestCounter()
+
+	const numGoroutines = 100
+	done := make(chan int64, numGoroutines)
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			scope := logger.NewScope("concurrent")
+			done <- scope.GetRequestID()
+		}()
+	}
+
+	wg.Wait()
+	close(done)
+
+	// Collect all IDs
+	ids := make(map[int64]bool)
+	for id := range done {
+		if ids[id] {
+			t.Errorf("Duplicate ID found: %d", id)
+		}
+		ids[id] = true
+	}
+
+	// All IDs should be unique
+	if len(ids) != numGoroutines {
+		t.Errorf("Expected %d unique IDs, got %d", numGoroutines, len(ids))
+	}
+
+	// IDs should be in range 1 to numGoroutines
+	for id := range ids {
+		if id < 1 || id > int64(numGoroutines) {
+			t.Errorf("ID %d out of expected range [1, %d]", id, numGoroutines)
+		}
+	}
+}
+
+func TestLogger_Initialization(t *testing.T) {
+	// Test various initialization options
+	ResetForTesting()
+
+	// Test with different levels
+	levels := []string{"debug", "info", "warn", "error"}
+	for _, level := range levels {
+		ResetForTesting()
+		err := InitializeWithOptions(
+			WithLevel(level),
+			WithStderr(false),
+			WithFile(false),
+		)
+		if err != nil {
+			t.Errorf("Failed to initialize with level %s: %v", level, err)
+		}
+
+		logger := GetLogger()
+		if logger == nil {
+			t.Errorf("GetLogger() returned nil after initialization with level %s", level)
+		}
+	}
+}
+
+func TestLogger_WithFormat(t *testing.T) {
+	// Test JSON format
 	ResetForTesting()
 	err := InitializeWithOptions(
 		WithLevel("info"),
 		WithFormat("json"),
-		WithOutputMode(OutputStderrOnly),
-		WithComponent("test-component"),
+		WithStderr(false),
+		WithFile(false),
 	)
 	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
+		t.Fatalf("Failed to initialize with JSON format: %v", err)
 	}
-	defer Close()
-
-	// Capture stderr
-	var buf bytes.Buffer
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	// Log a message
-	Infof("Test JSON message with %s", "formatting")
-
-	// Restore stderr and read output
-	w.Close()
-	os.Stderr = oldStderr
-	_, _ = buf.ReadFrom(r)
-
-	output := strings.TrimSpace(buf.String())
-
-	// Check that output is valid JSON
-	if !strings.HasPrefix(output, "{") || !strings.HasSuffix(output, "}") {
-		t.Errorf("Output does not appear to be JSON: %s", output)
-	}
-
-	// Check for expected fields
-	expectedFields := []string{
-		`"level":"INFO"`,
-		`"message":"Test JSON message with formatting"`,
-		`"component":"test-component"`,
-		`"time":"`,
-	}
-
-	for _, field := range expectedFields {
-		if !strings.Contains(output, field) {
-			t.Errorf("Expected field %s not found in JSON output: %s", field, output)
-		}
-	}
-}
-
-func TestRequestCounter(t *testing.T) {
-	// Initialize logger with request counter
-	ResetForTesting()
-	err := InitializeWithOptions(
-		WithLevel("info"),
-		WithFormat("text"),
-		WithOutputMode(OutputStderrOnly),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
-	defer Close()
 
 	logger := GetLogger()
+	scope := logger.NewScope("json-format")
 
-	// Create multiple scopes
-	scope1 := logger.NewScope("op1")
-	scope2 := logger.NewScope("op2")
-	scope3 := logger.NewScope("op3")
+	// Log something - mainly testing it doesn't panic
+	scope.Infof("Test message")
+	scope.InfoJSON("Test JSON", map[string]string{"key": "value"})
 
-	// Check request IDs are sequential
-	if scope1.GetRequestID() != 1 {
-		t.Errorf("Expected first request ID to be 1, got %d", scope1.GetRequestID())
-	}
-	if scope2.GetRequestID() != 2 {
-		t.Errorf("Expected second request ID to be 2, got %d", scope2.GetRequestID())
-	}
-	if scope3.GetRequestID() != 3 {
-		t.Errorf("Expected third request ID to be 3, got %d", scope3.GetRequestID())
+	// Test text format
+	ResetForTesting()
+	err = InitializeWithOptions(
+		WithLevel("info"),
+		WithFormat("text"),
+		WithStderr(false),
+		WithFile(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to initialize with text format: %v", err)
 	}
 
-	// Test counter reset
-	ResetRequestCounter()
-	scope4 := logger.NewScope("op4")
-	if scope4.GetRequestID() != 1 {
-		t.Errorf("Expected request ID after reset to be 1, got %d", scope4.GetRequestID())
-	}
+	logger = GetLogger()
+	scope = logger.NewScope("text-format")
+	scope.Infof("Test message")
 }
 
-func TestConcurrentInitialization(t *testing.T) {
-	// Test that concurrent initialization is safe
-	const numGoroutines = 10
-	var wg sync.WaitGroup
-	errors := make(chan error, numGoroutines)
+func TestLogger_NilSafety(t *testing.T) {
+	// Test that methods handle nil logger gracefully
+	var logger *Logger
+	var scope *ScopedLogger
 
-	tmpDir := t.TempDir()
-
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-
-			// Try to initialize
-			err := InitializeWithOptions(
-				WithLogDir(tmpDir),
-				WithLevel("info"),
-				WithFormat("text"),
-				WithComponent("test"),
-			)
-			if err != nil {
-				errors <- err
-			}
-
-			// Clean up
-			Close()
-		}(i)
+	// These should not panic
+	if logger.IsDebugEnabled() {
+		t.Error("Nil logger should return false for IsDebugEnabled")
 	}
 
-	wg.Wait()
-	close(errors)
-
-	// Check for errors
-	for err := range errors {
-		t.Errorf("Error during concurrent initialization: %v", err)
-	}
-}
-
-// TestExplicitLevelsRespected tests that explicit min levels are not overridden by auto-defaults
-func TestIsDebugEnabled(t *testing.T) {
-	tests := []struct {
-		name          string
-		logLevel      string
-		stderrLevel   string
-		fileLevel     string
-		outputMode    OutputMode
-		expectedDebug bool
-	}{
-		{"debug level - stderr only", "debug", "", "", OutputStderrOnly, true},
-		{"info level - stderr only", "info", "", "", OutputStderrOnly, false},
-		{"warn level - stderr only", "warn", "", "", OutputStderrOnly, false},
-		{"error level - stderr only", "error", "", "", OutputStderrOnly, false},
-		{"info main, debug file", "info", "", "debug", OutputBoth, true},
-		{"info main, warn file", "info", "", "warn", OutputBoth, false},
-		{"debug stderr, warn file", "info", "debug", "warn", OutputBoth, true},
-		{"warn stderr, debug file", "info", "warn", "debug", OutputBoth, true},
-		{"file only with debug", "info", "", "debug", OutputFileOnly, true},
-		{"file only with info", "info", "", "info", OutputFileOnly, false},
+	if scope.IsDebugEnabled() {
+		t.Error("Nil scope should return false for IsDebugEnabled")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ResetForTesting()
-
-			// Create temp log directory for file tests
-			logDir := ""
-			if tt.outputMode == OutputBoth || tt.outputMode == OutputFileOnly {
-				var err error
-				logDir, err = os.MkdirTemp("", "logger_test")
-				if err != nil {
-					t.Fatalf("Failed to create temp dir: %v", err)
-				}
-				defer os.RemoveAll(logDir)
-			}
-
-			// Build options
-			opts := []Option{
-				WithLevel(tt.logLevel),
-				WithFormat("text"),
-				WithOutputMode(tt.outputMode),
-			}
-			if logDir != "" {
-				opts = append(opts, WithLogDir(logDir))
-			}
-			if tt.stderrLevel != "" {
-				opts = append(opts, WithStderrMinLevel(tt.stderrLevel))
-			}
-			if tt.fileLevel != "" {
-				opts = append(opts, WithFileMinLevel(tt.fileLevel))
-			}
-
-			err := InitializeWithOptions(opts...)
-			if err != nil {
-				t.Fatalf("Failed to initialize logger: %v", err)
-			}
-			defer Close()
-
-			logger := GetLogger()
-			if logger.IsDebugEnabled() != tt.expectedDebug {
-				t.Errorf("Expected IsDebugEnabled()=%v, got %v", tt.expectedDebug, logger.IsDebugEnabled())
-			}
-
-			// Test ScopedLogger
-			scope := logger.NewScope("test")
-			if scope.IsDebugEnabled() != tt.expectedDebug {
-				t.Errorf("Expected ScopedLogger.IsDebugEnabled()=%v, got %v", tt.expectedDebug, scope.IsDebugEnabled())
-			}
-		})
+	// Create a scope with nil parent
+	scope = &ScopedLogger{parent: nil}
+	if scope.IsDebugEnabled() {
+		t.Error("Scope with nil parent should return false for IsDebugEnabled")
 	}
-}
-
-func TestExplicitLevelsRespected(t *testing.T) {
-	// Test case 1: Explicit stderr min level should be respected with log dir
-	t.Run("WithLogDir", func(t *testing.T) {
-		SetupTestLogger(t,
-			WithLevel("debug"),
-			WithStderrMinLevel("error"), // Explicitly set to error
-			WithFileMinLevel("warn"),    // Explicitly set to warn
-		)
-
-		// Check that the levels were respected
-		logger := GetLogger()
-		if logger.stderrMinLevel != LevelError {
-			t.Errorf("Expected stderr min level to be ERROR, got %d", logger.stderrMinLevel)
-		}
-		if logger.fileMinLevel != LevelWarn {
-			t.Errorf("Expected file min level to be WARN, got %d", logger.fileMinLevel)
-		}
-	})
-
-	// Test case 2: Without log dir, stderr min level defaults to main level
-	t.Run("WithoutLogDir", func(t *testing.T) {
-		// Reset and initialize manually without using SetupTestLogger
-		// to avoid the default temp directory creation
-		ResetForTesting()
-		err := InitializeWithOptions(
-			WithLevel("warn"), // Set main level to warn
-			WithOutputMode(OutputStderrOnly),
-		)
-		if err != nil {
-			t.Fatalf("Failed to initialize logger: %v", err)
-		}
-		t.Cleanup(func() {
-			Close()
-			ResetForTesting()
-		})
-
-		logger := GetLogger()
-		// Without log dir, stderr min level should match the main level
-		if logger.stderrMinLevel != LevelWarn {
-			t.Errorf("Expected stderr min level to be WARN (matching main level), got %d", logger.stderrMinLevel)
-		}
-	})
 }

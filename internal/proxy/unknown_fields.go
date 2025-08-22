@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/logger"
 	"reflect"
 	"strings"
 )
@@ -81,7 +82,7 @@ func logUnknownFields(ctx context.Context, jsonData []byte, v interface{}, reque
 
 	unknownFields, err := detectUnknownFields(jsonData, v)
 	if err != nil {
-		LogDebugCtx(ctx, fmt.Sprintf("Failed to detect unknown fields in %s: %v", requestType, err))
+		logger.From(ctx).Debugf("Failed to detect unknown fields in %s: %v", requestType, err)
 		return
 	}
 
@@ -89,7 +90,7 @@ func logUnknownFields(ctx context.Context, jsonData []byte, v interface{}, reque
 		// Extract values for the unknown fields
 		var jsonMap map[string]interface{}
 		if err := json.Unmarshal(jsonData, &jsonMap); err != nil {
-			LogDebugCtx(ctx, fmt.Sprintf("Failed to unmarshal JSON for unknown field values in %s: %v", requestType, err))
+			logger.From(ctx).Debugf("Failed to unmarshal JSON for unknown field values in %s: %v", requestType, err)
 			return
 		}
 
@@ -98,6 +99,6 @@ func logUnknownFields(ctx context.Context, jsonData []byte, v interface{}, reque
 			fieldInfo[field] = jsonMap[field]
 		}
 
-		LogDebugCtx(ctx, fmt.Sprintf("Unknown fields in %s (will be ignored): %v", requestType, fieldInfo))
+		logger.From(ctx).DebugJSON(fmt.Sprintf("Unknown fields in %s (will be ignored)", requestType), fieldInfo)
 	}
 }
