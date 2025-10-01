@@ -3,9 +3,11 @@ package retry
 import (
 	"bytes"
 	"context"
-	"errors"
+	stdErrors "errors"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
+	"lmtools/internal/errors"
 	"math"
 	"math/rand"
 	"net"
@@ -29,7 +31,7 @@ type Config struct {
 // DefaultConfig returns default retry configuration
 func DefaultConfig() *Config {
 	return &Config{
-		MaxRetries:     3,
+		MaxRetries:     10,
 		InitialBackoff: 1 * time.Second,
 		MaxBackoff:     30 * time.Second,
 		BackoffFactor:  2.0,
@@ -39,7 +41,7 @@ func DefaultConfig() *Config {
 // ProviderConfig returns provider-specific retry configuration
 func ProviderConfig(provider string) *Config {
 	switch provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		// OpenAI has aggressive rate limiting
 		return &Config{
 			MaxRetries:     8,
@@ -47,7 +49,7 @@ func ProviderConfig(provider string) *Config {
 			MaxBackoff:     60 * time.Second,
 			BackoffFactor:  2.0,
 		}
-	case "google":
+	case constants.ProviderGoogle:
 		// Google is generally more lenient
 		return &Config{
 			MaxRetries:     8,
@@ -55,7 +57,7 @@ func ProviderConfig(provider string) *Config {
 			MaxBackoff:     20 * time.Second,
 			BackoffFactor:  1.5,
 		}
-	case "argo", "lmc":
+	case constants.ProviderArgo, "lmc":
 		// Internal service, enhanced retry with exponential backoff
 		return &Config{
 			MaxRetries:     10,
@@ -123,11 +125,8 @@ func (r *Retryer) getLogger(ctx context.Context) Logger {
 // Do executes an HTTP request with retry logic
 func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request, bodyBytes []byte) (*http.Response, error) {
 	if r.config.MaxRetries < 0 {
-		return nil, fmt.Errorf("max retries must be >= 0")
+		return nil, errors.WrapError("validate retry config", stdErrors.New("max retries must be >= 0"))
 	}
-
-	// Resolve logger once for this operation
-	logger := r.getLogger(ctx)
 
 	var lastErr error
 	var overrideBackoff time.Duration
@@ -143,7 +142,10 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			}
 
 			// Try to get request logger from context first
-			logger.Infof("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
+			logger := r.getLogger(ctx)
+			if logger != nil {
+				logger.Infof("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
+			}
 
 			select {
 			case <-ctx.Done():
@@ -164,16 +166,16 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 		resp, err := client.Do(reqClone)
 		if err != nil {
 			// Don't retry on context cancellation
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
 			// Only retry on network timeout errors
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				lastErr = fmt.Errorf("attempt %d: %s %s -> %v", attempt+1, req.Method, req.URL, err)
+				lastErr = errors.WrapError("execute request", fmt.Errorf("attempt %d: %s %s -> %v", attempt+1, req.Method, req.URL, err))
 				continue
 			}
 			// Permanent error
-			return nil, fmt.Errorf("permanent error on attempt %d: %s %s -> %v", attempt+1, req.Method, req.URL, err)
+			return nil, errors.WrapError("execute request", fmt.Errorf("permanent error on attempt %d: %s %s -> %v", attempt+1, req.Method, req.URL, err))
 		}
 
 		// Check if response is retryable
@@ -184,7 +186,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 
 		// Drain and close response body for connection reuse
 		DrainAndClose(resp)
-		lastErr = fmt.Errorf("attempt %d: %s %s -> HTTP %d", attempt+1, req.Method, req.URL, resp.StatusCode)
+		lastErr = errors.WrapError("HTTP request", fmt.Errorf("attempt %d: %s %s -> HTTP %d", attempt+1, req.Method, req.URL, resp.StatusCode))
 
 		// Parse Retry-After header if present
 		if retryAfter := ExtractRetryAfter(resp); retryAfter > 0 {
@@ -192,12 +194,15 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			// Use the maximum of Retry-After and calculated backoff
 			if retryAfter > nextBackoff {
 				overrideBackoff = retryAfter
-				logger.Infof("Retry-After header suggests waiting %v (vs calculated %v)", retryAfter, nextBackoff)
+				logger := r.getLogger(ctx)
+				if logger != nil {
+					logger.Infof("Retry-After header suggests waiting %v (vs calculated %v)", retryAfter, nextBackoff)
+				}
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("all %d attempts failed for %s %s, last error: %w", r.config.MaxRetries+1, req.Method, req.URL, lastErr)
+	return nil, errors.WrapError("retry exhausted", fmt.Errorf("all %d attempts failed for %s %s, last error: %w", r.config.MaxRetries+1, req.Method, req.URL, lastErr))
 }
 
 // DoWithFunc executes a function with retry logic
@@ -213,7 +218,9 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 			backoff := r.calculateBackoff(attempt - 1)
 
 			// Try to get request logger from context first
-			logger.Debugf("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
+			if logger != nil {
+				logger.Debugf("Retry attempt %d/%d after %v due to: %v", attempt, r.config.MaxRetries, backoff, lastErr)
+			}
 
 			select {
 			case <-ctx.Done():
@@ -234,9 +241,11 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 			}
 			// Log error response for debugging
 			if resp.StatusCode >= 500 {
-				logger.Errorf("HTTP %d error response from %s", resp.StatusCode, resp.Request.URL)
+				if logger != nil {
+					logger.Errorf("HTTP %d error response from %s", resp.StatusCode, resp.Request.URL)
+				}
 			}
-			lastErr = fmt.Errorf("HTTP %d response", resp.StatusCode)
+			lastErr = errors.WrapError("HTTP response", fmt.Errorf("HTTP %d response", resp.StatusCode))
 		} else {
 			lastErr = err
 		}
@@ -247,7 +256,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 		}
 	}
 
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+	return nil, errors.WrapError("max retries exceeded", lastErr)
 }
 
 // shouldRetryResponse determines if a response warrants a retry

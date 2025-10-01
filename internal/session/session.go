@@ -1,10 +1,13 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
+	stdErrors "errors"
 	"fmt"
-	"io/fs"
+	"lmtools/internal/constants"
+	"lmtools/internal/core"
+	"lmtools/internal/errors"
 	"lmtools/internal/logger"
 	"os"
 	"path/filepath"
@@ -16,10 +19,10 @@ import (
 )
 
 var (
-	// ErrMaxRetriesExceeded is returned when AppendMessage fails after maximum retry attempts
-	ErrMaxRetriesExceeded = errors.New("exceeded maximum retry attempts")
+	// ErrMaxRetriesExceeded is returned when AppendMessageWithToolInteraction fails after maximum retry attempts
+	ErrMaxRetriesExceeded = stdErrors.New("exceeded maximum retry attempts")
 	// ErrSiblingOverflow is returned when too many sibling branches exist
-	ErrSiblingOverflow = errors.New("too many sibling branches")
+	ErrSiblingOverflow = stdErrors.New("too many sibling branches")
 )
 
 // Session represents a conversation session
@@ -33,21 +36,18 @@ var flockChecked bool
 
 // TestFlockSupport checks if the filesystem supports flock
 func TestFlockSupport() error {
-	// Ensure ~/.lmc exists
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+	// Use the sessions directory for testing
+	sessionsDir := GetSessionsDir()
+	// Ensure the parent directory exists
+	parentDir := filepath.Dir(sessionsDir)
+	if err := os.MkdirAll(parentDir, constants.DirPerm); err != nil {
+		return errors.WrapError("create parent directory", err)
 	}
 
-	lmcDir := filepath.Join(homeDir, ".lmc")
-	if err := os.MkdirAll(lmcDir, 0o750); err != nil {
-		return fmt.Errorf("failed to create lmc directory: %w", err)
-	}
-
-	// Create test file in ~/.lmc
-	testFile, err := os.CreateTemp(lmcDir, ".flock-test-*")
+	// Create test file in the parent directory
+	testFile, err := os.CreateTemp(parentDir, ".flock-test-*")
 	if err != nil {
-		return fmt.Errorf("failed to create test file: %w", err)
+		return errors.WrapError("create test file", err)
 	}
 	defer os.Remove(testFile.Name())
 	defer testFile.Close()
@@ -55,12 +55,12 @@ func TestFlockSupport() error {
 	// Test flock
 	fd := int(testFile.Fd())
 	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fmt.Errorf("flock not supported on %s: %w", lmcDir, err)
+		return errors.WrapError("flock test", err)
 	}
 
 	// Clean unlock
 	if err := syscall.Flock(fd, syscall.LOCK_UN); err != nil {
-		return fmt.Errorf("flock unlock failed: %w", err)
+		return errors.WrapError("flock unlock", err)
 	}
 
 	return nil
@@ -68,11 +68,17 @@ func TestFlockSupport() error {
 
 // Message represents a single message in a conversation
 type Message struct {
-	ID        string // Message hex ID (e.g., "0002")
-	Role      string // "user" or "assistant"
-	Content   string // Message text
+	ID        string    // Message hex ID (e.g., "0002")
+	Role      core.Role // "user" or "assistant"
+	Content   string    // Message text
 	Timestamp time.Time
 	Model     string // Model name (empty for user messages)
+}
+
+// SaveResult represents the result of a session save operation
+type SaveResult struct {
+	Path      string // Final path of saved message
+	MessageID string // Unique message identifier
 }
 
 // sessionsBaseDir can be overridden for testing or custom directory
@@ -112,14 +118,17 @@ func GetSessionsDir() string {
 }
 
 // CreateSession creates a new session with a sequential ID
-func CreateSession() (*Session, error) {
+// If systemPrompt is not empty, it will be saved as message 0000
+func CreateSession(systemPrompt string, log core.Logger) (*Session, error) {
 	// Test flock support once (only on first session creation)
 	if !flockChecked {
 		// Skip check if flag is set
 		if !skipFlockCheck {
 			if err := TestFlockSupport(); err != nil {
-				logger.Warnf("File locking may not work properly: %v", err)
-				logger.Warnf("Concurrent access to sessions may cause issues")
+				if log != nil {
+					log.Debugf("File locking may not work properly: %v", err)
+					log.Debugf("Concurrent access to sessions may cause issues")
+				}
 				// Continue anyway - some users might not need locking
 			}
 		}
@@ -127,14 +136,14 @@ func CreateSession() (*Session, error) {
 	}
 
 	sessionsDir := GetSessionsDir()
-	if err := os.MkdirAll(sessionsDir, 0o750); err != nil {
-		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
+	if err := os.MkdirAll(sessionsDir, constants.DirPerm); err != nil {
+		return nil, errors.WrapError("create sessions directory", err)
 	}
 
 	// Find the next available sequential ID
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
+		return nil, errors.WrapError("read sessions directory", err)
 	}
 
 	// Find the highest numeric ID
@@ -176,18 +185,28 @@ func CreateSession() (*Session, error) {
 		}
 
 		// Create directory
-		if err := os.Mkdir(sessionPath, 0o750); err != nil {
+		if err := os.Mkdir(sessionPath, constants.DirPerm); err != nil {
 			if os.IsExist(err) {
 				// Race condition - someone else created it, try next
 				continue
 			}
-			return nil, fmt.Errorf("failed to create session directory: %w", err)
+			return nil, errors.WrapError("create session directory", err)
 		}
 
-		return &Session{Path: sessionPath, SessionsDir: sessionsDir}, nil
+		session := &Session{Path: sessionPath, SessionsDir: sessionsDir}
+
+		// Save system message if provided
+		if systemPrompt != "" {
+			if err := saveSystemMessage(session, systemPrompt); err != nil {
+				// Log error but don't fail session creation
+				log.Debugf("Failed to save system message: %v", err)
+			}
+		}
+
+		return session, nil
 	}
 
-	return nil, fmt.Errorf("failed to create session after 100 attempts - too many collisions")
+	return nil, fmt.Errorf("failed to create session after 100 attempts: too many collisions")
 }
 
 // LoadSession loads an existing session by path
@@ -200,10 +219,10 @@ func LoadSession(sessionPath string) (*Session, error) {
 	// Check if session directory exists
 	info, err := os.Stat(sessionPath)
 	if err != nil {
-		return nil, fmt.Errorf("session not found: %w", err)
+		return nil, errors.WrapError("find session", err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("session path is not a directory: %s", sessionPath)
+		return nil, errors.WrapError("validate session path", stdErrors.New("session path is not a directory: "+sessionPath))
 	}
 
 	// Determine which sessions directory was used
@@ -211,107 +230,44 @@ func LoadSession(sessionPath string) (*Session, error) {
 	return &Session{Path: sessionPath, SessionsDir: sessionsDir}, nil
 }
 
-// AppendMessage atomically appends a message to the session
-// Returns: (finalPath, messageID, error)
-func AppendMessage(session *Session, msg Message) (string, string, error) {
-	const maxRetries = 10
-
-	// 1. Create temp files ONCE before any locks
-	tempTxtFile, err := os.CreateTemp(session.Path, ".msg-*.txt.tmp")
+// MaybeForkForSystem checks if the session needs forking due to system prompt change
+// and creates a fork if necessary. Returns the (possibly new) session and whether
+// a fork was created.
+func MaybeForkForSystem(ctx context.Context, sess *Session, effectiveSystem string) (*Session, bool, error) {
+	// Get the original system message from the session
+	originalSystemMsg, err := GetSystemMessage(sess.Path)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create temp txt: %w", err)
-	}
-	tempTxtPath := tempTxtFile.Name()
-	defer func() { _ = os.Remove(tempTxtPath) }()
-
-	// Write content and close immediately to avoid FD exhaustion
-	if _, err := tempTxtFile.Write([]byte(msg.Content)); err != nil {
-		tempTxtFile.Close()
-		return "", "", fmt.Errorf("failed to write content: %w", err)
-	}
-	if err := tempTxtFile.Close(); err != nil {
-		return "", "", fmt.Errorf("failed to close txt: %w", err)
+		return nil, false, errors.WrapError("get system message from session", err)
 	}
 
-	// Create JSON temp file
-	tempJsonFile, err := os.CreateTemp(session.Path, ".msg-*.json.tmp")
+	// Single rule: fork if the effective system prompt differs from the original
+	needFork := false
+	if originalSystemMsg == nil && effectiveSystem != "" {
+		// Original has no system message, but we're setting one
+		needFork = true
+	} else if originalSystemMsg != nil && *originalSystemMsg != effectiveSystem {
+		// System messages differ
+		needFork = true
+	}
+
+	if !needFork {
+		return sess, false, nil
+	}
+
+	// Fork the session with new system message
+	originalID := GetSessionID(sess.Path)
+	logger.From(ctx).Infof("Forking session %s due to system prompt change", originalID)
+
+	// Fork the session, preserving the lineage with new system prompt
+	newSession, err := ForkSessionWithSystemMessage(ctx, sess.Path, &effectiveSystem)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create temp json: %w", err)
-	}
-	tempJsonPath := tempJsonFile.Name()
-	defer func() { _ = os.Remove(tempJsonPath) }()
-
-	// Prepare metadata
-	var modelPtr *string
-	if msg.Model != "" {
-		modelPtr = &msg.Model
-	}
-	metadata := MessageMetadata{
-		Role:      msg.Role,
-		Timestamp: msg.Timestamp,
-		Model:     modelPtr,
+		return nil, false, errors.WrapError("create forked session", err)
 	}
 
-	// Write metadata and close
-	encoder := json.NewEncoder(tempJsonFile)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(metadata); err != nil {
-		tempJsonFile.Close()
-		return "", "", fmt.Errorf("failed to encode metadata: %w", err)
-	}
-	if err := tempJsonFile.Close(); err != nil {
-		return "", "", fmt.Errorf("failed to close json: %w", err)
-	}
+	logger.From(ctx).Infof("Created forked session %s from %s with new system prompt",
+		GetSessionID(newSession.Path), originalID)
 
-	// 2. Try to place files in correct location
-	currentPath := session.Path
-	var lastConflictMsgID string
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Optional exponential backoff after 2 retries
-		if attempt > 2 {
-			time.Sleep(time.Duration(1<<(attempt-2)) * 10 * time.Millisecond)
-		}
-
-		success, msgID, siblingPath, err := tryPlaceMessage(currentPath, tempTxtPath, tempJsonPath)
-		if err != nil {
-			// Retry on lock timeout
-			if errors.Is(err, ErrLockTimeout) && attempt < maxRetries-1 {
-				// Debug logging would go here if we had access to config
-				continue
-			}
-			return "", "", err
-		}
-
-		if success {
-			return currentPath, msgID, nil
-		}
-
-		// Track conflict for error reporting
-		lastConflictMsgID = msgID
-
-		// Always log conflicts - they're important operational events
-		logger.Infof("Message ID conflict: %s exists in %s, using sibling %s",
-			msgID, GetSessionID(currentPath), GetSessionID(siblingPath))
-
-		// Move to sibling for next attempt
-		currentPath = siblingPath
-	}
-
-	// Max retries exceeded - provide detailed error
-	return "", "", fmt.Errorf(
-		"%w: gave up after %d attempts\n"+
-			"Last conflict: message ID '%s' already exists in %s\n"+
-			"Your content has been preserved in temporary files:\n"+
-			"  Content: %s\n"+
-			"  Metadata: %s\n"+
-			"Options:\n"+
-			"  1. Retry with: echo <your_message> | lmc -resume %s\n"+
-			"  2. Manually move files to session directory with next available ID\n"+
-			"  3. Check for concurrent processes that may be writing to this session",
-		ErrMaxRetriesExceeded, maxRetries, lastConflictMsgID,
-		GetSessionID(currentPath), tempTxtPath, tempJsonPath,
-		GetSessionID(session.Path))
+	return newSession, true, nil
 }
 
 // CreateSibling creates a new sibling branch from a message
@@ -320,7 +276,12 @@ func AppendMessage(session *Session, msg Message) (string, string, error) {
 // DO NOT call this function while holding a lock on a child session path,
 // as it will create a high risk of deadlocks (AB-BA lock acquisition).
 // Lock hierarchy: root lock may acquire child locks, but not vice versa.
-func CreateSibling(sessionPath, messageID string) (string, error) {
+func CreateSibling(ctx context.Context, sessionPath, messageID string) (string, error) {
+	// Validate messageID is not empty
+	if messageID == "" {
+		return "", errors.WrapError("validate message ID", stdErrors.New("messageID cannot be empty"))
+	}
+
 	// Ensure sessionPath is absolute
 	if !filepath.IsAbs(sessionPath) {
 		sessionPath = filepath.Join(GetSessionsDir(), sessionPath)
@@ -328,6 +289,8 @@ func CreateSibling(sessionPath, messageID string) (string, error) {
 
 	// Get the anchor point for creating siblings (implements bubble-up logic)
 	anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
+	logger.From(ctx).Debugf("Creating sibling for message %s at anchor %s",
+		messageID, GetSessionID(anchorPath))
 
 	// Get the root session for locking to prevent any concurrent sibling creation
 	// within the same session tree
@@ -339,14 +302,15 @@ func CreateSibling(sessionPath, messageID string) (string, error) {
 		// Re-calculate the sibling path inside the lock to ensure consistency
 		siblingPath, err := GetNextSiblingPath(anchorPath, anchorID)
 		if err != nil {
-			return "", fmt.Errorf("failed to get sibling path: %w", err)
+			return "", errors.WrapError("get sibling path", err)
 		}
 
 		fullPath := filepath.Join(anchorPath, siblingPath)
-		if err := os.MkdirAll(fullPath, 0o750); err != nil {
-			return "", fmt.Errorf("failed to create sibling directory: %w", err)
+		if err := os.MkdirAll(fullPath, constants.DirPerm); err != nil {
+			return "", errors.WrapError("create sibling directory", err)
 		}
 
+		logger.From(ctx).Debugf("Created sibling branch: %s", GetSessionID(fullPath))
 		return fullPath, nil
 	})
 }
@@ -367,7 +331,7 @@ func GetLineage(sessionPath string) ([]Message, error) {
 	load := func(dir string) ([]Message, error) {
 		msgs, err := loadMessagesInDir(dir)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load messages in %s: %w", dir, err)
+			return nil, errors.WrapError("load messages in "+dir, err)
 		}
 		return msgs, nil
 	}
@@ -407,13 +371,13 @@ func GetLineage(sessionPath string) ([]Message, error) {
 			}
 		}
 		if branchIdx == -1 {
-			return nil, fmt.Errorf("branch point %s not found in %s", branchMsgID, dir)
+			return nil, errors.WrapError("find branch point", fmt.Errorf("branch point %s not found in %s", branchMsgID, dir))
 		}
 
 		branchMsg := msgs[branchIdx]
 
 		switch branchMsg.Role {
-		case "assistant":
+		case core.RoleAssistant:
 			// Regenerating an assistant: keep everything **before** it.
 			lineage = append(lineage, msgs[:branchIdx]...)
 
@@ -421,12 +385,12 @@ func GetLineage(sessionPath string) ([]Message, error) {
 			lastAssistant = &branchMsg
 			assistantAlreadyInLineage = false
 
-		case "user":
+		case core.RoleUser:
 			// Alternative user input.  We want everything up to and including the
 			// *previous* assistant.  Look for it in the same directory first.
 			prevAssistIdx := -1
 			for j := branchIdx - 1; j >= 0; j-- {
-				if msgs[j].Role == "assistant" {
+				if msgs[j].Role == core.RoleAssistant {
 					prevAssistIdx = j
 					break
 				}
@@ -449,7 +413,7 @@ func GetLineage(sessionPath string) ([]Message, error) {
 				// starts at the first message.
 			}
 		default:
-			return nil, fmt.Errorf("unknown role %q in message %s", branchMsg.Role, branchMsg.ID)
+			return nil, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", branchMsg.Role, branchMsg.ID))
 		}
 
 		// Advance to next directory in the path.
@@ -483,7 +447,7 @@ func DeleteNode(nodePath string) error {
 	// Security check: ensure the path is within the sessions directory
 	sessionsDir := GetSessionsDir()
 	if !strings.HasPrefix(nodePath, sessionsDir+string(filepath.Separator)) && nodePath != sessionsDir {
-		return fmt.Errorf("invalid path: must be within sessions directory")
+		return errors.WrapError("validate path", stdErrors.New("invalid path: must be within sessions directory"))
 	}
 
 	// First check if the node exists (before acquiring lock)
@@ -498,14 +462,14 @@ func DeleteNode(nodePath string) error {
 		msgID := filepath.Base(nodePath)
 
 		// Validate it's a valid message ID format
-		if !isValidMessageID(msgID) {
-			return fmt.Errorf("node not found: %s", nodePath)
+		if !IsValidMessageID(msgID) {
+			return errors.WrapError("delete node", fmt.Errorf("node not found: %s", nodePath))
 		}
 
 		// Check if the message files exist
-		contentPath := filepath.Join(dir, msgID+".txt")
-		if _, err := os.Stat(contentPath); err != nil {
-			return fmt.Errorf("node not found: %s", nodePath)
+		metaPath := filepath.Join(dir, msgID+".json")
+		if _, err := os.Stat(metaPath); err != nil {
+			return errors.WrapError("delete node", fmt.Errorf("node not found: %s", nodePath))
 		}
 	}
 
@@ -528,7 +492,7 @@ func DeleteNode(nodePath string) error {
 		// Parse message number
 		var msgNum int
 		if _, err := fmt.Sscanf(msgID, "%x", &msgNum); err != nil {
-			return fmt.Errorf("invalid message ID: %s", msgID)
+			return errors.WrapError("validate message ID", fmt.Errorf("invalid message ID: %s", msgID))
 		}
 
 		// Delete the message and all descendants
@@ -536,89 +500,239 @@ func DeleteNode(nodePath string) error {
 	})
 }
 
-// tryPlaceMessage attempts to atomically place message files in a session directory
-// Returns: (success, msgID, siblingPath, error)
-// This function is called from AppendMessage and handles the lock/check/rename logic
-func tryPlaceMessage(sessionPath, tempTxtPath, tempJsonPath string) (success bool, msgID string, siblingPath string, err error) {
-	// Phase 1: Check if we can place files (with lock)
-	var needSibling bool
-	var conflictMsgID string
+// saveSystemMessage saves the system prompt as message 0000
+func saveSystemMessage(session *Session, systemPrompt string) error {
+	// Write content file
+	contentPath := filepath.Join(session.Path, "0000.txt")
+	if err := os.WriteFile(contentPath, []byte(systemPrompt), constants.FilePerm); err != nil {
+		return errors.WrapError("write system content", err)
+	}
 
-	err = WithSessionLock(sessionPath, 5*time.Second, func() error {
-		// Get next ID inside lock (reduces conflicts)
-		msgID, err = GetNextMessageID(sessionPath)
-		if err != nil {
-			return err
-		}
+	// Write metadata file
+	metadata := MessageMetadata{
+		Role:      "system",
+		Timestamp: time.Now(),
+		Model:     nil,
+	}
 
-		finalTxtPath := filepath.Join(sessionPath, msgID+".txt")
-		finalJsonPath := filepath.Join(sessionPath, msgID+".json")
-
-		// Use proper error checking
-		_, errTxt := os.Stat(finalTxtPath)
-		_, errJson := os.Stat(finalJsonPath)
-
-		txtExists := errTxt == nil || !errors.Is(errTxt, fs.ErrNotExist)
-		jsonExists := errJson == nil || !errors.Is(errJson, fs.ErrNotExist)
-
-		if txtExists || jsonExists {
-			// Conflict detected
-			needSibling = true
-			conflictMsgID = msgID
-			success = false
-			return nil
-		}
-
-		// No conflict - atomic rename
-		if err := os.Rename(tempTxtPath, finalTxtPath); err != nil {
-			return fmt.Errorf("failed to rename txt: %w", err)
-		}
-
-		if err := os.Rename(tempJsonPath, finalJsonPath); err != nil {
-			// CRITICAL: Rename back, not delete!
-			// This preserves user content for retry
-			rollbackErr := os.Rename(finalTxtPath, tempTxtPath)
-
-			if rollbackErr != nil {
-				// Critical failure - both json rename and rollback failed
-				return fmt.Errorf(
-					"CRITICAL: Failed to place message files\n"+
-						"  JSON rename error: %w\n"+
-						"  Rollback error: %w\n"+
-						"Files in inconsistent state:\n"+
-						"  ✓ Created: %s\n"+
-						"  ✗ Failed: %s\n"+
-						"  ! Orphaned: %s\n"+
-						"Manual intervention required to recover temp file: %s",
-					err, rollbackErr, finalTxtPath, finalJsonPath, finalTxtPath, tempJsonPath)
-			}
-
-			// Rollback successful
-			return fmt.Errorf(
-				"failed to place message (rolled back successfully)\n"+
-					"  Error: %w\n"+
-					"Your content is preserved in:\n"+
-					"  Text: %s\n"+
-					"  JSON: %s\n"+
-					"You can retry the operation or manually move these files",
-				err, tempTxtPath, tempJsonPath)
-		}
-
-		success = true
-		return nil
-	})
-	// LOCK RELEASED HERE!
+	metadataPath := filepath.Join(session.Path, "0000.json")
+	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		return false, "", "", err
+		return errors.WrapError("marshal system metadata", err)
 	}
 
-	// Phase 2: Create sibling if needed (NO LOCK - avoids deadlock)
-	if needSibling {
-		siblingPath, err = CreateSibling(sessionPath, conflictMsgID)
-		if err != nil {
-			return false, "", "", fmt.Errorf("failed to create sibling: %w", err)
+	if err := os.WriteFile(metadataPath, metadataBytes, constants.FilePerm); err != nil {
+		return errors.WrapError("write system metadata", err)
+	}
+
+	return nil
+}
+
+// GetSystemMessage reads the system message from a session if it exists
+func GetSystemMessage(sessionPath string) (*string, error) {
+	// Make path absolute if needed
+	if !filepath.IsAbs(sessionPath) {
+		sessionPath = filepath.Join(GetSessionsDir(), sessionPath)
+	}
+
+	// Check if system message files exist
+	contentPath := filepath.Join(sessionPath, "0000.txt")
+	metadataPath := filepath.Join(sessionPath, "0000.json")
+
+	// Check metadata file exists and has system role
+	if metaBytes, err := os.ReadFile(metadataPath); err == nil {
+		var metadata MessageMetadata
+		if err := json.Unmarshal(metaBytes, &metadata); err == nil && metadata.Role == core.RoleSystem {
+			// Read the content
+			if content, err := os.ReadFile(contentPath); err == nil {
+				systemMsg := string(content)
+				return &systemMsg, nil
+			}
 		}
 	}
 
-	return success, msgID, siblingPath, nil
+	// No system message found
+	return nil, nil
+}
+
+// ForkSessionWithSystemMessage creates a new session by copying an existing one with a new system message
+func ForkSessionWithSystemMessage(ctx context.Context, originalPath string, newSystemPrompt *string) (*Session, error) {
+	// Make path absolute if needed
+	if !filepath.IsAbs(originalPath) {
+		originalPath = filepath.Join(GetSessionsDir(), originalPath)
+	}
+
+	// Create new session
+	var newSession *Session
+	var err error
+	if newSystemPrompt != nil {
+		newSession, err = CreateSession(*newSystemPrompt, logger.From(ctx))
+	} else {
+		newSession, err = CreateSession("", logger.From(ctx))
+	}
+	if err != nil {
+		return nil, errors.WrapError("create new session", err)
+	}
+
+	// Get lineage from original session (all messages including traversing branches)
+	messages, err := GetLineage(originalPath)
+	if err != nil {
+		// Clean up the created session on error
+		os.RemoveAll(newSession.Path)
+		return nil, errors.WrapError("get lineage from original session", err)
+	}
+
+	// To properly map messages to their directories, we need to walk the same path
+	// that GetLineage walked. GetLineage returns messages in root-to-leaf order,
+	// properly handling branch points. We'll build our index by walking the same path.
+	rootDir, components := ParseSessionPath(originalPath)
+
+	// Build a map of which messages belong to which directory by walking the lineage path
+	msgIndex := make(map[string]string)
+
+	// Start at root
+	currentDir := rootDir
+
+	// Add root directory messages
+	if rootMsgs, err := listMessages(currentDir); err == nil {
+		for _, msgID := range rootMsgs {
+			msgIndex[msgID] = currentDir
+		}
+	}
+
+	// Walk through each component (sibling directory) in order
+	for _, comp := range components {
+		currentDir = filepath.Join(currentDir, comp)
+
+		// Add messages from this directory
+		if msgs, err := listMessages(currentDir); err == nil {
+			for _, msgID := range msgs {
+				// Later directories override earlier ones for the same ID
+				// This matches how GetLineage selects messages
+				msgIndex[msgID] = currentDir
+			}
+		}
+	}
+
+	// Copy non-system messages to the new session
+	for _, msg := range messages {
+		// Skip system messages from the original session
+		if msg.Role == core.RoleSystem {
+			continue
+		}
+
+		// Copy the message to the new session using staging/commit pattern
+		// First, check if there are tool interactions to copy
+		var toolInteraction *core.ToolInteraction
+
+		// Only load tool interactions from the main lineage, not from sibling branches
+		// This prevents tool interactions from regenerated messages from being copied
+		originalMsgPath := msgIndex[msg.ID]
+		logger.From(ctx).Debugf("Processing message %s (role=%s) from path %s", msg.ID, msg.Role, originalMsgPath)
+
+		if originalMsgPath != "" {
+			// Check if this message has a tool file in its actual location
+			toolPath := filepath.Join(originalMsgPath, msg.ID+".tools.json")
+			if _, err := os.Stat(toolPath); err == nil {
+				// Use LoadToolInteraction to properly load tool data
+				ti, err := LoadToolInteraction(originalMsgPath, msg.ID)
+				if err != nil {
+					// Log error but continue - missing tool data shouldn't fail the fork
+					logger.From(ctx).Debugf("Failed to load tool interaction for message %s: %v", msg.ID, err)
+				} else if ti != nil {
+					toolInteraction = ti
+					logger.From(ctx).Debugf("Loaded tool interaction for message %s: %d calls, %d results",
+						msg.ID, len(ti.Calls), len(ti.Results))
+				}
+			} else {
+				logger.From(ctx).Debugf("No tool file found for message %s at %s", msg.ID, toolPath)
+			}
+		}
+
+		// Create a new message without the ID to let the system assign a new one
+		newMsg := Message{
+			Role:      msg.Role,
+			Content:   msg.Content,
+			Timestamp: msg.Timestamp,
+			Model:     msg.Model,
+		}
+
+		// Stage the message files
+		staged, err := stageMessageFiles(newSession.Path, newMsg, toolInteraction)
+		if err != nil {
+			os.RemoveAll(newSession.Path)
+			return nil, errors.WrapError("stage message", err)
+		}
+
+		// Use messageCommitter to place the message files atomically
+		mc := newMessageCommitter(newSession.Path)
+		newMsgID, needSibling, _, err := mc.Commit(ctx, staged)
+		staged.Close() // Clean up staging files immediately
+
+		if err != nil {
+			os.RemoveAll(newSession.Path)
+			return nil, errors.WrapError("place message", err)
+		}
+		if needSibling {
+			// This should not happen in a new session
+			os.RemoveAll(newSession.Path)
+			return nil, errors.WrapError("copy message", stdErrors.New("unexpected conflict when copying message"))
+		}
+
+		logger.From(ctx).Debugf("Copied message %s -> %s (role=%s, hasTools=%v)",
+			msg.ID, newMsgID, msg.Role, toolInteraction != nil)
+	}
+
+	return newSession, nil
+}
+
+// indexMessageDirectories builds a map of message ID to directory path for efficient lookups.
+// This function walks the session tree once and returns a map where keys are message IDs
+// and values are the directory paths containing those messages.
+// This is used to optimize BuildMessagesWithToolInteractions from O(n²) to O(n).
+func indexMessageDirectories(sessionPath string) (map[string]string, error) {
+	index := make(map[string]string)
+
+	// Helper function to recursively index a directory
+	var indexDir func(dirPath string) error
+	indexDir = func(dirPath string) error {
+		// List all messages in this directory
+		msgIDs, err := listMessages(dirPath)
+		if err != nil {
+			return errors.WrapError("list messages in "+dirPath, err)
+		}
+
+		// Add each message to the index
+		for _, msgID := range msgIDs {
+			index[msgID] = dirPath
+		}
+
+		// Check for sibling directories
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			return errors.WrapError(fmt.Sprintf("read directory %s", dirPath), err)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if isSibling, _, _ := IsSiblingDir(entry.Name()); isSibling {
+				// Recursively index sibling directory
+				sibPath := filepath.Join(dirPath, entry.Name())
+				if err := indexDir(sibPath); err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	}
+
+	// Start indexing from the root session path
+	if err := indexDir(sessionPath); err != nil {
+		return nil, err
+	}
+
+	return index, nil
 }

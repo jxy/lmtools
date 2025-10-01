@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/core"
 	"testing"
 )
 
@@ -66,7 +67,7 @@ func TestThinkingFieldConversion(t *testing.T) {
 					MaxTokens: 1000,
 					Messages: []AnthropicMessage{
 						{
-							Role:    RoleUser,
+							Role:    core.RoleUser,
 							Content: json.RawMessage(`"Test message"`),
 						},
 					},
@@ -92,7 +93,7 @@ func TestThinkingFieldConversion(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Test message"`),
 					},
 				},

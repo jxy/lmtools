@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"lmtools/internal/auth"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/proxy"
 	"net/http"
@@ -102,7 +103,7 @@ func main() {
 	// Configuration flags
 	flag.StringVar(&argoUser, "argo-user", "", "Argo user")
 	flag.StringVar(&argoEnv, "argo-env", "dev", "Argo environment")
-	flag.StringVar(&preferredProvider, "provider", "argo", "Provider (openai, google, argo)")
+	flag.StringVar(&preferredProvider, "provider", constants.ProviderArgo, "Provider (openai, google, argo)")
 	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
 	flag.StringVar(&model, "model", "", "Model to use (default varies by provider)")
 	flag.StringVar(&smallModel, "small-model", "", "Small model to use")
@@ -126,19 +127,19 @@ func main() {
 
 		// Assign the API key to the appropriate provider
 		switch preferredProvider {
-		case "anthropic":
+		case constants.ProviderAnthropic:
 			anthropicAPIKey = apiKey
-		case "openai":
+		case constants.ProviderOpenAI:
 			openAIAPIKey = apiKey
-		case "google":
+		case constants.ProviderGoogle:
 			googleAPIKey = apiKey
-		case "argo":
+		case constants.ProviderArgo:
 			// Argo doesn't use API keys, ignore
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown provider: %s\n", preferredProvider)
 			os.Exit(1)
 		}
-	} else if preferredProvider != "argo" && providerURL == "" {
+	} else if preferredProvider != constants.ProviderArgo && providerURL == "" {
 		// For non-Argo providers without custom URL, API key is required
 		fmt.Fprintf(os.Stderr, "API key file is required for %s provider. Use -api-key-file flag.\n", preferredProvider)
 		os.Exit(1)
@@ -174,7 +175,8 @@ func main() {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel(logLevel),
 		logger.WithFormat(logFormat),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("apiproxy"),
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -196,9 +198,11 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		logger.Infof("Starting API proxy server on %s:%d", host, port)
+		// No request context available at startup
+		logger.GetLogger().Infof("Starting API proxy server on %s:%d", host, port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Errorf("Failed to start server: %v", err)
+			// No request context available during startup error
+			logger.GetLogger().Errorf("Failed to start server: %v", err)
 			os.Exit(1)
 		}
 	}()
@@ -208,15 +212,18 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	logger.Infof("Shutting down server...")
+	// No request context available during shutdown
+	logger.GetLogger().Infof("Shutting down server...")
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := httpServer.Shutdown(ctx); err != nil {
-		logger.Errorf("Server forced to shutdown: %v", err)
+		// No request context available during shutdown
+		logger.GetLogger().Errorf("Server forced to shutdown: %v", err)
 	}
 
-	logger.Infof("Server exited")
+	// No request context available during shutdown
+	logger.GetLogger().Infof("Server exited")
 }

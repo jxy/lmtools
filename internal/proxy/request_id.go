@@ -4,10 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"lmtools/internal/logger"
 )
-
-// RequestIDKey is the context key for request IDs
-type RequestIDKey struct{}
 
 // GenerateRequestID generates a unique request ID
 func GenerateRequestID() string {
@@ -21,7 +19,7 @@ func GenerateRequestID() string {
 
 // GetRequestID retrieves the request ID from context
 func GetRequestID(ctx context.Context) string {
-	if id, ok := ctx.Value(RequestIDKey{}).(string); ok {
+	if id, ok := ctx.Value(logger.RequestIDKey{}).(string); ok {
 		return id
 	}
 	return ""

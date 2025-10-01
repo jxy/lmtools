@@ -2,16 +2,18 @@ package logger
 
 import (
 	"fmt"
+	"lmtools/internal/constants"
+	"lmtools/internal/errors"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-// CreateLogFile creates a log file with a timestamp
-func CreateLogFile(dir, operation string) (*os.File, string, error) {
+// createLogFile creates a log file with a timestamp (internal helper)
+func createLogFile(dir, operation string) (*os.File, string, error) {
 	// Ensure directory exists
-	if err := os.MkdirAll(dir, DirPerm); err != nil {
-		return nil, "", fmt.Errorf("failed to create log directory: %w", err)
+	if err := os.MkdirAll(dir, constants.DirPerm); err != nil {
+		return nil, "", errors.WrapError("create log directory", err)
 	}
 
 	// Create filename with timestamp and PID
@@ -20,7 +22,7 @@ func CreateLogFile(dir, operation string) (*os.File, string, error) {
 	logPath := filepath.Join(dir, filename)
 
 	// Create file with secure permissions (0600)
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, constants.FilePerm)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create log file: %w", err)
 	}

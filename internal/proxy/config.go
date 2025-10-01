@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"strings"
+	"time"
 )
 
 // Config holds the configuration for the API proxy
@@ -28,6 +30,7 @@ type Config struct {
 	MaxResponseBodySize int64 // Maximum response body size in bytes
 
 	// Streaming Configuration
+	PingInterval time.Duration // Ping interval (0 = use default of 15 seconds)
 
 	// API Endpoints
 	OpenAIURL    string // OpenAI API endpoint
@@ -80,14 +83,14 @@ func (c *Config) InitializeURLs() {
 	// Apply custom provider URL if specified
 	if c.ProviderURL != "" {
 		switch c.Provider {
-		case "openai":
+		case constants.ProviderOpenAI:
 			// Always treat ProviderURL as a base URL and append the endpoint
 			c.OpenAIURL = strings.TrimRight(c.ProviderURL, "/") + "/chat/completions"
-		case "google":
+		case constants.ProviderGoogle:
 			c.GoogleURL = c.ProviderURL
-		case "anthropic":
+		case constants.ProviderAnthropic:
 			c.AnthropicURL = c.ProviderURL
-		case "argo":
+		case constants.ProviderArgo:
 			c.ArgoBaseURL = c.ProviderURL
 		}
 	}
@@ -99,7 +102,7 @@ func (c *Config) InitializeURLs() {
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	// Validate preferred provider
-	validProviders := []string{"openai", "google", "anthropic", "argo"}
+	validProviders := []string{constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderAnthropic, constants.ProviderArgo}
 	valid := false
 	for _, p := range validProviders {
 		if c.Provider == p {
@@ -115,19 +118,19 @@ func (c *Config) Validate() error {
 	// Check if required credentials are present based on the selected provider
 	// With the unified -api-key-file flag, we only need the key for the selected provider
 	switch c.Provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		if c.OpenAIAPIKey == "" && c.ProviderURL == "" {
 			return fmt.Errorf("-api-key-file is required when -provider is 'openai' (unless using -provider-url)")
 		}
-	case "google":
+	case constants.ProviderGoogle:
 		if c.GoogleAPIKey == "" && c.ProviderURL == "" {
 			return fmt.Errorf("-api-key-file is required when -provider is 'google' (unless using -provider-url)")
 		}
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		if c.AnthropicAPIKey == "" && c.ProviderURL == "" {
 			return fmt.Errorf("-api-key-file is required when -provider is 'anthropic' (unless using -provider-url)")
 		}
-	case "argo":
+	case constants.ProviderArgo:
 		if c.ArgoUser == "" {
 			return fmt.Errorf("-argo-user is required when -provider is 'argo'")
 		}

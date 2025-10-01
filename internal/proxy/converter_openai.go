@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"strings"
 )
@@ -15,7 +16,7 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by OpenAI)", *req.TopK)
 	}
 	if len(req.Metadata) > 0 {
-		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by OpenAI)", req.Metadata)
+		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by OpenAI)", req.Metadata)
 	}
 
 	openAIReq := &OpenAIRequest{
@@ -48,7 +49,7 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 		}
 		if systemContent != "" {
 			messages = append(messages, OpenAIMessage{
-				Role:    RoleSystem,
+				Role:    core.RoleSystem,
 				Content: systemContent,
 			})
 		}
@@ -171,7 +172,7 @@ func (c *Converter) convertAnthropicMessageToOpenAI(ctx context.Context, msg Ant
 
 // convertContentBlocksToOpenAI converts Anthropic content blocks to OpenAI message format
 func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role string, blocks []AnthropicContentBlock) (OpenAIMessage, error) {
-	msg := OpenAIMessage{Role: Role(role)}
+	msg := OpenAIMessage{Role: core.Role(role)}
 
 	// Check if this is a tool call response
 	var hasToolCalls bool
@@ -188,7 +189,7 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 				"type":     "thinking",
 				"thinking": block.Thinking,
 			}
-			logger.From(ctx).DebugJSON("Dropping thinking content block (not supported by OpenAI)", droppedBlock)
+			logger.From(ctx).Debugf("Dropping thinking content block (not supported by OpenAI): %+v", droppedBlock)
 		case "tool_use":
 			hasToolCalls = true
 			// Convert tool input to JSON string
@@ -207,7 +208,7 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 			toolCalls = append(toolCalls, toolCall)
 		case "tool_result":
 			// This is a tool response message
-			msg.Role = "tool"
+			msg.Role = core.RoleTool
 			msg.ToolCallID = block.ToolUseID
 			// Extract content from json.RawMessage
 			var content interface{}
@@ -250,7 +251,7 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 		ID:    resp.ID,
 		Type:  "message",
 		Model: originalModel,
-		Role:  RoleAssistant,
+		Role:  core.RoleAssistant,
 		Usage: &AnthropicUsage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,

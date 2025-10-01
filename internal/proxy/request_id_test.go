@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"lmtools/internal/logger"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,7 +44,7 @@ func TestGetRequestID(t *testing.T) {
 		{
 			name: "With request ID in context",
 			setupCtx: func() context.Context {
-				return context.WithValue(context.Background(), RequestIDKey{}, "test-id-123")
+				return context.WithValue(context.Background(), logger.RequestIDKey{}, "test-id-123")
 			},
 			expected: "test-id-123",
 		},
@@ -57,7 +58,7 @@ func TestGetRequestID(t *testing.T) {
 		{
 			name: "With wrong type in context",
 			setupCtx: func() context.Context {
-				return context.WithValue(context.Background(), RequestIDKey{}, 123)
+				return context.WithValue(context.Background(), logger.RequestIDKey{}, 123)
 			},
 			expected: "",
 		},

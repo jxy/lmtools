@@ -45,6 +45,34 @@ func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptes
 	return proxyServer, openAIMock, googleMock, argoMock
 }
 
+// SetupArgoTestServer creates a test server configured to use Argo provider
+func SetupArgoTestServer(t *testing.T) (*httptest.Server, *httptest.Server) {
+	t.Helper()
+	// Create mock Argo provider
+	argoMock := httptest.NewServer(NewMockArgo(t))
+
+	// Create config with Argo as the provider
+	config := &Config{
+		Provider:           "argo",
+		ArgoUser:           "testuser",
+		ArgoEnv:            "test",
+		Model:              "gpto3",
+		SmallModel:         "gemini25flash",
+		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
+		// Set mock URL
+		ArgoBaseURL: argoMock.URL,
+	}
+
+	// Initialize URLs
+	config.InitializeURLs()
+
+	// Create server
+	server := NewServer(config)
+	proxyServer := httptest.NewServer(server)
+
+	return proxyServer, argoMock
+}
+
 // MockOpenAI creates a mock OpenAI server
 func NewMockOpenAI(t *testing.T) http.Handler {
 	t.Helper()

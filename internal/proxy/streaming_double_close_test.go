@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -12,7 +13,8 @@ func TestStreamingNoDoubleClose(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	// Create handler
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", nil)
+	ctx := context.Background()
+	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", ctx)
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -111,7 +113,8 @@ func TestStreamingDoubleCloseAttempt(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	// Create handler
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", nil)
+	ctx := context.Background()
+	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", ctx)
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}

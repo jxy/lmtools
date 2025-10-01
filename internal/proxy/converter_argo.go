@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"strings"
 )
@@ -15,7 +16,7 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by Argo)", *req.TopK)
 	}
 	if len(req.Metadata) > 0 {
-		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by Argo)", req.Metadata)
+		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by Argo)", req.Metadata)
 	}
 
 	argoReq := &ArgoChatRequest{
@@ -41,17 +42,21 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 	}
 
 	// Determine the provider to handle max_tokens correctly
-	provider := c.determineArgoModelProvider(req.Model)
+	provider := core.DetermineArgoModelProvider(req.Model)
 
 	// Handle max_tokens based on provider
 	if provider == "openai" {
 		// For OpenAI models, use max_completion_tokens
 		argoReq.MaxCompletionTokens = req.MaxTokens
 	} else {
-		// For non-OpenAI models, handle max_tokens for Argo non-streaming requests
-		if !req.Stream && req.MaxTokens >= 21000 {
+		// For non-OpenAI models, handle max_tokens for Argo requests
+		// Drop max_tokens >= 21000 for:
+		// 1. Non-streaming requests
+		// 2. Streaming requests with tools (which use the non-streaming endpoint)
+		if (!req.Stream || len(req.Tools) > 0) && req.MaxTokens >= 21000 {
 			// Drop max_tokens field entirely if >= 21000
-			logger.From(ctx).Debugf("Dropping max_tokens field (was %d) for Argo non-streaming request", req.MaxTokens)
+			logger.From(ctx).Debugf("Dropping max_tokens field (was %d) for Argo request (streaming=%v, tools=%d)",
+				req.MaxTokens, req.Stream, len(req.Tools))
 			// MaxTokens will remain nil/0, which means it won't be included in JSON
 		} else {
 			argoReq.MaxTokens = req.MaxTokens
@@ -118,11 +123,11 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 							"type":     "thinking",
 							"thinking": block.Thinking,
 						}
-						logger.From(ctx).DebugJSON(fmt.Sprintf("Dropping thinking content block for %s model (not supported by OpenAI)", req.Model), droppedBlock)
+						logger.From(ctx).Debugf("Dropping thinking content block for %s model (not supported by OpenAI): %+v", req.Model, droppedBlock)
 
 					case "tool_use":
 						// Only process tool_use in assistant messages
-						if msg.Role == RoleAssistant {
+						if msg.Role == core.RoleAssistant {
 							// Convert to OpenAI tool call format
 							toolCall := ToolCall{
 								ID:   block.ID,
@@ -134,6 +139,7 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 							// Convert input to JSON string
 							if inputJSON, err := json.Marshal(block.Input); err == nil {
 								toolCall.Function.Arguments = string(inputJSON)
+								logger.DebugJSON(logger.From(ctx), "Tool call arguments", block.Input)
 							} else {
 								toolCall.Function.Arguments = "{}"
 							}
@@ -162,7 +168,7 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 				}
 
 				// Add the message with text and/or tool calls if applicable
-				if msg.Role == RoleAssistant && len(toolCalls) > 0 {
+				if msg.Role == core.RoleAssistant && len(toolCalls) > 0 {
 					// Assistant message with tool calls
 					messages = append(messages, ArgoMessage{
 						Role:      string(msg.Role),
@@ -212,9 +218,8 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 	// Convert tools based on the target model type
 	if len(req.Tools) > 0 {
 		// For Argo, we need to determine the underlying provider from the model name
-		// Use the Argo model name to determine format, not the mapped provider
-		provider := c.determineArgoModelProvider(req.Model)
-		tools, toolChoice := c.convertToolsForArgoModel(provider, req.Model, req.Tools, req.ToolChoice)
+		// Convert tools to appropriate format based on model
+		tools, toolChoice := c.convertToolsForArgoModel(req.Model, req.Tools, req.ToolChoice)
 		argoReq.Tools = tools
 		argoReq.ToolChoice = toolChoice
 	}
@@ -300,159 +305,33 @@ func (c *Converter) extractTextFromContentBlocks(blocks []AnthropicContentBlock)
 }
 
 // convertToolsForArgoModel converts Anthropic tools to the appropriate format for the Argo model
-func (c *Converter) convertToolsForArgoModel(provider string, model string, tools []AnthropicTool, toolChoice *AnthropicToolChoice) (interface{}, interface{}) {
-	switch provider {
-	case "openai":
-		// OpenAI format with type/function wrapper
-		argoTools := make([]ArgoTool, 0, len(tools))
-		for _, tool := range tools {
-			argoTool := ArgoTool{
-				Type: "function",
-				Function: ArgoFunc{
-					Name:        tool.Name,
-					Description: tool.Description,
-					Parameters:  filterSchemaMetadata(tool.InputSchema),
-				},
-			}
-			argoTools = append(argoTools, argoTool)
+// This now delegates to the core function to avoid duplication
+func (c *Converter) convertToolsForArgoModel(model string, tools []AnthropicTool, toolChoice *AnthropicToolChoice) (interface{}, interface{}) {
+	// Convert AnthropicTool to core.ToolDefinition
+	toolDefs := make([]core.ToolDefinition, 0, len(tools))
+	for _, tool := range tools {
+		// Filter metadata before converting
+		filteredSchema := filterSchemaMetadata(tool.InputSchema)
+		toolDef := core.ToolDefinition{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: filteredSchema,
 		}
-		// Convert tool choice
-		if toolChoice != nil {
-			if toolChoice.Type == "tool" && toolChoice.Name != "" {
-				return argoTools, map[string]interface{}{
-					"type": "function",
-					"function": map[string]string{
-						"name": toolChoice.Name,
-					},
-				}
-			}
-			return argoTools, toolChoice.Type
-		}
-		return argoTools, "auto"
-
-	case "google":
-		// Google format - unwrapped with parameters field
-		var googleTools []map[string]interface{}
-		for _, tool := range tools {
-			// Filter out $schema before converting to Google format
-			filteredSchema := filterSchemaMetadata(tool.InputSchema)
-			// Convert to Google format with uppercase types
-			params := c.convertSchemaToGoogleFormat(filteredSchema)
-
-			googleTool := map[string]interface{}{
-				"name":        tool.Name,
-				"description": tool.Description,
-				"parameters":  params,
-			}
-
-			// Extract and add required field at top level if it exists
-			if schema, ok := filteredSchema.(map[string]interface{}); ok {
-				if required, exists := schema["required"]; exists {
-					googleTool["required"] = required
-				}
-			}
-
-			googleTools = append(googleTools, googleTool)
-		}
-		return googleTools, nil // Google doesn't use tool_choice in the same way
-
-	case "anthropic":
-		// Anthropic format - unwrapped with input_schema field
-		var anthropicTools []map[string]interface{}
-		for _, tool := range tools {
-			anthropicTool := map[string]interface{}{
-				"name":         tool.Name,
-				"description":  tool.Description,
-				"input_schema": filterSchemaMetadata(tool.InputSchema),
-			}
-			anthropicTools = append(anthropicTools, anthropicTool)
-		}
-		// Convert tool choice
-		if toolChoice != nil {
-			return anthropicTools, map[string]interface{}{
-				"type": toolChoice.Type,
-				"name": toolChoice.Name,
-			}
-		}
-		return anthropicTools, map[string]string{"type": "auto"}
-
-	case "argo":
-		// Determine format based on model prefix
-		modelLower := strings.ToLower(model)
-
-		if strings.HasPrefix(modelLower, "claude") {
-			// Use Anthropic format for Claude models
-			return c.convertToolsForArgoModel("anthropic", model, tools, toolChoice)
-		} else if strings.HasPrefix(modelLower, "gemini") {
-			// Use Google format for these models
-			return c.convertToolsForArgoModel("google", model, tools, toolChoice)
-		} else if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "gpto") {
-			// Use OpenAI format for GPT models
-			return c.convertToolsForArgoModel("openai", model, tools, toolChoice)
-		} else {
-			// Default to OpenAI format for unknown models
-			return c.convertToolsForArgoModel("openai", model, tools, toolChoice)
-		}
-
-	default:
-		// Default to OpenAI format for unknown providers
-		return c.convertToolsForArgoModel("openai", model, tools, toolChoice)
-	}
-}
-
-// determineArgoModelProvider determines the underlying provider for an Argo model
-func (c *Converter) determineArgoModelProvider(model string) string {
-	// Map Argo models to their underlying providers
-	modelLower := strings.ToLower(model)
-
-	// OpenAI-based models
-	if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o1") || strings.HasPrefix(modelLower, "o3") {
-		return "openai"
+		toolDefs = append(toolDefs, toolDef)
 	}
 
-	// Google AI models
-	if strings.HasPrefix(modelLower, "gemini") {
-		return "google"
-	}
-
-	// Claude-based models
-	if strings.HasPrefix(modelLower, "claude") {
-		return "anthropic"
-	}
-
-	// Default to OpenAI format for unknown models
-	return "openai"
-}
-
-// convertSchemaToGoogleFormat converts JSON schema to Google AI's expected format
-func (c *Converter) convertSchemaToGoogleFormat(schema interface{}) interface{} {
-	return c.convertSchemaToGoogleFormatWithDepth(schema, 0, 10)
-}
-
-// convertSchemaToGoogleFormatWithDepth converts JSON schema with depth limit
-func (c *Converter) convertSchemaToGoogleFormatWithDepth(schema interface{}, depth, maxDepth int) interface{} {
-	if depth > maxDepth {
-		return schema // Stop recursion at max depth
-	}
-
-	schemaMap, ok := schema.(map[string]interface{})
-	if !ok {
-		return schema
-	}
-
-	// Convert type names to uppercase for Google AI
-	if typeVal, ok := schemaMap["type"].(string); ok {
-		schemaMap["type"] = strings.ToUpper(typeVal)
-	}
-
-	// Recursively convert properties
-	if props, ok := schemaMap["properties"].(map[string]interface{}); ok {
-		for key, val := range props {
-			props[key] = c.convertSchemaToGoogleFormatWithDepth(val, depth+1, maxDepth)
+	// Convert AnthropicToolChoice to core.ToolChoice
+	var coreToolChoice *core.ToolChoice
+	if toolChoice != nil {
+		coreToolChoice = &core.ToolChoice{
+			Type: toolChoice.Type,
+			Name: toolChoice.Name,
 		}
 	}
 
-	return schemaMap
+	// Delegate to core function
+	converted := core.ConvertToolsForProvider(model, toolDefs, coreToolChoice)
+	return converted.Tools, converted.ToolChoice
 }
 
 // filterSchemaMetadata removes JSON Schema metadata fields like $schema from a schema object
@@ -499,14 +378,6 @@ func estimateTokenCount(content []AnthropicContentBlock) int {
 	return totalLength / 4
 }
 
-// ConvertArgoToAnthropic converts an Argo response to Anthropic format
-// Note: For Argo provider, we need the original request to estimate input tokens
-func (c *Converter) ConvertArgoToAnthropic(resp *ArgoChatResponse, originalModel string) *AnthropicResponse {
-	// This method is deprecated - use ConvertArgoToAnthropicWithRequest instead
-	// We can't estimate input tokens without the request
-	return c.ConvertArgoToAnthropicWithRequest(resp, originalModel, &AnthropicRequest{})
-}
-
 // ConvertArgoToAnthropicWithRequest converts an Argo response to Anthropic format with request for token estimation
 func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
 	// Handle different response formats
@@ -518,7 +389,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		return &AnthropicResponse{
 			Type:  "message",
 			Model: originalModel,
-			Role:  RoleAssistant,
+			Role:  core.RoleAssistant,
 			Content: []AnthropicContentBlock{
 				{
 					Type: "text",
@@ -536,8 +407,13 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		// Response with content array or tool calls
 		content := []AnthropicContentBlock{}
 
-		// Check if content is an array (Anthropic format)
-		if contentArray, ok := r["content"].([]interface{}); ok {
+		// Check for simple content string
+		if contentStr, ok := r["content"].(string); ok && contentStr != "" {
+			content = append(content, AnthropicContentBlock{
+				Type: "text",
+				Text: contentStr,
+			})
+		} else if contentArray, ok := r["content"].([]interface{}); ok {
 			// Parse content array
 			for _, item := range contentArray {
 				if blockMap, ok := item.(map[string]interface{}); ok {
@@ -569,12 +445,6 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 					content = append(content, block)
 				}
 			}
-		} else if text, ok := r["content"].(string); ok && text != "" {
-			// Legacy string content
-			content = append(content, AnthropicContentBlock{
-				Type: "text",
-				Text: text,
-			})
 		}
 
 		// Add tool calls (OpenAI-style format)
@@ -660,7 +530,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		return &AnthropicResponse{
 			Type:       "message",
 			Model:      originalModel,
-			Role:       RoleAssistant,
+			Role:       core.RoleAssistant,
 			Content:    content,
 			StopReason: stopReason,
 			Usage: &AnthropicUsage{
@@ -677,7 +547,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		return &AnthropicResponse{
 			Type:  "message",
 			Model: originalModel,
-			Role:  RoleAssistant,
+			Role:  core.RoleAssistant,
 			Content: []AnthropicContentBlock{
 				{
 					Type: "text",

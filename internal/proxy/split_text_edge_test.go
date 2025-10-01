@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -95,7 +96,7 @@ func TestSplitTextForStreamingEdgeCasesExtended(t *testing.T) {
 						panicked = true
 					}
 				}()
-				chunks = splitTextForStreaming(tc.text, tc.chunkSize)
+				chunks = splitTextForStreaming(context.Background(), tc.text, tc.chunkSize)
 			}()
 
 			if panicked && !tc.wantPanic {
@@ -158,7 +159,7 @@ func TestSplitTextForStreamingPerformance(t *testing.T) {
 
 	for _, chunkSize := range chunkSizes {
 		t.Run(fmt.Sprintf("chunkSize_%d", chunkSize), func(t *testing.T) {
-			chunks := splitTextForStreaming(largeText, chunkSize)
+			chunks := splitTextForStreaming(context.Background(), largeText, chunkSize)
 
 			// Verify reconstruction
 			reconstructed := strings.Join(chunks, "")

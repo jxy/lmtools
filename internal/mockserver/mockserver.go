@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"lmtools/internal/core"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +22,6 @@ type MockServer struct {
 	defaultResponse string
 	simulateErrors  bool
 	errorRate       float64
-	delay           time.Duration
 }
 
 // MockRequest captures details about incoming requests
@@ -59,13 +57,6 @@ func WithResponseFunc(f func(*http.Request) (interface{}, int, error)) MockServe
 	}
 }
 
-// WithDelay adds artificial delay to responses
-func WithDelay(d time.Duration) MockServerOption {
-	return func(ms *MockServer) {
-		ms.delay = d
-	}
-}
-
 // WithErrorSimulation enables random error responses
 func WithErrorSimulation(rate float64) MockServerOption {
 	return func(ms *MockServer) {
@@ -95,11 +86,6 @@ func NewMockServer(opts ...MockServerOption) *MockServer {
 
 // handler processes incoming requests
 func (ms *MockServer) handler(w http.ResponseWriter, r *http.Request) {
-	// Add delay if configured
-	if ms.delay > 0 {
-		time.Sleep(ms.delay)
-	}
-
 	// Capture request details
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -125,6 +111,12 @@ func (ms *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 		ms.handleChat(w, r, body)
 	case strings.HasSuffix(r.URL.Path, "/streamchat/"):
 		ms.handleStreamChat(w, r, body)
+	case strings.HasSuffix(r.URL.Path, "/messages"):
+		// Handle Anthropic-style messages endpoint
+		ms.handleChat(w, r, body)
+	case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+		// Handle OpenAI-style chat completions endpoint
+		ms.handleChat(w, r, body)
 	default:
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
 	}
@@ -149,14 +141,17 @@ func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body [
 	}
 
 	// Parse request only after checking custom response function
-	var req core.EmbedRequest
+	var req struct {
+		Input []string `json:"input"`
+		Model string   `json:"model"`
+	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	// Default embedding response
-	embedding := make([]float64, 1536) // Standard embedding size
+	embedding := make([]float64, 1536) // Standard embedding size for text-embedding-ada-002
 	for i := range embedding {
 		embedding[i] = float64(i) / 1536.0
 	}
@@ -201,19 +196,43 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 	}
 
 	// Parse request only after checking custom response function
-	var req core.ChatRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	var reqData map[string]interface{}
+	if err := json.Unmarshal(body, &reqData); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	// Generate contextual response based on last user message
 	responseText := ms.defaultResponse
-	if len(req.Messages) > 0 {
-		lastMsg := req.Messages[len(req.Messages)-1]
-		// Extract content as string
-		var content string
-		if err := json.Unmarshal(lastMsg.Content, &content); err == nil {
+	model := ms.defaultModel
+	if m, ok := reqData["model"].(string); ok {
+		model = m
+	}
+
+	// Extract last message content
+	if messages, ok := reqData["messages"].([]interface{}); ok && len(messages) > 0 {
+		lastMsg := messages[len(messages)-1]
+		if msgMap, ok := lastMsg.(map[string]interface{}); ok {
+			var content string
+			// Handle both string content and content blocks
+			switch c := msgMap["content"].(type) {
+			case string:
+				content = c
+			case []interface{}:
+				// Extract text from content blocks
+				for _, block := range c {
+					if blockMap, ok := block.(map[string]interface{}); ok {
+						if blockMap["type"] == "text" {
+							if text, ok := blockMap["text"].(string); ok {
+								content = text
+								break
+							}
+						}
+					}
+				}
+			}
+
+			// Generate contextual response
 			if strings.Contains(strings.ToLower(content), "hello") {
 				responseText = "Hello! How can I help you today?"
 			} else if strings.Contains(strings.ToLower(content), "weather") {
@@ -224,14 +243,42 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 		}
 	}
 
-	resp := map[string]interface{}{
-		"response": responseText,
-		"model":    req.Model,
-		"usage": map[string]int{
-			"prompt_tokens":     100,
-			"completion_tokens": len(strings.Fields(responseText)),
-			"total_tokens":      100 + len(strings.Fields(responseText)),
-		},
+	// Return response in appropriate format based on endpoint
+	var resp map[string]interface{}
+	if strings.Contains(r.URL.Path, "/v1/chat/completions") {
+		// OpenAI format
+		resp = map[string]interface{}{
+			"id":      "chatcmpl-123",
+			"object":  "chat.completion",
+			"created": time.Now().Unix(),
+			"model":   model,
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": responseText,
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]int{
+				"prompt_tokens":     100,
+				"completion_tokens": len(strings.Fields(responseText)),
+				"total_tokens":      100 + len(strings.Fields(responseText)),
+			},
+		}
+	} else {
+		// Argo/default format
+		resp = map[string]interface{}{
+			"response": responseText,
+			"model":    model,
+			"usage": map[string]int{
+				"prompt_tokens":     100,
+				"completion_tokens": len(strings.Fields(responseText)),
+				"total_tokens":      100 + len(strings.Fields(responseText)),
+			},
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -257,8 +304,8 @@ func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, b
 	}
 
 	// Parse request only after checking custom response function
-	var req core.ChatRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	var reqData map[string]interface{}
+	if err := json.Unmarshal(body, &reqData); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -271,17 +318,9 @@ func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, b
 	// For Argo, stream plain text response
 	response := ms.defaultResponse
 
-	// Write response as plain text stream
-	for _, char := range response {
-		fmt.Fprintf(w, "%c", char)
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-		time.Sleep(5 * time.Millisecond) // Simulate streaming
-	}
-
-	// Final newline
-	fmt.Fprintln(w)
+	// Write response as plain text
+	fmt.Fprint(w, response)
+	fmt.Fprintln(w) // Final newline
 }
 
 // GetRequests returns all captured requests
@@ -338,13 +377,5 @@ func (ms *MockServer) SimulateError(statusCode int, message string) {
 		// Reset after one use
 		ms.SetResponseFunc(nil)
 		return nil, statusCode, errors.New(message)
-	})
-}
-
-// SimulateTimeout makes the next request timeout
-func (ms *MockServer) SimulateTimeout(duration time.Duration) {
-	ms.SetResponseFunc(func(r *http.Request) (interface{}, int, error) {
-		time.Sleep(duration)
-		return map[string]string{"response": "Should have timed out"}, 200, nil
 	})
 }

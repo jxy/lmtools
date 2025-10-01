@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,8 @@ func init() {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 }
@@ -44,7 +46,8 @@ func captureStderr(t *testing.T, f func()) string {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 
@@ -71,7 +74,8 @@ func captureStderr(t *testing.T, f func()) string {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 
@@ -93,11 +97,11 @@ func TestCountTokensEndpointLogging(t *testing.T) {
 	tokenReq := AnthropicTokenCountRequest{
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Test message for token counting"`),
 			},
 			{
-				Role:    RoleAssistant,
+				Role:    core.RoleAssistant,
 				Content: json.RawMessage(`"Response message"`),
 			},
 		},
@@ -188,7 +192,8 @@ func TestRootEndpointLogging(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("info"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -229,7 +234,7 @@ func TestRootEndpointLogging(t *testing.T) {
 			t.Error("Expected 'GET / | Root endpoint accessed' in logs")
 		}
 
-		// Verify request ID is present
+		// Verify request ID is present (format: [#N])
 		if !strings.Contains(logs, "[#") {
 			t.Error("Expected request ID in logs")
 		}
@@ -260,7 +265,7 @@ func TestRootEndpointLogging(t *testing.T) {
 			t.Error("Expected 'POST / | Root endpoint accessed' in logs")
 		}
 
-		// Verify request ID is present
+		// Verify request ID is present (format: [#N])
 		if !strings.Contains(logs, "[#") {
 			t.Error("Expected request ID in logs")
 		}
@@ -273,7 +278,8 @@ func Test404EndpointLogging(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("warn"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -357,7 +363,8 @@ func TestCountTokensWithDifferentInputSizes(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("info"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -401,9 +408,9 @@ func TestCountTokensWithDifferentInputSizes(t *testing.T) {
 			// Build request
 			var messages []AnthropicMessage
 			for i := 0; i < test.messageCount; i++ {
-				role := RoleUser
+				role := core.RoleUser
 				if i%2 == 1 {
-					role = RoleAssistant
+					role = core.RoleAssistant
 				}
 				messages = append(messages, AnthropicMessage{
 					Role:    role,

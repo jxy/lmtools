@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,7 +28,7 @@ func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
 	
 	// Create .lmc directory
 	argoDir := filepath.Join(tmpHome, ".lmc")
-	if err := os.MkdirAll(argoDir, 0o750); err != nil {
+	if err := os.MkdirAll(argoDir, constants.DirPerm); err != nil {
 		t.Fatalf("Failed to create .lmc directory: %v", err)
 	}
 	
@@ -51,7 +52,7 @@ func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
 
 // TestCrossProcessConcurrentResume tests multiple processes resuming the same session
 func TestCrossProcessConcurrentResume(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	_, mockURL := setupTestEnvironment(t)
 	
 	// Create custom sessions directory
@@ -156,7 +157,7 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 
 // TestCrossProcessLockExclusion verifies that locks actually exclude other processes
 func TestCrossProcessLockExclusion(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	_, mockURL := setupTestEnvironment(t)
 	
 	// Create custom sessions directory
@@ -187,9 +188,12 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 		t.Fatalf("Failed to start first process: %v", err)
 	}
 	defer cmd1.Process.Kill()
-	
-	// Give it time to acquire the lock
-	time.Sleep(100 * time.Millisecond)
+
+	// Wait for the lock file to be created
+	lockFile := filepath.Join(sessionsDir, sessionID, ".lock")
+	if !waitForFile(t, lockFile, time.Second) {
+		t.Log("Lock file not created within timeout, proceeding anyway")
+	}
 	
 	// Try to access the same session from another process
 	start := time.Now()
@@ -212,7 +216,7 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 
 // TestCrossProcessSiblingCreation tests concurrent sibling creation
 func TestCrossProcessSiblingCreation(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	_, mockURL := setupTestEnvironment(t)
 	
 	// Create custom sessions directory

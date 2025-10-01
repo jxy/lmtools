@@ -13,7 +13,7 @@ import (
 
 func TestModelRecordingInSessions(t *testing.T) {
 	// Build the binary first
-	binPath := buildLmcBinary(t)
+	binPath := getLmcBinary(t)
 
 	// Create temporary sessions directory
 	tempDir := t.TempDir()

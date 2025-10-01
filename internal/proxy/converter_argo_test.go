@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/core"
 	"testing"
 )
 
@@ -73,7 +74,7 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 				Model: "gemini-2.5-pro",
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"What is the weather?"`),
 					},
 				},
@@ -133,7 +134,7 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 			name: "simple text message for Google",
 			messages: []AnthropicMessage{
 				{
-					Role:    RoleUser,
+					Role:    core.RoleUser,
 					Content: json.RawMessage(`"Hello, how are you?"`),
 				},
 			},
@@ -143,11 +144,11 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 			name: "assistant with tool_use for Google",
 			messages: []AnthropicMessage{
 				{
-					Role:    RoleUser,
+					Role:    core.RoleUser,
 					Content: json.RawMessage(`"What is the weather in Paris?"`),
 				},
 				{
-					Role: RoleAssistant,
+					Role: core.RoleAssistant,
 					Content: json.RawMessage(`[
 						{"type": "text", "text": "I'll check the weather in Paris for you."},
 						{"type": "tool_use", "id": "tool_123", "name": "get_weather", "input": {"location": "Paris"}}
@@ -160,18 +161,18 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 			name: "user with tool_result for Google",
 			messages: []AnthropicMessage{
 				{
-					Role:    RoleUser,
+					Role:    core.RoleUser,
 					Content: json.RawMessage(`"What is the weather in Paris?"`),
 				},
 				{
-					Role: RoleAssistant,
+					Role: core.RoleAssistant,
 					Content: json.RawMessage(`[
 						{"type": "text", "text": "I'll check the weather in Paris for you."},
 						{"type": "tool_use", "id": "tool_123", "name": "get_weather", "input": {"location": "Paris"}}
 					]`),
 				},
 				{
-					Role: RoleUser,
+					Role: core.RoleUser,
 					Content: json.RawMessage(`[
 						{"type": "tool_result", "tool_use_id": "tool_123", "content": "Temperature: 22°C, Sunny"}
 					]`),
@@ -188,7 +189,7 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 				Messages: tt.messages,
 			}
 
-			result, err := converter.ConvertAnthropicToArgo(context.TODO(), req, "testuser")
+			result, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")
 
 			if tt.wantError {
 				if err == nil {
@@ -253,11 +254,11 @@ func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
 		Model: "gpt4o",
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Hello"`),
 			},
 			{
-				Role: RoleAssistant,
+				Role: core.RoleAssistant,
 				Content: json.RawMessage(`[
 					{"type": "text", "text": "Hi! I'll help you."},
 					{"type": "tool_use", "id": "tool_123", "name": "get_info", "input": {"query": "test"}}
@@ -266,7 +267,7 @@ func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToArgo(context.TODO(), req, "testuser")
+	result, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

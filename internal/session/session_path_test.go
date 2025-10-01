@@ -1,6 +1,10 @@
 package session
 
 import (
+	"context"
+	"lmtools/internal/constants"
+	"lmtools/internal/core"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -138,7 +142,7 @@ func TestGetNextMessageID(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a test session directory
 		testSession := filepath.Join(sessionsDir, "test")
-		if err := ensureSessionDir(testSession); err != nil {
+		if err := os.MkdirAll(testSession, constants.DirPerm); err != nil {
 			t.Fatalf("Failed to create test session dir: %v", err)
 		}
 
@@ -193,7 +197,7 @@ func TestGetNextSiblingPath(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a test session directory
 		testSession := filepath.Join(sessionsDir, "test")
-		if err := ensureSessionDir(testSession); err != nil {
+		if err := os.MkdirAll(testSession, constants.DirPerm); err != nil {
 			t.Fatalf("Failed to create test session dir: %v", err)
 		}
 
@@ -210,7 +214,7 @@ func TestGetNextSiblingPath(t *testing.T) {
 		siblings := []string{"0002.s.0000", "0002.s.0001", "0002.s.0002"}
 		for _, sib := range siblings {
 			sibDir := filepath.Join(testSession, sib)
-			if err := ensureSessionDir(sibDir); err != nil {
+			if err := os.MkdirAll(sibDir, constants.DirPerm); err != nil {
 				t.Fatalf("Failed to create sibling dir: %v", err)
 			}
 		}
@@ -294,7 +298,7 @@ func TestParseMessageID(t *testing.T) {
 func TestIsSessionRoot(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a test session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -305,7 +309,7 @@ func TestIsSessionRoot(t *testing.T) {
 		}
 
 		// Create a sibling
-		siblingPath, err := CreateSibling(session.Path, "0001")
+		siblingPath, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create sibling: %v", err)
 		}
@@ -422,7 +426,7 @@ func TestValidationHelpers(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.id, func(t *testing.T) {
-				if got := isValidMessageID(tt.id); got != tt.expected {
+				if got := IsValidMessageID(tt.id); got != tt.expected {
 					t.Errorf("isValidMessageID(%q) = %v, want %v", tt.id, got, tt.expected)
 				}
 			})

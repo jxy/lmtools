@@ -4,6 +4,7 @@
 package proxy
 
 import (
+	"lmtools/internal/core"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -35,7 +36,7 @@ func TestIntegrationBasicChat(t *testing.T) {
 				MaxTokens: 100,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello"`),
 					},
 				},
@@ -59,7 +60,7 @@ func TestIntegrationBasicChat(t *testing.T) {
 				MaxTokens: 100,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello"`),
 					},
 				},
@@ -113,20 +114,19 @@ func TestIntegrationBasicChat(t *testing.T) {
 }
 
 func TestIntegrationStreaming(t *testing.T) {
-	proxyServer, openAIMock, googleMock, argoMock := SetupTestServer(t)
+	// Use SetupArgoTestServer to ensure routing through Argo for simulated streaming with pings
+	proxyServer, argoMock := SetupArgoTestServer(t)
 	defer proxyServer.Close()
-	defer openAIMock.Close()
-	defer googleMock.Close()
 	defer argoMock.Close()
 
 	// Make streaming request
 	req := AnthropicRequest{
-		Model:     "claude-3-haiku",
+		Model:     "gpto3", // Use Argo model for clarity
 		MaxTokens: 100,
 		Stream:    true,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Hello"`),
 			},
 		},
@@ -161,7 +161,9 @@ func TestIntegrationStreaming(t *testing.T) {
 	}
 
 	// Verify we got expected events using the new helper
-	expectedEvents := []string{"message_start", "content_block_start", "ping", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
+	// Note: ping events only occur if response takes longer than ping interval (1s)
+	// Since we removed artificial delays, the response is now fast and no pings are sent
+	expectedEvents := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
 	assertContainsEvents(t, string(body), expectedEvents)
 }
 
@@ -217,7 +219,7 @@ func TestIntegrationRetry(t *testing.T) {
 		MaxTokens: 100,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Test retry mechanism"`),
 			},
 		},
@@ -313,7 +315,7 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 		MaxTokens: 100,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Test rate limit retry"`),
 			},
 		},
@@ -375,7 +377,7 @@ func TestIntegrationSimulatedStreamingWithTools(t *testing.T) {
 		Stream:    true,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"List the contents of the current directory"`),
 			},
 		},
@@ -636,7 +638,7 @@ func TestCustomProviderURL(t *testing.T) {
 				MaxTokens: 100,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Test custom URL"`),
 					},
 				},

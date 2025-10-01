@@ -1,7 +1,9 @@
 package session
 
 import (
+	"context"
 	"fmt"
+	"lmtools/internal/core"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -12,7 +14,7 @@ import (
 func TestConcurrentResume(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create initial session with a message
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -23,7 +25,7 @@ func TestConcurrentResume(t *testing.T) {
 			Content:   "Initial message",
 			Timestamp: time.Now(),
 		}
-		_, _, err = AppendMessage(session, msg1)
+		_, err = AppendMessageWithToolInteraction(context.Background(), session, msg1, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to append initial message: %v", err)
 		}
@@ -66,7 +68,12 @@ func TestConcurrentResume(t *testing.T) {
 					Model:     "test-model",
 				}
 
-				path, msgID, err := AppendMessage(resumedSession, msg)
+				result, err := AppendMessageWithToolInteraction(context.Background(), resumedSession, msg, nil, nil)
+				var path, msgID string
+				if err == nil {
+					path = result.Path
+					msgID = result.MessageID
+				}
 				results <- struct {
 					path  string
 					msgID string
@@ -160,7 +167,7 @@ func TestConcurrentResume(t *testing.T) {
 // TestConcurrentAppendSameSession tests multiple goroutines appending to the same session
 func TestConcurrentAppendSameSession(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -182,7 +189,7 @@ func TestConcurrentAppendSameSession(t *testing.T) {
 					Timestamp: time.Now(),
 				}
 
-				_, _, err := AppendMessage(session, msg)
+				_, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 				if err != nil {
 					errors <- fmt.Errorf("message %d: %w", msgNum, err)
 				}
@@ -222,7 +229,7 @@ func TestConcurrentAppendSameSession(t *testing.T) {
 // TestConcurrentBranchCreation tests concurrent creation of branches from the same message
 func TestConcurrentBranchCreation(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -234,7 +241,7 @@ func TestConcurrentBranchCreation(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -251,7 +258,7 @@ func TestConcurrentBranchCreation(t *testing.T) {
 			go func(branchNum int) {
 				defer wg.Done()
 
-				path, err := CreateSibling(session.Path, "0001")
+				path, err := CreateSibling(context.Background(), session.Path, "0001")
 				if err != nil {
 					errors <- fmt.Errorf("branch %d: %w", branchNum, err)
 				} else {
@@ -300,17 +307,17 @@ func TestConcurrentBranchCreation(t *testing.T) {
 // TestConcurrentSiblingConflictResolution tests the sibling creation under high conflict
 func TestConcurrentSiblingConflictResolution(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
 		// Add initial message
-		_, _, err = AppendMessage(session, Message{
+		_, err = AppendMessageWithToolInteraction(context.Background(), session, Message{
 			Role:      "user",
 			Content:   "Hello",
 			Timestamp: time.Now(),
-		})
+		}, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to append initial message: %v", err)
 		}
@@ -341,7 +348,7 @@ func TestConcurrentSiblingConflictResolution(t *testing.T) {
 					Model:     "test",
 				}
 
-				path, msgID, err := AppendMessage(session, msg)
+				result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 				if err != nil {
 					t.Errorf("Goroutine %d failed: %v", id, err)
 					return
@@ -350,7 +357,7 @@ func TestConcurrentSiblingConflictResolution(t *testing.T) {
 				results <- struct {
 					path  string
 					msgID string
-				}{path, msgID}
+				}{result.Path, result.MessageID}
 			}(i)
 		}
 
@@ -388,7 +395,7 @@ func TestConcurrentSiblingConflictResolution(t *testing.T) {
 // TestRapidSequentialAppends tests rapid sequential appends that might overlap
 func TestRapidSequentialAppends(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -403,12 +410,12 @@ func TestRapidSequentialAppends(t *testing.T) {
 				Timestamp: time.Now(),
 			}
 
-			path, _, err := AppendMessage(session, msg)
+			result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 			if err != nil {
 				t.Fatalf("Failed to append message %d: %v", i, err)
 			}
 
-			paths[path]++
+			paths[result.Path]++
 		}
 
 		t.Logf("Message distribution:")
@@ -419,7 +426,7 @@ func TestRapidSequentialAppends(t *testing.T) {
 		// Verify total messages across all paths
 		totalMessages := 0
 		for path := range paths {
-			msgs, err := ListMessages(path)
+			msgs, err := listMessages(path)
 			if err != nil {
 				t.Errorf("Failed to list messages in %s: %v", path, err)
 				continue
@@ -448,7 +455,7 @@ func listAllMessagesIncludingSiblings(t *testing.T, sessionPath string) ([]strin
 	var siblingDirs []string
 
 	// Get messages in main path
-	msgs, err := ListMessages(sessionPath)
+	msgs, err := listMessages(sessionPath)
 	if err != nil {
 		t.Fatalf("Failed to list messages: %v", err)
 	}

@@ -17,7 +17,7 @@ func GetLineageAdapter(path string) ([]core.Message, error) {
 	result := make([]core.Message, len(msgs))
 	for i, msg := range msgs {
 		result[i] = core.Message{
-			Role:    msg.Role,
+			Role:    string(msg.Role),
 			Content: msg.Content,
 		}
 	}

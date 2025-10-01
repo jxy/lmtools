@@ -14,8 +14,8 @@ import (
 )
 
 func TestLoggingIntegration(t *testing.T) {
-	// Build argo binary
-	lmcBin := buildLmcBinary(t)
+	// Get lmc binary
+	lmcBin := getLmcBinary(t)
 
 	// Create temporary directories
 	tmpHome := t.TempDir()
@@ -126,8 +126,8 @@ func TestLoggingIntegration(t *testing.T) {
 }
 
 func TestStreamingLogging(t *testing.T) {
-	// Build lmc binary
-	lmcBin := buildLmcBinary(t)
+	// Get lmc binary
+	lmcBin := getLmcBinary(t)
 
 	// Create temporary directories
 	tmpHome := t.TempDir()
@@ -196,8 +196,8 @@ func TestStreamingLogging(t *testing.T) {
 }
 
 func TestConcurrentLogging(t *testing.T) {
-	// Build argo binary
-	lmcBin := buildLmcBinary(t)
+	// Get lmc binary
+	lmcBin := getLmcBinary(t)
 
 	// Create temporary directories
 	tmpHome := t.TempDir()
@@ -235,31 +235,9 @@ func TestConcurrentLogging(t *testing.T) {
 		}
 	}
 
-	// Give a moment for log files to be written
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify multiple log files were created in the specified directory
-	entries, err := os.ReadDir(logDir)
-	if err != nil {
-		t.Fatalf("Failed to read log directory: %v", err)
-	}
-
-	processLogs := 0
-	requestLogs := 0
-	now := time.Now()
-
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err == nil && now.Sub(info.ModTime()) < time.Minute {
-			t.Logf("Found log file: %s", entry.Name())
-			if strings.Contains(entry.Name(), "_lmc_") && strings.HasSuffix(entry.Name(), ".log") {
-				processLogs++
-			}
-			if strings.Contains(entry.Name(), "_embed_input_") && strings.HasSuffix(entry.Name(), ".json") {
-				requestLogs++
-			}
-		}
-	}
+	// Wait for log files to be written
+	processLogs := waitForLogFiles(t, logDir, "_lmc_", numProcesses, time.Second)
+	requestLogs := waitForLogFiles(t, logDir, "_embed_input_", numProcesses, time.Second)
 
 	t.Logf("Found %d process logs and %d request logs in %s", processLogs, requestLogs, logDir)
 

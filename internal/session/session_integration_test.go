@@ -1,6 +1,8 @@
 package session
 
 import (
+	"context"
+	"lmtools/internal/core"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,7 +11,7 @@ import (
 func TestBasicConversationFlow(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// 1. Create new session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -20,13 +22,13 @@ func TestBasicConversationFlow(t *testing.T) {
 			Content:   "Hello, how are you?",
 			Timestamp: time.Now(),
 		}
-		_, userMsgID, err := AppendMessage(session, userMsg)
+		result, err := AppendMessageWithToolInteraction(context.Background(), session, userMsg, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to append user message: %v", err)
 		}
 
-		if userMsgID != "0000" {
-			t.Errorf("Expected first message ID to be 0000, got %s", userMsgID)
+		if result.MessageID != "0000" {
+			t.Errorf("Expected first message ID to be 0000, got %s", result.MessageID)
 		}
 
 		// 3. Add assistant response
@@ -36,13 +38,13 @@ func TestBasicConversationFlow(t *testing.T) {
 			Timestamp: time.Now(),
 			Model:     "test-model",
 		}
-		_, assistantMsgID, err := AppendMessage(session, assistantMsg)
+		result2, err := AppendMessageWithToolInteraction(context.Background(), session, assistantMsg, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to append assistant message: %v", err)
 		}
 
-		if assistantMsgID != "0001" {
-			t.Errorf("Expected second message ID to be 0001, got %s", assistantMsgID)
+		if result2.MessageID != "0001" {
+			t.Errorf("Expected second message ID to be 0001, got %s", result2.MessageID)
 		}
 
 		// 4. Verify lineage
@@ -81,7 +83,7 @@ func TestBasicConversationFlow(t *testing.T) {
 func TestBranchingWorkflow(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// 1. Create session with 3 messages
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -94,13 +96,13 @@ func TestBranchingWorkflow(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		// 2. Branch from message 0001 (assistant response)
-		branchPath, err := CreateSibling(session.Path, "0001")
+		branchPath, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create branch: %v", err)
 		}
@@ -122,7 +124,7 @@ func TestBranchingWorkflow(t *testing.T) {
 		}
 
 		for _, msg := range branchMessages {
-			if _, _, err := AppendMessage(branch, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), branch, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append branch message: %v", err)
 			}
 		}
@@ -172,7 +174,7 @@ func TestBranchingWorkflow(t *testing.T) {
 func TestMultipleBranches(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create session with initial messages
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -185,23 +187,23 @@ func TestMultipleBranches(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		// Create multiple branches from the same point (message 0001)
-		branch1Path, err := CreateSibling(session.Path, "0001")
+		branch1Path, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create first branch: %v", err)
 		}
 
-		branch2Path, err := CreateSibling(session.Path, "0001")
+		branch2Path, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create second branch: %v", err)
 		}
 
-		branch3Path, err := CreateSibling(session.Path, "0001")
+		branch3Path, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create third branch: %v", err)
 		}
@@ -243,7 +245,7 @@ func TestMultipleBranches(t *testing.T) {
 				Timestamp: time.Now(),
 			}
 
-			if _, _, err := AppendMessage(branchSession, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), branchSession, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append to branch %s: %v", b.path, err)
 			}
 		}
@@ -271,7 +273,7 @@ func TestMultipleBranches(t *testing.T) {
 func TestNestedBranches(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create initial session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -284,13 +286,13 @@ func TestNestedBranches(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		// Create first level branch from message 0001
-		level1Path, err := CreateSibling(session.Path, "0001")
+		level1Path, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create level 1 branch: %v", err)
 		}
@@ -307,13 +309,13 @@ func TestNestedBranches(t *testing.T) {
 		}
 
 		for _, msg := range level1Messages {
-			if _, _, err := AppendMessage(level1Session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), level1Session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append level 1 message: %v", err)
 			}
 		}
 
 		// Create second level branch from level 1's message 0000
-		level2Path, err := CreateSibling(level1Session.Path, "0000")
+		level2Path, err := CreateSibling(context.Background(), level1Session.Path, "0000")
 		if err != nil {
 			t.Fatalf("Failed to create level 2 branch: %v", err)
 		}
@@ -330,7 +332,7 @@ func TestNestedBranches(t *testing.T) {
 			Timestamp: time.Now(),
 		}
 
-		if _, _, err := AppendMessage(level2Session, level2Message); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), level2Session, level2Message, nil, nil); err != nil {
 			t.Fatalf("Failed to append level 2 message: %v", err)
 		}
 
@@ -359,7 +361,7 @@ func TestNestedBranches(t *testing.T) {
 		}
 
 		// Create another branch at level 2 to test deep nesting
-		level3Path, err := CreateSibling(level2Session.Path, "0000")
+		level3Path, err := CreateSibling(context.Background(), level2Session.Path, "0000")
 		if err != nil {
 			t.Fatalf("Failed to create level 3 branch: %v", err)
 		}
@@ -376,7 +378,7 @@ func TestNestedBranches(t *testing.T) {
 			Model:     "test-model",
 		}
 
-		if _, _, err := AppendMessage(level3Session, level3Message); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), level3Session, level3Message, nil, nil); err != nil {
 			t.Fatalf("Failed to append level 3 message: %v", err)
 		}
 
@@ -407,7 +409,7 @@ func TestNestedBranches(t *testing.T) {
 func TestSessionTreeBuilding(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a complex tree structure
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -421,14 +423,14 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		for _, msg := range rootMessages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append root message: %v", err)
 			}
 		}
 
 		// Create branches at different points
 		// Branch 1: from message 0001
-		branch1Path, err := CreateSibling(session.Path, "0001")
+		branch1Path, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create branch 1: %v", err)
 		}
@@ -440,41 +442,41 @@ func TestSessionTreeBuilding(t *testing.T) {
 		}
 
 		for _, msg := range branch1Msgs {
-			if _, _, err := AppendMessage(branch1, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), branch1, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append to branch 1: %v", err)
 			}
 		}
 
 		// Branch 2: also from message 0001 (sibling of branch 1)
-		branch2Path, err := CreateSibling(session.Path, "0001")
+		branch2Path, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create branch 2: %v", err)
 		}
 
 		branch2, _ := LoadSession(branch2Path)
-		if _, _, err := AppendMessage(branch2, Message{Role: "user", Content: "Branch 2 - Msg 0", Timestamp: time.Now()}); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), branch2, Message{Role: "user", Content: "Branch 2 - Msg 0", Timestamp: time.Now()}, nil, nil); err != nil {
 			t.Fatalf("Failed to append to branch 2: %v", err)
 		}
 
 		// Branch 3: from message 0003 (regeneration)
-		branch3Path, err := CreateSibling(session.Path, "0003")
+		branch3Path, err := CreateSibling(context.Background(), session.Path, "0003")
 		if err != nil {
 			t.Fatalf("Failed to create branch 3: %v", err)
 		}
 
 		branch3, _ := LoadSession(branch3Path)
-		if _, _, err := AppendMessage(branch3, Message{Role: "assistant", Content: "Root 3 - Regenerated", Timestamp: time.Now(), Model: "model2-regen"}); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), branch3, Message{Role: "assistant", Content: "Root 3 - Regenerated", Timestamp: time.Now(), Model: "model2-regen"}, nil, nil); err != nil {
 			t.Fatalf("Failed to append to branch 3: %v", err)
 		}
 
 		// Nested branch: from branch1's message 0000
-		nestedPath, err := CreateSibling(branch1.Path, "0000")
+		nestedPath, err := CreateSibling(context.Background(), branch1.Path, "0000")
 		if err != nil {
 			t.Fatalf("Failed to create nested branch: %v", err)
 		}
 
 		nested, _ := LoadSession(nestedPath)
-		if _, _, err := AppendMessage(nested, Message{Role: "user", Content: "Nested - Msg 0", Timestamp: time.Now()}); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), nested, Message{Role: "user", Content: "Nested - Msg 0", Timestamp: time.Now()}, nil, nil); err != nil {
 			t.Fatalf("Failed to append to nested branch: %v", err)
 		}
 

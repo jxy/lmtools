@@ -4,8 +4,9 @@
 package session
 
 import (
-	"errors"
-	"fmt"
+	stdErrors "errors"
+	"lmtools/internal/constants"
+	"lmtools/internal/errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -13,8 +14,8 @@ import (
 )
 
 var (
-	ErrLockTimeout = errors.New("lock acquisition timeout")
-	ErrLockHeld    = errors.New("lock is already held")
+	ErrLockTimeout = stdErrors.New("lock acquisition timeout")
+	ErrLockHeld    = stdErrors.New("lock is already held")
 )
 
 // WithSessionLock executes a function while holding an exclusive lock on the session.
@@ -24,14 +25,14 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 
 	// Ensure lock directory exists
 	lockDir := filepath.Dir(lockPath)
-	if err := os.MkdirAll(lockDir, 0o750); err != nil {
-		return fmt.Errorf("failed to create lock directory: %w", err)
+	if err := os.MkdirAll(lockDir, constants.DirPerm); err != nil {
+		return errors.WrapError("create lock directory", err)
 	}
 
 	// Open or create lock file
-	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR, 0o644)
+	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR, uint32(constants.FilePerm))
 	if err != nil {
-		return fmt.Errorf("failed to open lock file: %w", err)
+		return errors.WrapError("open lock file", err)
 	}
 	defer syscall.Close(fd)
 
@@ -51,7 +52,7 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 
 			// Check if it's a "would block" error
 			if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
-				return fmt.Errorf("failed to acquire lock: %w", err)
+				return errors.WrapError("acquire lock", err)
 			}
 
 			// Check timeout
@@ -71,7 +72,7 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 	} else {
 		// Wait indefinitely
 		if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
-			return fmt.Errorf("failed to acquire lock: %w", err)
+			return errors.WrapError("acquire lock", err)
 		}
 	}
 

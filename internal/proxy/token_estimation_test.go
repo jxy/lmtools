@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"lmtools/internal/core"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestEstimateRequestTokens(t *testing.T) {
 			request: &AnthropicRequest{
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello, how are you?"`),
 					},
 				},
@@ -31,7 +32,7 @@ func TestEstimateRequestTokens(t *testing.T) {
 				System: json.RawMessage(`"You are a helpful assistant."`),
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"What is the weather today?"`),
 					},
 				},
@@ -44,15 +45,15 @@ func TestEstimateRequestTokens(t *testing.T) {
 			request: &AnthropicRequest{
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Tell me a story"`),
 					},
 					{
-						Role:    RoleAssistant,
+						Role:    core.RoleAssistant,
 						Content: json.RawMessage(`"Once upon a time, there was a brave knight who lived in a castle."`),
 					},
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"What happened next?"`),
 					},
 				},
@@ -65,7 +66,7 @@ func TestEstimateRequestTokens(t *testing.T) {
 			request: &AnthropicRequest{
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"What's the weather in San Francisco?"`),
 					},
 				},
@@ -96,12 +97,12 @@ func TestEstimateRequestTokens(t *testing.T) {
 				for i := 0; i < 257; i++ {
 					if i%2 == 0 {
 						messages[i] = AnthropicMessage{
-							Role:    RoleUser,
+							Role:    core.RoleUser,
 							Content: json.RawMessage(`"This is a user message with some content to simulate a real conversation."`),
 						}
 					} else {
 						messages[i] = AnthropicMessage{
-							Role:    RoleAssistant,
+							Role:    core.RoleAssistant,
 							Content: json.RawMessage(`"This is an assistant response with helpful information and context."`),
 						}
 					}
@@ -118,7 +119,7 @@ func TestEstimateRequestTokens(t *testing.T) {
 			request: &AnthropicRequest{
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`[{"type":"text","text":"Analyze this data"},{"type":"text","text":"Here is more context"}]`),
 					},
 				},
@@ -155,7 +156,7 @@ func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
 		System: json.RawMessage(`"You are a helpful coding assistant."`),
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Write a function to calculate fibonacci numbers"`),
 			},
 		},

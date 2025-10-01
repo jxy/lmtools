@@ -15,15 +15,15 @@ test: test-unit
 
 # Run unit tests
 test-unit:
-	go test -v -race ./internal/... ./cmd/lmc ./cmd/apiproxy
+	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy
 
 # Run integration tests (requires built binaries)
 test-integration: build
-	go test -v -race -tags=integration ./cmd/lmc ./internal/...
+	go test -race -tags=integration ./cmd/lmc ./internal/...
 
 # Run e2e tests (end-to-end with mock servers)
 test-e2e: build
-	go test -v -race -tags=e2e ./cmd/lmc ./internal/...
+	go test -race -tags=e2e ./cmd/lmc ./internal/...
 
 # Run all tests (unit, integration, e2e)
 test-all: test-unit test-integration test-e2e

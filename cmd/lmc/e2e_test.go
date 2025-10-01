@@ -13,9 +13,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
-
-	"lmtools/internal/core"
 )
 
 // E2ETestServer wraps the mock server for e2e tests
@@ -36,7 +33,14 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 	
 	// Handle chat endpoint
 	mux.HandleFunc("/chat/", func(w http.ResponseWriter, r *http.Request) {
-		var req core.ChatRequest
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Model  string `json:"model"`
+			Stream bool   `json:"stream,omitempty"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
@@ -51,21 +55,19 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 		// Generate contextual responses
 		response := "Default response"
 		if len(req.Messages) > 0 {
-			// Extract string content from json.RawMessage
-			var lastMsgStr string
-			if err := json.Unmarshal(req.Messages[len(req.Messages)-1].Content, &lastMsgStr); err == nil {
-				switch {
-				case strings.Contains(strings.ToLower(lastMsgStr), "weather"):
-					response = "Today is sunny with a high of 75°F."
-				case strings.Contains(strings.ToLower(lastMsgStr), "hello"):
-					response = "Hello! How can I assist you today?"
-				case strings.Contains(lastMsgStr, "continue"):
-					response = fmt.Sprintf("Continuing conversation #%d...", requestNum)
-				case strings.Contains(lastMsgStr, "test"):
-					response = "Test response confirmed."
-				default:
-					response = fmt.Sprintf("Response #%d to: %s", requestNum, lastMsgStr)
-				}
+			// Content is now a plain string, use it directly
+			lastMsgStr := req.Messages[len(req.Messages)-1].Content
+			switch {
+			case strings.Contains(strings.ToLower(lastMsgStr), "weather"):
+				response = "Today is sunny with a high of 75°F."
+			case strings.Contains(strings.ToLower(lastMsgStr), "hello"):
+				response = "Hello! How can I assist you today?"
+			case strings.Contains(lastMsgStr, "continue"):
+				response = fmt.Sprintf("Continuing conversation #%d...", requestNum)
+			case strings.Contains(lastMsgStr, "test"):
+				response = "Test response confirmed."
+			default:
+				response = fmt.Sprintf("Response #%d to: %s", requestNum, lastMsgStr)
 			}
 		}
 		
@@ -81,7 +83,10 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 	
 	// Handle embedding endpoint
 	mux.HandleFunc("/embed/", func(w http.ResponseWriter, r *http.Request) {
-		var req core.EmbedRequest
+		var req struct {
+			Input []string `json:"input"`
+			Model string   `json:"model"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
@@ -109,7 +114,14 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 	
 	// Handle streaming endpoint
 	mux.HandleFunc("/streamchat/", func(w http.ResponseWriter, r *http.Request) {
-		var req core.ChatRequest
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Model  string `json:"model"`
+			Stream bool   `json:"stream,omitempty"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
@@ -125,13 +137,7 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 		
 		// Stream a simple response as plain text (Argo format)
 		response := "This is a streaming response."
-		for _, char := range response {
-			fmt.Fprintf(w, "%c", char)
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		fmt.Fprint(w, response)
 		fmt.Fprintln(w) // Final newline
 	})
 	
@@ -143,8 +149,8 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 
 // TestE2E_BasicConversationFlow tests a complete conversation flow
 func TestE2E_BasicConversationFlow(t *testing.T) {
-	// Build argo binary
-	lmcBin := buildLmcBinary(t)
+	// Get lmc binary
+	lmcBin := getLmcBinary(t)
 	
 	// Setup environment
 	tmpHome := t.TempDir()
@@ -224,7 +230,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 
 // TestE2E_BranchingConversation tests branching functionality
 func TestE2E_BranchingConversation(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	sessionsDir := t.TempDir()
@@ -287,7 +293,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 
 // TestE2E_EmbeddingMode tests embedding functionality
 func TestE2E_EmbeddingMode(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	server := newE2ETestServer(t)
@@ -322,7 +328,7 @@ func TestE2E_EmbeddingMode(t *testing.T) {
 
 // TestE2E_StreamingMode tests streaming functionality
 func TestE2E_StreamingMode(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	sessionsDir := t.TempDir()
@@ -410,7 +416,7 @@ func TestE2E_StreamingMode(t *testing.T) {
 
 // TestE2E_SessionDeletion tests deletion functionality
 func TestE2E_SessionDeletion(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	sessionsDir := t.TempDir()
@@ -466,7 +472,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 
 // TestE2E_ConcurrentOperations tests concurrent session operations
 func TestE2E_ConcurrentOperations(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	sessionsDir := t.TempDir()

@@ -8,10 +8,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	stdErrors "errors"
 	"fmt"
 	"io"
 	"lmtools/internal/auth"
+	"lmtools/internal/constants"
+	"lmtools/internal/errors"
 	"net/http"
 	"os"
 	"strings"
@@ -22,123 +24,14 @@ import (
 // ============================================================================
 
 var (
-	ErrInterrupted  = errors.New("operation interrupted")
-	ErrNoInput      = errors.New("no input provided")
-	ErrInvalidInput = errors.New("invalid input")
+	ErrInterrupted  = stdErrors.New("operation interrupted")
+	ErrNoInput      = stdErrors.New("no input provided")
+	ErrInvalidInput = stdErrors.New("invalid input")
 )
-
-// WrapError provides consistent error wrapping with context
-func WrapError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%s: %w", operation, err)
-}
-
-// HTTPError represents an HTTP error response
-type HTTPError struct {
-	StatusCode int
-	Body       string
-}
-
-func (e *HTTPError) Error() string {
-	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
-}
-
-// NewHTTPError creates a new HTTP error
-func NewHTTPError(statusCode int, body string) *HTTPError {
-	return &HTTPError{
-		StatusCode: statusCode,
-		Body:       body,
-	}
-}
-
-// IsRetryable returns true if the HTTP error is retryable
-func (e *HTTPError) IsRetryable() bool {
-	switch e.StatusCode {
-	case http.StatusRequestTimeout, // 408
-		http.StatusTooManyRequests,     // 429
-		425,                            // Too Early
-		http.StatusInternalServerError, // 500
-		http.StatusBadGateway,          // 502
-		http.StatusServiceUnavailable,  // 503
-		http.StatusGatewayTimeout:      // 504
-		return true
-	default:
-		return false
-	}
-}
-
-// ValidationError represents a validation error
-type ValidationError struct {
-	Field   string
-	Message string
-}
-
-func (e *ValidationError) Error() string {
-	if e.Field != "" {
-		return fmt.Sprintf("validation error for field %s: %s", e.Field, e.Message)
-	}
-	return e.Message
-}
-
-// ConfigError represents a configuration error
-type ConfigError struct {
-	Message string
-}
-
-func (e *ConfigError) Error() string {
-	return fmt.Sprintf("configuration error: %s", e.Message)
-}
-
-// SessionError represents a session-related error
-type SessionError struct {
-	Operation string
-	Path      string
-	Err       error
-}
-
-func (e *SessionError) Error() string {
-	if e.Path != "" {
-		return fmt.Sprintf("session %s error at %s: %v", e.Operation, e.Path, e.Err)
-	}
-	return fmt.Sprintf("session %s error: %v", e.Operation, e.Err)
-}
-
-func (e *SessionError) Unwrap() error {
-	return e.Err
-}
-
-// ProxyError represents an API proxy error
-type ProxyError struct {
-	Provider string
-	Message  string
-	Err      error
-}
-
-func (e *ProxyError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("proxy error for provider %s: %s: %v", e.Provider, e.Message, e.Err)
-	}
-	return fmt.Sprintf("proxy error for provider %s: %s", e.Provider, e.Message)
-}
-
-func (e *ProxyError) Unwrap() error {
-	return e.Err
-}
 
 // ============================================================================
 // Models and Constants
 // ============================================================================
-
-// Common role types for chat messages
-type Role string
-
-const (
-	RoleSystem    Role = "system"
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
-)
 
 // Default models
 const (
@@ -163,201 +56,62 @@ const (
 	ArgoDevURL  = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource"
 )
 
-// Input validation constants
-const (
-	MaxInputSizeBytes = 1024 * 1024 // 1MB
-)
+// ============================================================================
+// Request Building
+// ============================================================================
 
-// GetDefaultChatModel returns the default chat model for the given provider
-func GetDefaultChatModel(provider string) string {
-	switch provider {
-	case "openai":
-		return DefaultOpenAIChatModel
-	case "anthropic":
-		return DefaultAnthropicChatModel
-	case "google":
-		return DefaultGoogleChatModel
-	case "argo", "":
-		return DefaultArgoChatModel
-	default:
-		// For unknown providers, default to argo's model
-		return DefaultArgoChatModel
+// getProviderWithDefault returns the provider from config or a default value
+func getProviderWithDefault(cfg RequestConfig, defaultProvider string) string {
+	provider := cfg.GetProvider()
+	if provider == "" {
+		return defaultProvider
 	}
-}
-
-// GetDefaultSmallModel returns the default small model for the given provider
-func GetDefaultSmallModel(provider string) string {
-	switch provider {
-	case "openai":
-		return DefaultOpenAISmallModel
-	case "anthropic":
-		return DefaultAnthropicSmallModel
-	case "google":
-		return DefaultGoogleSmallModel
-	case "argo", "":
-		return DefaultArgoSmallModel
-	default:
-		// For unknown providers, default to argo's model
-		return DefaultArgoSmallModel
-	}
-}
-
-// NormalizeModel normalizes model names for consistency
-func NormalizeModel(model string) string {
-	return strings.ToLower(strings.TrimSpace(model))
-}
-
-// GetBaseURL returns the base URL for the given environment
-func GetBaseURL(env string) string {
-	switch strings.ToLower(env) {
-	case "dev":
-		return ArgoDevURL
-	case "prod":
-		return ArgoProdURL
-	default:
-		// If it looks like a URL, use it directly
-		lowerEnv := strings.ToLower(env)
-		if strings.HasPrefix(lowerEnv, "http://") || strings.HasPrefix(lowerEnv, "https://") {
-			return env
-		}
-		// Default to prod
-		return ArgoProdURL
-	}
-}
-
-// ============================================================================
-// Request/Response Types
-// ============================================================================
-
-// ChatMessage represents a message in a chat conversation
-type ChatMessage struct {
-	Role    Role            `json:"role"`
-	Content json.RawMessage `json:"content"`
-}
-
-// ChatRequest represents a generic chat request
-type ChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature *float64      `json:"temperature,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	Stream      bool          `json:"stream,omitempty"`
-}
-
-// ChatResponse represents a generic chat response
-type ChatResponse struct {
-	ID      string `json:"id,omitempty"`
-	Model   string `json:"model,omitempty"`
-	Content string `json:"content,omitempty"`
-	Usage   *Usage `json:"usage,omitempty"`
-}
-
-// EmbedRequest represents a generic embedding request
-type EmbedRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
-}
-
-// EmbedResponse represents a generic embedding response
-type EmbedResponse struct {
-	Model      string      `json:"model,omitempty"`
-	Embeddings [][]float64 `json:"embeddings"`
-	Usage      *Usage      `json:"usage,omitempty"`
-}
-
-// Usage represents token usage information
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens,omitempty"`
-	CompletionTokens int `json:"completion_tokens,omitempty"`
-	TotalTokens      int `json:"total_tokens,omitempty"`
-}
-
-// StreamChunk represents a chunk in a streaming response
-type StreamChunk struct {
-	ID      string `json:"id,omitempty"`
-	Model   string `json:"model,omitempty"`
-	Content string `json:"content,omitempty"`
-	Done    bool   `json:"done,omitempty"`
-}
-
-// ============================================================================
-// Request Building (from request package)
-// ============================================================================
-
-// SimpleChatMessage is the simple format for chat messages used by lmc CLI
-type SimpleChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// SimpleChatRequest is the simple format used by lmc CLI
-type SimpleChatRequest struct {
-	User     string              `json:"user"`
-	Model    string              `json:"model"`
-	Messages []SimpleChatMessage `json:"messages"`
-}
-
-// SimpleEmbedRequest is the simple format used by lmc CLI
-type SimpleEmbedRequest struct {
-	User   string   `json:"user"`
-	Model  string   `json:"model"`
-	Prompt []string `json:"prompt"`
-}
-
-// Config represents the configuration needed for building requests
-// This is a subset of the full config to avoid circular dependencies
-type RequestConfig interface {
-	GetUser() string
-	GetModel() string
-	GetSystem() string
-	GetEnv() string
-	IsEmbed() bool
-	IsStreamChat() bool
-	GetProvider() string
-	GetProviderURL() string
-	GetAPIKeyFile() string
+	return provider
 }
 
 // BuildRequest builds an HTTP request based on configuration and input
 func BuildRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
-	return buildRequestInternal(cfg, input, nil)
-}
+	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 
-// buildRequestInternal handles both single and session requests
-// For single requests: input is provided, sessionMessages is nil
-// For session requests: input is empty, sessionMessages contains the history
-func buildRequestInternal(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
-	provider := cfg.GetProvider()
-	if provider == "" {
-		provider = "argo"
-	}
-
-	// Handle embed mode separately (only for single requests)
-	if cfg.IsEmbed() && input != "" {
+	// Handle embed mode separately
+	if cfg.IsEmbed() {
 		return buildEmbedRequest(cfg, provider, input)
 	}
 
-	// Route to provider-specific chat builder
-	switch provider {
-	case "argo":
-		return buildArgoChatRequest(cfg, input, sessionMessages)
-	case "openai":
-		return buildOpenAIChatRequest(cfg, input, sessionMessages)
-	case "google":
-		return buildGoogleChatRequest(cfg, input, sessionMessages)
-	case "anthropic":
-		return buildAnthropicChatRequest(cfg, input, sessionMessages)
-	default:
-		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
+	// Build typed messages from input
+	var messages []TypedMessage
+
+	// Add system message if configured (except for Google and Anthropic which handle it separately)
+	effectiveSystem := cfg.GetEffectiveSystem()
+	if effectiveSystem != "" && provider != constants.ProviderGoogle && provider != constants.ProviderAnthropic {
+		messages = append(messages, NewTextMessage("system", effectiveSystem))
 	}
+
+	// Add user message
+	if input != "" {
+		messages = append(messages, NewTextMessage("user", input))
+	}
+
+	// Prepare options
+	opts := ChatBuildOptions{
+		Stream: cfg.IsStreamChat(),
+	}
+
+	// Add tools if enabled
+	if cfg.IsToolEnabled() {
+		opts.ToolDefs = GetBuiltinUniversalCommandTool()
+	}
+
+	// Use the unified BuildChatRequest
+	return BuildChatRequest(cfg, messages, opts)
 }
 
 // buildEmbedRequest handles embedding requests for providers that support it
 func buildEmbedRequest(cfg RequestConfig, provider, input string) (*http.Request, []byte, error) {
 	switch provider {
-	case "argo":
+	case constants.ProviderArgo:
 		return buildArgoEmbedRequest(cfg, input)
-	case "openai":
+	case constants.ProviderOpenAI:
 		return buildOpenAIEmbedRequest(cfg, input)
 	default:
 		return nil, nil, fmt.Errorf("%s provider does not support embedding mode", provider)
@@ -366,13 +120,17 @@ func buildEmbedRequest(cfg RequestConfig, provider, input string) (*http.Request
 
 // buildArgoEmbedRequest handles Argo embedding requests
 func buildArgoEmbedRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
-	urlBase := GetBaseURL(cfg.GetEnv())
+	urlBase := getBaseURL(cfg.GetEnv())
 	model := cfg.GetModel()
 	if model == "" {
 		model = DefaultEmbedModel
 	}
 
-	req := SimpleEmbedRequest{User: cfg.GetUser(), Model: model, Prompt: []string{input}}
+	req := map[string]interface{}{
+		"user":   cfg.GetUser(),
+		"model":  model,
+		"prompt": []string{input},
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal embed request: %w", err)
@@ -384,35 +142,62 @@ func buildArgoEmbedRequest(cfg RequestConfig, input string) (*http.Request, []by
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "argo")
+	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), constants.ProviderArgo)
 	return httpReq, body, nil
 }
 
 // buildArgoChatRequest builds an Argo chat request for both single and session modes
-func buildArgoChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
-	urlBase := GetBaseURL(cfg.GetEnv())
+// buildArgoChatRequestTyped builds an Argo chat request from typed messages
+// This is the unified function that both buildArgoChatRequest and buildArgoChatRequestWithTools use
+func buildArgoChatRequestTyped(cfg RequestConfig, messages []TypedMessage, stream bool) (*http.Request, []byte, error) {
+	urlBase := getBaseURL(cfg.GetEnv())
 	model := cfg.GetModel()
 	if model == "" {
-		model = GetDefaultChatModel("argo")
+		model = GetDefaultChatModel(constants.ProviderArgo)
 	}
 
-	// Build messages inline - no separate function needed
-	messages := []SimpleChatMessage{{Role: "system", Content: cfg.GetSystem()}}
+	// Check if first message is already a system message
+	hasSystemMessage := len(messages) > 0 && messages[0].Role == string(RoleSystem)
 
-	if len(sessionMessages) > 0 {
-		// Session mode: append all messages
-		for _, msg := range sessionMessages {
-			messages = append(messages, SimpleChatMessage(msg))
-		}
-	} else {
-		// Single mode: just add user input
-		messages = append(messages, SimpleChatMessage{Role: "user", Content: input})
+	// Add system message if needed
+	finalMessages := messages
+	effectiveSystem := cfg.GetEffectiveSystem()
+	if !hasSystemMessage && effectiveSystem != "" {
+		// Prepend system message
+		systemMsg := NewTextMessage("system", effectiveSystem)
+		finalMessages = append([]TypedMessage{systemMsg}, messages...)
 	}
 
-	req := SimpleChatRequest{
-		User:     cfg.GetUser(),
-		Model:    model,
-		Messages: messages,
+	// Determine model provider for Argo routing
+	provider := DetermineArgoModelProvider(model)
+
+	// Convert TypedMessage to appropriate format based on model
+	var argoMessages []interface{}
+	switch provider {
+	case constants.ProviderAnthropic:
+		argoMessages = ToAnthropic(finalMessages)
+	case constants.ProviderOpenAI:
+		argoMessages = ToOpenAI(finalMessages)
+	case constants.ProviderGoogle:
+		argoMessages = ToGoogleForArgo(finalMessages) // Use Argo variant that keeps system
+	default:
+		argoMessages = ToOpenAI(finalMessages) // Default to OpenAI format
+	}
+
+	// Create request with appropriate format
+	req := map[string]interface{}{
+		"user":     cfg.GetUser(),
+		"model":    model,
+		"messages": argoMessages,
+	}
+
+	// Add tool if configured
+	if cfg.IsToolEnabled() {
+		toolDefs := GetBuiltinUniversalCommandTool()
+		// Convert tools to appropriate format based on model
+		converted := ConvertToolsForProvider(model, toolDefs, nil)
+		req["tools"] = converted.Tools
+		req["tool_choice"] = converted.ToolChoice
 	}
 
 	body, err := json.Marshal(req)
@@ -420,8 +205,17 @@ func buildArgoChatRequest(cfg RequestConfig, input string, sessionMessages []Mes
 		return nil, nil, fmt.Errorf("failed to marshal chat request: %w", err)
 	}
 
+	// For Argo, check if we should use streaming
+	// When tools are configured, Argo doesn't support streaming
+	actualStream := stream
+	if stream && cfg.IsToolEnabled() {
+		actualStream = false
+		// Argo doesn't support streaming with tools
+	}
+
 	endpoint := fmt.Sprintf("%s/chat/", urlBase)
-	if cfg.IsStreamChat() {
+	if actualStream {
+		// Only use streaming endpoint if no tools are configured
 		endpoint = fmt.Sprintf("%s/streamchat/", urlBase)
 	}
 
@@ -430,36 +224,15 @@ func buildArgoChatRequest(cfg RequestConfig, input string, sessionMessages []Mes
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "argo")
+	auth.SetRequestHeaders(httpReq, true, actualStream, constants.ProviderArgo)
 	return httpReq, body, nil
 }
 
 // buildOpenAIEmbedRequest handles OpenAI embedding requests
 func buildOpenAIEmbedRequest(cfg RequestConfig, input string) (*http.Request, []byte, error) {
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "openai"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
 	model := cfg.GetModel()
 	if model == "" {
-		model = GetDefaultChatModel("openai")
+		model = GetDefaultChatModel(constants.ProviderOpenAI)
 	}
 
 	// OpenAI embedding format
@@ -480,306 +253,18 @@ func buildOpenAIEmbedRequest(cfg RequestConfig, input string) (*http.Request, []
 	}
 	url = strings.TrimRight(url, "/") + "/embeddings"
 
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetProviderHeaders(httpReq, "openai", apiKey)
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "openai")
-
-	return httpReq, body, nil
-}
-
-// buildOpenAIChatRequest builds an OpenAI chat request for both single and session modes
-func buildOpenAIChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "openai"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("openai")
-	}
-
-	// Build OpenAI format messages inline
-	openAIMessages := []map[string]string{
-		{"role": "system", "content": cfg.GetSystem()},
-	}
-
-	if len(sessionMessages) > 0 {
-		// Session mode: append all messages
-		for _, msg := range sessionMessages {
-			openAIMessages = append(openAIMessages, map[string]string{
-				"role":    msg.Role,
-				"content": msg.Content,
-			})
-		}
-	} else {
-		// Single mode: just add user input
-		openAIMessages = append(openAIMessages, map[string]string{
-			"role": "user", "content": input,
-		})
-	}
-
-	// OpenAI chat format
-	req := map[string]interface{}{
-		"model":    model,
-		"messages": openAIMessages,
-		"stream":   cfg.IsStreamChat(),
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Determine endpoint
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://api.openai.com/v1"
-	}
-	url = strings.TrimRight(url, "/") + "/chat/completions"
-
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetProviderHeaders(httpReq, "openai", apiKey)
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "openai")
-
-	return httpReq, body, nil
-}
-
-// buildGoogleChatRequest builds a Google chat request for both single and session modes
-func buildGoogleChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
-	// Google doesn't have separate embedding endpoint
-	if cfg.IsEmbed() {
-		return nil, nil, fmt.Errorf("google provider does not support embedding mode")
-	}
-
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "google"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("google")
-	}
-
-	// Build Google AI format - combine all messages into contents
-	var contents []map[string]interface{}
-
-	if len(sessionMessages) > 0 {
-		// Session mode: convert messages to Google format
-		for _, msg := range sessionMessages {
-			if msg.Role == "user" || msg.Role == "assistant" {
-				role := "user"
-				if msg.Role == "assistant" {
-					role = "model"
-				}
-				contents = append(contents, map[string]interface{}{
-					"role": role,
-					"parts": []map[string]string{
-						{"text": msg.Content},
-					},
-				})
-			}
-		}
-	} else {
-		// Single mode: just add user input
-		contents = []map[string]interface{}{
-			{
-				"role": "user",
-				"parts": []map[string]string{
-					{"text": input},
-				},
-			},
-		}
-	}
-
-	req := map[string]interface{}{
-		"contents": contents,
-		"systemInstruction": map[string]interface{}{
-			"parts": []map[string]string{
-				{"text": cfg.GetSystem()},
-			},
-		},
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Determine endpoint
-	url := cfg.GetProviderURL()
-	if url == "" {
-		if apiKey == "" {
-			return nil, nil, fmt.Errorf("API key is required for standard Google endpoint")
-		}
-		url = "https://generativelanguage.googleapis.com/v1beta"
-	}
-
-	url = strings.TrimRight(url, "/")
-	if cfg.IsStreamChat() {
-		url = fmt.Sprintf("%s/models/%s:streamGenerateContent", url, model)
-	} else {
-		url = fmt.Sprintf("%s/models/%s:generateContent", url, model)
-	}
-
-	// Add API key as query parameter
-	if apiKey != "" {
-		if strings.Contains(url, "?") {
-			url += "&key=" + apiKey
-		} else {
-			url += "?key=" + apiKey
-		}
-	}
-
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "google")
-
-	return httpReq, body, nil
-}
-
-// buildAnthropicChatRequest builds an Anthropic chat request for both single and session modes
-func buildAnthropicChatRequest(cfg RequestConfig, input string, sessionMessages []Message) (*http.Request, []byte, error) {
-	// Anthropic doesn't have separate embedding endpoint
-	if cfg.IsEmbed() {
-		return nil, nil, fmt.Errorf("anthropic provider does not support embedding mode")
-	}
-
-	var apiKey string
-
-	// Only require API key for standard endpoints
-	if cfg.GetProviderURL() == "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read API key: %w", err)
-		}
-
-		if err := auth.ValidateAPIKey(apiKey, "anthropic"); err != nil {
-			return nil, nil, fmt.Errorf("invalid API key: %w", err)
-		}
-	} else if cfg.GetAPIKeyFile() != "" {
-		var err error
-		apiKey, err = auth.ReadKeyFile(cfg.GetAPIKeyFile())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read API key file: %v\n", err)
-		}
-	}
-
-	model := cfg.GetModel()
-	if model == "" {
-		model = GetDefaultChatModel("anthropic")
-	}
-
-	// Build Anthropic format messages inline
-	var anthropicMessages []map[string]string
-
-	if len(sessionMessages) > 0 {
-		// Session mode: append messages (filter to user/assistant only)
-		for _, msg := range sessionMessages {
-			if msg.Role == "user" || msg.Role == "assistant" {
-				anthropicMessages = append(anthropicMessages, map[string]string{
-					"role":    msg.Role,
-					"content": msg.Content,
-				})
-			}
-		}
-	} else {
-		// Single mode: just add user input
-		anthropicMessages = []map[string]string{
-			{"role": "user", "content": input},
-		}
-	}
-
-	// Anthropic format request
-	req := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 4096,
-		"messages":   anthropicMessages,
-		"system":     cfg.GetSystem(),
-		"stream":     cfg.IsStreamChat(),
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Determine endpoint
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://api.anthropic.com/v1"
-	}
-	url = strings.TrimRight(url, "/") + "/messages"
-
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Use centralized header setting
-	auth.SetProviderHeaders(httpReq, "anthropic", apiKey)
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), "anthropic")
-
-	return httpReq, body, nil
+	// Use unified request builder
+	return buildProviderRequest(cfg, url, body, constants.ProviderOpenAI, false)
 }
 
 // ============================================================================
-// Response Handling (from response package)
+// Response Handling
 // ============================================================================
 
-// Logger interface to avoid circular dependency
-type Logger interface {
-	GetLogDir() string
-	LogJSON(logDir, prefix string, data []byte) error
-	CreateLogFile(logDir, prefix string) (*os.File, string, error)
+// Response represents a unified response structure from any provider
+type Response struct {
+	Text      string
+	ToolCalls []ToolCall
 }
 
 // HandleResponse processes an HTTP response based on configuration.
@@ -787,14 +272,12 @@ type Logger interface {
 // 1. Prints the streamed content directly to os.Stdout in real-time
 // 2. Returns the full accumulated content as a string for session storage
 // The response body is closed by this function - callers should not close it.
-func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response, logger Logger) (string, error) {
+// Returns: (Response, error)
+func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response, logger Logger, notifier Notifier) (Response, error) {
 	defer resp.Body.Close()
 
 	// Get provider, default to argo
-	provider := cfg.GetProvider()
-	if provider == "" {
-		provider = "argo"
-	}
+	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 
 	// Validate HTTP status first
 	if resp.StatusCode != http.StatusOK {
@@ -804,56 +287,82 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 		if err != nil {
 			errorData = []byte("failed to read error response")
 		}
-		return "", NewHTTPError(resp.StatusCode, string(errorData))
+		return Response{}, errors.NewHTTPError(resp.StatusCode, string(errorData))
 	}
+
+	var response Response
+	var err error
 
 	// Handle streaming responses with provider-specific parsing
+	// Note: buildArgoChatRequestWithTools already handles disabling streaming for Argo with tools
+	// by using the non-streaming endpoint, so we don't need to check that here
 	if cfg.IsStreamChat() {
-		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
-		if err != nil {
-			return "", fmt.Errorf("failed to create log file: %w", err)
-		}
-		defer func() {
-			if closeErr := f.Close(); closeErr != nil {
-				fmt.Fprintf(os.Stderr, "failed to close log file %s: %v\n", path, closeErr)
-			}
-		}()
-
-		// Stream and parse based on provider
-		switch provider {
-		case "argo":
-			return handleArgoStream(ctx, resp.Body, f)
-		case "openai":
-			return handleOpenAIStream(ctx, resp.Body, f)
-		case "anthropic":
-			return handleAnthropicStream(ctx, resp.Body, f)
-		case "google":
-			return handleGoogleStream(ctx, resp.Body, f)
-		default:
-			// Fallback: just copy raw stream
-			var buf bytes.Buffer
-			done := make(chan error, 1)
-			go func() {
-				_, err := io.Copy(io.MultiWriter(os.Stdout, f, &buf), resp.Body)
-				done <- err
-			}()
-
-			select {
-			case <-ctx.Done():
-				return buf.String(), fmt.Errorf("streaming interrupted: %w", ctx.Err())
-			case err := <-done:
-				if err != nil {
-					return buf.String(), fmt.Errorf("error streaming response: %w", err)
-				}
-				return buf.String(), nil
-			}
-		}
+		response, err = handleStreamingResponse(ctx, cfg, resp, provider, logger, notifier)
+	} else {
+		response, err = handleNonStreamingResponse(cfg, resp, provider, logger, notifier)
 	}
 
+	if err != nil {
+		return Response{}, err
+	}
+
+	return response, nil
+}
+
+// handleStreamingResponse handles streaming responses and returns accumulated content
+func handleStreamingResponse(ctx context.Context, cfg RequestConfig, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
+	f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
+	if err != nil {
+		return Response{}, fmt.Errorf("failed to create log file: %w", err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			notifier.Warnf("Failed to close log file %s: %v", path, closeErr)
+		}
+	}()
+
+	// Stream and parse based on provider
+	switch provider {
+	case constants.ProviderArgo:
+		// Argo doesn't support tools with streaming
+		text, toolCalls, err := handleArgoStream(ctx, resp.Body, f, os.Stdout)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	case constants.ProviderOpenAI:
+		text, toolCalls, err := handleOpenAIStreamWithTools(ctx, resp.Body, f, os.Stdout, notifier)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	case constants.ProviderAnthropic:
+		text, toolCalls, err := handleAnthropicStreamWithTools(ctx, resp.Body, f, os.Stdout, notifier)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	case constants.ProviderGoogle:
+		text, toolCalls, err := handleGoogleStreamWithTools(ctx, resp.Body, f, os.Stdout, notifier)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	default:
+		// Fallback: just copy raw stream
+		var buf bytes.Buffer
+		done := make(chan error, 1)
+		go func() {
+			_, err := io.Copy(io.MultiWriter(os.Stdout, f, &buf), resp.Body)
+			done <- err
+		}()
+
+		select {
+		case <-ctx.Done():
+			return Response{Text: buf.String()}, fmt.Errorf("streaming interrupted: %w", ctx.Err())
+		case err := <-done:
+			if err != nil {
+				return Response{Text: buf.String()}, fmt.Errorf("error streaming response: %w", err)
+			}
+			return Response{Text: buf.String()}, nil
+		}
+	}
+}
+
+// handleNonStreamingResponse handles non-streaming responses
+func handleNonStreamingResponse(cfg RequestConfig, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
 	// Read response body
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
+		return Response{}, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	// Log response
@@ -862,205 +371,279 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 		logPrefix = "embed_output"
 	}
 	if err := logger.LogJSON(logger.GetLogDir(), logPrefix, data); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to log response: %v\n", err)
+		notifier.Warnf("Failed to log response: %v", err)
 	}
 
-	// Route to provider-specific parser
+	// Parse response based on provider
+	return parseResponse(provider, data, cfg.IsEmbed())
+}
+
+// parseResponse routes to provider-specific parser
+func parseResponse(provider string, data []byte, isEmbed bool) (Response, error) {
 	switch provider {
-	case "argo":
-		return parseArgoResponse(data, cfg.IsEmbed())
-	case "openai":
-		return parseOpenAIResponse(data, cfg.IsEmbed())
-	case "google":
-		return parseGoogleResponse(data, cfg.IsEmbed())
-	case "anthropic":
-		return parseAnthropicResponse(data, cfg.IsEmbed())
+	case constants.ProviderArgo:
+		text, toolCalls, err := parseArgoResponseWithTools(data, isEmbed)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	case constants.ProviderOpenAI:
+		text, toolCalls, err := parseOpenAIResponseWithTools(data, isEmbed)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	case constants.ProviderGoogle:
+		text, toolCalls, err := parseGoogleResponseWithTools(data, isEmbed)
+		return Response{Text: text, ToolCalls: toolCalls}, err
+	case constants.ProviderAnthropic:
+		text, toolCalls, err := parseAnthropicResponseWithTools(data, isEmbed)
+		return Response{Text: text, ToolCalls: toolCalls}, err
 	default:
-		return "", fmt.Errorf("unsupported provider: %s", provider)
+		return Response{}, fmt.Errorf("unsupported provider: %s", provider)
 	}
 }
 
-// parseArgoResponse parses response from Argo API
-func parseArgoResponse(data []byte, isEmbed bool) (string, error) {
-	if isEmbed {
-		var embedResp struct {
-			Embedding [][]float64 `json:"embedding"`
+// convertAnthropicToolsToOpenAI converts Anthropic tool definitions to OpenAI format
+func convertAnthropicToolsToOpenAI(tools []ToolDefinition) []map[string]interface{} {
+	openAITools := make([]map[string]interface{}, 0, len(tools))
+	for _, tool := range tools {
+		openAITool := map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"parameters":  tool.InputSchema,
+			},
 		}
-		if err := json.Unmarshal(data, &embedResp); err != nil {
-			return "", fmt.Errorf("failed to unmarshal Argo embed response: %w", err)
-		}
-		if len(embedResp.Embedding) == 0 {
-			return "", fmt.Errorf("empty embedding response")
-		}
-		if len(embedResp.Embedding[0]) == 0 {
-			return "[]", nil
-		}
-		embeddingJSON, err := json.Marshal(embedResp.Embedding[0])
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal embedding: %w", err)
-		}
-		return string(embeddingJSON), nil
+		openAITools = append(openAITools, openAITool)
 	}
-
-	var chatResp struct {
-		Response string `json:"response"`
-	}
-	if err := json.Unmarshal(data, &chatResp); err != nil {
-		return "", fmt.Errorf("failed to unmarshal Argo chat response: %w", err)
-	}
-	return chatResp.Response, nil
+	return openAITools
 }
 
-// parseOpenAIResponse parses response from OpenAI API
-func parseOpenAIResponse(data []byte, isEmbed bool) (string, error) {
-	if isEmbed {
-		var embedResp struct {
-			Data []struct {
-				Embedding []float64 `json:"embedding"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(data, &embedResp); err != nil {
-			return "", fmt.Errorf("failed to unmarshal OpenAI embed response: %w", err)
-		}
-		if len(embedResp.Data) == 0 {
-			return "", fmt.Errorf("empty embedding response")
-		}
-		if len(embedResp.Data[0].Embedding) == 0 {
-			return "[]", nil
-		}
-		embeddingJSON, err := json.Marshal(embedResp.Data[0].Embedding)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal embedding: %w", err)
-		}
-		return string(embeddingJSON), nil
-	}
+// convertAnthropicToolsToGoogle converts Anthropic tools to Google format
+func convertAnthropicToolsToGoogle(tools []ToolDefinition) []map[string]interface{} {
+	googleTools := make([]map[string]interface{}, 0, len(tools))
+	for _, tool := range tools {
+		// Convert schema to Google format with uppercase types
+		params := ConvertSchemaToGoogleFormat(tool.InputSchema)
 
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+		googleTool := map[string]interface{}{
+			"name":        tool.Name,
+			"description": tool.Description,
+			"parameters":  params,
+		}
+
+		// Extract and add required field at top level if it exists
+		if schema, ok := tool.InputSchema.(map[string]interface{}); ok {
+			if required, exists := schema["required"]; exists {
+				googleTool["required"] = required
+			}
+		}
+
+		googleTools = append(googleTools, googleTool)
 	}
-	if err := json.Unmarshal(data, &chatResp); err != nil {
-		return "", fmt.Errorf("failed to unmarshal OpenAI chat response: %w", err)
-	}
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in OpenAI response")
-	}
-	return chatResp.Choices[0].Message.Content, nil
+	return googleTools
 }
 
-// parseGoogleResponse parses response from Google AI API
-func parseGoogleResponse(data []byte, isEmbed bool) (string, error) {
-	if isEmbed {
-		// Google AI doesn't support embeddings through this interface
-		return "", fmt.Errorf("google provider does not support embedding mode")
-	}
-
-	var googleResp struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	if err := json.Unmarshal(data, &googleResp); err != nil {
-		return "", fmt.Errorf("failed to unmarshal Google response: %w", err)
-	}
-	if len(googleResp.Candidates) == 0 {
-		return "", fmt.Errorf("no candidates in Google response")
-	}
-	if len(googleResp.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no parts in Google response")
-	}
-	return googleResp.Candidates[0].Content.Parts[0].Text, nil
+// ConvertedTools represents the result of converting tools for a specific provider
+type ConvertedTools struct {
+	Tools      interface{}
+	ToolChoice interface{}
 }
 
-// parseAnthropicResponse parses response from Anthropic API
-func parseAnthropicResponse(data []byte, isEmbed bool) (string, error) {
-	if isEmbed {
-		// Anthropic doesn't support embeddings
-		return "", fmt.Errorf("anthropic provider does not support embedding mode")
+// ConvertToolsForProvider converts tools to the appropriate format based on the model
+// Exported for use by proxy converter
+func ConvertToolsForProvider(model string, tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
+	if len(tools) == 0 {
+		return ConvertedTools{}
 	}
 
-	var anthropicResp struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
+	provider := DetermineArgoModelProvider(model)
+
+	switch provider {
+	case constants.ProviderOpenAI:
+		// OpenAI format with type/function wrapper
+		openAITools := convertAnthropicToolsToOpenAI(tools)
+		// Convert tool choice
+		if toolChoice != nil {
+			if toolChoice.Type == "tool" && toolChoice.Name != "" {
+				return ConvertedTools{
+					Tools: openAITools,
+					ToolChoice: map[string]interface{}{
+						"type": "function",
+						"function": map[string]string{
+							"name": toolChoice.Name,
+						},
+					},
+				}
+			}
+			return ConvertedTools{Tools: openAITools, ToolChoice: toolChoice.Type}
+		}
+		return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+
+	case constants.ProviderGoogle:
+		// Google format with uppercase types
+		googleTools := convertAnthropicToolsToGoogle(tools)
+		return ConvertedTools{Tools: googleTools, ToolChoice: nil} // Google doesn't use tool_choice
+
+	case constants.ProviderAnthropic:
+		// Keep native Anthropic format
+		anthropicTools := make([]map[string]interface{}, 0, len(tools))
+		for _, tool := range tools {
+			anthropicTool := map[string]interface{}{
+				"name":         tool.Name,
+				"description":  tool.Description,
+				"input_schema": tool.InputSchema,
+			}
+			anthropicTools = append(anthropicTools, anthropicTool)
+		}
+		// Convert tool choice
+		if toolChoice != nil {
+			return ConvertedTools{
+				Tools: anthropicTools,
+				ToolChoice: map[string]interface{}{
+					"type": toolChoice.Type,
+					"name": toolChoice.Name,
+				},
+			}
+		}
+		return ConvertedTools{Tools: anthropicTools, ToolChoice: map[string]string{"type": "auto"}}
+
+	default:
+		// Default to OpenAI format
+		openAITools := convertAnthropicToolsToOpenAI(tools)
+		if toolChoice != nil {
+			if toolChoice.Type == "tool" && toolChoice.Name != "" {
+				return ConvertedTools{
+					Tools: openAITools,
+					ToolChoice: map[string]interface{}{
+						"type": "function",
+						"function": map[string]string{
+							"name": toolChoice.Name,
+						},
+					},
+				}
+			}
+			return ConvertedTools{Tools: openAITools, ToolChoice: toolChoice.Type}
+		}
+		return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
 	}
-	if err := json.Unmarshal(data, &anthropicResp); err != nil {
-		return "", fmt.Errorf("failed to unmarshal Anthropic response: %w", err)
+}
+
+// ChatBuildOptions contains options for building chat requests
+type ChatBuildOptions struct {
+	ModelOverride  string           // Override the model from config
+	SystemOverride string           // Override the system prompt from config
+	ToolDefs       []ToolDefinition // Tool definitions to include
+	Stream         bool             // Whether to stream the response
+}
+
+// BuildChatRequest is the unified entry point for building chat requests
+// It handles all providers and configurations through a single interface
+func BuildChatRequest(cfg RequestConfig, typedMessages []TypedMessage, opts ChatBuildOptions) (*http.Request, []byte, error) {
+	// Determine provider and model
+	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
+	model := opts.ModelOverride
+	if model == "" {
+		model = cfg.GetModel()
+		if model == "" {
+			model = GetDefaultChatModel(provider)
+		}
 	}
-	if len(anthropicResp.Content) == 0 {
-		return "", fmt.Errorf("no content in Anthropic response")
+
+	// Determine system prompt
+	system := opts.SystemOverride
+	if system == "" {
+		system = cfg.GetEffectiveSystem()
 	}
-	return anthropicResp.Content[0].Text, nil
+
+	// Validate tool support if tools are requested
+	if len(opts.ToolDefs) > 0 {
+		if err := ValidateToolSupport(provider, model); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Use the existing unified builder
+	return buildChatRequestFromTyped(cfg, typedMessages, model, system, opts.ToolDefs, nil, opts.Stream)
+}
+
+// BuildToolResultRequest builds a request containing tool execution results
+func BuildToolResultRequest(cfg RequestConfig, model string, system string, toolDefs []ToolDefinition, typedMessages []TypedMessage) (*http.Request, []byte, error) {
+	// Use the new unified BuildChatRequest
+	opts := ChatBuildOptions{
+		ModelOverride:  model,
+		SystemOverride: system,
+		ToolDefs:       toolDefs,
+		Stream:         false, // Tool results never stream
+	}
+	return BuildChatRequest(cfg, typedMessages, opts)
 }
 
 // ============================================================================
 // Session-related Request Building
 // ============================================================================
 
-// Session represents a conversation session (simplified interface to avoid circular deps)
-type Session interface {
-	GetPath() string
-}
-
-// Message represents a conversation message
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// GetLineageFunc is a function type for getting conversation history
-type GetLineageFunc func(path string) ([]Message, error)
-
-// MessageBuilder is a function type that builds messages for a provider request
-
-// BuildRequestWithSession builds a request that includes conversation history from a session
-func BuildRequestWithSession(cfg RequestConfig, sess Session, getLineage GetLineageFunc) (*http.Request, []byte, error) {
+// BuildRequestWithToolInteractions builds a request using messages that include tool interactions
+func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestConfig, sess Session, getMessagesWithTools func(context.Context, string) ([]TypedMessage, error)) (RequestBuild, error) {
 	if cfg.IsEmbed() {
-		return nil, nil, fmt.Errorf("embed mode does not support sessions")
+		return RequestBuild{}, fmt.Errorf("embed mode does not support sessions")
 	}
 
-	// Get conversation history
-	messages, err := getLineage(sess.GetPath())
+	// Get messages with tool interactions
+	typedMessages, err := getMessagesWithTools(ctx, sess.GetPath())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get conversation history: %w", err)
+		return RequestBuild{}, fmt.Errorf("failed to get messages with tools: %w", err)
 	}
 
-	return buildRequestInternal(cfg, "", messages)
-}
+	// Prepare options
+	opts := ChatBuildOptions{
+		Stream: cfg.IsStreamChat(),
+	}
 
-// BuildRegenerationRequest builds a request for regenerating a response
-func BuildRegenerationRequest(cfg RequestConfig, sess Session, getLineage GetLineageFunc) (*http.Request, []byte, error) {
-	return BuildRequestWithSession(cfg, sess, getLineage)
+	// Load tool if configured
+	if cfg.IsToolEnabled() {
+		opts.ToolDefs = GetBuiltinUniversalCommandTool()
+	}
+
+	// Use the unified BuildChatRequest
+	req, body, err := BuildChatRequest(cfg, typedMessages, opts)
+	if err != nil {
+		return RequestBuild{}, err
+	}
+
+	// Get the actual model used
+	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
+	model := cfg.GetModel()
+	if model == "" {
+		model = GetDefaultChatModel(provider)
+	}
+
+	return RequestBuild{
+		Request:  req,
+		Body:     body,
+		Model:    model,
+		ToolDefs: opts.ToolDefs,
+	}, nil
 }
 
 // ============================================================================
 // Streaming Response Handlers
 // ============================================================================
 
-// streamParser defines a function that processes a line from a stream
-// and returns the content to be printed/accumulated, whether parsing is done,
-// and any error encountered
-type streamParser func(line string, state interface{}) (content string, done bool, err error)
+// streamParser defines a unified function that processes a line from a stream
+// and returns content, tool calls (may be nil), done status, and any error
+type streamParser func(line string, state interface{}) (content string, toolCalls []ToolCall, done bool, err error)
 
-// handleGenericStream is a reusable stream handler that processes streaming responses
-// using a provided parser function
-func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.File, parser streamParser, initialState interface{}) (string, error) {
+// handleGenericStream is a unified stream handler that processes streaming responses
+// using a provided parser function that may return tool calls
+func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, parser streamParser, initialState interface{}, provider string) (string, []ToolCall, error) {
 	// Body is closed by HandleResponse, not here
 
 	var accumulated strings.Builder
+	var allToolCalls []ToolCall
 	scanner := bufio.NewScanner(body)
 	// Increase buffer size to handle large SSE lines (default is ~64KB)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 2MB max
 
 	state := initialState
 	var sseBuf []string
+	var parseErrorCount int
 
 	// Helper to flush accumulated SSE data lines
 	flushSSE := func() (bool, error) {
@@ -1076,16 +659,29 @@ func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.Fi
 		_, _ = logFile.WriteString("data: " + joined + "\n\n")
 
 		// Parse the complete data
-		content, done, err := parser("data: "+joined, state)
+		content, toolCalls, done, err := parser("data: "+joined, state)
 		if err != nil {
-			// Log parsing error to file, not stderr
+			// Log parsing error to file
 			_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
+			parseErrorCount++
+
+			// Emit warning via notifier if we hit the threshold
+			if parseErrorCount == constants.DefaultStreamParseErrorThreshold {
+				if notifier != nil {
+					notifier.Warnf("Multiple streaming parse errors detected (provider: %s). See log file for details.", provider)
+				}
+			}
 			return false, nil
 		}
 
 		if content != "" {
-			fmt.Print(content)
+			fmt.Fprint(out, content)
 			accumulated.WriteString(content)
+		}
+
+		// Accumulate tool calls if any
+		if len(toolCalls) > 0 {
+			allToolCalls = append(allToolCalls, toolCalls...)
 		}
 
 		return done, nil
@@ -1095,7 +691,7 @@ scanLoop:
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return accumulated.String(), ctx.Err()
+			return accumulated.String(), allToolCalls, ctx.Err()
 		default:
 			line := scanner.Text()
 
@@ -1120,23 +716,39 @@ scanLoop:
 				continue
 			}
 
-			// Other SSE fields (event:, id:, retry:) - log as-is
-			_, _ = logFile.WriteString(line + "\n")
+			// Handle other SSE lines based on type
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				// Provider-specific event handling
+				content, toolCalls, done, err := parser(line, state)
+				if err != nil {
+					// Log parsing error to file
+					_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
+					parseErrorCount++
 
-			// For non-data lines, still try to parse them with the parser
-			// This maintains backward compatibility with parsers expecting raw lines
-			content, done, err := parser(line, state)
-			if err != nil {
-				_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
-				continue
+					// Emit warning via notifier if we hit the threshold
+					if parseErrorCount == constants.DefaultStreamParseErrorThreshold {
+						if notifier != nil {
+							notifier.Warnf("Multiple streaming parse errors detected. Check log file for details.")
+						}
+					}
+				}
+				if content != "" {
+					fmt.Fprint(out, content)
+					accumulated.WriteString(content)
+				}
+				// Accumulate tool calls if any
+				if len(toolCalls) > 0 {
+					allToolCalls = append(allToolCalls, toolCalls...)
+				}
+				if done {
+					break scanLoop
+				}
+			default:
+				// Log other lines without parsing
+				_, _ = logFile.WriteString(line + "\n")
 			}
-			if done {
-				break scanLoop
-			}
-			if content != "" {
-				fmt.Print(content)
-				accumulated.WriteString(content)
-			}
+			continue
 		}
 	}
 
@@ -1144,14 +756,15 @@ scanLoop:
 	_, _ = flushSSE()
 
 	if err := scanner.Err(); err != nil {
-		return accumulated.String(), err
+		return accumulated.String(), allToolCalls, err
 	}
 
-	return accumulated.String(), nil
+	return accumulated.String(), allToolCalls, nil
 }
 
 // handleArgoStream handles Argo's plain text streaming format
-func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
+// Note: Argo doesn't support tool calls in streaming mode
+func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer) (string, []ToolCall, error) {
 	// Body is closed by HandleResponse, not here
 
 	var accumulated strings.Builder
@@ -1160,133 +773,21 @@ func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File)
 	for {
 		select {
 		case <-ctx.Done():
-			return accumulated.String(), ctx.Err()
+			return accumulated.String(), nil, ctx.Err()
 		default:
 			n, err := body.Read(buffer)
 			if n > 0 {
 				chunk := string(buffer[:n])
-				fmt.Print(chunk)
+				fmt.Fprint(out, chunk)
 				accumulated.WriteString(chunk)
 				_, _ = logFile.WriteString(chunk)
 			}
 			if err == io.EOF {
-				return accumulated.String(), nil
+				return accumulated.String(), nil, nil
 			}
 			if err != nil {
-				return accumulated.String(), err
+				return accumulated.String(), nil, err
 			}
 		}
 	}
-}
-
-// parseOpenAIStreamLine parses a line from OpenAI's SSE stream
-func parseOpenAIStreamLine(line string, state interface{}) (string, bool, error) {
-	if strings.HasPrefix(line, "data: ") {
-		data := strings.TrimPrefix(line, "data: ")
-
-		// Check for completion marker
-		if data == "[DONE]" {
-			return "", true, nil // done
-		}
-
-		// Parse JSON chunk
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return "", false, err
-		}
-
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			return chunk.Choices[0].Delta.Content, false, nil
-		}
-	}
-
-	return "", false, nil
-}
-
-// handleOpenAIStream handles OpenAI's SSE format with JSON payloads
-func handleOpenAIStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
-	return handleGenericStream(ctx, body, logFile, parseOpenAIStreamLine, nil)
-}
-
-// anthropicStreamState tracks the current event type for Anthropic's SSE format
-type anthropicStreamState struct {
-	currentEvent string
-}
-
-// parseAnthropicStreamLine parses a line from Anthropic's SSE stream
-func parseAnthropicStreamLine(line string, state interface{}) (string, bool, error) {
-	s := state.(*anthropicStreamState)
-
-	if strings.HasPrefix(line, "event: ") {
-		s.currentEvent = strings.TrimPrefix(line, "event: ")
-		return "", false, nil
-	}
-
-	if strings.HasPrefix(line, "data: ") && s.currentEvent == "content_block_delta" {
-		data := strings.TrimPrefix(line, "data: ")
-
-		// Parse JSON delta
-		var delta struct {
-			Delta struct {
-				Text string `json:"text"`
-			} `json:"delta"`
-		}
-
-		if err := json.Unmarshal([]byte(data), &delta); err != nil {
-			return "", false, err
-		}
-
-		return delta.Delta.Text, false, nil
-	}
-
-	return "", false, nil
-}
-
-// handleAnthropicStream handles Anthropic's SSE format with event types
-func handleAnthropicStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
-	state := &anthropicStreamState{}
-	return handleGenericStream(ctx, body, logFile, parseAnthropicStreamLine, state)
-}
-
-// parseGoogleStreamLine parses a line from Google's SSE stream
-func parseGoogleStreamLine(line string, state interface{}) (string, bool, error) {
-	if strings.HasPrefix(line, "data: ") {
-		data := strings.TrimPrefix(line, "data: ")
-
-		// Parse JSON chunk
-		var chunk struct {
-			Candidates []struct {
-				Content struct {
-					Parts []struct {
-						Text string `json:"text"`
-					} `json:"parts"`
-				} `json:"content"`
-			} `json:"candidates"`
-		}
-
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return "", false, err
-		}
-
-		// Extract text from first candidate's first part
-		if len(chunk.Candidates) > 0 &&
-			len(chunk.Candidates[0].Content.Parts) > 0 &&
-			chunk.Candidates[0].Content.Parts[0].Text != "" {
-			return chunk.Candidates[0].Content.Parts[0].Text, false, nil
-		}
-	}
-
-	return "", false, nil
-}
-
-// handleGoogleStream handles Google's SSE format for Google AI
-func handleGoogleStream(ctx context.Context, body io.ReadCloser, logFile *os.File) (string, error) {
-	return handleGenericStream(ctx, body, logFile, parseGoogleStreamLine, nil)
 }

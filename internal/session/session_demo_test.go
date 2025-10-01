@@ -1,7 +1,9 @@
 package session
 
 import (
+	"context"
 	"fmt"
+	"lmtools/internal/core"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +16,7 @@ func TestDemonstrateFix(t *testing.T) {
 		t.Logf("This test shows how concurrent -resume operations are now handled correctly")
 
 		// Create a session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -31,12 +33,12 @@ func TestDemonstrateFix(t *testing.T) {
 		}
 
 		for _, msg := range initialMessages {
-			_, msgID, _ := AppendMessage(session, msg)
-			t.Logf("  Message %s: [%s] %.30s...", msgID, msg.Role, msg.Content)
+			result, _ := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
+			t.Logf("  Message %s: [%s] %.30s...", result.MessageID, msg.Role, msg.Content)
 		}
 
 		// Show current state
-		messages, _ := ListMessages(session.Path)
+		messages, _ := listMessages(session.Path)
 		t.Logf("\nCurrent message IDs in session: %v", messages)
 
 		// Simulate the problematic scenario: 3 concurrent resume operations
@@ -65,7 +67,7 @@ func TestDemonstrateFix(t *testing.T) {
 					Model:     "gpt4o",
 				}
 
-				path, msgID, err := AppendMessage(session, msg)
+				result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 				if err != nil {
 					t.Errorf("Process %d failed: %v", processID, err)
 					return
@@ -75,7 +77,7 @@ func TestDemonstrateFix(t *testing.T) {
 					id    int
 					path  string
 					msgID string
-				}{processID, path, msgID}
+				}{processID, result.Path, result.MessageID}
 			}(i)
 		}
 
@@ -107,9 +109,9 @@ func TestDemonstrateFix(t *testing.T) {
 
 		// Show final state of main session
 		t.Logf("\nFinal message IDs in main session:")
-		finalMessages, _ := ListMessages(session.Path)
+		finalMessages, _ := listMessages(session.Path)
 		for _, msgID := range finalMessages {
-			msg, _ := ReadMessage(session.Path, msgID)
+			msg, _ := readMessage(session.Path, msgID)
 			t.Logf("  %s: [%s] %.40s...", msgID, msg.Role, msg.Content)
 		}
 
@@ -138,15 +140,15 @@ func TestBeforeAndAfterScenario(t *testing.T) {
 		// What happens AFTER the fix
 		t.Logf("\nAFTER the fix (current implementation):")
 
-		session, _ := CreateSession()
+		session, _ := CreateSession("", core.NewTestLogger(false))
 
 		// Add some messages
 		for i := 0; i < 3; i++ {
-			_, _, _ = AppendMessage(session, Message{
+			_, _ = AppendMessageWithToolInteraction(context.Background(), session, Message{
 				Role:      "user",
 				Content:   fmt.Sprintf("Message %d", i),
 				Timestamp: time.Now(),
-			})
+			}, nil, nil)
 		}
 
 		// Concurrent appends
@@ -155,18 +157,18 @@ func TestBeforeAndAfterScenario(t *testing.T) {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				_, _, _ = AppendMessage(session, Message{
+				_, _ = AppendMessageWithToolInteraction(context.Background(), session, Message{
 					Role:      "assistant",
 					Content:   fmt.Sprintf("Response %d", id),
 					Timestamp: time.Now(),
 					Model:     "test",
-				})
+				}, nil, nil)
 			}(i)
 		}
 		wg.Wait()
 
 		// Check results
-		messages, _ := ListMessages(session.Path)
+		messages, _ := listMessages(session.Path)
 		t.Logf("  - Message IDs in order: %v", messages)
 		t.Logf("  - No persistent lock files (cleaned up properly)")
 		t.Logf("  - Conversation history preserved correctly")

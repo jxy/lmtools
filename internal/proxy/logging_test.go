@@ -64,15 +64,15 @@ func TestRequestSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a context with a scoped logger
-			scope := logger.GetLogger().NewScope("test")
-			ctx := logger.WithContext(context.Background(), scope)
+			// Create a context
+			ctx := context.Background()
 
 			// Sleep briefly to ensure non-zero duration
+			startTime := time.Now()
 			time.Sleep(10 * time.Millisecond)
 
 			// Call RequestSummary - mainly testing it doesn't panic
-			duration := scope.GetDuration()
+			duration := time.Since(startTime)
 			numMessages := 3 // example values
 			numTools := 1
 			RequestSummary(ctx, tt.method, tt.path, tt.originalModel, tt.mappedModel,

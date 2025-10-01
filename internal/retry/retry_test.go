@@ -330,7 +330,7 @@ func TestRetry(t *testing.T) {
 			t.Fatal("Expected error for MaxRetries < 0")
 		}
 
-		expectedMsg := "max retries must be >= 0"
+		expectedMsg := "validate retry config: max retries must be >= 0"
 		if err.Error() != expectedMsg {
 			t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
 		}

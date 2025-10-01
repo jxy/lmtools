@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"lmtools/internal/core"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,33 +15,24 @@ func TestSimulatedStreamingFormat(t *testing.T) {
 	// Add a test-specific timeout to prevent hanging
 	t.Parallel()
 
-	// Setup test server with mocks
-	proxyServer, openAIMock, googleMock, argoMock := SetupTestServer(t)
+	// Setup test server configured for Argo provider
+	proxyServer, argoMock := SetupArgoTestServer(t)
 	defer proxyServer.Close()
-	defer openAIMock.Close()
-	defer googleMock.Close()
 	defer argoMock.Close()
 
 	// Test simulated streaming with Argo
-	// Add tools to force simulated streaming (Argo streamchat doesn't handle tools correctly)
+	// Argo doesn't support real streaming with tools, so it will simulate streaming
 	req := AnthropicRequest{
-		Model:     "gpt4", // This will use Argo
+		Model:     "gpto3", // Argo model
 		MaxTokens: 100,
 		Stream:    true,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Tell me a joke"`),
 			},
 		},
-		// Add a dummy tool to force simulated streaming
-		Tools: []AnthropicTool{
-			{
-				Name:        "dummy_tool",
-				Description: "A dummy tool to force simulated streaming",
-				InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
-			},
-		},
+		// No tools - Argo will simulate streaming without tools
 	}
 
 	reqBody, _ := json.Marshal(req)
@@ -76,10 +68,11 @@ func TestSimulatedStreamingFormat(t *testing.T) {
 	lines := strings.Split(streamOutput, "\n")
 
 	// Check for required event sequence
+	// Note: With artificial delays removed, response completes before ping interval (1s)
+	// So ping events may not appear in fast responses
 	expectedEventSequence := []string{
 		"event: message_start",
 		"event: content_block_start",
-		"event: ping",
 		"event: content_block_delta",
 		"event: content_block_stop",
 		"event: message_delta",

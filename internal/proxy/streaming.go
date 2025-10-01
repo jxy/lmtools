@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"net/http"
 	"strings"
@@ -14,20 +16,16 @@ import (
 
 // SSEWriter handles Server-Sent Events writing
 type SSEWriter struct {
-	w         http.ResponseWriter
-	flusher   http.Flusher
-	reqLogger *logger.ScopedLogger // For consistent [#N] prefix in logs
+	w       http.ResponseWriter
+	flusher http.Flusher
+	ctx     context.Context
 }
 
 // NewSSEWriter creates a new SSE writer
-func NewSSEWriter(w http.ResponseWriter, reqLogger *logger.ScopedLogger) (*SSEWriter, error) {
+func NewSSEWriter(w http.ResponseWriter, ctx context.Context) (*SSEWriter, error) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		if reqLogger != nil {
-			reqLogger.Debugf("ResponseWriter type: %T does not implement http.Flusher", w)
-		} else {
-			logger.Debugf("ResponseWriter type: %T does not implement http.Flusher", w)
-		}
+		logger.From(ctx).Debugf("ResponseWriter type: %T does not implement http.Flusher", w)
 		return nil, fmt.Errorf("streaming not supported (ResponseWriter type: %T)", w)
 	}
 
@@ -37,24 +35,16 @@ func NewSSEWriter(w http.ResponseWriter, reqLogger *logger.ScopedLogger) (*SSEWr
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
 
-	return &SSEWriter{w: w, flusher: flusher, reqLogger: reqLogger}, nil
+	return &SSEWriter{w: w, flusher: flusher, ctx: ctx}, nil
 }
 
 // WriteEvent writes an SSE event
 func (s *SSEWriter) WriteEvent(eventType, data string) error {
 	// Log the event being sent to client
-	if s.reqLogger != nil {
-		if eventType != "" {
-			s.reqLogger.Debugf("→ CLIENT: event: %s | data: %s", eventType, data)
-		} else {
-			s.reqLogger.Debugf("→ CLIENT: data: %s", data)
-		}
+	if eventType != "" {
+		logger.From(s.ctx).Debugf("→ CLIENT: event: %s | data: %s", eventType, data)
 	} else {
-		if eventType != "" {
-			logger.Debugf("→ CLIENT: event: %s | data: %s", eventType, data)
-		} else {
-			logger.Debugf("→ CLIENT: data: %s", data)
-		}
+		logger.From(s.ctx).Debugf("→ CLIENT: data: %s", data)
 	}
 
 	if eventType != "" {
@@ -113,13 +103,13 @@ type AnthropicStreamHandler struct {
 	sse                *SSEWriter
 	state              *StreamingState
 	originalModel      string
-	simulatedStreaming bool                 // If true, don't track tool calls in state
-	reqLogger          *logger.ScopedLogger // Request-scoped logger for consistent [#N] prefix
+	simulatedStreaming bool // If true, don't track tool calls in state
+	ctx                context.Context
 }
 
 // NewAnthropicStreamHandler creates a new Anthropic stream handler
-func NewAnthropicStreamHandler(w http.ResponseWriter, originalModel string, reqLogger *logger.ScopedLogger) (*AnthropicStreamHandler, error) {
-	sse, err := NewSSEWriter(w, reqLogger)
+func NewAnthropicStreamHandler(w http.ResponseWriter, originalModel string, ctx context.Context) (*AnthropicStreamHandler, error) {
+	sse, err := NewSSEWriter(w, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +117,7 @@ func NewAnthropicStreamHandler(w http.ResponseWriter, originalModel string, reqL
 	return &AnthropicStreamHandler{
 		sse:           sse,
 		originalModel: originalModel,
-		reqLogger:     reqLogger,
+		ctx:           ctx,
 		state: &StreamingState{
 			MessageID:    fmt.Sprintf("msg_%x", time.Now().UnixNano()),
 			ClosedBlocks: make(map[int]bool),
@@ -188,7 +178,7 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 	defer h.mu.Unlock()
 
 	if h.state.TextBlockClosed {
-		logger.Debugf("SendTextDelta called but text block is closed, ignoring %d chars", len(text))
+		logger.From(h.ctx).Debugf("SendTextDelta called but text block is closed, ignoring %d chars", len(text))
 		return nil
 	}
 
@@ -204,7 +194,7 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 		},
 	}
 	if err := h.sse.WriteJSON("content_block_delta", deltaData); err != nil {
-		logger.Errorf("Failed to write text delta: %v", err)
+		logger.From(h.ctx).Errorf("Failed to write text delta: %v", err)
 		return err
 	}
 	return nil
@@ -236,7 +226,7 @@ func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string
 		},
 	}
 	if err := h.sse.WriteJSON("content_block_start", blockData); err != nil {
-		logger.Errorf("Failed to write tool_use start for %s: %v", name, err)
+		logger.From(h.ctx).Errorf("Failed to write tool_use start for %s: %v", name, err)
 		return err
 	}
 	return nil
@@ -255,7 +245,7 @@ func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON strin
 		if lastToolIndex >= 0 {
 			// For real streaming, we'd need to accumulate partialJSON
 			// and parse when complete. For now, we skip partial updates.
-			logger.Debugf("%s", "  Real streaming: would accumulate partial JSON")
+			logger.From(h.ctx).Debugf("%s", "  Real streaming: would accumulate partial JSON")
 		}
 	}
 
@@ -268,7 +258,7 @@ func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON strin
 		},
 	}
 	if err := h.sse.WriteJSON("content_block_delta", deltaData); err != nil {
-		logger.Errorf("Failed to write input_json_delta for index %d: %v", index, err)
+		logger.From(h.ctx).Errorf("Failed to write input_json_delta for index %d: %v", index, err)
 		return err
 	}
 	return nil
@@ -289,7 +279,7 @@ func (h *AnthropicStreamHandler) SendContentBlockStop(index int) error {
 		"index": index,
 	}
 	if err := h.sse.WriteJSON("content_block_stop", stopData); err != nil {
-		logger.Errorf("Failed to write content_block_stop for index %d: %v", index, err)
+		logger.From(h.ctx).Errorf("Failed to write content_block_stop for index %d: %v", index, err)
 		return err
 	}
 
@@ -363,12 +353,12 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		if accumulatedText != "" && !textSent {
 			// Send accumulated text
 			if err := h.SendTextDelta(accumulatedText); err != nil {
-				logger.Errorf("Failed to send accumulated text: %v", err)
+				logger.From(h.ctx).Errorf("Failed to send accumulated text: %v", err)
 				return err
 			}
 		}
 		if err := h.SendContentBlockStop(0); err != nil {
-			logger.Errorf("Failed to close text block: %v", err)
+			logger.From(h.ctx).Errorf("Failed to close text block: %v", err)
 			return err
 		}
 		h.mu.Lock()
@@ -380,7 +370,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	if toolIndex != nil {
 		for i := 1; i <= lastToolIndex; i++ {
 			if err := h.SendContentBlockStop(i); err != nil {
-				logger.Errorf("Failed to close tool block %d: %v", i, err)
+				logger.From(h.ctx).Errorf("Failed to close tool block %d: %v", i, err)
 				return err
 			}
 		}
@@ -391,11 +381,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		h.mu.Lock()
 		accTextLen := len(h.state.AccumulatedText)
 		h.mu.Unlock()
-		if h.reqLogger != nil {
-			h.reqLogger.Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
-		} else {
-			logger.Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
-		}
+		logger.From(h.ctx).Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
 	}
 
 	// Send completion events
@@ -404,21 +390,96 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	h.mu.Unlock()
 
 	if err := h.SendMessageDelta(stopReason, outputTokens); err != nil {
-		logger.Errorf("Failed to send message_delta: %v", err)
+		logger.From(h.ctx).Errorf("Failed to send message_delta: %v", err)
 		return err
 	}
 
 	if err := h.SendMessageStop(); err != nil {
-		logger.Errorf("Failed to send message_stop: %v", err)
+		logger.From(h.ctx).Errorf("Failed to send message_stop: %v", err)
 		return err
 	}
 
 	if err := h.SendDone(); err != nil {
-		logger.Errorf("Failed to send [DONE]: %v", err)
+		logger.From(h.ctx).Errorf("Failed to send [DONE]: %v", err)
 		return err
 	}
 
 	return nil
+}
+
+// SendError sends an error event
+func (h *AnthropicStreamHandler) SendError(message string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.sse.WriteJSON("error", map[string]string{
+		"type":    "error",
+		"message": message,
+	})
+}
+
+// Close ensures the stream is properly closed
+func (h *AnthropicStreamHandler) Close() error {
+	// No-op for now as the underlying ResponseWriter is managed by the HTTP server
+	// This method exists to satisfy the interface and for future extensions
+	return nil
+}
+
+// UpdateModel updates the model in the handler state
+func (h *AnthropicStreamHandler) UpdateModel(model string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.originalModel = model
+}
+
+// SetStopReason sets the stop reason in the handler state
+func (h *AnthropicStreamHandler) SetStopReason(stopReason string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// Store for later use in Complete
+	h.state.HasSentStopReason = true
+}
+
+// SetUsage sets the token usage in the handler state
+func (h *AnthropicStreamHandler) SetUsage(inputTokens, outputTokens int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.state.InputTokens = inputTokens
+	h.state.OutputTokens = outputTokens
+}
+
+// SendMessage sends a complete message (for simulated streaming)
+func (h *AnthropicStreamHandler) SendMessage(message string) error {
+	// Send message start
+	if err := h.SendMessageStart(); err != nil {
+		return err
+	}
+
+	// Send content block start
+	if err := h.SendContentBlockStart(0, "text"); err != nil {
+		return err
+	}
+
+	// Send the message as text delta
+	if err := h.SendTextDelta(message); err != nil {
+		return err
+	}
+
+	// Send content block stop
+	if err := h.SendContentBlockStop(0); err != nil {
+		return err
+	}
+
+	// Complete the stream
+	return h.Complete("end_turn")
+}
+
+// SendEvent sends a generic event with JSON data
+func (h *AnthropicStreamHandler) SendEvent(eventType string, data interface{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.sse.WriteJSON(eventType, data)
 }
 
 // OpenAIStreamParser parses OpenAI streaming responses
@@ -459,24 +520,24 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			// Parse JSON chunk
 			var chunk map[string]interface{}
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				logger.Errorf("Failed to parse OpenAI stream chunk: %v", err)
+				logger.From(p.handler.ctx).Errorf("Failed to parse OpenAI stream chunk: %v", err)
 				continue // Skip invalid JSON but log the error
 			}
 
 			// Log the received chunk
-			if p.handler.reqLogger != nil {
-				p.handler.reqLogger.DebugJSON("OpenAI Stream Chunk", chunk)
+			if logger.From(p.handler.ctx).IsDebugEnabled() {
+				logger.DebugJSON(logger.From(p.handler.ctx), "OpenAI Stream Chunk", chunk)
 			}
 
 			// Process the chunk
 			if err := p.processChunk(chunk); err != nil {
-				logger.Errorf("Failed to process OpenAI stream chunk: %v", err)
+				logger.From(p.handler.ctx).Errorf("Failed to process OpenAI stream chunk: %v", err)
 				// Send error event to client
 				if err := p.handler.sse.WriteJSON("error", map[string]string{
 					"type":    "error",
 					"message": fmt.Sprintf("Stream processing error: %v", err),
 				}); err != nil {
-					logger.Errorf("Failed to write error event: %v", err)
+					logger.From(p.handler.ctx).Errorf("Failed to write error event: %v", err)
 				}
 				return err
 			}
@@ -604,19 +665,19 @@ func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 		}
 
 		// Log the received chunk
-		if p.handler.reqLogger != nil {
-			p.handler.reqLogger.DebugJSON("Google Stream Chunk", chunk)
+		if logger.From(p.handler.ctx).IsDebugEnabled() {
+			logger.DebugJSON(logger.From(p.handler.ctx), "Google Stream Chunk", chunk)
 		}
 
 		// Process the chunk
 		if err := p.processChunk(chunk); err != nil {
-			logger.Errorf("%s: %v", "Failed to process Google stream chunk", err)
+			logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to process Google stream chunk", err)
 			// Send error event to client
 			if err := p.handler.sse.WriteJSON("error", map[string]string{
 				"type":    "error",
 				"message": fmt.Sprintf("Stream processing error: %v", err),
 			}); err != nil {
-				logger.Errorf("%s: %v", "Failed to write error event", err)
+				logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to write error event", err)
 			}
 			return err
 		}
@@ -710,23 +771,17 @@ func (p *GoogleStreamParser) processChunk(chunk map[string]interface{}) error {
 
 // ArgoStreamParser handles Argo streaming responses
 type ArgoStreamParser struct {
-	handler   *AnthropicStreamHandler
-	reqLogger *logger.ScopedLogger // For consistent [#N] prefix in logs
+	handler *AnthropicStreamHandler
 }
 
 // NewArgoStreamParser creates a new Argo stream parser
 func NewArgoStreamParser(handler *AnthropicStreamHandler) *ArgoStreamParser {
-	// Get reqLogger from handler if available
-	var reqLogger *logger.ScopedLogger
-	if handler != nil {
-		reqLogger = handler.reqLogger
-	}
-	return &ArgoStreamParser{handler: handler, reqLogger: reqLogger}
+	return &ArgoStreamParser{handler: handler}
 }
 
 // Parse parses an Argo streaming response
 func (p *ArgoStreamParser) Parse(reader io.Reader) error {
-	return p.ParseWithPingInterval(reader, defaultPingInterval)
+	return p.ParseWithPingInterval(reader, constants.DefaultPingInterval*time.Second)
 }
 
 // ParseWithPingInterval parses an Argo streaming response with configurable ping interval
@@ -770,19 +825,15 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 			lastActivity = time.Now()
 			text := string(data)
 			// Log the received text chunk
-			if p.reqLogger != nil {
-				p.reqLogger.Debugf("Argo Stream Chunk: %q", text)
-			} else {
-				logger.Debugf("%s", fmt.Sprintf("Argo Stream Chunk: %q", text))
-			}
+			logger.From(p.handler.ctx).Debugf("Argo Stream Chunk: %q", text)
 			if err := p.handler.SendTextDelta(text); err != nil {
-				logger.Errorf("%s: %v", "Failed to send Argo text delta", err)
+				logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to send Argo text delta", err)
 				// Send error event to client
 				if err := p.handler.sse.WriteJSON("error", map[string]string{
 					"type":    "error",
 					"message": fmt.Sprintf("Stream processing error: %v", err),
 				}); err != nil {
-					logger.Errorf("%s: %v", "Failed to write error event", err)
+					logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to write error event", err)
 				}
 				return err
 			}
@@ -798,13 +849,9 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 		case <-pingTicker.C:
 			// Only send ping if we haven't received data recently
 			if time.Since(lastActivity) >= pingInterval {
-				if p.reqLogger != nil {
-					p.reqLogger.Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
-				} else {
-					logger.Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
-				}
+				logger.From(p.handler.ctx).Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
 				if err := p.handler.SendPing(); err != nil {
-					logger.Errorf("%s: %v", "Failed to send ping during Argo streaming", err)
+					logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to send ping during Argo streaming", err)
 					return fmt.Errorf("client disconnected: %w", err)
 				}
 			}

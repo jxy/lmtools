@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"lmtools/internal/constants"
 	"strings"
 )
 
@@ -53,21 +54,21 @@ func (m *ModelMapper) mapToSmallModel() (provider, model string) {
 
 	// Use preferred provider if credentials are available
 	switch m.config.Provider {
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
-			return "anthropic", smallModel
+			return constants.ProviderAnthropic, smallModel
 		}
-	case "google":
+	case constants.ProviderGoogle:
 		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
-			return "google", smallModel
+			return constants.ProviderGoogle, smallModel
 		}
-	case "argo":
+	case constants.ProviderArgo:
 		if m.config.ArgoUser != "" {
-			return "argo", smallModel
+			return constants.ProviderArgo, smallModel
 		}
 	default: // "openai" or any other value defaults to OpenAI
 		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
-			return "openai", smallModel
+			return constants.ProviderOpenAI, smallModel
 		}
 	}
 
@@ -95,21 +96,21 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 
 	// Use preferred provider if credentials are available
 	switch m.config.Provider {
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
-			return "anthropic", model
+			return constants.ProviderAnthropic, model
 		}
-	case "google":
+	case constants.ProviderGoogle:
 		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
-			return "google", model
+			return constants.ProviderGoogle, model
 		}
-	case "argo":
+	case constants.ProviderArgo:
 		if m.config.ArgoUser != "" {
-			return "argo", model
+			return constants.ProviderArgo, model
 		}
 	default: // "openai" or any other value defaults to OpenAI
 		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
-			return "openai", model
+			return constants.ProviderOpenAI, model
 		}
 	}
 
@@ -135,21 +136,21 @@ func (m *ModelMapper) mapToModel() (provider, model string) {
 func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string) {
 	// Use the configured provider if credentials are available
 	switch m.config.Provider {
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
-			return "anthropic", model
+			return constants.ProviderAnthropic, model
 		}
-	case "google":
+	case constants.ProviderGoogle:
 		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
-			return "google", model
+			return constants.ProviderGoogle, model
 		}
-	case "argo":
+	case constants.ProviderArgo:
 		if m.config.ArgoUser != "" {
-			return "argo", model
+			return constants.ProviderArgo, model
 		}
 	default: // "openai" or any other value defaults to OpenAI
 		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
-			return "openai", model
+			return constants.ProviderOpenAI, model
 		}
 	}
 
@@ -174,11 +175,11 @@ func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string)
 // GetAPIKey returns the appropriate API key for a provider
 func (m *ModelMapper) GetAPIKey(provider string) string {
 	switch provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		return m.config.OpenAIAPIKey
-	case "google":
+	case constants.ProviderGoogle:
 		return m.config.GoogleAPIKey
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		return m.config.AnthropicAPIKey
 	default:
 		return ""

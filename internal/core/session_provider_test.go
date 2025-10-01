@@ -1,51 +1,22 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
-// mockRequestConfig implements RequestConfig for testing
-type mockRequestConfig struct {
-	user        string
-	model       string
-	system      string
-	env         string
-	embed       bool
-	streamChat  bool
-	provider    string
-	providerURL string
-	apiKeyFile  string
-}
-
-func (m mockRequestConfig) GetUser() string        { return m.user }
-func (m mockRequestConfig) GetModel() string       { return m.model }
-func (m mockRequestConfig) GetSystem() string      { return m.system }
-func (m mockRequestConfig) GetEnv() string         { return m.env }
-func (m mockRequestConfig) IsEmbed() bool          { return m.embed }
-func (m mockRequestConfig) IsStreamChat() bool     { return m.streamChat }
-func (m mockRequestConfig) GetProvider() string    { return m.provider }
-func (m mockRequestConfig) GetProviderURL() string { return m.providerURL }
-func (m mockRequestConfig) GetAPIKeyFile() string  { return m.apiKeyFile }
-
-// mockSession implements Session for testing
-type mockSession struct {
-	path string
-}
-
-func (m mockSession) GetPath() string { return m.path }
-
-// mockGetLineage returns test messages
-func mockGetLineage(path string) ([]Message, error) {
-	return []Message{
-		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: "Hi there!"},
-		{Role: "user", Content: "How are you?"},
+// mockGetMessagesWithTools returns test messages as TypedMessage
+func mockGetMessagesWithTools(ctx context.Context, path string) ([]TypedMessage, error) {
+	return []TypedMessage{
+		NewTextMessage("user", "Hello"),
+		NewTextMessage("assistant", "Hi there!"),
+		NewTextMessage("user", "How are you?"),
 	}, nil
 }
 
-func TestBuildRequestWithSession_Providers(t *testing.T) {
+func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 	tests := []struct {
 		name           string
 		provider       string
@@ -89,30 +60,30 @@ func TestBuildRequestWithSession_Providers(t *testing.T) {
 				t.Skip("Skipping test that requires API key file")
 			}
 
-			cfg := mockRequestConfig{
-				user:       "testuser",
-				model:      "",
-				system:     "You are a helpful assistant",
-				env:        "prod",
-				provider:   tt.provider,
-				apiKeyFile: tt.apiKeyFile,
+			cfg := &TestRequestConfig{
+				User:       "testuser",
+				Model:      "",
+				System:     "You are a helpful assistant",
+				Env:        "prod",
+				Provider:   tt.provider,
+				APIKeyFile: tt.apiKeyFile,
 			}
 
-			sess := mockSession{path: "/test/session"}
+			sess := NewTestSession("/test/session")
 
-			req, body, err := BuildRequestWithSession(cfg, sess, mockGetLineage)
+			rb, err := BuildRequestWithToolInteractions(context.Background(), cfg, sess, mockGetMessagesWithTools)
 			if err != nil {
-				t.Fatalf("BuildRequestWithSession failed: %v", err)
+				t.Fatalf("BuildRequestWithToolInteractions failed: %v", err)
 			}
 
 			// Check URL contains expected domain
-			if !strings.Contains(req.URL.String(), tt.expectedURL) {
-				t.Errorf("Expected URL to contain %s, got %s", tt.expectedURL, req.URL.String())
+			if !strings.Contains(rb.Request.URL.String(), tt.expectedURL) {
+				t.Errorf("Expected URL to contain %s, got %s", tt.expectedURL, rb.Request.URL.String())
 			}
 
 			// Check request format
 			var requestData map[string]interface{}
-			if err := json.Unmarshal(body, &requestData); err != nil {
+			if err := json.Unmarshal(rb.Body, &requestData); err != nil {
 				t.Fatalf("Failed to unmarshal request body: %v", err)
 			}
 
@@ -157,7 +128,7 @@ func TestBuildRequestWithSession_Providers(t *testing.T) {
 	}
 }
 
-func TestBuildRegenerationRequest_Providers(t *testing.T) {
+func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 	tests := []struct {
 		name           string
 		provider       string
@@ -201,30 +172,30 @@ func TestBuildRegenerationRequest_Providers(t *testing.T) {
 				t.Skip("Skipping test that requires API key file")
 			}
 
-			cfg := mockRequestConfig{
-				user:       "testuser",
-				model:      "",
-				system:     "You are a helpful assistant",
-				env:        "prod",
-				provider:   tt.provider,
-				apiKeyFile: tt.apiKeyFile,
+			cfg := &TestRequestConfig{
+				User:       "testuser",
+				Model:      "",
+				System:     "You are a helpful assistant",
+				Env:        "prod",
+				Provider:   tt.provider,
+				APIKeyFile: tt.apiKeyFile,
 			}
 
-			sess := mockSession{path: "/test/session"}
+			sess := NewTestSession("/test/session")
 
-			req, body, err := BuildRegenerationRequest(cfg, sess, mockGetLineage)
+			rb, err := BuildRequestWithToolInteractions(context.Background(), cfg, sess, mockGetMessagesWithTools)
 			if err != nil {
-				t.Fatalf("BuildRegenerationRequest failed: %v", err)
+				t.Fatalf("BuildRequestWithToolInteractions failed: %v", err)
 			}
 
 			// Check URL contains expected domain
-			if !strings.Contains(req.URL.String(), tt.expectedURL) {
-				t.Errorf("Expected URL to contain %s, got %s", tt.expectedURL, req.URL.String())
+			if !strings.Contains(rb.Request.URL.String(), tt.expectedURL) {
+				t.Errorf("Expected URL to contain %s, got %s", tt.expectedURL, rb.Request.URL.String())
 			}
 
 			// Check request format
 			var requestData map[string]interface{}
-			if err := json.Unmarshal(body, &requestData); err != nil {
+			if err := json.Unmarshal(rb.Body, &requestData); err != nil {
 				t.Fatalf("Failed to unmarshal request body: %v", err)
 			}
 

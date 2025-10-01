@@ -1,6 +1,7 @@
 package session
 
 import (
+	"lmtools/internal/core"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,7 @@ import (
 // TestMessage creates a test message with default values
 func TestMessage(role, content string) Message {
 	return Message{
-		Role:      role,
+		Role:      core.Role(role),
 		Content:   content,
 		Timestamp: time.Now(),
 	}
@@ -53,12 +54,12 @@ func assertFileStructure(t *testing.T, sessionPath string, expected []string) {
 func assertMessageContent(t *testing.T, sessionPath, msgID string, expectedRole, expectedContent string) {
 	t.Helper()
 
-	msg, err := ReadMessage(sessionPath, msgID)
+	msg, err := readMessage(sessionPath, msgID)
 	if err != nil {
 		t.Fatalf("Failed to read message %s: %v", msgID, err)
 	}
 
-	if msg.Role != expectedRole {
+	if string(msg.Role) != expectedRole {
 		t.Errorf("Expected role %s, got %s", expectedRole, msg.Role)
 	}
 

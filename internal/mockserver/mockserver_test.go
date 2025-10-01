@@ -150,17 +150,36 @@ func TestMockServer_CustomResponse(t *testing.T) {
 	mock := NewMockServer(
 		WithResponseFunc(func(r *http.Request) (interface{}, int, error) {
 			// Parse request to determine response
-			var req core.ChatRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var reqData map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
 				return nil, 400, err
 			}
 
 			response := "Custom response"
-			if len(req.Messages) > 0 {
-				lastMsg := req.Messages[len(req.Messages)-1]
-				var content string
-				if err := json.Unmarshal(lastMsg.Content, &content); err == nil {
-					response = "You said: " + content
+			if messages, ok := reqData["messages"].([]interface{}); ok && len(messages) > 0 {
+				lastMsg := messages[len(messages)-1]
+				if msgMap, ok := lastMsg.(map[string]interface{}); ok {
+					var content string
+					// Handle both string content and content blocks
+					switch c := msgMap["content"].(type) {
+					case string:
+						content = c
+					case []interface{}:
+						// Extract text from content blocks
+						for _, block := range c {
+							if blockMap, ok := block.(map[string]interface{}); ok {
+								if blockMap["type"] == "text" {
+									if text, ok := blockMap["text"].(string); ok {
+										content = text
+										break
+									}
+								}
+							}
+						}
+					}
+					if content != "" {
+						response = "You said: " + content
+					}
 				}
 			}
 

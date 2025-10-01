@@ -74,14 +74,20 @@ func TestParseFlagsCustom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := Config{
-		Model:      "modelA",
-		StreamChat: true,
-		ArgoUser:   "alice",
-		System:     "sys",
-		ArgoEnv:    "dev",
-		Timeout:    10 * time.Minute,
-		Retries:    3,      // Default value
-		Provider:   "argo", // Default value
+		Model:               "modelA",
+		StreamChat:          true,
+		ArgoUser:            "alice",
+		System:              "sys",
+		SystemExplicitlySet: true, // -s flag was provided
+		ArgoEnv:             "dev",
+		Timeout:             10 * time.Minute,
+		Retries:             3,                // Default value
+		Provider:            "argo",           // Default value
+		ToolTimeout:         30 * time.Second, // Default value
+		MaxToolRounds:       32,               // Default value
+		MaxToolParallel:     4,                // Default value
+		ToolMaxOutputBytes:  1048576,          // Default value (1MB)
+		LogLevel:            "INFO",           // Default value
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("ParseFlags = %+v; want %+v", cfg, want)

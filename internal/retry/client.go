@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"net/http"
 	"time"
 )
@@ -40,7 +41,36 @@ func NewClientWithOptions(timeout time.Duration, maxRetries int, logger Logger, 
 
 	// If maxRetries is specified, override provider defaults
 	retryers := make(map[string]*Retryer)
-	for _, provider := range []string{"openai", "google", "argo", "lmc", "default"} {
+	for _, provider := range []string{constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderArgo, "lmc", "default"} {
+		config := ProviderConfig(provider)
+		if provider == "default" {
+			config = DefaultConfig()
+		}
+		if maxRetries > 0 {
+			config.MaxRetries = maxRetries
+		}
+		// Set the logger from context function if provided
+		if loggerFromContext != nil {
+			config.LoggerFromContext = loggerFromContext
+		}
+		retryers[provider] = NewRetryer(config, logger)
+	}
+
+	return &Client{
+		client: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
+		retryers: retryers,
+	}
+}
+
+// NewClientWithTransport creates a new retryable HTTP client with a custom transport
+// This is primarily for testing purposes to allow custom transport configuration
+func NewClientWithTransport(timeout time.Duration, maxRetries int, logger Logger, loggerFromContext func(context.Context) Logger, transport http.RoundTripper) *Client {
+	// If maxRetries is specified, override provider defaults
+	retryers := make(map[string]*Retryer)
+	for _, provider := range []string{constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderArgo, "lmc", "default"} {
 		config := ProviderConfig(provider)
 		if provider == "default" {
 			config = DefaultConfig()

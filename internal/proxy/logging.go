@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"lmtools/internal/logger"
 	"time"
@@ -53,39 +52,5 @@ func truncateValue(value interface{}, maxLen int) interface{} {
 		return result
 	default:
 		return value
-	}
-}
-
-// countToolCallsInMessages counts total tool calls across all messages
-func countToolCallsInMessages(messages []AnthropicMessage) int {
-	count := 0
-	for _, msg := range messages {
-		// Try to parse content as array
-		var blocks []AnthropicContentBlock
-		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-			for _, block := range blocks {
-				if block.Type == "tool_use" {
-					count++
-				}
-			}
-		}
-	}
-	return count
-}
-
-// logToolCall logs tool calls at appropriate levels with truncation
-func logToolCall(ctx context.Context, name string, input interface{}) {
-	l := logger.From(ctx)
-
-	// INFO level: truncated for readability
-	truncated := truncateValue(input, 64)
-	l.InfoJSON("Tool call: "+name, truncated)
-
-	// DEBUG level: full data for debugging
-	if l.IsDebugEnabled() {
-		l.DebugJSON("Tool call full", map[string]interface{}{
-			"name":  name,
-			"input": input,
-		})
 	}
 }

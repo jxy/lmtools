@@ -1,7 +1,9 @@
 package session
 
 import (
+	"context"
 	"fmt"
+	"lmtools/internal/core"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +17,7 @@ import (
 func TestStressConcurrentResumeWithConflicts(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create initial session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -30,7 +32,7 @@ func TestStressConcurrentResumeWithConflicts(t *testing.T) {
 		}
 
 		for _, msg := range initialMessages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append initial message: %v", err)
 			}
 		}
@@ -77,7 +79,12 @@ func TestStressConcurrentResumeWithConflicts(t *testing.T) {
 					Model:     "test-model",
 				}
 
-				path, msgID, err := AppendMessage(session, msg)
+				result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
+				var path, msgID string
+				if err == nil {
+					path = result.Path
+					msgID = result.MessageID
+				}
 				results <- struct {
 					goroutineID int
 					path        string
@@ -174,7 +181,7 @@ func TestStressConcurrentResumeWithConflicts(t *testing.T) {
 // TestStressRapidFileCreation tests extremely rapid message creation
 func TestStressRapidFileCreation(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -201,11 +208,11 @@ func TestStressRapidFileCreation(t *testing.T) {
 						Timestamp: time.Now(),
 					}
 
-					path, _, err := AppendMessage(session, msg)
+					result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 					if err != nil {
 						errors <- fmt.Errorf("G%d-M%d: %w", goroutineID, i, err)
-					} else if path != session.Path {
-						conflicts <- fmt.Sprintf("G%d-M%d -> %s", goroutineID, i, GetSessionID(path))
+					} else if result.Path != session.Path {
+						conflicts <- fmt.Sprintf("G%d-M%d -> %s", goroutineID, i, GetSessionID(result.Path))
 					}
 				}
 			}(g)
@@ -258,7 +265,7 @@ func TestExtremeScenario(t *testing.T) {
 
 		sessions := make([]*Session, numSessions)
 		for i := 0; i < numSessions; i++ {
-			session, err := CreateSession()
+			session, err := CreateSession("", core.NewTestLogger(false))
 			if err != nil {
 				t.Fatalf("Failed to create session %d: %v", i, err)
 			}
@@ -297,10 +304,10 @@ func TestExtremeScenario(t *testing.T) {
 							Timestamp: time.Now(),
 						}
 
-						path, _, err := AppendMessage(session, msg)
+						result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 						if err != nil {
 							errors++
-						} else if path != session.Path {
+						} else if result.Path != session.Path {
 							conflicts++
 						} else {
 							success++
@@ -352,7 +359,7 @@ func TestExtremeScenario(t *testing.T) {
 func TestUserReportedBugScenario(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create session and add initial messages like in the bug report
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -364,7 +371,7 @@ func TestUserReportedBugScenario(t *testing.T) {
 				Content:   fmt.Sprintf("Message %d", i),
 				Timestamp: time.Now(),
 			}
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message %d: %v", i, err)
 			}
 		}
@@ -400,7 +407,11 @@ func TestUserReportedBugScenario(t *testing.T) {
 					Model:     "gpt4o",
 				}
 
-				_, msgID, err := AppendMessage(session, msg)
+				saveResult, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
+				msgID := ""
+				if err == nil {
+					msgID = saveResult.MessageID
+				}
 
 				// Check for lock files (they should exist)
 				lockFile := ""

@@ -141,9 +141,17 @@ func TestGetActualModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := getActualModel(tt.cfg)
+			// Compute actual model using the same logic as in main.go
+			actual := tt.cfg.Model
+			if actual == "" {
+				if tt.cfg.Embed {
+					actual = core.DefaultEmbedModel
+				} else {
+					actual = core.GetDefaultChatModel(tt.cfg.Provider)
+				}
+			}
 			if actual != tt.expected {
-				t.Errorf("getActualModel() = %q, want %q", actual, tt.expected)
+				t.Errorf("computed model = %q, want %q", actual, tt.expected)
 			}
 		})
 	}

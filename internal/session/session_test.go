@@ -1,8 +1,11 @@
 package session
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
+	"lmtools/internal/constants"
+	"lmtools/internal/core"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,7 +18,7 @@ import (
 func TestCreateSession(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Test creating a session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -39,7 +42,7 @@ func TestCreateSession(t *testing.T) {
 		}
 
 		// Test creating multiple sessions - should have sequential IDs
-		session2, err := CreateSession()
+		session2, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create second session: %v", err)
 		}
@@ -59,12 +62,12 @@ func TestSessionIDOverflow(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a session directory with ID ffff to simulate near-overflow
 		highIDPath := filepath.Join(sessionsDir, "ffff")
-		if err := os.Mkdir(highIDPath, 0o750); err != nil {
+		if err := os.Mkdir(highIDPath, constants.DirPerm); err != nil {
 			t.Fatalf("Failed to create high ID session: %v", err)
 		}
 
 		// Now try to create a session - should succeed with 5-digit hex
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session after ffff: %v", err)
 		}
@@ -75,7 +78,7 @@ func TestSessionIDOverflow(t *testing.T) {
 		}
 
 		// Create another one to verify sequential continues
-		session2, err := CreateSession()
+		session2, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create second session: %v", err)
 		}
@@ -90,7 +93,7 @@ func TestSessionIDOverflow(t *testing.T) {
 func TestLoadSession(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a session first
-		created, err := CreateSession()
+		created, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -124,9 +127,9 @@ func TestLoadSession(t *testing.T) {
 	})
 }
 
-func TestAppendMessage(t *testing.T) {
+func TestAppendMessageWithToolInteraction(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -138,13 +141,13 @@ func TestAppendMessage(t *testing.T) {
 			Timestamp: time.Now(),
 		}
 
-		_, msgID, err := AppendMessage(session, userMsg)
+		result, err := AppendMessageWithToolInteraction(context.Background(), session, userMsg, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
 
-		if msgID != "0000" {
-			t.Errorf("Expected first message ID to be 0000, got %s", msgID)
+		if result.MessageID != "0000" {
+			t.Errorf("Expected first message ID to be 0000, got %s", result.MessageID)
 		}
 
 		// Verify files were created
@@ -161,13 +164,13 @@ func TestAppendMessage(t *testing.T) {
 			Model:     "test-model",
 		}
 
-		_, msgID2, err := AppendMessage(session, assistantMsg)
+		result2, err := AppendMessageWithToolInteraction(context.Background(), session, assistantMsg, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to append second message: %v", err)
 		}
 
-		if msgID2 != "0001" {
-			t.Errorf("Expected second message ID to be 0001, got %s", msgID2)
+		if result2.MessageID != "0001" {
+			t.Errorf("Expected second message ID to be 0001, got %s", result2.MessageID)
 		}
 
 		// Test message ID incrementing
@@ -177,18 +180,18 @@ func TestAppendMessage(t *testing.T) {
 				Content:   "Test message",
 				Timestamp: time.Now(),
 			}
-			_, msgID, err := AppendMessage(session, msg)
+			result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 			if err != nil {
 				t.Fatalf("Failed to append message %d: %v", i, err)
 			}
 
 			expected := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(
 				strings.TrimPrefix(strings.TrimSpace(
-					strings.TrimPrefix("0x"+msgID, "0x")), "0")), "x"))
-			if msgID != expected {
+					strings.TrimPrefix("0x"+result.MessageID, "0x")), "0")), "x"))
+			if result.MessageID != expected {
 				// Just verify it increments
-				if len(msgID) != 4 {
-					t.Errorf("Expected 4-digit hex ID, got %s", msgID)
+				if len(result.MessageID) != 4 {
+					t.Errorf("Expected 4-digit hex ID, got %s", result.MessageID)
 				}
 			}
 		}
@@ -198,7 +201,7 @@ func TestAppendMessage(t *testing.T) {
 func TestCreateSibling(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create session with messages
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -211,13 +214,13 @@ func TestCreateSibling(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		// Create sibling from message 0001
-		siblingPath, err := CreateSibling(session.Path, "0001")
+		siblingPath, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create sibling: %v", err)
 		}
@@ -234,7 +237,7 @@ func TestCreateSibling(t *testing.T) {
 		}
 
 		// Create second sibling from same message
-		siblingPath2, err := CreateSibling(session.Path, "0001")
+		siblingPath2, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create second sibling: %v", err)
 		}
@@ -249,7 +252,7 @@ func TestCreateSibling(t *testing.T) {
 func TestGetLineage(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a session with linear messages
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -263,7 +266,7 @@ func TestGetLineage(t *testing.T) {
 		}
 
 		for _, msg := range linearMessages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
@@ -277,7 +280,7 @@ func TestGetLineage(t *testing.T) {
 		assertLineageEqual(t, linearMessages, lineage)
 
 		// Create a branch from message 0001
-		branchPath, err := CreateSibling(session.Path, "0001")
+		branchPath, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create branch: %v", err)
 		}
@@ -294,7 +297,7 @@ func TestGetLineage(t *testing.T) {
 		}
 
 		for _, msg := range branchMessages {
-			if _, _, err := AppendMessage(branchSession, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), branchSession, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append branch message: %v", err)
 			}
 		}
@@ -315,7 +318,7 @@ func TestGetLineage(t *testing.T) {
 		assertLineageEqual(t, expectedBranchLineage, branchLineage)
 
 		// Test nested branch
-		nestedBranchPath, err := CreateSibling(branchSession.Path, "0000")
+		nestedBranchPath, err := CreateSibling(context.Background(), branchSession.Path, "0000")
 		if err != nil {
 			t.Fatalf("Failed to create nested branch: %v", err)
 		}
@@ -326,7 +329,7 @@ func TestGetLineage(t *testing.T) {
 		}
 
 		nestedMsg := Message{Role: "user", Content: "Nested message", Timestamp: time.Now()}
-		if _, _, err := AppendMessage(nestedSession, nestedMsg); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), nestedSession, nestedMsg, nil, nil); err != nil {
 			t.Fatalf("Failed to append nested message: %v", err)
 		}
 
@@ -356,7 +359,7 @@ func TestGetLineage(t *testing.T) {
 func TestGetSessionID(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Test with simple session
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -368,7 +371,7 @@ func TestGetSessionID(t *testing.T) {
 		}
 
 		// Test with branch
-		branchPath, err := CreateSibling(session.Path, "0001")
+		branchPath, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create branch: %v", err)
 		}
@@ -384,7 +387,7 @@ func TestGetSessionID(t *testing.T) {
 func TestAssistantMessageRegeneration(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a session with user and assistant messages
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -398,14 +401,14 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		t.Run("RegenerateFirstAssistant", func(t *testing.T) {
 			// Create sibling for first assistant message (0001)
-			siblingPath, err := CreateSibling(session.Path, "0001")
+			siblingPath, err := CreateSibling(context.Background(), session.Path, "0001")
 			if err != nil {
 				t.Fatalf("Failed to create sibling: %v", err)
 			}
@@ -444,7 +447,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 				Model:     "test-model-v2",
 			}
 
-			if _, _, err := AppendMessage(siblingSession, regenMsg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), siblingSession, regenMsg, nil, nil); err != nil {
 				t.Fatalf("Failed to append regenerated message: %v", err)
 			}
 
@@ -465,7 +468,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 
 		t.Run("RegenerateLastAssistant", func(t *testing.T) {
 			// Create sibling for last assistant message (0003)
-			siblingPath, err := CreateSibling(session.Path, "0003")
+			siblingPath, err := CreateSibling(context.Background(), session.Path, "0003")
 			if err != nil {
 				t.Fatalf("Failed to create sibling: %v", err)
 			}
@@ -513,7 +516,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 			}
 
 			for i := 0; i < 3; i++ {
-				siblingPath, err := CreateSibling(session.Path, "0001")
+				siblingPath, err := CreateSibling(context.Background(), session.Path, "0001")
 				if err != nil {
 					t.Fatalf("Failed to create sibling %d: %v", i, err)
 				}
@@ -556,7 +559,7 @@ func TestAssistantMessageRegeneration(t *testing.T) {
 func TestBubbleUpSiblingCreation(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create initial session with messages
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -570,14 +573,14 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		t.Run("BubbleUpFromFirstLevelSibling", func(t *testing.T) {
 			// Create first sibling of message 0001
-			sibling1Path, err := CreateSibling(session.Path, "0001")
+			sibling1Path, err := CreateSibling(context.Background(), session.Path, "0001")
 			if err != nil {
 				t.Fatalf("Failed to create first sibling: %v", err)
 			}
@@ -600,14 +603,14 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 				Timestamp: time.Now(),
 				Model:     "test-model-v2",
 			}
-			_, _, err = AppendMessage(sibSession1, sibMsg)
+			_, err = AppendMessageWithToolInteraction(context.Background(), sibSession1, sibMsg, nil, nil)
 			if err != nil {
 				t.Fatalf("Failed to append to sibling: %v", err)
 			}
 
 			// Now branch from the message inside the sibling (bubble-up test)
 			// This should create abc123/0001.s.0001, NOT abc123/0001.s.0000/0000.s.0000
-			sibling2Path, err := CreateSibling(sibSession1.Path, "0000")
+			sibling2Path, err := CreateSibling(context.Background(), sibSession1.Path, "0000")
 			if err != nil {
 				t.Fatalf("Failed to create second sibling: %v", err)
 			}
@@ -622,18 +625,18 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 		t.Run("BubbleUpFromDeepNesting", func(t *testing.T) {
 			// Create a deeper nesting structure
 			// First, create sibling of 0002
-			sib1, err := CreateSibling(session.Path, "0002")
+			sib1, err := CreateSibling(context.Background(), session.Path, "0002")
 			if err != nil {
 				t.Fatalf("Failed to create sibling of 0002: %v", err)
 			}
 
 			sib1Session, _ := LoadSession(sib1)
-			if _, _, err := AppendMessage(sib1Session, Message{Role: "user", Content: "Alt message", Timestamp: time.Now()}); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), sib1Session, Message{Role: "user", Content: "Alt message", Timestamp: time.Now()}, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 
 			// Create sibling of the message in sib1
-			sib2, err := CreateSibling(sib1, "0000")
+			sib2, err := CreateSibling(context.Background(), sib1, "0000")
 			if err != nil {
 				t.Fatalf("Failed to create nested sibling: %v", err)
 			}
@@ -647,20 +650,20 @@ func TestBubbleUpSiblingCreation(t *testing.T) {
 
 		t.Run("MultipleBubbleUps", func(t *testing.T) {
 			// Test that multiple bubble-ups from the same nested location work correctly
-			baseSib, err := CreateSibling(session.Path, "0003")
+			baseSib, err := CreateSibling(context.Background(), session.Path, "0003")
 			if err != nil {
 				t.Fatalf("Failed to create base sibling: %v", err)
 			}
 
 			baseSibSession, _ := LoadSession(baseSib)
-			if _, _, err := AppendMessage(baseSibSession, Message{Role: "assistant", Content: "Regen 1", Timestamp: time.Now(), Model: "model"}); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), baseSibSession, Message{Role: "assistant", Content: "Regen 1", Timestamp: time.Now(), Model: "model"}, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 
 			// Create multiple siblings from the nested message
 			var siblingPaths []string
 			for i := 0; i < 3; i++ {
-				sibPath, err := CreateSibling(baseSib, "0000")
+				sibPath, err := CreateSibling(context.Background(), baseSib, "0000")
 				if err != nil {
 					t.Fatalf("Failed to create bubbled sibling %d: %v", i, err)
 				}
@@ -687,28 +690,28 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Test that concurrent sibling creation doesn't cause index collisions
 		// Create a session with a message to branch from
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
 		// Add initial messages
-		if _, _, err := AppendMessage(session, Message{Role: "user", Content: "Message 0", Timestamp: time.Now()}); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), session, Message{Role: "user", Content: "Message 0", Timestamp: time.Now()}, nil, nil); err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
-		if _, _, err := AppendMessage(session, Message{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test"}); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), session, Message{Role: "assistant", Content: "Message 1", Timestamp: time.Now(), Model: "test"}, nil, nil); err != nil {
 			t.Fatalf("Failed to append message: %v", err)
 		}
 
 		// Create first-level sibling
-		sibling1, err := CreateSibling(session.Path, "0001")
+		sibling1, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create sibling: %v", err)
 		}
 
 		// Add message to sibling
 		sib1Session, _ := LoadSession(sibling1)
-		if _, _, err := AppendMessage(sib1Session, Message{Role: "assistant", Content: "Alt 1", Timestamp: time.Now(), Model: "test"}); err != nil {
+		if _, err := AppendMessageWithToolInteraction(context.Background(), sib1Session, Message{Role: "assistant", Content: "Alt 1", Timestamp: time.Now(), Model: "test"}, nil, nil); err != nil {
 			t.Fatalf("Failed to append to sibling: %v", err)
 		}
 
@@ -723,7 +726,7 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 		for i := 0; i < numGoroutines/2; i++ {
 			go func() {
 				defer wg.Done()
-				path, err := CreateSibling(session.Path, "0001")
+				path, err := CreateSibling(context.Background(), session.Path, "0001")
 				if err != nil {
 					errors <- err
 				} else {
@@ -736,7 +739,7 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 		for i := 0; i < numGoroutines/2; i++ {
 			go func() {
 				defer wg.Done()
-				path, err := CreateSibling(sibling1, "0000")
+				path, err := CreateSibling(context.Background(), sibling1, "0000")
 				if err != nil {
 					errors <- err
 				} else {
@@ -806,7 +809,7 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 func TestDeleteNode(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a session with a complex tree structure
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -820,30 +823,30 @@ func TestDeleteNode(t *testing.T) {
 		}
 
 		for _, msg := range messages {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to append message: %v", err)
 			}
 		}
 
 		// Create branches
-		branch1, err := CreateSibling(session.Path, "0001")
+		branch1, err := CreateSibling(context.Background(), session.Path, "0001")
 		if err != nil {
 			t.Fatalf("Failed to create branch1: %v", err)
 		}
 
 		// Add messages to branch1
 		branch1Session, _ := LoadSession(branch1)
-		_, _, _ = AppendMessage(branch1Session, Message{Role: "user", Content: "Branch1 Message 0", Timestamp: time.Now()})
-		_, _, _ = AppendMessage(branch1Session, Message{Role: "assistant", Content: "Branch1 Message 1", Timestamp: time.Now(), Model: "test"})
+		_, _ = AppendMessageWithToolInteraction(context.Background(), branch1Session, Message{Role: "user", Content: "Branch1 Message 0", Timestamp: time.Now()}, nil, nil)
+		_, _ = AppendMessageWithToolInteraction(context.Background(), branch1Session, Message{Role: "assistant", Content: "Branch1 Message 1", Timestamp: time.Now(), Model: "test"}, nil, nil)
 
 		// Create another branch from message 2
-		branch2, err := CreateSibling(session.Path, "0002")
+		branch2, err := CreateSibling(context.Background(), session.Path, "0002")
 		if err != nil {
 			t.Fatalf("Failed to create branch2: %v", err)
 		}
 
 		// Create a branch from message 3 to test deletion
-		branch3, err := CreateSibling(session.Path, "0003")
+		branch3, err := CreateSibling(context.Background(), session.Path, "0003")
 		if err != nil {
 			t.Fatalf("Failed to create branch3: %v", err)
 		}
@@ -856,18 +859,18 @@ func TestDeleteNode(t *testing.T) {
 			}
 
 			// Verify message 0002 and 0003 are deleted
-			if _, err := ReadMessage(session.Path, "0002"); err == nil {
+			if _, err := readMessage(session.Path, "0002"); err == nil {
 				t.Errorf("Message 0002 should have been deleted")
 			}
-			if _, err := ReadMessage(session.Path, "0003"); err == nil {
+			if _, err := readMessage(session.Path, "0003"); err == nil {
 				t.Errorf("Message 0003 should have been deleted")
 			}
 
 			// Verify messages 0000 and 0001 still exist
-			if _, err := ReadMessage(session.Path, "0000"); err != nil {
+			if _, err := readMessage(session.Path, "0000"); err != nil {
 				t.Errorf("Message 0000 should still exist: %v", err)
 			}
-			if _, err := ReadMessage(session.Path, "0001"); err != nil {
+			if _, err := readMessage(session.Path, "0001"); err != nil {
 				t.Errorf("Message 0001 should still exist: %v", err)
 			}
 
@@ -901,7 +904,7 @@ func TestDeleteNode(t *testing.T) {
 
 		t.Run("DeleteSession", func(t *testing.T) {
 			// Create a new session to delete
-			session2, err := CreateSession()
+			session2, err := CreateSession("", core.NewTestLogger(false))
 			if err != nil {
 				t.Fatalf("Failed to create session2: %v", err)
 			}
@@ -930,7 +933,7 @@ func TestDeleteNode(t *testing.T) {
 
 		t.Run("DeleteWithRelativePath", func(t *testing.T) {
 			// Create a session
-			session3, err := CreateSession()
+			session3, err := CreateSession("", core.NewTestLogger(false))
 			if err != nil {
 				t.Fatalf("Failed to create session3: %v", err)
 			}
@@ -969,7 +972,7 @@ func TestDeleteNode(t *testing.T) {
 
 		t.Run("SecurityDotDotInPath", func(t *testing.T) {
 			// Create a session
-			session4, err := CreateSession()
+			session4, err := CreateSession("", core.NewTestLogger(false))
 			if err != nil {
 				t.Fatalf("Failed to create session4: %v", err)
 			}

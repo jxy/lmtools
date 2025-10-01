@@ -36,7 +36,8 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 	// Create streaming handler
 	w := newFlushableRecorder()
-	handler, err := NewAnthropicStreamHandler(w, "gpt35", nil)
+	handler, err := NewAnthropicStreamHandler(w, "gpt35", serverCtx)
 	if err != nil {
 		t.Fatalf("Failed to create stream handler: %v", err)
 	}
@@ -171,7 +172,8 @@ func TestPingEventsQuickResponse(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -206,7 +208,8 @@ func TestPingEventsQuickResponse(t *testing.T) {
 
 	// Create handler
 	w := newFlushableRecorder()
-	handler, _ := NewAnthropicStreamHandler(w, "gpt35", nil)
+	ctx := context.Background()
+	handler, _ := NewAnthropicStreamHandler(w, "gpt35", ctx)
 
 	// Send initial events (errors are less critical in this test)
 	_ = handler.SendMessageStart()
@@ -256,7 +259,8 @@ func TestPingIntervalClamping(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -331,7 +335,7 @@ func TestPingIntervalClamping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create handler
 			w := newFlushableRecorder()
-			handler, _ := NewAnthropicStreamHandler(w, "gpt35", nil)
+			handler, _ := NewAnthropicStreamHandler(w, "gpt35", context.Background())
 
 			// Send initial events
 			_ = handler.SendMessageStart()

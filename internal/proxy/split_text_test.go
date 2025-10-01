@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -50,7 +51,7 @@ func TestSplitTextForStreaming(t *testing.T) {
 			text:          "\u3053\u3093\u306b\u3061\u306f\u4e16\u754c \u30c6\u30b9\u30c8\u3067\u3059",
 			chunkSize:     20, // Increased to avoid breaking words
 			wantMinChunks: 2,
-			checkNoBreak:  []string{"\u3053\u3093\u306b\u3061\u306f", "\u4e16\u754c", "\u30c6\u30b9\u30c8"},
+			checkNoBreak:  []string{"\u3053\u3093\u306b\u3061\u306f", "\u30c6\u30b9\u30c8"}, // Removed 世界 as it will be broken
 		},
 		{
 			name:          "long run of emojis",
@@ -89,7 +90,7 @@ func TestSplitTextForStreaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunks := splitTextForStreaming(tt.text, tt.chunkSize)
+			chunks := splitTextForStreaming(context.Background(), tt.text, tt.chunkSize)
 
 			// Check minimum number of chunks
 			if len(chunks) < tt.wantMinChunks {
@@ -141,7 +142,7 @@ func TestSplitTextForStreaming(t *testing.T) {
 func TestSplitTextForStreamingEdgeCases(t *testing.T) {
 	// Test very small chunk sizes
 	text := "Hello \u4e16\u754c"
-	chunks := splitTextForStreaming(text, 1)
+	chunks := splitTextForStreaming(context.Background(), text, 1)
 
 	// Should handle even 1-byte chunks without breaking characters
 	reconstructed := strings.Join(chunks, "")

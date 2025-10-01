@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"lmtools/internal/errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,14 +64,17 @@ func IsSiblingDir(name string) (isSibling bool, messageID string, siblingNum str
 
 // GetNextMessageID returns the next available message ID in a directory
 func GetNextMessageID(sessionPath string) (string, error) {
-	messages, err := ListMessages(sessionPath)
+	// KISS: Only scan the current directory's JSON filenames
+	// Message IDs only need to be unique within the current directory.
+	// Sibling directories can reuse IDs safely because they're separate namespaces.
+	msgs, err := listMessages(sessionPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to list messages: %w", err)
+		return "", errors.WrapError("list messages", err)
 	}
 
 	// Find the highest numeric ID
 	maxID := -1
-	for _, msgID := range messages {
+	for _, msgID := range msgs {
 		// Skip non-hex IDs
 		if id, err := strconv.ParseUint(msgID, 16, 64); err == nil {
 			if int(id) > maxID {
@@ -80,17 +84,17 @@ func GetNextMessageID(sessionPath string) (string, error) {
 	}
 
 	nextID := maxID + 1
-
 	// Format with appropriate width
-	if nextID <= 0xffff {
+	switch {
+	case nextID <= 0xffff:
 		return fmt.Sprintf("%04x", nextID), nil
-	} else if nextID <= 0xfffff {
+	case nextID <= 0xfffff:
 		return fmt.Sprintf("%05x", nextID), nil
-	} else if nextID <= 0xffffff {
+	case nextID <= 0xffffff:
 		return fmt.Sprintf("%06x", nextID), nil
-	} else if nextID <= 0xfffffff {
+	case nextID <= 0xfffffff:
 		return fmt.Sprintf("%07x", nextID), nil
-	} else {
+	default:
 		return fmt.Sprintf("%08x", nextID), nil
 	}
 }
@@ -99,7 +103,7 @@ func GetNextMessageID(sessionPath string) (string, error) {
 func GetNextSiblingPath(sessionPath, messageID string) (string, error) {
 	siblings, err := findSiblings(sessionPath, messageID)
 	if err != nil {
-		return "", fmt.Errorf("failed to find siblings: %w", err)
+		return "", errors.WrapError("find siblings", err)
 	}
 
 	// Find the highest sibling number
@@ -136,7 +140,7 @@ func ParseMessageID(messageIDPath string) (sessionPath string, messageID string)
 		parts := strings.Split(messageIDPath, string(filepath.Separator))
 		for i := len(parts) - 1; i >= 0; i-- {
 			// Use strict validation for message IDs
-			if isValidMessageID(parts[i]) {
+			if IsValidMessageID(parts[i]) {
 				// Found a valid message ID
 				messageID = parts[i]
 				// Reconstruct the session path using platform-agnostic methods
@@ -149,7 +153,8 @@ func ParseMessageID(messageIDPath string) (sessionPath string, messageID string)
 
 				// Special check: if this is a direct child of sessions dir and the path exists as a directory,
 				// it's a session ID, not a message ID
-				if filepath.Base(filepath.Dir(sessionPath)) == "sessions" {
+				sessionsDir := GetSessionsDir()
+				if strings.HasPrefix(sessionPath, sessionsDir+string(filepath.Separator)) || sessionPath == sessionsDir {
 					// Check if this path exists as a directory
 					if info, err := os.Stat(messageIDPath); err == nil && info.IsDir() {
 						// It's a session directory
@@ -172,7 +177,7 @@ func ParseMessageID(messageIDPath string) (sessionPath string, messageID string)
 
 	// Last part should be message ID
 	lastPart := parts[len(parts)-1]
-	if isValidMessageID(lastPart) {
+	if IsValidMessageID(lastPart) {
 		messageID = lastPart
 		// Join the rest as session path
 		sessionPath = filepath.Join(GetSessionsDir(), strings.Join(parts[:len(parts)-1], "/"))
@@ -193,19 +198,6 @@ func IsSessionRoot(sessionPath string) bool {
 	sessionsDir := GetSessionsDir()
 	parent := filepath.Dir(sessionPath)
 	return parent == sessionsDir
-}
-
-// isValidMessageID checks if a string is a valid message ID (4+ hex chars)
-func isValidMessageID(id string) bool {
-	if len(id) < 4 {
-		return false
-	}
-	for _, c := range id {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // isValidSessionID checks if a string could be a valid session ID
@@ -268,4 +260,44 @@ func GetAnchorForBranching(sessionPath string, messageID string) (anchorPath str
 	}
 
 	return anchorPath, lastOriginalMsgID
+}
+
+// IsValidMessageID checks if a string is a valid message ID format (4-8 lowercase hex digits)
+func IsValidMessageID(s string) bool {
+	// Message IDs can be 4-8 characters long (to handle overflow past ffff)
+	if len(s) < 4 || len(s) > 8 {
+		return false
+	}
+	// Only lowercase hex characters are allowed
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// IsMessageReference checks if the ID is a message reference (not a session ID)
+// Message references end with /XXXX where XXXX doesn't contain .s.
+// Examples:
+//   - "0001" → false (session ID)
+//   - "0001.s.0002" → false (sibling session ID)
+//   - "0001/0002" → true (message reference)
+//   - "0001/0002.s.0003" → false (sibling session ID)
+//   - "0001/0002.s.0003/0004" → true (message reference)
+func IsMessageReference(id string) bool {
+	if !strings.Contains(id, "/") {
+		return false
+	}
+
+	parts := strings.Split(id, "/")
+	lastPart := parts[len(parts)-1]
+
+	// If last part contains .s., it's a sibling session, not a message
+	if strings.Contains(lastPart, ".s.") {
+		return false
+	}
+
+	// Check if it's a valid hex ID (4-8 chars)
+	return IsValidMessageID(lastPart)
 }

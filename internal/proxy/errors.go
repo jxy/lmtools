@@ -1,11 +1,8 @@
 package proxy
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"lmtools/internal/logger"
-	"net/http"
 )
 
 // Error types
@@ -84,36 +81,4 @@ func (e *APIError) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(errResp)
-}
-
-// sendAPIError sends an API error response
-func (s *Server) sendAPIError(ctx context.Context, w http.ResponseWriter, apiErr *APIError) {
-	// Log the error
-	logger.From(ctx).Errorf("API Error: %v", apiErr)
-
-	// Determine status code based on error type
-	statusCode := http.StatusInternalServerError
-	switch apiErr.Type {
-	case ErrTypeValidation:
-		statusCode = http.StatusBadRequest
-	case ErrTypeAuth:
-		statusCode = http.StatusUnauthorized
-	case ErrTypePermission:
-		statusCode = http.StatusForbidden
-	case ErrTypeNotFound:
-		statusCode = http.StatusNotFound
-	case ErrTypeRate:
-		statusCode = http.StatusTooManyRequests
-	case ErrTypeOverload:
-		statusCode = http.StatusServiceUnavailable
-	case ErrTypePayloadSize:
-		statusCode = http.StatusRequestEntityTooLarge
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
-	if err := json.NewEncoder(w).Encode(apiErr); err != nil {
-		logger.From(ctx).Errorf("Failed to encode error response: %v", err)
-	}
 }

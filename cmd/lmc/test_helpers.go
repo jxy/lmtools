@@ -5,31 +5,85 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// buildLmcBinary builds the lmc binary for testing
-func buildLmcBinary(t *testing.T) string {
+var (
+	cachedLmcBinary string
+	cachedTmpDir    string
+	buildOnce       sync.Once
+	cleanupOnce     sync.Once
+	buildErr        error
+)
+
+// getLmcBinary returns the path to the lmc binary for testing.
+// It first checks for a pre-built binary at ../../bin/lmc.
+// If not found, it builds the binary once and caches the path.
+func getLmcBinary(t *testing.T) string {
 	t.Helper()
 	
-	tmpDir := t.TempDir()
-	lmcBin := filepath.Join(tmpDir, "lmc.test")
+	buildOnce.Do(func() {
+		// First, check if pre-built binary exists
+		prebuiltPath := "../../bin/lmc"
+		if _, err := os.Stat(prebuiltPath); err == nil {
+			// Use absolute path to avoid issues with working directory changes
+			absPath, err := filepath.Abs(prebuiltPath)
+			if err == nil {
+				cachedLmcBinary = absPath
+				return
+			}
+		}
+		
+		// Fall back to building a test binary
+		tmpDir, err := os.MkdirTemp("", "lmc-test-*")
+		if err != nil {
+			buildErr = err
+			return
+		}
+		cachedTmpDir = tmpDir
+		
+		lmcBin := filepath.Join(tmpDir, "lmc.test")
+		
+		cmd := exec.Command("go", "build", "-o", lmcBin, ".")
+		cmd.Dir = "." // Run in cmd/lmc directory
+		
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			buildErr = fmt.Errorf("build failed: %v\nOutput:\n%s", err, string(out))
+			return
+		}
+		
+		cachedLmcBinary = lmcBin
+	})
 	
-	cmd := exec.Command("go", "build", "-o", lmcBin, ".")
-	cmd.Dir = "." // Run in cmd/lmc directory
-	
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("Failed to build lmc: %v\nOutput: %s", err, output)
+	if buildErr != nil {
+		t.Fatalf("Failed to get lmc binary: %v", buildErr)
 	}
 	
-	return lmcBin
+	// Register cleanup on first use
+	if cachedTmpDir != "" {
+		t.Cleanup(func() {
+			// Only clean up if this is the last test using the binary
+			// This is handled by the test framework - cleanup runs after all tests complete
+			cleanupOnce.Do(func() {
+				if cachedTmpDir != "" {
+					os.RemoveAll(cachedTmpDir)
+					cachedTmpDir = ""
+				}
+			})
+		})
+	}
+	
+	return cachedLmcBinary
 }
+
 
 // runLmcCommand runs lmc with the given arguments and input
 // It always adds -log-dir to isolate test logs from production
@@ -121,4 +175,81 @@ func assertRecentLogFiles(t *testing.T, dir string, includeSubstr string, suffix
 		}
 	}
 	return false
+}
+
+// waitForFile waits for a file to exist, checking periodically until timeout
+func waitForFile(t *testing.T, path string, timeout time.Duration) bool {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForFiles waits for a specific number of files to appear in a directory
+func waitForFiles(t *testing.T, dir string, expectedCount int, timeout time.Duration) bool {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(dir)
+		if err == nil && len(entries) >= expectedCount {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForLogFiles waits for a specific number of log files with given pattern
+func waitForLogFiles(t *testing.T, dir string, pattern string, expectedCount int, timeout time.Duration) int {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+
+		count := 0
+		now := time.Now()
+		for _, entry := range entries {
+			if strings.Contains(entry.Name(), pattern) {
+				info, err := entry.Info()
+				if err == nil && now.Sub(info.ModTime()) < time.Minute {
+					count++
+				}
+			}
+		}
+
+		if count >= expectedCount {
+			return count
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Return actual count found even if timeout
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	now := time.Now()
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), pattern) {
+			info, err := entry.Info()
+			if err == nil && now.Sub(info.ModTime()) < time.Minute {
+				count++
+			}
+		}
+	}
+	return count
 }

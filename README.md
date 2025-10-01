@@ -20,67 +20,100 @@ go build -o ./bin/lmc ./cmd/lmc
 
 ```bash
 # Generate embeddings (sessions automatically disabled)
-echo "Hello world" | lmc -u yourname -e
+echo "Hello world" | lmc -argo-user yourname -e
 
 # Chat mode with automatic session creation
-echo "What is LMC?" | lmc -u yourname
+echo "What is LMC?" | lmc -argo-user yourname
 
 # Streaming chat
-echo "Tell me a story" | lmc -u yourname -stream
+echo "Tell me a story" | lmc -argo-user yourname -stream
 
 # Use specific model
-echo "Explain quantum computing" | lmc -u yourname -m gpt4o
+echo "Explain quantum computing" | lmc -argo-user yourname -model gpt4o
+
+# Enable tool execution capabilities
+echo "List files in current directory" | lmc -argo-user yourname -tool
 ```
 
 ### Session Management
 
 ```bash
 # Show all conversation sessions
-lmc -u yourname -show-sessions
+lmc -argo-user yourname -show-sessions
 
 # Resume a previous session
-echo "Continue from where we left off" | lmc -u yourname -resume 0001
+echo "Continue from where we left off" | lmc -argo-user yourname -resume 0001
 
 # Branch from a specific message
-echo "Let me rephrase that" | lmc -u yourname -branch 0001/0002
+echo "Let me rephrase that" | lmc -argo-user yourname -branch 0001/0002
 
 # Delete a session or message
-lmc -u yourname -delete 0001
+lmc -argo-user yourname -delete 0001
 
 # Show a specific conversation or message
-lmc -u yourname -show 0001
-lmc -u yourname -show 0001/0002
+lmc -argo-user yourname -show 0001
+lmc -argo-user yourname -show 0001/0002
 ```
 
 ### Advanced Options
 
 ```bash
 # Use custom sessions directory
-echo "Test" | lmc -u yourname -sessions-dir /tmp/my-sessions
+echo "Test" | lmc -argo-user yourname -sessions-dir /tmp/my-sessions
 
 # Custom environment/API endpoint
-echo "Test" | lmc -u yourname -env prod
-echo "Test" | lmc -u yourname -env https://custom.example/api
+echo "Test" | lmc -argo-user yourname -argo-env prod
+echo "Test" | lmc -argo-user yourname -argo-env https://custom.example/api
 
 # Set system prompt
-echo "Hello" | lmc -u yourname -s "You are a helpful coding assistant"
+echo "Hello" | lmc -argo-user yourname -s "You are a helpful coding assistant"
 
 # Disable session tracking
-echo "One-off question" | lmc -u yourname -no-session
+echo "One-off question" | lmc -argo-user yourname -no-session
+```
+
+### Tool Execution
+
+```bash
+# Enable tool execution with auto-approval for safe commands
+echo "Show current directory" | lmc -argo-user yourname -tool -tool-auto-approve
+
+# Use tool with custom timeout
+echo "Run a long process" | lmc -argo-user yourname -tool -tool-timeout 5m
+
+# Use tool with whitelist for auto-approval (each line must be a JSON array)
+echo '["ls"]' > whitelist.txt
+echo '["pwd"]' >> whitelist.txt
+echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt -tool-auto-approve
 ```
 
 ## Command-line Flags
 
 ### Required
-- `-u string`: User identifier (required for most operations)
+- `-argo-user string`: User identifier (required for Argo provider)
+- `-api-key-file string`: Path to API key file (required for non-Argo providers)
 
 ### Model Selection
-- `-m string`: Model to use (default: "gemini25pro" for chat, "v3large" for embed)
+- `-model string`: Model to use (defaults: gpt5 for Argo, gpt-5 for OpenAI, gemini-2.5-pro for Google, claude-opus-4-1-20250805 for Anthropic)
 - `-e`: Enable embed mode for generating embeddings
+- `-list-models`: List available models from provider
 
 ### Chat Options
 - `-stream`: Use streaming chat mode for real-time responses
 - `-s string`: System prompt for chat mode (default: "You are a brilliant assistant.")
+
+### Tool Execution
+- `-tool`: Enable built-in universal_command tool for system command execution
+  - **Note**: Direct Google provider supports tool execution
+  - **Note**: Google models accessed through Argo provider do not support tool execution (Argo limitation)
+- `-tool-timeout duration`: Timeout for tool execution (default: 30s)
+- `-tool-whitelist string`: Path to whitelist file where each line is a JSON array of command parts
+- `-tool-blacklist string`: Path to blacklist file (commands always rejected)
+- `-tool-auto-approve`: Skip manual approval for whitelisted commands
+- `-tool-non-interactive`: Run in non-interactive mode (deny unapproved commands)
+- `-tool-max-output-bytes int`: Maximum output size per tool execution (default: 1MB, max: 100MB)
+- `-max-tool-rounds int`: Maximum rounds of tool execution (default: 32)
+- `-max-tool-parallel int`: Maximum parallel tool executions (default: 4)
 
 ### Session Management
 - `-resume string`: Resume session or branch by ID/path
@@ -90,11 +123,18 @@ echo "One-off question" | lmc -u yourname -no-session
 - `-delete string`: Delete node (session/branch/message) and its descendants
 - `-no-session`: Disable session creation (automatically set for embed mode)
 - `-sessions-dir string`: Custom sessions directory (default: ~/.lmc/sessions)
+- `-skip-flock-check`: Skip file locking check
 
-### Configuration
-- `-env string`: Environment - "prod", "dev", or custom API URL (default: "dev")
+### Provider Configuration
+- `-provider string`: Provider: argo (default), openai, google, anthropic
+- `-provider-url string`: Custom provider API endpoint
+- `-argo-env string`: Environment for Argo - "prod", "dev", or custom URL (default: "dev")
+
+### Other Options
 - `-timeout duration`: HTTP request timeout (default: 10m)
 - `-retries int`: Number of retry attempts for failed requests (default: 3)
+- `-log-dir string`: Custom log directory (default: ~/.lmc/logs)
+- `-log-level string`: Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)
 
 ## Data Storage
 
@@ -114,6 +154,80 @@ LMC provides sophisticated session management:
 - **Branching support**: Create alternative conversation paths from any message
 - **Tree visualization**: View conversation history as a tree structure
 - **Concurrent safety**: Multiple processes can safely access sessions simultaneously
+- **Automatic session forking**: When resuming a session with different system prompts:
+  - Sessions fork whenever the effective system prompt differs from the original
+  - This includes using `-tool` flag or explicit `-s` flag with different content
+  - Original sessions are preserved unchanged
+  - User is notified when forking occurs
+
+### Session Atomicity
+
+LMC ensures atomic session operations through careful file ordering:
+
+- **Message files**: Each message consists of `.txt` (content), `.json` (metadata), and optionally `.tools.json` (tool interactions)
+- **Atomic commit**: The JSON metadata file is written last, serving as the commit point
+- **Consistency rule**: A message exists if and only if its JSON file exists
+- **Rollback safety**: If interrupted, partial messages are automatically ignored
+- **Tool persistence**: Tool calls and results are stored in `.tools.json` files alongside messages
+
+#### The .json Commit Point Invariant
+
+The `.json` file serves as the definitive commit point for all session operations:
+
+- **Write order**: Files are always written in the order: `.txt` → `.tools.json` → `.json`
+- **Existence check**: Only messages with a `.json` file are considered valid
+- **Orphan cleanup**: On each commit, any `.txt` or `.tools.json` files without a corresponding `.json` file are automatically removed
+- **Crash recovery**: This design ensures that interrupted operations leave no partial data
+- **Atomic guarantee**: Either all files for a message exist (with `.json` present), or none are visible to the system
+
+This invariant is enforced throughout the codebase and ensures data consistency even in the presence of crashes, concurrent access, or filesystem errors.
+
+### Session Forking
+
+When resuming a session with a different system prompt, LMC automatically creates a fork to preserve the original conversation:
+
+- **Automatic detection**: Forks occur when the effective system prompt differs from the original
+- **Common triggers**: Using `-tool` flag or explicit `-s` flag with different content
+- **Full copy**: The entire conversation history is copied to the new fork
+- **Performance considerations**: For large sessions (hundreds of messages), forking may take several seconds
+
+**Important for large sessions**: Session forking creates a complete copy of the conversation history. For sessions with many messages or large content:
+- Fork operations may take 1-10 seconds depending on session size
+- Disk usage doubles for the forked portion
+- Consider creating a new session instead if you don't need the full history
+- Use `-no-session` for one-off queries that don't require context
+
+### Tool Execution Behavior
+
+When tools are enabled with `-tool`:
+
+- **Approval flow**: Commands require approval based on whitelist/blacklist/auto-approve settings
+- **Execution tracking**: All tool calls and results are persisted in session history
+- **Continuation**: Tool execution can span multiple rounds (up to `-max-tool-rounds`)
+- **Error handling**: Failed commands are recorded with error details
+- **Output truncation**: Large outputs are truncated to prevent memory issues
+- **Non-interactive mode**: Use `-tool-non-interactive` for scripted usage (requires whitelist or auto-approve)
+
+#### Non-interactive Scripts
+
+When running `lmc` as a background job or in environments with closed stdin (such as CI/CD pipelines), tool execution behaves differently:
+
+- **EOF detection**: When stdin is closed or EOF is encountered, interactive approval prompts are not possible
+- **Automatic denial**: Without `-tool-non-interactive`, commands will be denied when stdin is unavailable
+- **Required flags**: For background/scripted usage, you must use `-tool-non-interactive` along with either:
+  - `-tool-whitelist` with a file containing allowed commands
+  - `-tool-auto-approve` to approve all non-blacklisted commands
+- **Example for scripts**:
+  ```bash
+  # Create whitelist
+  echo '["ls", "-la"]' > allowed.txt
+  echo '["pwd"]' >> allowed.txt
+
+  # Run in background with proper flags
+  echo "List files and show working directory" | \
+    lmc -argo-user bot -tool -tool-non-interactive \
+    -tool-whitelist allowed.txt -tool-auto-approve &
+  ```
 
 ## Development
 

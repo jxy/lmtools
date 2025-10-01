@@ -1,0 +1,84 @@
+package core
+
+import (
+	"encoding/json"
+	"fmt"
+	"sync/atomic"
+)
+
+// NOTE: Tool support for Google provider:
+// - Direct Google provider (using Google API directly): SUPPORTS tools
+// - Google models via Argo provider: DOES NOT support tools (current limitation)
+// This file implements tool parsing for direct Google provider usage.
+
+// googleToolCallCounter is used to generate unique IDs for Google tool calls
+var googleToolCallCounter uint64
+
+// generateGoogleToolCallID creates a unique ID for tool calls (used by Google which doesn't provide IDs)
+func generateGoogleToolCallID() string {
+	n := atomic.AddUint64(&googleToolCallCounter, 1)
+	return fmt.Sprintf("call_%d", n)
+}
+
+// parseGoogleResponseWithTools parses Google responses that may contain tool calls
+// This is used when connecting directly to Google API, not through Argo
+func parseGoogleResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
+	if isEmbed {
+		// Google AI doesn't support embeddings through this interface
+		return "", nil, fmt.Errorf("google provider does not support embedding mode")
+	}
+
+	var resp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text         string `json:"text"`
+					FunctionCall *struct {
+						Name string                 `json:"name"`
+						Args map[string]interface{} `json:"args"`
+					} `json:"functionCall"`
+				} `json:"parts"`
+				Role string `json:"role"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return "", nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return "", nil, fmt.Errorf("API error: %s (code: %d, status: %s)",
+			resp.Error.Message, resp.Error.Code, resp.Error.Status)
+	}
+
+	if len(resp.Candidates) == 0 {
+		return "", nil, fmt.Errorf("no candidates in response")
+	}
+
+	var text string
+	var toolCalls []ToolCall
+
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if part.Text != "" {
+			text += part.Text
+		}
+		if part.FunctionCall != nil {
+			// Convert args to JSON
+			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   generateGoogleToolCallID(),
+				Name: part.FunctionCall.Name,
+				Args: argsJSON,
+			})
+		}
+	}
+
+	return text, toolCalls, nil
+}

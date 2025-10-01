@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -56,16 +57,18 @@ func TestSplitTextForStreamingBacktick(t *testing.T) {
 			text:      "a `b` c",
 			chunkSize: 3,
 			want: []string{
-				"a `",
-				"b` ",
-				"c",
+				"a",
+				" ",
+				"`",
+				"b",
+				"` c",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitTextForStreaming(tt.text, tt.chunkSize)
+			got := splitTextForStreaming(context.Background(), tt.text, tt.chunkSize)
 
 			// Check if we got the expected number of chunks
 			if len(got) != len(tt.want) {

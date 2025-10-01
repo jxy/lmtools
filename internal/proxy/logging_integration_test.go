@@ -21,7 +21,8 @@ func init() {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 }
@@ -209,7 +210,6 @@ func TestStreamingRequestLogging(t *testing.T) {
 func TestConcurrentRequestLogging(t *testing.T) {
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
-	defer serverCancel()
 
 	// Create mock provider
 	mockProvider := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
@@ -233,10 +233,6 @@ func TestConcurrentRequestLogging(t *testing.T) {
 			}
 		}
 	})
-	defer func() {
-		serverCancel()
-		mockProvider.Close()
-	}()
 
 	// Create server config
 	config := &Config{
@@ -246,8 +242,8 @@ func TestConcurrentRequestLogging(t *testing.T) {
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server with cleanup using testing-optimized configuration
+	server, cleanup := NewServerForTesting(config)
 
 	// Number of concurrent requests
 	numRequests := 10
@@ -285,6 +281,15 @@ func TestConcurrentRequestLogging(t *testing.T) {
 	}
 
 	wg.Wait()
+
+	// Clean up connections
+	cleanup()
+
+	// Cancel context to stop any pending handlers
+	serverCancel()
+
+	// Close the mock provider
+	mockProvider.Close()
 
 	// In a real test, we would verify that each request has unique logs
 	// and that logs are not interleaved
@@ -446,7 +451,8 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("json"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -492,6 +498,7 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		}
 	}
 	if !found {
+		t.Logf("Captured logs:\n%s", buf.String())
 		t.Errorf("missing JSON Incoming Anthropic Request log")
 	}
 }
@@ -501,7 +508,8 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("json"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -560,7 +568,8 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("json"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -613,7 +622,8 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("json"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -682,12 +692,15 @@ func TestLogTimestamps(t *testing.T) {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 
 	// Create a new request logger after reinitializing
-	reqLogger := logger.GetLogger().NewScope("")
+	// Create a context with counter ID to test request ID logging
+	ctx := context.WithValue(context.Background(), logger.RequestCounterKey{}, int64(42))
+	reqLogger := logger.From(ctx)
 
 	// Log a test message
 	reqLogger.Infof("Test message")
@@ -701,7 +714,8 @@ func TestLogTimestamps(t *testing.T) {
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 		logger.WithComponent("test"),
 	)
 	var buf bytes.Buffer
@@ -710,38 +724,31 @@ func TestLogTimestamps(t *testing.T) {
 	}
 	output := buf.String()
 
-	// New format includes request ID: [#N]
-	if !strings.Contains(output, "[#") {
-		t.Errorf("Expected output to contain [#, got: %s", output)
-	}
-
-	// Verify request ID is present
-	if reqLogger != nil {
-		expectedID := fmt.Sprintf("[#%d]", reqLogger.GetRequestID())
-		if !strings.Contains(output, expectedID) {
-			t.Errorf("Expected output to contain %s, got: %s", expectedID, output)
-		}
-	}
-
 	// Verify the message content is preserved
 	if !strings.Contains(output, "Test message") {
 		t.Errorf("Expected output to contain 'Test message', got: %s", output)
 	}
 
-	// Verify that start time was set
-	if reqLogger.GetStartTime().IsZero() {
-		t.Error("Start time was not set")
+	// Verify timestamp format
+	if !strings.Contains(output, "[INFO]") {
+		t.Errorf("Expected output to contain [INFO], got: %s", output)
 	}
 
-	// Verify that start time is recent
-	if time.Since(reqLogger.GetStartTime()) > time.Second {
-		t.Error("Start time seems too old")
+	// Verify ISO timestamp format
+	if !strings.Contains(output, "2025-") {
+		t.Errorf("Expected output to contain timestamp, got: %s", output)
+	}
+
+	// Verify request ID is present (format: [#N])
+	if !strings.Contains(output, "[#42]") {
+		t.Errorf("Expected output to contain [#42], got: %s", output)
 	}
 }
 
 // Benchmark tests
 func BenchmarkLoggingWithRequestID(b *testing.B) {
-	logger := logger.GetLogger().NewScope("")
+	ctx := context.WithValue(context.Background(), logger.RequestCounterKey{}, int64(1))
+	logger := logger.From(ctx)
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -751,7 +758,8 @@ func BenchmarkLoggingWithRequestID(b *testing.B) {
 
 func BenchmarkConcurrentLogging(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
-		logger := logger.GetLogger().NewScope("")
+		ctx := context.WithValue(context.Background(), logger.RequestCounterKey{}, int64(1))
+		logger := logger.From(ctx)
 		i := 0
 		for pb.Next() {
 			logger.Debugf("Concurrent benchmark message %d", i)

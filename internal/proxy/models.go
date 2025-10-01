@@ -2,15 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
-)
-
-// Common types
-type Role string
-
-const (
-	RoleSystem    Role = "system"
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
+	"lmtools/internal/core"
 )
 
 // EstimateTokenCount estimates the number of tokens in a text string
@@ -103,7 +95,7 @@ type AnthropicThinking struct {
 
 // AnthropicMessage represents a message in the Anthropic format
 type AnthropicMessage struct {
-	Role    Role            `json:"role"`
+	Role    core.Role       `json:"role"`
 	Content json.RawMessage `json:"content"`
 }
 
@@ -141,7 +133,7 @@ type AnthropicToolChoice struct {
 type AnthropicResponse struct {
 	ID         string                  `json:"id"`
 	Type       string                  `json:"type"`
-	Role       Role                    `json:"role"`
+	Role       core.Role               `json:"role"`
 	Content    []AnthropicContentBlock `json:"content"`
 	Model      string                  `json:"model"`
 	StopReason string                  `json:"stop_reason,omitempty"`
@@ -162,6 +154,69 @@ type AnthropicStreamEvent struct {
 	ContentBlock *AnthropicContentBlock `json:"content_block,omitempty"`
 	Message      *AnthropicResponse     `json:"message,omitempty"`
 	Usage        *AnthropicUsage        `json:"usage,omitempty"`
+}
+
+// MessageStartEvent represents a message_start event
+type MessageStartEvent struct {
+	Type    string            `json:"type"`
+	Message AnthropicResponse `json:"message"`
+}
+
+// ContentBlockStartEvent represents a content_block_start event
+type ContentBlockStartEvent struct {
+	Type         string                `json:"type"`
+	Index        int                   `json:"index"`
+	ContentBlock AnthropicContentBlock `json:"content_block"`
+}
+
+// ContentBlockDeltaEvent represents a content_block_delta event
+type ContentBlockDeltaEvent struct {
+	Type  string       `json:"type"`
+	Index int          `json:"index"`
+	Delta DeltaContent `json:"delta"`
+}
+
+// DeltaContent represents the delta content in a streaming event
+type DeltaContent struct {
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+}
+
+// ContentBlockStopEvent represents a content_block_stop event
+type ContentBlockStopEvent struct {
+	Type  string `json:"type"`
+	Index int    `json:"index"`
+}
+
+// MessageDeltaEvent represents a message_delta event
+type MessageDeltaEvent struct {
+	Type  string          `json:"type"`
+	Delta MessageDelta    `json:"delta"`
+	Usage *AnthropicUsage `json:"usage,omitempty"`
+}
+
+// MessageDelta represents the delta in a message_delta event
+type MessageDelta struct {
+	StopReason   string `json:"stop_reason,omitempty"`
+	StopSequence string `json:"stop_sequence,omitempty"`
+}
+
+// MessageStopEvent represents a message_stop event
+type MessageStopEvent struct {
+	Type string `json:"type"`
+}
+
+// ErrorEvent represents an error event
+type ErrorEvent struct {
+	Type  string    `json:"type"`
+	Error ErrorInfo `json:"error"`
+}
+
+// ErrorInfo represents error information
+type ErrorInfo struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
 }
 
 // AnthropicTokenCountRequest represents a token counting request
@@ -201,7 +256,7 @@ type OpenAIRequest struct {
 
 // OpenAIMessage represents a message in the OpenAI format
 type OpenAIMessage struct {
-	Role       Role        `json:"role"`
+	Role       core.Role   `json:"role"`
 	Content    interface{} `json:"content"` // Can be string or []OpenAIContent
 	Name       string      `json:"name,omitempty"`
 	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
@@ -294,7 +349,7 @@ type OpenAIStreamDelta struct {
 
 // OpenAIDelta represents the delta content
 type OpenAIDelta struct {
-	Role      *Role      `json:"role,omitempty"`
+	Role      *core.Role `json:"role,omitempty"`
 	Content   *string    `json:"content,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }

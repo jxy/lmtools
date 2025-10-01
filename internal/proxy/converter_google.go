@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 )
 
 // ConvertAnthropicToGoogle converts an Anthropic request to Google AI format
 func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
 	// Log omitted fields at DEBUG level
-	if req.Metadata != nil && len(req.Metadata) > 0 {
-		logger.From(ctx).DebugJSON("Omitting metadata from Anthropic request (not supported by Google)", req.Metadata)
+	if len(req.Metadata) > 0 {
+		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by Google)", req.Metadata)
 	}
 	if req.ToolChoice != nil {
 		logger.From(ctx).Debugf("Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name)
@@ -68,7 +69,7 @@ func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *Anthropic
 		for _, tool := range req.Tools {
 			// Filter out $schema and convert to Google format
 			filteredSchema := filterSchemaMetadata(tool.InputSchema)
-			parameters := c.convertSchemaToGoogleFormat(filteredSchema)
+			parameters := core.ConvertSchemaToGoogleFormat(filteredSchema)
 			// Type assert to map[string]interface{} - this should always succeed for valid schemas
 			paramsMap, _ := parameters.(map[string]interface{})
 
@@ -93,7 +94,7 @@ func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *Anthropic
 func (c *Converter) convertAnthropicMessageToGoogle(msg AnthropicMessage) (GoogleContent, error) {
 	// Map roles
 	role := "user"
-	if msg.Role == RoleAssistant {
+	if msg.Role == core.RoleAssistant {
 		role = "model"
 	}
 
@@ -217,7 +218,7 @@ func (c *Converter) ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel
 	anthResp := &AnthropicResponse{
 		Type:  "message",
 		Model: originalModel,
-		Role:  RoleAssistant,
+		Role:  core.RoleAssistant,
 	}
 
 	// Set usage if available

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/core"
 	"reflect"
 	"testing"
 )
@@ -30,7 +31,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello, how are you?"`),
 					},
 				},
@@ -40,7 +41,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: "Hello, how are you?",
 					},
 				},
@@ -54,7 +55,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				System:    json.RawMessage(`"You are a helpful assistant."`),
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Tell me a joke"`),
 					},
 				},
@@ -64,11 +65,11 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
-						Role:    RoleSystem,
+						Role:    core.RoleSystem,
 						Content: "You are a helpful assistant.",
 					},
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: "Tell me a joke",
 					},
 				},
@@ -81,7 +82,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`[{"type": "text", "text": "Hello"}, {"type": "text", "text": " World"}]`),
 					},
 				},
@@ -91,7 +92,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: "Hello World",
 					},
 				},
@@ -104,7 +105,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Calculate 2+2"`),
 					},
 				},
@@ -128,7 +129,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: "Calculate 2+2",
 					},
 				},
@@ -158,7 +159,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Use the tool"`),
 					},
 				},
@@ -183,7 +184,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: "Use the tool",
 					},
 				},
@@ -213,7 +214,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: 20000, // Above OpenAI limit
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello"`),
 					},
 				},
@@ -223,7 +224,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				MaxTokens: intPtr(20000), // No longer capped, pass through as-is
 				Messages: []OpenAIMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: "Hello",
 					},
 				},
@@ -263,7 +264,7 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 				Choices: []OpenAIChoice{
 					{
 						Message: OpenAIMessage{
-							Role:    RoleAssistant,
+							Role:    core.RoleAssistant,
 							Content: "Hello! I'm doing well, thank you.",
 						},
 						FinishReason: "stop",
@@ -278,7 +279,7 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 			expected: &AnthropicResponse{
 				ID:   "chatcmpl-123",
 				Type: "message",
-				Role: RoleAssistant,
+				Role: core.RoleAssistant,
 				Content: []AnthropicContentBlock{
 					{
 						Type: "text",
@@ -301,7 +302,7 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 				Choices: []OpenAIChoice{
 					{
 						Message: OpenAIMessage{
-							Role:    RoleAssistant,
+							Role:    core.RoleAssistant,
 							Content: "I'll calculate that for you.",
 							ToolCalls: []ToolCall{
 								{
@@ -326,7 +327,7 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 			expected: &AnthropicResponse{
 				ID:   "chatcmpl-124",
 				Type: "message",
-				Role: RoleAssistant,
+				Role: core.RoleAssistant,
 				Content: []AnthropicContentBlock{
 					{
 						Type: "text",
@@ -399,7 +400,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpt-4",
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello Argo"`),
 					},
 				},
@@ -423,7 +424,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello"`),
 					},
 				},
@@ -448,7 +449,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				MaxTokens: 1000,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Hello"`),
 					},
 				},
@@ -473,7 +474,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				System: json.RawMessage(`"You are a helpful assistant"`),
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Help me"`),
 					},
 				},
@@ -500,7 +501,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpt-4",
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`[{"type": "text", "text": "Part 1"}, {"type": "text", "text": "Part 2"}]`),
 					},
 				},
@@ -523,7 +524,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpto3",
 				Messages: []AnthropicMessage{
 					{
-						Role: RoleUser,
+						Role: core.RoleUser,
 						Content: json.RawMessage(`[{
 							"type": "tool_result",
 							"tool_use_id": "call_PqB38FjnsQbA0cYOp0Af6Bbj",
@@ -553,7 +554,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "claude-3-haiku",
 				Messages: []AnthropicMessage{
 					{
-						Role: RoleUser,
+						Role: core.RoleUser,
 						Content: json.RawMessage(`[{
 							"type": "tool_result",
 							"tool_use_id": "call_PqB38FjnsQbA0cYOp0Af6Bbj",
@@ -588,7 +589,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpto3",
 				Messages: []AnthropicMessage{
 					{
-						Role: RoleAssistant,
+						Role: core.RoleAssistant,
 						Content: json.RawMessage(`[{
 							"type": "tool_use",
 							"id": "call_47BSzK51qN5Fq0hMJT1HXx5j",
@@ -630,7 +631,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpt-4",
 				Messages: []AnthropicMessage{
 					{
-						Role: RoleAssistant,
+						Role: core.RoleAssistant,
 						Content: json.RawMessage(`[{
 							"type": "text",
 							"text": "I'll read that file for you."

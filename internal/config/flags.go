@@ -3,7 +3,9 @@ package config
 import (
 	"flag"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/prompts"
 	"os"
 	"strings"
 	"time"
@@ -14,29 +16,43 @@ func getDefaultUser() string {
 }
 
 type Config struct {
-	Model          string        // model to use
-	Embed          bool          // whether to run in embed mode
-	StreamChat     bool          // whether to use streaming chat mode
-	ArgoUser       string        // user identifier (required for Argo provider only)
-	System         string        // system prompt for chat
-	ArgoEnv        string        // environment (prod|dev|custom base URL)
-	Timeout        time.Duration // HTTP request timeout
-	Retries        int           // number of retry attempts
-	Resume         string        // session ID or path to continue
-	Branch         string        // message ID to branch from
-	ShowSessions   bool          // display conversation trees
-	NoSession      bool          // disable session creation
-	Delete         string        // node path to delete
-	Show           string        // show session or message by ID/path
-	SessionsDir    string        // custom sessions directory
-	LogDir         string        // custom log directory
-	SkipFlockCheck bool          // skip file locking check
+	// Tool execution settings
+	MaxToolRounds       int           `json:"max_tool_rounds,omitempty"`
+	MaxToolParallel     int           `json:"max_tool_parallel,omitempty"`
+	Model               string        // model to use
+	Embed               bool          // whether to run in embed mode
+	StreamChat          bool          // whether to use streaming chat mode
+	ArgoUser            string        // user identifier (required for Argo provider only)
+	System              string        // system prompt for chat
+	SystemExplicitlySet bool          // whether -s flag was explicitly provided
+	ArgoEnv             string        // environment (prod|dev|custom base URL)
+	Timeout             time.Duration // HTTP request timeout
+	Retries             int           // number of retry attempts
+	Resume              string        // session ID or path to continue
+	Branch              string        // message ID to branch from
+	ShowSessions        bool          // display conversation trees
+	NoSession           bool          // disable session creation
+	Delete              string        // node path to delete
+	Show                string        // show session or message by ID/path
+	SessionsDir         string        // custom sessions directory
+	LogDir              string        // custom log directory
+	LogLevel            string        // log level (DEBUG, INFO, WARN, ERROR)
+	SkipFlockCheck      bool          // skip file locking check
 
 	// Provider support
 	Provider    string // provider: argo (default), openai, google, anthropic
 	ProviderURL string // custom provider API endpoint
 	APIKeyFile  string // path to API key file (required for non-Argo providers)
 	ListModels  bool   // list available models from provider
+
+	// Tool support
+	EnableTool         bool          // enable built-in universal_command tool
+	ToolTimeout        time.Duration // timeout for tool execution (default: 30s)
+	ToolWhitelist      string        // path to whitelist file (one command per line)
+	ToolBlacklist      string        // path to blacklist file (one command per line)
+	ToolAutoApprove    bool          // skip manual approval for whitelisted tools
+	ToolNonInteractive bool          // run in non-interactive mode (deny unapproved commands)
+	ToolMaxOutputBytes int           // maximum output size per tool execution (default: 1MB)
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -56,7 +72,18 @@ func ParseFlags(args []string) (Config, error) {
 
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
-	fs.StringVar(&cfg.System, "s", "You are a brilliant assistant.", "system prompt for chat mode")
+	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
+
+	// Tool Options
+	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable built-in universal_command tool")
+	fs.DurationVar(&cfg.ToolTimeout, "tool-timeout", core.DefaultToolTimeout, "timeout for tool execution")
+	fs.StringVar(&cfg.ToolWhitelist, "tool-whitelist", "", "path to whitelist file (one command per line, or JSON arrays for multi-arg commands)")
+	fs.StringVar(&cfg.ToolBlacklist, "tool-blacklist", "", "path to blacklist file (one command per line)")
+	fs.BoolVar(&cfg.ToolAutoApprove, "tool-auto-approve", false, "skip manual approval for whitelisted tools")
+	fs.BoolVar(&cfg.ToolNonInteractive, "tool-non-interactive", false, "run in non-interactive mode (deny unapproved commands)")
+	fs.IntVar(&cfg.MaxToolRounds, "max-tool-rounds", core.DefaultMaxToolRounds, "maximum rounds of tool execution")
+	fs.IntVar(&cfg.MaxToolParallel, "max-tool-parallel", core.DefaultMaxToolParallel, "maximum parallel tool executions (default: 4)")
+	fs.IntVar(&cfg.ToolMaxOutputBytes, "tool-max-output-bytes", int(core.DefaultMaxOutputSize), "maximum output size per tool execution (default: 1MB)")
 
 	// Configuration
 	fs.StringVar(&cfg.ArgoEnv, "argo-env", "dev", "environment: prod, dev, or custom base URL")
@@ -64,7 +91,7 @@ func ParseFlags(args []string) (Config, error) {
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
 
 	// Provider support
-	fs.StringVar(&cfg.Provider, "provider", "argo", "provider: argo, openai, google, anthropic")
+	fs.StringVar(&cfg.Provider, "provider", constants.ProviderArgo, "provider: argo, openai, google, anthropic")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "custom provider API endpoint")
 	fs.StringVar(&cfg.APIKeyFile, "api-key-file", "", "path to API key file (required for non-Argo providers)")
 	fs.BoolVar(&cfg.ListModels, "list-models", false, "list available models from provider")
@@ -81,19 +108,22 @@ func ParseFlags(args []string) (Config, error) {
 	fs.StringVar(&cfg.Show, "show", "", "show session or message by ID/path")
 	fs.StringVar(&cfg.SessionsDir, "sessions-dir", "", "custom sessions directory (default: ~/.lmc/sessions)")
 	fs.StringVar(&cfg.LogDir, "log-dir", "", "custom log directory (default: ~/.lmc/logs)")
+	fs.StringVar(&cfg.LogLevel, "log-level", "INFO", "log level (DEBUG, INFO, WARN, ERROR)")
 	fs.BoolVar(&cfg.SkipFlockCheck, "skip-flock-check", false, "skip file locking check")
-
-	// Check if -no-session was explicitly set before parsing
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-no-session" || strings.HasPrefix(args[i], "-no-session=") {
-			noSessionExplicit = true
-			break
-		}
-	}
 
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
+
+	// Use Visit to check which flags were explicitly provided
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "s":
+			cfg.SystemExplicitlySet = true
+		case "no-session":
+			noSessionExplicit = true
+		}
+	})
 
 	// Check for invalid flag combination: embed mode with explicit -no-session=false
 	if cfg.Embed && noSessionExplicit && !cfg.NoSession {
@@ -113,12 +143,17 @@ func ParseFlags(args []string) (Config, error) {
 
 	// Check invalid flag combinations
 	if cfg.Embed && cfg.StreamChat {
-		return cfg, fmt.Errorf("invalid flag combination: embed mode cannot be used with stream")
+		return cfg, fmt.Errorf(prompts.ErrEmbedWithStream)
+	}
+
+	// Check tool flag combinations
+	if cfg.Embed && cfg.EnableTool {
+		return cfg, fmt.Errorf(prompts.ErrEmbedWithTool)
 	}
 
 	// Check embed mode with session flags
 	if cfg.Embed && (cfg.Resume != "" || cfg.Branch != "") {
-		return cfg, fmt.Errorf("invalid flag combination: embed mode cannot be used with session flags (-resume, -branch)")
+		return cfg, fmt.Errorf(prompts.ErrEmbedWithSession)
 	}
 
 	// Check session flag combinations
@@ -147,7 +182,7 @@ func ParseFlags(args []string) (Config, error) {
 	cfg.Provider = strings.ToLower(cfg.Provider)
 
 	// Validate provider
-	validProviders := []string{"argo", "openai", "google", "anthropic"}
+	validProviders := []string{constants.ProviderArgo, constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderAnthropic}
 	isValidProvider := false
 	for _, p := range validProviders {
 		if cfg.Provider == p {
@@ -162,11 +197,11 @@ func ParseFlags(args []string) (Config, error) {
 
 	// Default to argo if not specified
 	if cfg.Provider == "" {
-		cfg.Provider = "argo"
+		cfg.Provider = constants.ProviderArgo
 	}
 
 	// Provider-specific authentication requirements
-	if cfg.Provider == "argo" {
+	if cfg.Provider == constants.ProviderArgo {
 		// Argo requires user identifier (except for show-sessions, delete, show, and list-models)
 		if cfg.ArgoUser == "" && !cfg.ShowSessions && cfg.Delete == "" && cfg.Show == "" && !cfg.ListModels {
 			return cfg, fmt.Errorf("user identifier (-argo-user) is required for Argo provider")
@@ -178,6 +213,18 @@ func ParseFlags(args []string) (Config, error) {
 		}
 		// For custom provider URLs, API key is optional (might be an internal service)
 		// For non-Argo providers, if no user is specified, we'll use a hash of the API key later
+	}
+
+	// Validate provider+tool combinations using centralized validation
+	if cfg.EnableTool {
+		if err := core.ValidateToolSupport(cfg.Provider, cfg.Model); err != nil {
+			return cfg, err
+		}
+	}
+
+	// Validate non-interactive tool mode
+	if cfg.EnableTool && cfg.ToolNonInteractive && !cfg.ToolAutoApprove && cfg.ToolWhitelist == "" {
+		return cfg, fmt.Errorf("tool-non-interactive requires either -tool-auto-approve or a -tool-whitelist file")
 	}
 
 	return cfg, nil
@@ -222,7 +269,19 @@ Session Options:
   -show string        Show session or message by ID/path
   -sessions-dir string Custom sessions directory (default: ~/.lmc/sessions)
   -log-dir string    Custom log directory (default: ~/.lmc/logs)
+  -log-level string  Log level (DEBUG, INFO, WARN, ERROR) (default: "INFO")
   -skip-flock-check  Skip file locking check
+
+Tool Options:
+  -tool                 Enable built-in universal_command tool
+  -tool-timeout duration Timeout for tool execution (default: 30s)
+  -tool-whitelist string Path to whitelist file (one command per line, or JSON arrays for multi-arg commands)
+  -tool-blacklist string Path to blacklist file (one command per line)
+  -tool-auto-approve    Skip manual approval for whitelisted tools
+  -tool-non-interactive Run in non-interactive mode (deny unapproved commands)
+  -max-tool-rounds int  Maximum rounds of tool execution (default: 32)
+  -max-tool-parallel int Maximum parallel tool executions (default: 4)
+  -tool-max-output-bytes int Maximum output size per tool execution (default: 1MB)
 
 Examples:
   # Chat with default Argo provider
@@ -267,6 +326,10 @@ func (c Config) GetSystem() string {
 	return c.System
 }
 
+func (c Config) IsSystemExplicitlySet() bool {
+	return c.SystemExplicitlySet
+}
+
 func (c Config) GetEnv() string {
 	return c.ArgoEnv
 }
@@ -289,4 +352,78 @@ func (c Config) GetProviderURL() string {
 
 func (c Config) GetAPIKeyFile() string {
 	return c.APIKeyFile
+}
+
+func (c Config) IsToolEnabled() bool {
+	return c.EnableTool
+}
+
+// GetEffectiveSystem returns the appropriate system prompt:
+// - If tool is enabled and no system prompt was explicitly set, returns the tool system prompt
+// - Otherwise returns the configured system prompt
+func (c Config) GetEffectiveSystem() string {
+	// If tool is enabled via -tool flag and system wasn't explicitly set, use tool prompt
+	if c.EnableTool && !c.SystemExplicitlySet {
+		return prompts.ToolSystemPrompt
+	}
+	return c.System
+}
+
+func (c Config) GetToolTimeout() time.Duration {
+	if c.ToolTimeout <= 0 {
+		return core.DefaultToolTimeout
+	}
+	return c.ToolTimeout
+}
+
+func (c Config) GetToolWhitelist() string {
+	return c.ToolWhitelist
+}
+
+func (c Config) GetToolBlacklist() string {
+	return c.ToolBlacklist
+}
+
+func (c Config) GetToolAutoApprove() bool {
+	return c.ToolAutoApprove
+}
+
+func (c Config) GetToolNonInteractive() bool {
+	return c.ToolNonInteractive
+}
+
+func (c Config) GetMaxToolRounds() int {
+	if c.MaxToolRounds <= 0 {
+		return core.DefaultMaxToolRounds
+	}
+	return c.MaxToolRounds
+}
+
+func (c Config) GetMaxToolParallel() int {
+	if c.MaxToolParallel <= 0 {
+		return 4 // Default to 4 parallel executions
+	}
+	return c.MaxToolParallel
+}
+
+func (c Config) GetToolMaxOutputBytes() int {
+	if c.ToolMaxOutputBytes <= 0 {
+		return int(core.DefaultMaxOutputSize)
+	}
+	// Add upper bound validation (100MB)
+	const maxAllowed = 100 * 1024 * 1024 // 100MB
+	if c.ToolMaxOutputBytes > maxAllowed {
+		return maxAllowed
+	}
+	return c.ToolMaxOutputBytes
+}
+
+// GetResume returns the resume session ID/path
+func (c Config) GetResume() string {
+	return c.Resume
+}
+
+// GetBranch returns the branch message ID
+func (c Config) GetBranch() string {
+	return c.Branch
 }

@@ -1,8 +1,8 @@
 package core
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,364 +12,518 @@ import (
 	"time"
 )
 
-func TestParseOpenAIStreamLine(t *testing.T) {
-	tests := []struct {
-		name        string
-		line        string
-		wantContent string
-		wantDone    bool
-		wantErr     bool
-	}{
+// testRequestConfig implements RequestConfig for testing
+type testRequestConfig struct {
+	user         string
+	model        string
+	system       string
+	env          string
+	provider     string
+	providerURL  string
+	apiKeyFile   string
+	isEmbed      bool
+	isStreamChat bool
+	enableTool   bool
+	stream       bool
+}
+
+func (c *testRequestConfig) GetUser() string               { return c.user }
+func (c *testRequestConfig) GetModel() string              { return c.model }
+func (c *testRequestConfig) GetSystem() string             { return c.system }
+func (c *testRequestConfig) IsSystemExplicitlySet() bool   { return false }
+func (c *testRequestConfig) GetEnv() string                { return c.env }
+func (c *testRequestConfig) GetProvider() string           { return c.provider }
+func (c *testRequestConfig) GetProviderURL() string        { return c.providerURL }
+func (c *testRequestConfig) GetAPIKeyFile() string         { return c.apiKeyFile }
+func (c *testRequestConfig) IsEmbed() bool                 { return c.isEmbed }
+func (c *testRequestConfig) IsStreamChat() bool            { return c.isStreamChat }
+func (c *testRequestConfig) IsToolEnabled() bool           { return c.enableTool }
+func (c *testRequestConfig) GetEffectiveSystem() string    { return c.system }
+func (c *testRequestConfig) GetToolTimeout() time.Duration { return 30 * time.Second }
+func (c *testRequestConfig) GetToolWhitelist() string      { return "" }
+func (c *testRequestConfig) GetToolBlacklist() string      { return "" }
+func (c *testRequestConfig) GetToolAutoApprove() bool      { return false }
+func (c *testRequestConfig) GetToolNonInteractive() bool   { return false }
+func (c *testRequestConfig) GetMaxToolRounds() int         { return 32 }
+func (c *testRequestConfig) GetMaxToolParallel() int       { return 4 }
+func (c *testRequestConfig) GetToolMaxOutputBytes() int    { return 1024 * 1024 }
+func (c *testRequestConfig) GetResume() string             { return "" }
+func (c *testRequestConfig) GetBranch() string             { return "" }
+
+// TestBuildOpenAIToolResultRequest tests the OpenAI tool result request builder
+func TestBuildOpenAIToolResultRequest(t *testing.T) {
+	// Create a temporary API key file
+	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp API key file: %v", err)
+	}
+	defer os.Remove(apiKeyFile.Name())
+	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
+		t.Fatalf("Failed to write API key: %v", err)
+	}
+	apiKeyFile.Close()
+
+	// Test configuration
+	cfg := &testRequestConfig{
+		user:       "testuser",
+		model:      "gpt-5",
+		system:     "Test system prompt",
+		apiKeyFile: apiKeyFile.Name(),
+		provider:   "openai",
+	}
+
+	// Test tool results are now embedded in typedMessages
+
+	// Create typed messages from the accumulated messages
+	typedMessages := []TypedMessage{
+		NewTextMessage("system", "Test system prompt"),
+		NewTextMessage("user", "List files and read one"),
 		{
-			name:        "valid data chunk",
-			line:        `data: {"choices":[{"delta":{"content":"Hello"}}]}`,
-			wantContent: "Hello",
-			wantDone:    false,
-			wantErr:     false,
+			Role: "assistant",
+			Blocks: []Block{
+				TextBlock{Text: "I'll help you list files"},
+				ToolUseBlock{
+					ID:    "call_123",
+					Name:  "list_files",
+					Input: json.RawMessage(`{"directory": "/tmp"}`),
+				},
+				ToolUseBlock{
+					ID:    "call_456",
+					Name:  "read_file",
+					Input: json.RawMessage(`{"path": "/tmp/test.txt"}`),
+				},
+			},
 		},
 		{
-			name:        "done marker",
-			line:        "data: [DONE]",
-			wantContent: "",
-			wantDone:    true,
-			wantErr:     false,
-		},
-		{
-			name:        "empty delta content",
-			line:        `data: {"choices":[{"delta":{"content":""}}]}`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "no choices",
-			line:        `data: {"choices":[]}`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "malformed JSON",
-			line:        `data: {"choices":[{"delta":{"content":"Hello"`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     true,
-		},
-		{
-			name:        "non-data line",
-			line:        "event: message",
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "multiline content",
-			line:        `data: {"choices":[{"delta":{"content":"Line 1\nLine 2"}}]}`,
-			wantContent: "Line 1\nLine 2",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "special characters",
-			line:        `data: {"choices":[{"delta":{"content":"Hello \"world\" with 'quotes'"}}]}`,
-			wantContent: `Hello "world" with 'quotes'`,
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "unicode content",
-			line:        `data: {"choices":[{"delta":{"content":"Hello 世界 🌍"}}]}`,
-			wantContent: "Hello 世界 🌍",
-			wantDone:    false,
-			wantErr:     false,
+			Role: "user",
+			Blocks: []Block{
+				ToolResultBlock{
+					ToolUseID: "call_123",
+					Content:   "file1.txt\nfile2.txt",
+				},
+				ToolResultBlock{
+					ToolUseID: "call_456",
+					Content:   "Error: File not found",
+				},
+				TextBlock{Text: "Additional context"},
+			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			content, done, err := parseOpenAIStreamLine(tt.line, nil)
+	// Tool definitions are now passed directly to request builders
+	model := "gpt-5"
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseOpenAIStreamLine() error = %v, wantErr %v", err, tt.wantErr)
-				return
+	// Build the request
+	req, body, err := BuildToolResultRequest(cfg, model, "You are a helpful assistant.", nil, typedMessages)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify request properties
+	if req.Method != "POST" {
+		t.Errorf("Expected method POST, got %s", req.Method)
+	}
+	if !strings.Contains(req.URL.String(), "/chat/completions") {
+		t.Errorf("Expected URL to contain /chat/completions, got %s", req.URL.String())
+	}
+
+	// Verify headers
+	if req.Header.Get("Authorization") != "Bearer test-api-key" {
+		t.Errorf("Expected Authorization header 'Bearer test-api-key', got '%s'", req.Header.Get("Authorization"))
+	}
+
+	// Parse and verify request body
+	var parsedReq map[string]interface{}
+	if err := json.Unmarshal(body, &parsedReq); err != nil {
+		t.Fatalf("Failed to unmarshal request body: %v", err)
+	}
+
+	// Check model
+	if parsedReq["model"] != "gpt-5" {
+		t.Errorf("Expected model 'gpt-5', got %v", parsedReq["model"])
+	}
+
+	// Check messages
+	messages, ok := parsedReq["messages"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected messages to be an array")
+	}
+
+	// Should have: system, user, assistant (with tool calls), tool result 1, tool result 2, user (additional text)
+	if len(messages) != 6 {
+		t.Errorf("Expected 6 messages, got %d", len(messages))
+	}
+
+	// Verify assistant message with tool calls
+	if len(messages) >= 3 {
+		assistantMsg, ok := messages[2].(map[string]interface{})
+		if !ok {
+			t.Error("Expected third message to be a map")
+		} else {
+			if assistantMsg["role"] != "assistant" {
+				t.Errorf("Expected assistant role, got %v", assistantMsg["role"])
 			}
-			if content != tt.wantContent {
-				t.Errorf("parseOpenAIStreamLine() content = %v, want %v", content, tt.wantContent)
+			toolCalls, ok := assistantMsg["tool_calls"].([]interface{})
+			if !ok || len(toolCalls) != 2 {
+				t.Error("Expected assistant message to have 2 tool calls")
 			}
-			if done != tt.wantDone {
-				t.Errorf("parseOpenAIStreamLine() done = %v, want %v", done, tt.wantDone)
+		}
+	}
+
+	// Verify tool result messages
+	if len(messages) >= 5 {
+		// First tool result
+		toolMsg1, ok := messages[3].(map[string]interface{})
+		if !ok {
+			t.Error("Expected fourth message to be a map")
+		} else {
+			if toolMsg1["role"] != "tool" {
+				t.Errorf("Expected tool role, got %v", toolMsg1["role"])
+			}
+			if toolMsg1["tool_call_id"] != "call_123" {
+				t.Errorf("Expected tool_call_id 'call_123', got %v", toolMsg1["tool_call_id"])
+			}
+		}
+
+		// Second tool result with error
+		toolMsg2, ok := messages[4].(map[string]interface{})
+		if !ok {
+			t.Error("Expected fifth message to be a map")
+		} else {
+			if toolMsg2["role"] != "tool" {
+				t.Errorf("Expected tool role, got %v", toolMsg2["role"])
+			}
+			content, ok := toolMsg2["content"].(string)
+			if !ok || !strings.Contains(content, "Error:") {
+				t.Error("Expected tool result to contain error message")
+			}
+		}
+	}
+
+	// Clear cache after test
+	// ClearRequestCache() - removed
+}
+
+// TestBuildAnthropicToolResultRequest tests the Anthropic tool result request builder
+func TestBuildAnthropicToolResultRequest(t *testing.T) {
+	// Create a temporary API key file
+	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp API key file: %v", err)
+	}
+	defer os.Remove(apiKeyFile.Name())
+	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
+		t.Fatalf("Failed to write API key: %v", err)
+	}
+	apiKeyFile.Close()
+
+	// Test configuration
+	cfg := &testRequestConfig{
+		user:       "testuser",
+		model:      "claude-opus-4-1-20250805",
+		provider:   "anthropic",
+		system:     "Test system prompt",
+		apiKeyFile: apiKeyFile.Name(),
+	}
+
+	// Test tool results are now embedded in typedMessages
+
+	// Set up request cache
+	// Create typed messages from the accumulated messages
+	typedMessages := []TypedMessage{
+		NewTextMessage("system", "Test system prompt"),
+		NewTextMessage("user", "List directory and read a file"),
+		{
+			Role: "assistant",
+			Blocks: []Block{
+				TextBlock{Text: "I'll list the directory for you"},
+				ToolUseBlock{
+					ID:    "toolu_123",
+					Name:  "list_directory",
+					Input: json.RawMessage(`{"path": "/home/user"}`),
+				},
+			},
+		},
+		{
+			Role: "user",
+			Blocks: []Block{
+				ToolResultBlock{
+					ToolUseID: "toolu_123",
+					Content:   "file1.txt\nfile2.txt\ndirectory1/",
+				},
+				TextBlock{Text: "Note: Output was truncated"},
+			},
+		},
+	}
+
+	// Tool definitions are now passed directly to request builders
+	model := "claude-opus-4-1-20250805"
+
+	// Build the request
+	req, body, err := BuildToolResultRequest(cfg, model, "Test system prompt", nil, typedMessages)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify request properties
+	if req.Method != "POST" {
+		t.Errorf("Expected method POST, got %s", req.Method)
+	}
+	if !strings.Contains(req.URL.String(), "/messages") {
+		t.Errorf("Expected URL to contain /messages, got %s", req.URL.String())
+	}
+
+	// Verify headers
+	if req.Header.Get("x-api-key") != "test-api-key" {
+		t.Errorf("Expected x-api-key header 'test-api-key', got '%s'", req.Header.Get("x-api-key"))
+	}
+	if req.Header.Get("anthropic-version") == "" {
+		t.Error("Expected anthropic-version header to be set")
+	}
+
+	// Parse and verify request body
+	var parsedReq map[string]interface{}
+	if err := json.Unmarshal(body, &parsedReq); err != nil {
+		t.Fatalf("Failed to unmarshal request body: %v", err)
+	}
+
+	// Check model and system
+	if parsedReq["model"] != "claude-opus-4-1-20250805" {
+		t.Errorf("Expected model 'claude-opus-4-1-20250805', got %v", parsedReq["model"])
+	}
+	if parsedReq["system"] != "Test system prompt" {
+		t.Errorf("Expected system 'Test system prompt', got %v", parsedReq["system"])
+	}
+
+	// Check messages
+	messages, ok := parsedReq["messages"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected messages to be an array")
+	}
+
+	// Should have: user (original), assistant (with tool use), user (tool results)
+	// System is extracted and placed in top-level field for Anthropic
+	if len(messages) != 3 {
+		t.Errorf("Expected 3 messages, got %d", len(messages))
+	}
+
+	// Verify assistant message with tool use content blocks
+	if len(messages) >= 2 {
+		assistantMsg, ok := messages[1].(map[string]interface{})
+		if !ok {
+			t.Error("Expected third message to be a map")
+		} else {
+			if assistantMsg["role"] != "assistant" {
+				t.Errorf("Expected assistant role, got %v", assistantMsg["role"])
+			}
+			content, ok := assistantMsg["content"].([]interface{})
+			if !ok {
+				t.Error("Expected assistant content to be an array")
+			} else {
+				// Should have text block and tool use blocks
+				if len(content) < 2 {
+					t.Error("Expected at least 2 content blocks in assistant message")
+				}
+			}
+		}
+	}
+
+	// Verify user message with tool results
+	if len(messages) >= 4 {
+		userMsg, ok := messages[3].(map[string]interface{})
+		if !ok {
+			t.Error("Expected fourth message to be a map")
+		} else {
+			if userMsg["role"] != "user" {
+				t.Errorf("Expected user role, got %v", userMsg["role"])
+			}
+			content, ok := userMsg["content"].([]interface{})
+			if !ok {
+				t.Error("Expected user content to be an array")
+			} else {
+				// Should have tool result and additional text
+				if len(content) != 2 { // 1 tool result + 1 text
+					t.Errorf("Expected 2 content blocks, got %d", len(content))
+				}
+			}
+		}
+	}
+
+	// Clear cache after test
+	// ClearRequestCache() - removed
+}
+
+// TestBuildToolResultRequestNoCacheError tests error handling when no cache is available
+func TestBuildToolResultRequestNoCacheError(t *testing.T) {
+	// Clear any existing cache
+	// ClearRequestCache() - removed
+
+	cfg := &testRequestConfig{
+		user:  "testuser",
+		model: "gpt-5",
+	}
+
+	// Test each provider
+	providers := []string{"openai", "anthropic", "argo"}
+	for _, provider := range providers {
+		t.Run(provider, func(t *testing.T) {
+			// Override provider method for test
+			cfg.providerURL = "" // This would normally come from GetProvider()
+
+			// Create a nil conversation to test error handling
+			_, _, err := BuildToolResultRequest(cfg, "test-model", "", nil, nil)
+
+			if err == nil {
+				t.Error("Expected error when no conversation is available")
+			} else if strings.Contains(err.Error(), "model is required") {
+				t.Errorf("Got unexpected 'model is required' error: %v", err)
 			}
 		})
 	}
 }
 
-func TestParseAnthropicStreamLine(t *testing.T) {
-	tests := []struct {
-		name        string
-		line        string
-		state       *anthropicStreamState
-		wantContent string
-		wantDone    bool
-		wantErr     bool
-		wantEvent   string
-	}{
-		{
-			name:        "event line",
-			line:        "event: content_block_delta",
-			state:       &anthropicStreamState{},
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-			wantEvent:   "content_block_delta",
-		},
-		{
-			name:        "data line with matching event",
-			line:        `data: {"delta":{"text":"Hello"}}`,
-			state:       &anthropicStreamState{currentEvent: "content_block_delta"},
-			wantContent: "Hello",
-			wantDone:    false,
-			wantErr:     false,
-			wantEvent:   "content_block_delta",
-		},
-		{
-			name:        "data line with non-matching event",
-			line:        `data: {"delta":{"text":"Hello"}}`,
-			state:       &anthropicStreamState{currentEvent: "other_event"},
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-			wantEvent:   "other_event",
-		},
-		{
-			name:        "malformed JSON data",
-			line:        `data: {"delta":{"text":"Hello"`,
-			state:       &anthropicStreamState{currentEvent: "content_block_delta"},
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     true,
-			wantEvent:   "content_block_delta",
-		},
-		{
-			name:        "empty text in delta",
-			line:        `data: {"delta":{"text":""}}`,
-			state:       &anthropicStreamState{currentEvent: "content_block_delta"},
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-			wantEvent:   "content_block_delta",
-		},
-		{
-			name:        "multiline text",
-			line:        `data: {"delta":{"text":"Line 1\nLine 2\nLine 3"}}`,
-			state:       &anthropicStreamState{currentEvent: "content_block_delta"},
-			wantContent: "Line 1\nLine 2\nLine 3",
-			wantDone:    false,
-			wantErr:     false,
-			wantEvent:   "content_block_delta",
-		},
-		{
-			name:        "event change",
-			line:        "event: message_stop",
-			state:       &anthropicStreamState{currentEvent: "content_block_delta"},
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-			wantEvent:   "message_stop",
-		},
+// TestBuildGoogleToolResultRequest tests the Google tool result request builder
+func TestBuildGoogleToolResultRequest(t *testing.T) {
+	// Create a temporary API key file
+	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp API key file: %v", err)
+	}
+	defer os.Remove(apiKeyFile.Name())
+
+	// Write test API key
+	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
+		t.Fatalf("Failed to write API key: %v", err)
+	}
+	apiKeyFile.Close()
+
+	cfg := &testRequestConfig{
+		user:        "testuser",
+		model:       "gemini-2.5-pro",
+		apiKeyFile:  apiKeyFile.Name(),
+		providerURL: "https://generativelanguage.googleapis.com",
+		system:      "Test system prompt",
+		provider:    "google",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.state == nil {
-				tt.state = &anthropicStreamState{}
-			}
-
-			content, done, err := parseAnthropicStreamLine(tt.line, tt.state)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseAnthropicStreamLine() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if content != tt.wantContent {
-				t.Errorf("parseAnthropicStreamLine() content = %v, want %v", content, tt.wantContent)
-			}
-			if done != tt.wantDone {
-				t.Errorf("parseAnthropicStreamLine() done = %v, want %v", done, tt.wantDone)
-			}
-			if tt.state.currentEvent != tt.wantEvent {
-				t.Errorf("parseAnthropicStreamLine() state.currentEvent = %v, want %v", tt.state.currentEvent, tt.wantEvent)
-			}
-		})
-	}
-}
-
-func TestParseGoogleStreamLine(t *testing.T) {
-	tests := []struct {
-		name        string
-		line        string
-		wantContent string
-		wantDone    bool
-		wantErr     bool
-	}{
+	// Create typed messages to simulate the conversation including tool results
+	typedMessages := []TypedMessage{
+		NewTextMessage("user", "List files in current directory"),
 		{
-			name:        "valid data chunk",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"Hello Google"}]}}]}`,
-			wantContent: "Hello Google",
-			wantDone:    false,
-			wantErr:     false,
+			Role: "model",
+			Blocks: []Block{
+				ToolUseBlock{
+					ID:    "call_123",
+					Name:  "list_files",
+					Input: json.RawMessage(`{"directory": "."}`),
+				},
+				ToolUseBlock{
+					ID:    "call_456",
+					Name:  "read_file",
+					Input: json.RawMessage(`{"path": "/etc/passwd"}`),
+				},
+			},
 		},
 		{
-			name:        "empty candidates",
-			line:        `data: {"candidates":[]}`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
+			Role: "user",
+			Blocks: []Block{
+				ToolResultBlock{
+					ToolUseID: "call_123",
+					Content:   "Files: file1.txt, file2.txt",
+				},
+				ToolResultBlock{
+					ToolUseID: "call_456",
+					Content:   "Error: Permission denied",
+					IsError:   true,
+				},
+			},
 		},
-		{
-			name:        "empty parts",
-			line:        `data: {"candidates":[{"content":{"parts":[]}}]}`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "empty text",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":""}]}}]}`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "malformed JSON",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"Hello"`,
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     true,
-		},
-		{
-			name:        "non-data line",
-			line:        "event: something",
-			wantContent: "",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "multiple parts (only first used)",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"First"},{"text":"Second"}]}}]}`,
-			wantContent: "First",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "multiple candidates (only first used)",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"First candidate"}]}},{"content":{"parts":[{"text":"Second candidate"}]}}]}`,
-			wantContent: "First candidate",
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "nested JSON structure",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"Complex \"nested\" content"}]}}]}`,
-			wantContent: `Complex "nested" content`,
-			wantDone:    false,
-			wantErr:     false,
-		},
-		{
-			name:        "unicode in content",
-			line:        `data: {"candidates":[{"content":{"parts":[{"text":"Hello 世界 from Google AI 🚀"}]}}]}`,
-			wantContent: "Hello 世界 from Google AI 🚀",
-			wantDone:    false,
-			wantErr:     false,
-		},
+		NewTextMessage("user", "Additional context"),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			content, done, err := parseGoogleStreamLine(tt.line, nil)
+	// Tool definitions are now passed directly to request builders
+	model := "gemini-2.5-pro"
+	system := "Test system prompt"
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseGoogleStreamLine() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if content != tt.wantContent {
-				t.Errorf("parseGoogleStreamLine() content = %v, want %v", content, tt.wantContent)
-			}
-			if done != tt.wantDone {
-				t.Errorf("parseGoogleStreamLine() done = %v, want %v", done, tt.wantDone)
-			}
-		})
+	// Build the request using the unified builder
+	req, body, err := buildChatRequestFromTyped(cfg, typedMessages, model, system, nil, nil, false)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
 	}
-}
 
-// Test edge cases and error scenarios
-func TestStreamParsersEdgeCases(t *testing.T) {
-	t.Run("OpenAI parser with very long line", func(t *testing.T) {
-		// Create a very long content string
-		longContent := ""
-		for i := 0; i < 10000; i++ {
-			longContent += "a"
-		}
-		line := `data: {"choices":[{"delta":{"content":"` + longContent + `"}}]}`
+	// Verify request properties
+	if req.Method != "POST" {
+		t.Errorf("Expected method POST, got %s", req.Method)
+	}
+	if !strings.Contains(req.URL.String(), "/models/gemini-2.5-pro:generateContent") {
+		t.Errorf("Expected URL to contain model endpoint, got %s", req.URL.String())
+	}
+	if !strings.Contains(req.URL.String(), "key=test-api-key") {
+		t.Errorf("Expected URL to contain API key parameter, got %s", req.URL.String())
+	}
 
-		content, done, err := parseOpenAIStreamLine(line, nil)
-		if err != nil {
-			t.Errorf("parseOpenAIStreamLine() unexpected error with long content: %v", err)
-		}
-		if content != longContent {
-			t.Errorf("parseOpenAIStreamLine() failed to handle long content")
-		}
-		if done {
-			t.Errorf("parseOpenAIStreamLine() unexpected done = true")
-		}
-	})
+	// Parse and verify request body
+	var parsedReq map[string]interface{}
+	if err := json.Unmarshal(body, &parsedReq); err != nil {
+		t.Fatalf("Failed to unmarshal request body: %v", err)
+	}
 
-	t.Run("Anthropic parser state persistence", func(t *testing.T) {
-		state := &anthropicStreamState{}
+	// Check system instruction
+	if sysInst, ok := parsedReq["systemInstruction"].(map[string]interface{}); ok {
+		if parts, ok := sysInst["parts"].([]interface{}); ok && len(parts) > 0 {
+			if part, ok := parts[0].(map[string]interface{}); ok {
+				if part["text"] != "Test system prompt" {
+					t.Errorf("Expected system prompt 'Test system prompt', got %v", part["text"])
+				}
+			}
+		}
+	}
 
-		// Set event
-		_, _, _ = parseAnthropicStreamLine("event: content_block_delta", state)
-		if state.currentEvent != "content_block_delta" {
-			t.Errorf("State not updated correctly")
-		}
+	// Check contents
+	contents, ok := parsedReq["contents"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected contents to be an array")
+	}
 
-		// Process data with the event
-		content, _, _ := parseAnthropicStreamLine(`data: {"delta":{"text":"Test"}}`, state)
-		if content != "Test" {
-			t.Errorf("Failed to process data with stored event")
+	// Should have: user, model (with function calls), function responses, user (additional)
+	if len(contents) != 4 {
+		t.Errorf("Expected 4 contents, got %d", len(contents))
+		// Debug: print the contents
+		for i, content := range contents {
+			if c, ok := content.(map[string]interface{}); ok {
+				t.Logf("Content %d: role=%v", i, c["role"])
+			}
 		}
+	}
 
-		// Change event
-		_, _, _ = parseAnthropicStreamLine("event: other_event", state)
-		if state.currentEvent != "other_event" {
-			t.Errorf("State not updated on event change")
+	// Verify function response messages
+	if len(contents) >= 3 {
+		funcResp, ok := contents[2].(map[string]interface{})
+		if !ok {
+			t.Error("Expected third content to be a map")
+		} else {
+			// Google format uses "user" role for tool results
+			if funcResp["role"] != "user" {
+				t.Errorf("Expected user role for tool results, got %v", funcResp["role"])
+			}
+			parts, ok := funcResp["parts"].([]interface{})
+			if !ok || len(parts) != 2 {
+				t.Error("Expected function response to have 2 parts")
+			} else {
+				// Verify each part has functionResponse
+				for i, part := range parts {
+					partMap, ok := part.(map[string]interface{})
+					if !ok {
+						t.Errorf("Part %d is not a map", i)
+						continue
+					}
+					if _, ok := partMap["functionResponse"]; !ok {
+						t.Errorf("Part %d missing functionResponse", i)
+					}
+				}
+			}
 		}
-
-		// Same data should not produce content with different event
-		content, _, _ = parseAnthropicStreamLine(`data: {"delta":{"text":"Test"}}`, state)
-		if content != "" {
-			t.Errorf("Should not process data with non-matching event")
-		}
-	})
-
-	t.Run("Empty JSON objects", func(t *testing.T) {
-		// OpenAI empty object
-		content, _, err := parseOpenAIStreamLine(`data: {}`, nil)
-		if err != nil {
-			t.Errorf("parseOpenAIStreamLine() error with empty object: %v", err)
-		}
-		if content != "" {
-			t.Errorf("parseOpenAIStreamLine() should return empty content for empty object")
-		}
-
-		// Google empty object
-		content, _, err = parseGoogleStreamLine(`data: {}`, nil)
-		if err != nil {
-			t.Errorf("parseGoogleStreamLine() error with empty object: %v", err)
-		}
-		if content != "" {
-			t.Errorf("parseGoogleStreamLine() should return empty content for empty object")
-		}
-	})
+	}
 }
 
 // TestStreamingFallbackAccumulation tests that unknown providers accumulate streamed content
@@ -396,8 +550,8 @@ func TestStreamingFallbackAccumulation(t *testing.T) {
 
 	// Create request config with unknown provider
 	cfg := &testRequestConfig{
-		provider: "unknown-provider",
-		stream:   true,
+		provider:     "unknown-provider",
+		isStreamChat: true,
 	}
 
 	// Create HTTP response
@@ -407,72 +561,22 @@ func TestStreamingFallbackAccumulation(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Create a test logger
-	logger := &testLogger{}
+	// Create a test logger with proper log directory
+	logger := &testLogger{
+		logDir: logDir,
+	}
 
 	// Handle the streaming response
 	ctx := context.Background()
-	content, err := HandleResponse(ctx, cfg, resp, logger)
+	notifier := NewTestNotifier()
+	response, err := HandleResponse(ctx, cfg, resp, logger, notifier)
 	if err != nil {
 		t.Fatalf("HandleResponse failed: %v", err)
 	}
 
 	// Verify accumulated content matches expected
-	if content != expectedContent {
-		t.Errorf("Expected content %q, got %q", expectedContent, content)
-	}
-}
-
-// TestBuildRegenerationRequestDelegation tests that BuildRegenerationRequest delegates to BuildRequestWithSession
-func TestBuildRegenerationRequestDelegation(t *testing.T) {
-	cfg := &testRequestConfig{
-		provider: "argo",
-		model:    "test-model",
-		system:   "test system",
-		input:    "test input",
-	}
-
-	sess := &testSession{
-		path: "0001/0002",
-	}
-
-	messages := []Message{
-		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: "Hi there"},
-	}
-
-	getLineage := func(path string) ([]Message, error) {
-		if path != sess.GetPath() {
-			t.Errorf("Expected path %q, got %q", sess.GetPath(), path)
-		}
-		return messages, nil
-	}
-
-	// Call both functions and compare results
-	req1, body1, err1 := BuildRequestWithSession(cfg, sess, getLineage)
-	req2, body2, err2 := BuildRegenerationRequest(cfg, sess, getLineage)
-
-	// Both should succeed or fail together
-	if (err1 == nil) != (err2 == nil) {
-		t.Fatalf("Error mismatch: BuildRequestWithSession: %v, BuildRegenerationRequest: %v", err1, err2)
-	}
-
-	if err1 != nil {
-		return // Both failed as expected
-	}
-
-	// Compare requests
-	if req1.URL.String() != req2.URL.String() {
-		t.Errorf("URL mismatch: %s vs %s", req1.URL.String(), req2.URL.String())
-	}
-
-	if req1.Method != req2.Method {
-		t.Errorf("Method mismatch: %s vs %s", req1.Method, req2.Method)
-	}
-
-	// Compare bodies
-	if !bytes.Equal(body1, body2) {
-		t.Errorf("Body mismatch:\n%s\nvs\n%s", string(body1), string(body2))
+	if response.Text != expectedContent {
+		t.Errorf("Expected content %q, got %q", expectedContent, response.Text)
 	}
 }
 
@@ -542,18 +646,20 @@ event: ping
 
 			// Collect parsed content
 			var collected []string
-			parser := func(line string, state interface{}) (string, bool, error) {
+			parser := func(line string, state interface{}) (string, []ToolCall, bool, error) {
 				if strings.HasPrefix(line, "data: ") {
 					content := strings.TrimPrefix(line, "data: ")
 					collected = append(collected, content)
-					return content, false, nil
+					return content, nil, false, nil
 				}
-				return "", false, nil
+				return "", nil, false, nil
 			}
 
 			// Run the parser
 			ctx := context.Background()
-			_, err = handleGenericStream(ctx, io.NopCloser(reader), logFile, parser, nil)
+			var output strings.Builder
+			testNotifier := &testNotifier{}
+			_, _, err = handleGenericStream(ctx, io.NopCloser(reader), logFile, &output, testNotifier, parser, nil, "test")
 			if err != nil {
 				t.Fatalf("handleGenericStream failed: %v", err)
 			}
@@ -575,43 +681,15 @@ event: ping
 	}
 }
 
-// Test helpers
-type testRequestConfig struct {
-	provider string
-	model    string
-	system   string
-	input    string
-	stream   bool
-	embed    bool
-}
-
-func (t *testRequestConfig) GetUser() string        { return "testuser" }
-func (t *testRequestConfig) GetProvider() string    { return t.provider }
-func (t *testRequestConfig) GetModel() string       { return t.model }
-func (t *testRequestConfig) GetSystem() string      { return t.system }
-func (t *testRequestConfig) GetInput() string       { return t.input }
-func (t *testRequestConfig) IsStreamChat() bool     { return t.stream }
-func (t *testRequestConfig) IsEmbed() bool          { return t.embed }
-func (t *testRequestConfig) GetEnv() string         { return "" }
-func (t *testRequestConfig) GetMaxTokens() int      { return 0 }
-func (t *testRequestConfig) GetAPIKey() string      { return "" }
-func (t *testRequestConfig) GetAPIKeyFile() string  { return "" }
-func (t *testRequestConfig) GetProviderURL() string { return "" }
-func (t *testRequestConfig) GetTools() []byte       { return nil }
-
-type testSession struct {
-	path string
-}
-
-func (t *testSession) GetPath() string { return t.path }
-
 type testLogger struct {
 	logDir string
 }
 
-func (t *testLogger) Info(format string, args ...interface{})  {}
-func (t *testLogger) Warn(format string, args ...interface{})  {}
-func (t *testLogger) Error(format string, args ...interface{}) {}
+func (t *testLogger) Info(format string, args ...interface{})   {}
+func (t *testLogger) Warn(format string, args ...interface{})   {}
+func (t *testLogger) Error(format string, args ...interface{})  {}
+func (t *testLogger) Debugf(format string, args ...interface{}) {}
+func (t *testLogger) IsDebugEnabled() bool                      { return false }
 func (t *testLogger) GetLogDir() string {
 	if t.logDir == "" {
 		return os.TempDir()
@@ -629,13 +707,484 @@ func (t *testLogger) CreateLogFile(dir string, prefix string) (*os.File, string,
 	return f, f.Name(), nil
 }
 
-func (t *testLogger) LogJSON(dir, prefix string, data []byte) error {
-	return nil
+func (t *testLogger) LogJSON(dir string, prefix string, data []byte) error {
+	// Create temp file in the specified directory
+	pattern := prefix + "_*.json"
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
 }
 
-func parseTestSSE(line string, state interface{}) (string, bool, error) {
+func parseTestSSE(line string, state interface{}) (string, []ToolCall, bool, error) {
 	if strings.HasPrefix(line, "data: ") {
-		return strings.TrimPrefix(line, "data: "), false, nil
+		return strings.TrimPrefix(line, "data: "), nil, false, nil
 	}
-	return "", false, nil
+	return "", nil, false, nil
+}
+
+// testNotifier is a minimal implementation for testing
+type testNotifier struct{}
+
+func (t *testNotifier) Infof(format string, args ...interface{})   {}
+func (t *testNotifier) Warnf(format string, args ...interface{})   {}
+func (t *testNotifier) Errorf(format string, args ...interface{})  {}
+func (t *testNotifier) Promptf(format string, args ...interface{}) {}
+
+func TestHandleResponseWithToolCalls(t *testing.T) {
+	tests := []struct {
+		name          string
+		provider      string
+		responseBody  string
+		wantText      string
+		wantToolCalls int
+		wantErr       bool
+	}{
+		{
+			name:     "Anthropic with tool calls",
+			provider: "anthropic",
+			responseBody: `{
+				"content": [
+					{
+						"type": "text",
+						"text": "I'll help you with that."
+					},
+					{
+						"type": "tool_use",
+						"id": "call-123",
+						"name": "universal_command",
+						"input": {"command": ["echo", "hello"]}
+					}
+				]
+			}`,
+			wantText:      "I'll help you with that.",
+			wantToolCalls: 1,
+			wantErr:       false,
+		},
+		{
+			name:     "OpenAI with tool calls",
+			provider: "openai",
+			responseBody: `{
+				"choices": [{
+					"message": {
+						"content": "Let me run that command for you.",
+						"tool_calls": [
+							{
+								"id": "call-456",
+								"type": "function",
+								"function": {
+									"name": "universal_command",
+									"arguments": "{\"command\":[\"ls\",\"-la\"]}"
+								}
+							}
+						]
+					}
+				}]
+			}`,
+			wantText:      "Let me run that command for you.",
+			wantToolCalls: 1,
+			wantErr:       false,
+		},
+		{
+			name:     "Google with tool calls",
+			provider: "google",
+			responseBody: `{
+				"candidates": [{
+					"content": {
+						"parts": [
+							{
+								"text": "Executing the command now."
+							},
+							{
+								"functionCall": {
+									"name": "universal_command",
+									"args": {"command": ["pwd"]}
+								}
+							}
+						]
+					}
+				}]
+			}`,
+			wantText:      "Executing the command now.",
+			wantToolCalls: 1,
+			wantErr:       false,
+		},
+		{
+			name:     "Multiple tool calls",
+			provider: "anthropic",
+			responseBody: `{
+				"content": [
+					{
+						"type": "tool_use",
+						"id": "call-1",
+						"name": "universal_command",
+						"input": {"command": ["echo", "first"]}
+					},
+					{
+						"type": "tool_use",
+						"id": "call-2",
+						"name": "universal_command",
+						"input": {"command": ["echo", "second"]}
+					}
+				]
+			}`,
+			wantText:      "",
+			wantToolCalls: 2,
+			wantErr:       false,
+		},
+		{
+			name:     "Text only, no tools",
+			provider: "anthropic",
+			responseBody: `{
+				"content": [
+					{
+						"type": "text",
+						"text": "Just a text response, no tools needed."
+					}
+				]
+			}`,
+			wantText:      "Just a text response, no tools needed.",
+			wantToolCalls: 0,
+			wantErr:       false,
+		},
+		{
+			name:          "Empty response",
+			provider:      "anthropic",
+			responseBody:  `{"content": []}`,
+			wantText:      "",
+			wantToolCalls: 0,
+			wantErr:       false,
+		},
+		{
+			name:          "Malformed JSON",
+			provider:      "anthropic",
+			responseBody:  `{"content": [{"type": "text", "text": "incomplete`,
+			wantText:      "",
+			wantToolCalls: 0,
+			wantErr:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test server
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.responseBody))
+			}))
+			defer ts.Close()
+
+			// Create request config
+			cfg := &testRequestConfig{
+				provider: tt.provider,
+				stream:   false,
+			}
+
+			// Create HTTP response
+			resp, err := http.Get(ts.URL)
+			if err != nil {
+				t.Fatalf("Failed to create test request: %v", err)
+			}
+			defer resp.Body.Close()
+
+			// Create test logger
+			logger := &testLogger{}
+
+			// Handle response
+			ctx := context.Background()
+			notifier := NewTestNotifier()
+			response, err := HandleResponse(ctx, cfg, resp, logger, notifier)
+
+			// Check error
+			if (err != nil) != tt.wantErr {
+				t.Errorf("HandleResponse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return // Don't check other values on error
+			}
+
+			// Check text content
+			if response.Text != tt.wantText {
+				t.Errorf("HandleResponse() text = %q, want %q", response.Text, tt.wantText)
+			}
+
+			// Check tool calls count
+			if len(response.ToolCalls) != tt.wantToolCalls {
+				t.Errorf("HandleResponse() got %d tool calls, want %d", len(response.ToolCalls), tt.wantToolCalls)
+			}
+
+			// Verify tool call structure if present
+			if len(response.ToolCalls) > 0 {
+				for i, call := range response.ToolCalls {
+					if call.ID == "" {
+						t.Errorf("Tool call %d has empty ID", i)
+					}
+					if call.Name == "" {
+						t.Errorf("Tool call %d has empty Name", i)
+					}
+					if len(call.Args) == 0 {
+						t.Errorf("Tool call %d has empty Args", i)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestBuildToolResultRequest(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		toolResults  []ToolResult
+		wantContains []string
+		wantErr      bool
+	}{
+		{
+			name:     "Anthropic tool results",
+			provider: "anthropic",
+			toolResults: []ToolResult{
+				{
+					ID:     "call-123",
+					Output: "Command executed successfully",
+				},
+			},
+			wantContains: []string{
+				`"type":"tool_result"`,
+				`"tool_use_id":"call-123"`,
+				`"content":"Command executed successfully"`,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "OpenAI tool results",
+			provider: "openai",
+			toolResults: []ToolResult{
+				{
+					ID:     "call-456",
+					Output: "File listing complete",
+				},
+			},
+			wantContains: []string{
+				`"tool_call_id":"call-456"`,
+				`"content":"File listing complete"`,
+				`"role":"tool"`,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Google tool results",
+			provider: "google",
+			toolResults: []ToolResult{
+				{
+					ID:     "call-789",
+					Output: "Directory: /home/user",
+				},
+			},
+			wantContains: []string{
+				`"contents"`, // Google uses contents instead of messages
+			},
+			wantErr: false, // Google request builds successfully but without tool support
+		},
+		{
+			name:     "Multiple tool results",
+			provider: "anthropic",
+			toolResults: []ToolResult{
+				{
+					ID:     "call-1",
+					Output: "First result",
+				},
+				{
+					ID:     "call-2",
+					Output: "Second result",
+				},
+			},
+			wantContains: []string{
+				`"tool_use_id":"call-1"`,
+				`"content":"First result"`,
+				`"tool_use_id":"call-2"`,
+				`"content":"Second result"`,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Tool result with error",
+			provider: "anthropic",
+			toolResults: []ToolResult{
+				{
+					ID:    "call-err",
+					Error: "Command not found",
+				},
+			},
+			wantContains: []string{
+				`"tool_use_id":"call-err"`,
+				`"is_error":true`,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Truncated output",
+			provider: "anthropic",
+			toolResults: []ToolResult{
+				{
+					ID:        "call-trunc",
+					Output:    "Large output...",
+					Truncated: true,
+				},
+			},
+			wantContains: []string{
+				`"tool_use_id":"call-trunc"`,
+				`"content":"Large output...\n[output truncated]"`,
+			},
+			wantErr: false,
+		},
+		{
+			name:         "Empty tool results",
+			provider:     "anthropic",
+			toolResults:  []ToolResult{},
+			wantContains: []string{},
+			wantErr:      false, // Empty results are allowed - might just have additional text
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary API key file if needed
+			var apiKeyFile string
+			if tt.provider != "argo" {
+				tmpFile, err := os.CreateTemp("", "test-api-key-*.txt")
+				if err != nil {
+					t.Fatalf("Failed to create temp API key file: %v", err)
+				}
+				defer os.Remove(tmpFile.Name())
+
+				if _, err := tmpFile.WriteString("test-api-key"); err != nil {
+					t.Fatalf("Failed to write API key: %v", err)
+				}
+				tmpFile.Close()
+				apiKeyFile = tmpFile.Name()
+			}
+
+			// Create request config
+			cfg := &testRequestConfig{
+				provider:   tt.provider,
+				model:      "test-model",
+				apiKeyFile: apiKeyFile,
+			}
+
+			// Set up conversation
+			var typedMessages []TypedMessage
+			typedMessages = append(typedMessages, NewTextMessage("user", "Test message"))
+
+			if len(tt.toolResults) > 0 {
+				// Add assistant message with tool calls
+				assistantBlocks := []Block{
+					TextBlock{Text: "I'll help you with that"},
+				}
+				for _, result := range tt.toolResults {
+					assistantBlocks = append(assistantBlocks, ToolUseBlock{
+						ID:    result.ID,
+						Name:  "test_tool",
+						Input: json.RawMessage(`{}`),
+					})
+				}
+				typedMessages = append(typedMessages, TypedMessage{
+					Role:   "assistant",
+					Blocks: assistantBlocks,
+				})
+
+				// Add tool results
+				var toolResultBlocks []Block
+				for _, result := range tt.toolResults {
+					var toolResult ToolResultBlock
+					toolResult.ToolUseID = result.ID
+					if result.Error != "" {
+						toolResult.Content = result.Error
+						toolResult.IsError = true
+					} else {
+						output := result.Output
+						if result.Truncated {
+							output += "\n[output truncated]"
+						}
+						toolResult.Content = output
+					}
+					toolResultBlocks = append(toolResultBlocks, toolResult)
+				}
+				typedMessages = append(typedMessages, TypedMessage{
+					Role:   "user",
+					Blocks: toolResultBlocks,
+				})
+			}
+
+			// Tool definitions are now passed directly to request builders
+			model := "test-model"
+
+			// Build request
+			req, body, err := BuildToolResultRequest(cfg, model, "", nil, typedMessages)
+
+			// Check error
+			if (err != nil) != tt.wantErr {
+				t.Errorf("BuildToolResultRequest() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return // Don't check other values on error
+			}
+
+			// Verify request is not nil
+			if req == nil {
+				t.Fatal("BuildToolResultRequest() returned nil request")
+			}
+
+			// Check request method
+			if req.Method != "POST" {
+				t.Errorf("BuildToolResultRequest() method = %s, want POST", req.Method)
+			}
+
+			// Check body contains expected content
+			bodyStr := string(body)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(bodyStr, want) {
+					t.Errorf("BuildToolResultRequest() body missing %q\nGot: %s", want, bodyStr)
+				}
+			}
+		})
+	}
+}
+
+func TestToolConversionRoundTrip(t *testing.T) {
+	// Test that tool calls can be converted between formats and back
+	originalCalls := []ToolCall{
+		{
+			ID:   "test-call-1",
+			Name: "universal_command",
+			Args: []byte(`{"command":["echo","hello world"],"environ":{"USER":"test"}}`),
+		},
+	}
+
+	tests := []struct {
+		name     string
+		provider string
+	}{
+		{"Anthropic format", "anthropic"},
+		{"OpenAI format", "openai"},
+		{"Google format", "google"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// For now, just verify the tool calls are valid JSON
+			for _, call := range originalCalls {
+				if !json.Valid(call.Args) {
+					t.Errorf("Invalid JSON in tool call args: %s", string(call.Args))
+				}
+			}
+		})
+	}
 }

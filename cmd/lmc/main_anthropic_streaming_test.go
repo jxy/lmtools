@@ -5,18 +5,18 @@ package main
 
 import (
 	"fmt"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestAnthropicStreamingMode tests Anthropic SSE streaming functionality
 func TestAnthropicStreamingMode(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	
@@ -56,14 +56,13 @@ func TestAnthropicStreamingMode(t *testing.T) {
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}))
 	defer server.Close()
 	
 	// Create a temporary API key file
 	apiKeyFile := filepath.Join(tmpHome, "anthropic-key")
-	if err := os.WriteFile(apiKeyFile, []byte("test-anthropic-key"), 0600); err != nil {
+	if err := os.WriteFile(apiKeyFile, []byte("test-anthropic-key"), constants.FilePerm); err != nil {
 		t.Fatalf("Failed to create API key file: %v", err)
 	}
 	

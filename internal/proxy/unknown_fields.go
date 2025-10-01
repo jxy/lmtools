@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"lmtools/internal/logger"
 	"reflect"
 	"strings"
@@ -75,8 +74,7 @@ func contains(slice []string, item string) bool {
 // Performance: Only runs when debug logging is enabled due to expensive reflection.
 func logUnknownFields(ctx context.Context, jsonData []byte, v interface{}, requestType string) {
 	// Skip expensive reflection if debug logging is not enabled
-	reqLogger := GetRequestLogger(ctx)
-	if reqLogger == nil || !reqLogger.IsDebugEnabled() {
+	if !logger.From(ctx).IsDebugEnabled() {
 		return
 	}
 
@@ -99,6 +97,6 @@ func logUnknownFields(ctx context.Context, jsonData []byte, v interface{}, reque
 			fieldInfo[field] = jsonMap[field]
 		}
 
-		logger.From(ctx).DebugJSON(fmt.Sprintf("Unknown fields in %s (will be ignored)", requestType), fieldInfo)
+		logger.From(ctx).Debugf("Unknown fields in %s (will be ignored): %+v", requestType, fieldInfo)
 	}
 }

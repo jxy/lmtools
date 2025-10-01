@@ -25,38 +25,38 @@ func NewProxyMiddleware(next http.Handler, config *Config) http.Handler {
 
 // ServeHTTP implements http.Handler with all middleware functionality
 func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 1. Request ID (was RequestIDMiddleware)
+	// 1. Generate counter-based request ID for logging
+	ctx := logger.WithNewRequestCounter(r.Context())
+
+	// 2. Handle X-Request-ID header for HTTP correlation
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" {
 		requestID = GenerateRequestID()
 	}
 	w.Header().Set("X-Request-ID", requestID)
-	ctx := context.WithValue(r.Context(), RequestIDKey{}, requestID)
+	ctx = context.WithValue(ctx, logger.RequestIDKey{}, requestID)
 
-	// 2. Security - Apply request body size limit (was SecurityMiddleware)
+	// 3. Security - Apply request body size limit (was SecurityMiddleware)
 	r.Body = http.MaxBytesReader(w, r.Body, m.config.MaxRequestBodySize)
 
-	// 3. Request logging setup (was RequestLogger)
-	reqLogger := logger.GetLogger().NewScope("")
-	ctx = logger.WithContext(ctx, reqLogger)
-
-	// Log X-Request-ID for correlation
+	// 4. Request logging setup (was RequestLogger)
+	// Log with counter ID and X-Request-ID for correlation
 	logger.From(ctx).Debugf("Request start | X-Request-ID: %s", requestID)
 
 	r = r.WithContext(ctx)
 
-	// 4. Response writer wrapper for status capture and streaming detection
+	// 5. Response writer wrapper for status capture and streaming detection
 	rw := &proxyResponseWriter{
 		ResponseWriter: w,
 		statusCode:     http.StatusOK,
-		reqLogger:      reqLogger,
 		request:        r,
+		startTime:      time.Now(),
 	}
 
-	// 5. Error handling with panic recovery (was ErrorMiddleware)
+	// 6. Error handling with panic recovery (was ErrorMiddleware)
 	defer func() {
 		if err := recover(); err != nil {
-			logger.Errorf("Panic in %s %s: %v", r.Method, r.URL.Path, err)
+			logger.From(ctx).Errorf("Panic in %s %s: %v", r.Method, r.URL.Path, err)
 
 			if !rw.written {
 				w.Header().Set("Content-Type", "application/json")
@@ -80,9 +80,9 @@ type proxyResponseWriter struct {
 	http.ResponseWriter
 	statusCode     int
 	written        bool
-	reqLogger      *logger.ScopedLogger
 	request        *http.Request
 	streamDetected bool
+	startTime      time.Time
 }
 
 // WriteHeader captures the status code

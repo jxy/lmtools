@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"lmtools/internal/constants"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,7 +11,8 @@ import (
 
 func TestCreateLogFile(t *testing.T) {
 	dir := t.TempDir()
-	f, path, err := CreateLogFile(dir, "test-op")
+	logger := GetLogger()
+	f, path, err := logger.CreateLogFile(dir, "test-op")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +39,8 @@ func TestCreateLogFilePermissions(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	f, path, err := CreateLogFile(dir, "test-perms")
+	logger := GetLogger()
+	f, path, err := logger.CreateLogFile(dir, "test-perms")
 	if err != nil {
 		t.Fatalf("CreateLogFile failed: %v", err)
 	}
@@ -49,7 +52,7 @@ func TestCreateLogFilePermissions(t *testing.T) {
 	}
 
 	mode := info.Mode().Perm()
-	if mode != 0o600 {
+	if mode != constants.FilePerm {
 		t.Errorf("Expected file permissions 0600, got %04o", mode)
 	}
 }

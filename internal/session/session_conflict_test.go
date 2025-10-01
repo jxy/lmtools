@@ -1,7 +1,10 @@
 package session
 
 import (
+	"context"
 	"fmt"
+	"lmtools/internal/constants"
+	"lmtools/internal/core"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,7 +15,7 @@ import (
 // TestForceMessageIDConflict tries to force message ID conflicts
 func TestForceMessageIDConflict(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -23,10 +26,10 @@ func TestForceMessageIDConflict(t *testing.T) {
 		jsonPath := filepath.Join(session.Path, msgID+".json")
 
 		// Create the files
-		if err := os.WriteFile(txtPath, []byte("Pre-existing message"), 0o644); err != nil {
+		if err := os.WriteFile(txtPath, []byte("Pre-existing message"), constants.FilePerm); err != nil {
 			t.Fatalf("Failed to create txt file: %v", err)
 		}
-		if err := os.WriteFile(jsonPath, []byte(`{"role":"user","timestamp":"2024-01-01T00:00:00Z"}`), 0o644); err != nil {
+		if err := os.WriteFile(jsonPath, []byte(`{"role":"user","timestamp":"2024-01-01T00:00:00Z"}`), constants.FilePerm); err != nil {
 			t.Fatalf("Failed to create json file: %v", err)
 		}
 
@@ -53,7 +56,12 @@ func TestForceMessageIDConflict(t *testing.T) {
 					Model:     "test",
 				}
 
-				path, msgID, err := AppendMessage(session, msg)
+				result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
+				var path, msgID string
+				if err == nil {
+					path = result.Path
+					msgID = result.MessageID
+				}
 				results <- struct {
 					id    int
 					path  string
@@ -109,7 +117,7 @@ func TestForceMessageIDConflict(t *testing.T) {
 // TestLockFileVisibility checks if lock files are visible during operations
 func TestLockFileVisibility(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -161,7 +169,7 @@ func TestLockFileVisibility(t *testing.T) {
 
 				// Add a small delay to increase lock visibility window
 				time.Sleep(5 * time.Millisecond)
-				_, _, _ = AppendMessage(session, msg)
+				_, _ = AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
 			}(i)
 		}
 
@@ -200,7 +208,7 @@ func TestLockFileVisibility(t *testing.T) {
 func TestConcurrentResumeRealWorld(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a session with some history
-		session, err := CreateSession()
+		session, err := CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -217,7 +225,7 @@ func TestConcurrentResumeRealWorld(t *testing.T) {
 		}
 
 		for _, msg := range history {
-			if _, _, err := AppendMessage(session, msg); err != nil {
+			if _, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil); err != nil {
 				t.Fatalf("Failed to add history: %v", err)
 			}
 		}
@@ -272,7 +280,12 @@ func TestConcurrentResumeRealWorld(t *testing.T) {
 					Model:     "gpt4o",
 				}
 
-				path, msgID, err := AppendMessage(session, msg)
+				result, err := AppendMessageWithToolInteraction(context.Background(), session, msg, nil, nil)
+				var path, msgID string
+				if err == nil {
+					path = result.Path
+					msgID = result.MessageID
+				}
 				results <- struct {
 					user  string
 					path  string

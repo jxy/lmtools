@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -52,22 +55,22 @@ func TestArgoStreamingWithPings(t *testing.T) {
 		{
 			name:          "Quick response - no pings",
 			chunks:        []string{"Hello ", "world!", " How ", "are ", "you?"},
-			chunkDelay:    10 * time.Millisecond,
-			pingInterval:  100 * time.Millisecond,
+			chunkDelay:    5 * time.Millisecond,
+			pingInterval:  50 * time.Millisecond,
 			expectedPings: 0,
 		},
 		{
 			name:          "Slow response - should send pings",
 			chunks:        []string{"Hello ", "world!"},
-			chunkDelay:    150 * time.Millisecond,
-			pingInterval:  100 * time.Millisecond,
+			chunkDelay:    60 * time.Millisecond,
+			pingInterval:  50 * time.Millisecond,
 			expectedPings: 1, // One ping between chunks
 		},
 		{
 			name:          "Very slow response - multiple pings",
 			chunks:        []string{"Start", "Middle", "End"},
-			chunkDelay:    220 * time.Millisecond,
-			pingInterval:  100 * time.Millisecond,
+			chunkDelay:    110 * time.Millisecond,
+			pingInterval:  50 * time.Millisecond,
 			expectedPings: 3, // At least one ping between each chunk
 		},
 	}
@@ -76,9 +79,10 @@ func TestArgoStreamingWithPings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a test response writer
 			w := httptest.NewRecorder()
+			ctx := context.Background()
 
 			// Create handler
-			handler, err := NewAnthropicStreamHandler(w, "test-model", nil)
+			handler, err := NewAnthropicStreamHandler(w, "test-model", ctx)
 			if err != nil {
 				t.Fatalf("Failed to create handler: %v", err)
 			}
@@ -120,6 +124,116 @@ func TestArgoStreamingWithPings(t *testing.T) {
 	}
 }
 
+func TestArgoStreamingSlowFirstToken(t *testing.T) {
+	// Test that pings are sent while waiting for the first token
+	tests := []struct {
+		name             string
+		firstTokenDelay  time.Duration
+		pingInterval     time.Duration
+		expectedMinPings int
+		expectedMaxPings int
+	}{
+		{
+			name:             "First token delayed 120ms with 50ms ping interval",
+			firstTokenDelay:  120 * time.Millisecond,
+			pingInterval:     50 * time.Millisecond,
+			expectedMinPings: 2, // Should get at least 2 pings before first token
+			expectedMaxPings: 3, // But no more than 3
+		},
+		{
+			name:             "First token delayed 260ms with 50ms ping interval",
+			firstTokenDelay:  260 * time.Millisecond,
+			pingInterval:     50 * time.Millisecond,
+			expectedMinPings: 5, // Should get at least 5 pings
+			expectedMaxPings: 6,
+		},
+		{
+			name:             "First token delayed 80ms with 100ms ping interval",
+			firstTokenDelay:  80 * time.Millisecond,
+			pingInterval:     100 * time.Millisecond,
+			expectedMinPings: 0, // No pings expected - first token arrives before ping interval
+			expectedMaxPings: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a pipe for controlled streaming
+			pr, pw := io.Pipe()
+			defer pr.Close()
+			defer pw.Close()
+
+			// Simulate Argo's slow first response in a goroutine
+			go func() {
+				// Wait before sending first token (simulating slow model startup)
+				time.Sleep(tt.firstTokenDelay)
+
+				// Send first chunk
+				_, _ = pw.Write([]byte("Hello"))
+
+				// Send remaining chunks quickly
+				time.Sleep(10 * time.Millisecond)
+				_, _ = pw.Write([]byte(" world"))
+				time.Sleep(10 * time.Millisecond)
+				_, _ = pw.Write([]byte("!"))
+
+				// Close the stream
+				pw.Close()
+			}()
+
+			w := httptest.NewRecorder()
+			ctx := context.Background()
+			handler, err := NewAnthropicStreamHandler(w, "test-model", ctx)
+			if err != nil {
+				t.Fatalf("Failed to create handler: %v", err)
+			}
+
+			// Send initial events
+			if err := handler.SendMessageStart(); err != nil {
+				t.Fatalf("Failed to send message start: %v", err)
+			}
+			if err := handler.SendContentBlockStart(0, "text"); err != nil {
+				t.Fatalf("Failed to send content block start: %v", err)
+			}
+
+			// Parse with ping interval
+			parser := NewArgoStreamParser(handler)
+			startTime := time.Now()
+			err = parser.ParseWithPingInterval(pr, tt.pingInterval)
+			elapsed := time.Since(startTime)
+
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+
+			// Count ping events in response
+			response := w.Body.String()
+			pingCount := strings.Count(response, `event: ping`)
+
+			// Verify ping count is within expected range
+			if pingCount < tt.expectedMinPings {
+				t.Errorf("Expected at least %d pings, but got %d (elapsed: %v)",
+					tt.expectedMinPings, pingCount, elapsed)
+				t.Logf("Response:\n%s", response)
+			}
+			if pingCount > tt.expectedMaxPings {
+				t.Errorf("Expected at most %d pings, but got %d (elapsed: %v)",
+					tt.expectedMaxPings, pingCount, elapsed)
+				t.Logf("Response:\n%s", response)
+			}
+
+			// Verify the actual content was streamed
+			if !strings.Contains(response, "Hello") || !strings.Contains(response, "world") {
+				t.Error("Expected content not found in response")
+			}
+
+			// Log timing info for debugging
+			t.Logf("First token delay: %v, Ping interval: %v, Elapsed: %v, Pings sent: %d",
+				tt.firstTokenDelay, tt.pingInterval, elapsed, pingCount)
+		})
+	}
+}
+
 func TestArgoStreamingPingOnTimeout(t *testing.T) {
 	// Create a reader that blocks indefinitely
 	pr, pw := io.Pipe()
@@ -130,12 +244,13 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 	go func() {
 		_, _ = pw.Write([]byte("Initial data"))
 		// Don't close - simulate hanging connection
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 		pw.Close()
 	}()
 
 	w := httptest.NewRecorder()
-	handler, err := NewAnthropicStreamHandler(w, "test-model", nil)
+	ctx := context.Background()
+	handler, err := NewAnthropicStreamHandler(w, "test-model", ctx)
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -154,7 +269,7 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 	// Run parser in goroutine
 	done := make(chan error)
 	go func() {
-		done <- parser.ParseWithPingInterval(pr, 50*time.Millisecond)
+		done <- parser.ParseWithPingInterval(pr, 30*time.Millisecond)
 	}()
 
 	// Wait for parser to complete
@@ -164,14 +279,159 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 		response := w.Body.String()
 		pingCount := strings.Count(response, `event: ping`)
 
-		// We should have gotten at least 2 pings (150ms wait / 50ms interval)
-		// but since we closed the pipe after 500ms, we check after completion
-		if pingCount < 2 {
-			t.Errorf("Expected at least 2 pings with 50ms interval, got %d", pingCount)
+		// We should have gotten at least 3 pings (100ms wait / 30ms interval)
+		// but since we closed the pipe after 250ms, we check after completion
+		if pingCount < 3 {
+			t.Errorf("Expected at least 3 pings with 30ms interval, got %d", pingCount)
 			t.Logf("Response:\n%s", response)
 		}
-	case <-time.After(1 * time.Second):
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Parser did not complete within timeout")
+	}
+}
+
+func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
+	// Test that pings are sent while waiting for non-streaming response (with tools)
+	// For testing, we use a 200ms ping interval (fast tests, still realistic)
+
+	tests := []struct {
+		name             string
+		responseDelay    time.Duration
+		expectedMinPings int
+		expectedMaxPings int
+	}{
+		{
+			name:             "Response delayed 50ms - no pings expected",
+			responseDelay:    50 * time.Millisecond,
+			expectedMinPings: 0, // Response arrives before first ping interval (200ms)
+			expectedMaxPings: 0,
+		},
+		{
+			name:             "Response delayed 250ms - should get 1 ping",
+			responseDelay:    250 * time.Millisecond,
+			expectedMinPings: 1, // Should get 1 ping at 200ms mark
+			expectedMaxPings: 2, // Might get 2 depending on timing
+		},
+		{
+			name:             "Response delayed 450ms - should get 2 pings",
+			responseDelay:    450 * time.Millisecond,
+			expectedMinPings: 2, // Should get pings at 200ms and 400ms marks
+			expectedMaxPings: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock Argo server with custom delay
+			argoMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Logf("Mock Argo with delay: %s %s", r.Method, r.URL.Path)
+
+				// Read request body
+				body, _ := io.ReadAll(r.Body)
+				var req ArgoChatRequest
+				if err := json.Unmarshal(body, &req); err != nil {
+					http.Error(w, "Bad request", http.StatusBadRequest)
+					return
+				}
+
+				// Simulate delay before responding
+				time.Sleep(tt.responseDelay)
+
+				// Return non-streaming response
+				resp := ArgoChatResponse{
+					Response: "Hello from delayed mock Argo!",
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					t.Logf("Failed to encode response: %v", err)
+				}
+			}))
+			defer argoMock.Close()
+
+			// Create config
+			config := &Config{
+				Provider:           "argo",
+				ArgoUser:           "testuser",
+				ArgoEnv:            "test",
+				Model:              "gpto3",
+				SmallModel:         "gemini25flash",
+				MaxRequestBodySize: 10 * 1024 * 1024,
+				ArgoBaseURL:        argoMock.URL,
+				PingInterval:       200 * time.Millisecond, // Use 200ms for fast testing
+			}
+
+			// Initialize URLs
+			config.InitializeURLs()
+
+			// Create server
+			server := NewServer(config)
+			proxyServer := httptest.NewServer(server)
+			defer proxyServer.Close()
+
+			// Create request with tools (forces simulated streaming)
+			req := AnthropicRequest{
+				Model:     "gpto3",
+				MaxTokens: 100,
+				Stream:    true,
+				Messages: []AnthropicMessage{
+					{
+						Role:    "user",
+						Content: json.RawMessage(`"Test message"`),
+					},
+				},
+				Tools: []AnthropicTool{
+					{
+						Name:        "test_tool",
+						Description: "A test tool",
+						InputSchema: json.RawMessage(`{"type":"object"}`),
+					},
+				},
+			}
+
+			// Make streaming request
+			reqBody, _ := json.Marshal(req)
+			resp, err := http.Post(
+				proxyServer.URL+"/v1/messages",
+				"application/json",
+				bytes.NewReader(reqBody),
+			)
+			if err != nil {
+				t.Fatalf("Request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			// Read the entire response
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("Error reading response: %v", err)
+			}
+
+			response := string(body)
+			pingCount := strings.Count(response, `event: ping`)
+
+			// Verify ping count is within expected range
+			if pingCount < tt.expectedMinPings {
+				t.Errorf("Expected at least %d pings, but got %d (response delay: %v)",
+					tt.expectedMinPings, pingCount, tt.responseDelay)
+			}
+			if pingCount > tt.expectedMaxPings {
+				t.Errorf("Expected at most %d pings, but got %d (response delay: %v)",
+					tt.expectedMaxPings, pingCount, tt.responseDelay)
+			}
+
+			// Verify the response contains proper SSE format
+			if !strings.Contains(response, "event: message_start") {
+				t.Error("Missing message_start event")
+			}
+			if !strings.Contains(response, "data: [DONE]") {
+				t.Error("Missing [DONE] marker")
+			}
+
+			// Log timing info for debugging
+			t.Logf("Response delay: %v, Test ping interval: 200ms, Pings sent: %d",
+				tt.responseDelay, pingCount)
+		})
 	}
 }
 
@@ -181,10 +441,11 @@ func TestArgoStreamingContextCancellation(t *testing.T) {
 
 	// Create a slow reader that would normally take a long time
 	chunks := []string{"Start", "Middle", "End"}
-	reader := NewSlowReader(chunks, 200*time.Millisecond)
+	reader := NewSlowReader(chunks, 100*time.Millisecond)
 
 	w := httptest.NewRecorder()
-	handler, err := NewAnthropicStreamHandler(w, "test-model", nil)
+	ctx := context.Background()
+	handler, err := NewAnthropicStreamHandler(w, "test-model", ctx)
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -209,11 +470,11 @@ func TestArgoStreamingContextCancellation(t *testing.T) {
 	// Start parsing
 	done := make(chan error)
 	go func() {
-		done <- parser.ParseWithPingInterval(ctxReader, 50*time.Millisecond)
+		done <- parser.ParseWithPingInterval(ctxReader, 30*time.Millisecond)
 	}()
 
 	// Cancel after short delay
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	cancel()
 
 	// Parser should complete quickly after cancellation
@@ -222,7 +483,7 @@ func TestArgoStreamingContextCancellation(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "context canceled") {
 			t.Errorf("Expected context canceled error, got: %v", err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Parser did not respond to context cancellation")
 	}
 }

@@ -18,7 +18,8 @@ func TestArgoStreamingTokenCounting(t *testing.T) {
 	if err := logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
 		logger.WithFormat("text"),
-		logger.WithOutputMode(logger.OutputStderrOnly),
+		logger.WithStderr(true),
+		logger.WithFile(false),
 	); err != nil {
 		t.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -75,8 +76,11 @@ func TestArgoStreamingTokenCounting(t *testing.T) {
 	// Create a response recorder
 	recorder := httptest.NewRecorder()
 
+	// Create context
+	ctx := context.Background()
+
 	// Create handler
-	handler, err := NewAnthropicStreamHandler(recorder, anthReq.Model, nil)
+	handler, err := NewAnthropicStreamHandler(recorder, anthReq.Model, ctx)
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -99,7 +103,6 @@ func TestArgoStreamingTokenCounting(t *testing.T) {
 	}
 
 	// Call streamFromArgo
-	ctx := context.Background()
 	err = server.streamFromArgo(ctx, anthReq, handler)
 	if err != nil {
 		t.Fatalf("streamFromArgo failed: %v", err)

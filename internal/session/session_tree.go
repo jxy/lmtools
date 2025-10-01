@@ -1,7 +1,11 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
+	"lmtools/internal/core"
+	"lmtools/internal/errors"
+	"lmtools/internal/format"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,10 +15,11 @@ import (
 
 // TreeNode represents a node in the conversation tree
 type TreeNode struct {
-	Message    *Message
-	Children   []*TreeNode
-	IsSibling  bool
-	SiblingNum string
+	Message         *Message
+	Children        []*TreeNode
+	IsSibling       bool
+	SiblingNum      string
+	ToolInteraction *core.ToolInteraction // Tool calls or results associated with this message
 }
 
 // formatBytes formats byte count for display
@@ -33,16 +38,8 @@ func formatBytes(bytes int) string {
 	}
 }
 
-// formatRole formats role with optional model
-func formatRole(role, model string) string {
-	if role == "assistant" && model != "" {
-		return fmt.Sprintf("%s/%s", role, model)
-	}
-	return role
-}
-
 // ShowSessions displays all conversation trees
-func ShowSessions() error {
+func ShowSessions(notifier core.Notifier) error {
 	sessionsDir := GetSessionsDir()
 
 	// Check if sessions directory exists
@@ -53,7 +50,7 @@ func ShowSessions() error {
 
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return fmt.Errorf("failed to read sessions directory: %w", err)
+		return errors.WrapError("read sessions directory", err)
 	}
 
 	// Filter for session directories
@@ -80,19 +77,21 @@ func ShowSessions() error {
 		sessionPath := filepath.Join(sessionsDir, sessionID)
 
 		// Get messages to show creation time and calculate total size
-		messages, err := ListMessages(sessionPath)
+		messages, err := listMessages(sessionPath)
 		var created time.Time
 		var totalSize int
 		messageCount := len(messages)
 
 		if err == nil && len(messages) > 0 {
-			if msg, err := ReadMessage(sessionPath, messages[0]); err == nil {
+			if msg, err := readMessage(sessionPath, messages[0]); err == nil {
 				created = msg.Timestamp
 			}
-			// Calculate total size
+			// Calculate total size using file sizes instead of reading content
+			// This is much faster as it avoids loading file content into memory
 			for _, msgID := range messages {
-				if msg, err := ReadMessage(sessionPath, msgID); err == nil {
-					totalSize += len(msg.Content)
+				txtPath := filepath.Join(sessionPath, msgID+".txt")
+				if info, err := os.Stat(txtPath); err == nil {
+					totalSize += int(info.Size())
 				}
 			}
 		}
@@ -107,6 +106,9 @@ func ShowSessions() error {
 		tree, err := buildTree(sessionPath)
 		if err != nil {
 			fmt.Printf("  Error reading session: %v\n", err)
+			if notifier != nil {
+				notifier.Warnf("Error reading session %s: %v", sessionID, err)
+			}
 			continue
 		}
 
@@ -122,13 +124,13 @@ func ShowTree(sessionID string) error {
 
 	// Check if session exists
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return errors.WrapError("find session", fmt.Errorf("session not found: %s", sessionID))
 	}
 
 	// Build and display tree
 	tree, err := buildTree(sessionPath)
 	if err != nil {
-		return fmt.Errorf("failed to build tree: %w", err)
+		return errors.WrapError("build tree", err)
 	}
 
 	fmt.Printf("%s/\n", sessionID)
@@ -150,9 +152,13 @@ func buildTree(dirPath string) ([]*TreeNode, error) {
 	messageMap := make(map[string]*TreeNode)
 
 	for i := range messages {
+		// Load tool interaction if it exists
+		toolInteraction, _ := LoadToolInteraction(dirPath, messages[i].ID)
+
 		node := &TreeNode{
-			Message:  &messages[i],
-			Children: []*TreeNode{},
+			Message:         &messages[i],
+			Children:        []*TreeNode{},
+			ToolInteraction: toolInteraction,
 		}
 		nodes = append(nodes, node)
 		messageMap[messages[i].ID] = node
@@ -228,13 +234,25 @@ func displayTree(nodes []*TreeNode, prefix string, isLast bool) {
 			}
 
 			// Format message
-			content := truncateContent(node.Message.Content, 60)
+			content := format.Truncate(node.Message.Content, format.MaxArgPreview*3) // Use 3x arg preview for content
 
 			// Format role with model and size
-			roleDisplay := formatRole(node.Message.Role, node.Message.Model)
+			roleDisplay := FormatRole(string(node.Message.Role), node.Message.Model)
 			size := formatBytes(len(node.Message.Content))
 
-			fmt.Printf("%s • %s • %s • \"%s\"\n", node.Message.ID, roleDisplay, size, content)
+			// Add tool interaction indicators
+			toolIndicator := ""
+			if node.ToolInteraction != nil {
+				if len(node.ToolInteraction.Calls) > 0 {
+					// Assistant message with tool calls - show tool names and brief args
+					toolIndicator = formatToolCallsInline(node.ToolInteraction.Calls)
+				} else if len(node.ToolInteraction.Results) > 0 {
+					// User message with tool results - show result preview and size
+					toolIndicator = formatToolResultsInline(node.ToolInteraction.Results)
+				}
+			}
+
+			fmt.Printf("%s • %s • %s • \"%s\"%s\n", node.Message.ID, roleDisplay, size, content, toolIndicator)
 
 			// Display children
 			if len(node.Children) > 0 {
@@ -250,17 +268,93 @@ func displayTree(nodes []*TreeNode, prefix string, isLast bool) {
 	}
 }
 
-// truncateContent truncates content to a maximum length
-func truncateContent(content string, maxLen int) string {
-	// Remove newlines and extra spaces
-	content = strings.ReplaceAll(content, "\n", " ")
-	content = strings.Join(strings.Fields(content), " ")
-
-	if len(content) <= maxLen {
-		return content
+// formatToolCallsInline formats tool calls as a brief inline summary
+func formatToolCallsInline(calls []core.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
 	}
 
-	return content[:maxLen-3] + "..."
+	// Format: [tool: name(args...)]
+	summaries := []string{}
+	for _, call := range calls {
+		argSummary := ""
+		if len(call.Args) > 0 {
+			// Try to extract key information from args
+			var args map[string]interface{}
+			if err := json.Unmarshal(call.Args, &args); err == nil {
+				// Build brief arg summary
+				parts := []string{}
+				// Prioritize common fields
+				if path, ok := args["path"].(string); ok {
+					parts = append(parts, format.Truncate(path, format.MaxArgPreview))
+				}
+				if cmd, ok := args["command"]; ok {
+					switch v := cmd.(type) {
+					case []interface{}:
+						if len(v) > 0 {
+							parts = append(parts, fmt.Sprintf("%v", v[0]))
+						}
+					case string:
+						parts = append(parts, format.Truncate(v, format.MaxArgPreview))
+					}
+				}
+				if query, ok := args["query"].(string); ok {
+					parts = append(parts, format.Truncate(query, format.MaxArgPreview))
+				}
+				// If no known fields, show first field
+				if len(parts) == 0 && len(args) > 0 {
+					for _, v := range args {
+						parts = append(parts, format.Truncate(fmt.Sprintf("%v", v), format.MaxArgPreview))
+						break
+					}
+				}
+				if len(parts) > 0 {
+					argSummary = strings.Join(parts, ", ")
+				}
+			} else {
+				// Not a map, just show truncated raw
+				argSummary = format.Truncate(string(call.Args), format.MaxArgPreview)
+			}
+		}
+
+		if argSummary != "" {
+			summaries = append(summaries, fmt.Sprintf("%s(%s)", call.Name, argSummary))
+		} else {
+			summaries = append(summaries, call.Name)
+		}
+	}
+
+	return fmt.Sprintf(" [tool: %s]", strings.Join(summaries, "; "))
+}
+
+// formatToolResultsInline formats tool results as a brief inline summary
+func formatToolResultsInline(results []core.ToolResult) string {
+	if len(results) == 0 {
+		return ""
+	}
+
+	// Format: [result: preview... (size)]
+	summaries := []string{}
+	for _, result := range results {
+		if result.Error != "" {
+			summaries = append(summaries, fmt.Sprintf("error: %s", format.Truncate(result.Error, format.MaxArgPreview)))
+		} else {
+			// Clean up output for display
+			output := strings.TrimSpace(result.Output)
+			// Replace newlines with spaces for inline display
+			output = strings.ReplaceAll(output, "\n", " ")
+			// Collapse multiple spaces
+			for strings.Contains(output, "  ") {
+				output = strings.ReplaceAll(output, "  ", " ")
+			}
+
+			preview := format.Truncate(output, format.MaxResultPreview)
+			size := formatBytes(len(result.Output))
+			summaries = append(summaries, fmt.Sprintf("%s (%s)", preview, size))
+		}
+	}
+
+	return fmt.Sprintf(" [result: %s]", strings.Join(summaries, "; "))
 }
 
 // CountSessions returns the number of sessions
@@ -273,7 +367,7 @@ func CountSessions() (int, error) {
 
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return 0, fmt.Errorf("failed to read sessions directory: %w", err)
+		return 0, errors.WrapError("read sessions directory", err)
 	}
 
 	count := 0

@@ -6,18 +6,18 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestGoogleStreamingMode tests Google AI SSE streaming functionality
 func TestGoogleStreamingMode(t *testing.T) {
-	lmcBin := buildLmcBinary(t)
+	lmcBin := getLmcBinary(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	
@@ -97,14 +97,13 @@ func TestGoogleStreamingMode(t *testing.T) {
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}))
 	defer server.Close()
 	
 	// Create a temporary API key file
 	apiKeyFile := filepath.Join(tmpHome, "google-key")
-	if err := os.WriteFile(apiKeyFile, []byte("test-google-key"), 0600); err != nil {
+	if err := os.WriteFile(apiKeyFile, []byte("test-google-key"), constants.FilePerm); err != nil {
 		t.Fatalf("Failed to create API key file: %v", err)
 	}
 	

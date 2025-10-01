@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestSplitTextForStreamingInvalidUTF8(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// The function should handle invalid UTF-8 gracefully
-			chunks := splitTextForStreaming(tt.text, tt.chunkSize)
+			chunks := splitTextForStreaming(context.Background(), tt.text, tt.chunkSize)
 
 			// Should return some chunks
 			if len(chunks) == 0 && len(tt.text) > 0 {
@@ -89,7 +90,7 @@ func TestSplitTextForStreamingGraphemeClusters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunks := splitTextForStreaming(tt.text, tt.chunkSize)
+			chunks := splitTextForStreaming(context.Background(), tt.text, tt.chunkSize)
 
 			// Verify reconstruction
 			reconstructed := strings.Join(chunks, "")
@@ -166,7 +167,7 @@ func TestSplitTextForStreamingBoundaryConditions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunks := splitTextForStreaming(tt.text, tt.chunkSize)
+			chunks := splitTextForStreaming(context.Background(), tt.text, tt.chunkSize)
 
 			if len(chunks) != tt.wantCount {
 				t.Errorf("got %d chunks, want %d", len(chunks), tt.wantCount)
@@ -213,7 +214,7 @@ func TestSplitTextForStreamingSpecialCharacters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunks := splitTextForStreaming(tt.text, tt.chunkSize)
+			chunks := splitTextForStreaming(context.Background(), tt.text, tt.chunkSize)
 
 			// Verify reconstruction
 			reconstructed := strings.Join(chunks, "")

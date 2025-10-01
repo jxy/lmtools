@@ -4,6 +4,7 @@
 package proxy
 
 import (
+	"lmtools/internal/core"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -455,7 +456,7 @@ func TestE2EBasicChat(t *testing.T) {
 				MaxTokens: 100,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"` + tt.message + `"`),
 					},
 				},
@@ -508,7 +509,7 @@ func TestE2EStreamingResponses(t *testing.T) {
 		Stream:    true,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Tell me a story"`),
 			},
 		},
@@ -565,7 +566,6 @@ func TestE2EStreamingResponses(t *testing.T) {
 	expectedEvents := []string{
 		"message_start",
 		"content_block_start",
-		"ping",
 		"content_block_delta",
 		"content_block_stop",
 		"message_delta",
@@ -609,7 +609,7 @@ func TestE2EToolUse(t *testing.T) {
 				MaxTokens: 200,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Please calculate 25 times 4"`),
 					},
 				},
@@ -687,7 +687,7 @@ func TestE2EComplexContent(t *testing.T) {
 		MaxTokens: 200,
 		Messages: []AnthropicMessage{
 			{
-				Role: RoleUser,
+				Role: core.RoleUser,
 				Content: json.RawMessage(`[
 					{"type": "text", "text": "I used the calculator tool."},
 					{"type": "tool_result", "tool_use_id": "calc_123", "content": "Result: 100"}
@@ -731,7 +731,7 @@ func TestE2ETokenCounting(t *testing.T) {
 		System: json.RawMessage(`"You are a helpful assistant."`),
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"This is a test message with multiple words to count tokens accurately."`),
 			},
 		},
@@ -855,7 +855,7 @@ func TestE2EPerformance(t *testing.T) {
 				MaxTokens: 50,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Say hello"`),
 					},
 				},
@@ -1057,7 +1057,7 @@ func TestProviderFlagPrecedence(t *testing.T) {
 				MaxTokens: 100,
 				Messages: []AnthropicMessage{
 					{
-						Role:    RoleUser,
+						Role:    core.RoleUser,
 						Content: json.RawMessage(`"Test provider precedence"`),
 					},
 				},
@@ -1133,7 +1133,7 @@ func BenchmarkE2ESimpleChat(b *testing.B) {
 		MaxTokens: 50,
 		Messages: []AnthropicMessage{
 			{
-				Role:    RoleUser,
+				Role:    core.RoleUser,
 				Content: json.RawMessage(`"Hello"`),
 			},
 		},
