@@ -41,6 +41,15 @@ func (s *Server) readResponseBody(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+// truncateErrorBody safely truncates error response body for inclusion in error messages
+func truncateErrorBody(body string, maxLen int) string {
+	if len(body) <= maxLen {
+		return body
+	}
+	// Truncate and add ellipsis
+	return body[:maxLen] + "..."
+}
+
 // logErrorResponse logs error responses from providers
 func (s *Server) logErrorResponse(ctx context.Context, provider string, statusCode int, body []byte) {
 	log := logger.From(ctx)

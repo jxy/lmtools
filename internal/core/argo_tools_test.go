@@ -117,7 +117,7 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 					t.Errorf("Expected name='universal_command', got %v", function["name"])
 				}
 
-				// Check tool_choice
+				// Check tool_choice - should be string "auto" for OpenAI
 				if req["tool_choice"] != "auto" {
 					t.Errorf("Expected tool_choice='auto', got %v", req["tool_choice"])
 				}
@@ -128,7 +128,7 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 			model:    "gemini25pro",
 			provider: "argo",
 			verifyTools: func(t *testing.T, req map[string]interface{}) {
-				// Tools should be in Google format (unwrapped with uppercase types)
+				// Tools should be in Google format with functionDeclarations
 				toolsInterface, ok := req["tools"].([]interface{})
 				if !ok {
 					t.Fatalf("Tools should be []interface{}, got %T", req["tools"])
@@ -143,13 +143,28 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 					t.Fatalf("Tool should be map[string]interface{}, got %T", toolsInterface[0])
 				}
 
-				// Check Google format structure (no type wrapper)
-				if tool["name"] != "universal_command" {
-					t.Errorf("Expected name='universal_command', got %v", tool["name"])
+				// Check for functionDeclarations field (Google format)
+				funcDecls, ok := tool["functionDeclarations"].([]interface{})
+				if !ok {
+					t.Fatalf("Expected functionDeclarations field to be an array, got %T", tool["functionDeclarations"])
+				}
+
+				if len(funcDecls) != 1 {
+					t.Fatalf("Expected 1 function declaration, got %d", len(funcDecls))
+				}
+
+				funcDecl, ok := funcDecls[0].(map[string]interface{})
+				if !ok {
+					t.Fatalf("Function declaration should be map[string]interface{}, got %T", funcDecls[0])
+				}
+
+				// Check function declaration structure
+				if funcDecl["name"] != "universal_command" {
+					t.Errorf("Expected name='universal_command', got %v", funcDecl["name"])
 				}
 
 				// Check parameters field exists
-				params, ok := tool["parameters"].(map[string]interface{})
+				params, ok := funcDecl["parameters"].(map[string]interface{})
 				if !ok {
 					t.Fatal("Expected parameters field to be a map")
 				}
@@ -355,30 +370,42 @@ func TestConvertToolsForProvider(t *testing.T) {
 
 			switch tt.expectedProvider {
 			case "openai":
-				// Verify OpenAI format
-				toolsList, ok := convertedTools.([]map[string]interface{})
+				// Verify OpenAI format with typed structures
+				toolsList, ok := convertedTools.([]OpenAITool)
 				if !ok {
-					t.Fatalf("Expected []map[string]interface{} for OpenAI, got %T", convertedTools)
+					t.Fatalf("Expected []OpenAITool for OpenAI, got %T", convertedTools)
 				}
-				if len(toolsList) == 0 || toolsList[0]["type"] != "function" {
+				if len(toolsList) == 0 || toolsList[0].Type != "function" {
 					t.Error("OpenAI tools should have type='function'")
 				}
+				if toolsList[0].Function.Name != "test_tool" {
+					t.Errorf("Expected tool name='test_tool', got %v", toolsList[0].Function.Name)
+				}
+				// Check tool choice is string "auto" for OpenAI
 				if toolChoice != "auto" {
 					t.Errorf("Expected tool_choice='auto' for OpenAI, got %v", toolChoice)
 				}
 
 			case "google":
-				// Verify Google format
-				toolsList, ok := convertedTools.([]map[string]interface{})
+				// Verify Google format with typed structures
+				toolsList, ok := convertedTools.([]GoogleTool)
 				if !ok {
-					t.Fatalf("Expected []map[string]interface{} for Google, got %T", convertedTools)
+					t.Fatalf("Expected []GoogleTool for Google, got %T", convertedTools)
 				}
 				if len(toolsList) == 0 {
 					t.Fatal("Expected at least one tool")
 				}
+				// Check function declarations
+				if len(toolsList[0].FunctionDeclarations) == 0 {
+					t.Fatal("Expected at least one function declaration")
+				}
+				decl := toolsList[0].FunctionDeclarations[0]
+				if decl.Name != "test_tool" {
+					t.Errorf("Expected tool name='test_tool', got %v", decl.Name)
+				}
 				// Check for parameters field and uppercase types
-				params, ok := toolsList[0]["parameters"].(map[string]interface{})
-				if !ok {
+				params := decl.Parameters
+				if params == nil {
 					t.Fatal("Google tools should have parameters field")
 				}
 				if params["type"] != "OBJECT" {
@@ -389,21 +416,24 @@ func TestConvertToolsForProvider(t *testing.T) {
 				}
 
 			case "anthropic":
-				// Verify Anthropic format
-				toolsList, ok := convertedTools.([]map[string]interface{})
+				// Verify Anthropic format with typed structures
+				toolsList, ok := convertedTools.([]AnthropicTool)
 				if !ok {
-					t.Fatalf("Expected []map[string]interface{} for Anthropic, got %T", convertedTools)
+					t.Fatalf("Expected []AnthropicTool for Anthropic, got %T", convertedTools)
 				}
 				if len(toolsList) == 0 {
 					t.Fatal("Expected at least one tool")
 				}
+				if toolsList[0].Name != "test_tool" {
+					t.Errorf("Expected tool name='test_tool', got %v", toolsList[0].Name)
+				}
 				// Check for input_schema field
-				if _, ok := toolsList[0]["input_schema"]; !ok {
+				if toolsList[0].InputSchema == nil {
 					t.Error("Anthropic tools should have input_schema field")
 				}
-				toolChoiceMap, ok := toolChoice.(map[string]string)
-				if !ok || toolChoiceMap["type"] != "auto" {
-					t.Errorf("Expected tool_choice={type:'auto'} for Anthropic, got %v", toolChoice)
+				toolChoiceMap, ok := toolChoice.(AnthropicToolChoice)
+				if !ok || toolChoiceMap.Type != "auto" {
+					t.Errorf("Expected tool_choice={Type:'auto'} for Anthropic, got %v", toolChoice)
 				}
 			}
 		})

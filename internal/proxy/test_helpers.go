@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // SetupTestServer creates a test server with mock providers
@@ -223,16 +222,12 @@ func NewMockArgo(t *testing.T) http.Handler {
 			w.Header().Set("Cache-Control", "no-cache")
 			w.WriteHeader(http.StatusOK)
 
-			// Send character by character with small delay to simulate streaming
+			// Send character by character to simulate streaming
 			message := "Hello from mock Argo streaming!"
-			for i, char := range message {
+			for _, char := range message {
 				fmt.Fprintf(w, "%c", char)
 				if flusher, ok := w.(http.Flusher); ok {
 					flusher.Flush()
-				}
-				// Add tiny delay between characters except for the last one
-				if i < len(message)-1 {
-					time.Sleep(time.Millisecond)
 				}
 			}
 			// The response will be closed when the handler returns

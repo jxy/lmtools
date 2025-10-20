@@ -12,12 +12,7 @@ import (
 // ConvertAnthropicToArgo converts an Anthropic request to Argo format
 func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRequest, user string) (*ArgoChatRequest, error) {
 	// Log omitted fields at DEBUG level
-	if req.TopK != nil {
-		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by Argo)", *req.TopK)
-	}
-	if len(req.Metadata) > 0 {
-		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by Argo)", req.Metadata)
-	}
+	c.logOmittedFields(ctx, req)
 
 	argoReq := &ArgoChatRequest{
 		Model:       req.Model,
@@ -27,76 +22,25 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		Stop:        req.StopSequences,
 	}
 
-	// Handle thinking field based on model type
-	if req.Thinking != nil && req.Thinking.Type == "enabled" {
-		modelLower := strings.ToLower(req.Model)
-		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
-			// For GPT and O3/O4 models, convert to reasoning_effort
-			argoReq.ReasoningEffort = "high"
-			logger.From(ctx).Debugf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model)
-		} else if strings.HasPrefix(modelLower, "claude") {
-			// For Claude models (opus/sonnet), pass through the thinking structure
-			argoReq.Thinking = req.Thinking
-			logger.From(ctx).Debugf("Passing through thinking structure for Claude model %s", req.Model)
-		}
-	}
+	// Handle thinking field
+	c.applyThinkingConfig(ctx, req, argoReq)
 
 	// Determine the provider to handle max_tokens correctly
 	provider := core.DetermineArgoModelProvider(req.Model)
 
 	// Handle max_tokens based on provider
-	if provider == "openai" {
-		// For OpenAI models, use max_completion_tokens
-		argoReq.MaxCompletionTokens = req.MaxTokens
-	} else {
-		// For non-OpenAI models, handle max_tokens for Argo requests
-		// Drop max_tokens >= 21000 for:
-		// 1. Non-streaming requests
-		// 2. Streaming requests with tools (which use the non-streaming endpoint)
-		if (!req.Stream || len(req.Tools) > 0) && req.MaxTokens >= 21000 {
-			// Drop max_tokens field entirely if >= 21000
-			logger.From(ctx).Debugf("Dropping max_tokens field (was %d) for Argo request (streaming=%v, tools=%d)",
-				req.MaxTokens, req.Stream, len(req.Tools))
-			// MaxTokens will remain nil/0, which means it won't be included in JSON
-		} else {
-			argoReq.MaxTokens = req.MaxTokens
-		}
-	}
+	c.setArgoMaxTokens(ctx, req, argoReq, provider)
 
 	// Build conversation history
 	var messages []ArgoMessage
 
 	// Add system message if present
-	if req.System != nil {
-		// Check if system is a string or array
-		var systemContent string
-
-		// Try to unmarshal as array first
-		var systemArray []AnthropicContentBlock
-		if err := json.Unmarshal(req.System, &systemArray); err == nil {
-			// For system messages with arrays, we need to extract text
-			// Argo expects system content as a string
-			text, err := extractSystemContent(req.System)
-			if err != nil {
-				return nil, fmt.Errorf("failed to extract system content: %w", err)
-			}
-			systemContent = text
-		} else {
-			// Try as string
-			var systemStr string
-			if err := json.Unmarshal(req.System, &systemStr); err == nil {
-				systemContent = systemStr
-			} else {
-				return nil, fmt.Errorf("failed to parse system content")
-			}
-		}
-
-		if systemContent != "" {
-			messages = append(messages, ArgoMessage{
-				Role:    "system",
-				Content: systemContent,
-			})
-		}
+	systemMsg, err := c.extractArgoSystemMessage(req.System)
+	if err != nil {
+		return nil, err
+	}
+	if systemMsg != nil {
+		messages = append(messages, *systemMsg)
 	}
 
 	// Convert messages - handle content based on provider
@@ -104,88 +48,77 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		// Check if content is already an array
 		var contentArray []AnthropicContentBlock
 		if err := json.Unmarshal(msg.Content, &contentArray); err == nil {
-			// For OpenAI models, we need special conversion to handle thinking blocks and tools
+			// For OpenAI models, use centralized converters to avoid duplication
 			if provider == "openai" {
-				// Process each block in the message
-				var textContent string
-				var hasText bool
-				var toolCalls []ToolCall
-
+				// Log thinking blocks before conversion (they'll be filtered out by AnthropicBlocksToCore)
 				for _, block := range contentArray {
-					switch block.Type {
-					case "text":
-						textContent += block.Text
-						hasText = true
-
-					case "thinking":
-						// OpenAI/GPT models don't support thinking blocks, so we drop them and log at DEBUG level
+					if block.Type == "thinking" {
 						droppedBlock := map[string]interface{}{
 							"type":     "thinking",
 							"thinking": block.Thinking,
 						}
 						logger.From(ctx).Debugf("Dropping thinking content block for %s model (not supported by OpenAI): %+v", req.Model, droppedBlock)
-
-					case "tool_use":
-						// Only process tool_use in assistant messages
-						if msg.Role == core.RoleAssistant {
-							// Convert to OpenAI tool call format
-							toolCall := ToolCall{
-								ID:   block.ID,
-								Type: "function",
-								Function: FunctionCall{
-									Name: block.Name,
-								},
-							}
-							// Convert input to JSON string
-							if inputJSON, err := json.Marshal(block.Input); err == nil {
-								toolCall.Function.Arguments = string(inputJSON)
-								logger.DebugJSON(logger.From(ctx), "Tool call arguments", block.Input)
-							} else {
-								toolCall.Function.Arguments = "{}"
-							}
-							toolCalls = append(toolCalls, toolCall)
-						}
-
-					case "tool_result":
-						// Convert tool_result to separate OpenAI tool message
-						toolMsg := ArgoMessage{
-							Role:       "tool",
-							ToolCallID: block.ToolUseID,
-						}
-						// Extract content from the tool result
-						var toolContent interface{}
-						if err := json.Unmarshal(block.Content, &toolContent); err == nil {
-							if contentStr, ok := toolContent.(string); ok {
-								toolMsg.Content = contentStr
-							} else {
-								toolMsg.Content = string(block.Content)
-							}
-						} else {
-							toolMsg.Content = string(block.Content)
-						}
-						messages = append(messages, toolMsg)
 					}
 				}
 
-				// Add the message with text and/or tool calls if applicable
-				if msg.Role == core.RoleAssistant && len(toolCalls) > 0 {
-					// Assistant message with tool calls
+				// Convert Anthropic blocks to core.Block using existing converter
+				coreBlocks := AnthropicBlocksToCore(contentArray)
+
+				// Separate tool results from other blocks
+				var filteredBlocks []core.Block
+				var toolResultMessages []ArgoMessage
+
+				for _, block := range coreBlocks {
+					switch b := block.(type) {
+					case core.ToolResultBlock:
+						// Tool results become separate messages in OpenAI format
+						toolResultMessages = append(toolResultMessages, ArgoMessage{
+							Role:       "tool",
+							ToolCallID: b.ToolUseID,
+							Content:    b.Content,
+						})
+					default:
+						// Keep all other blocks
+						filteredBlocks = append(filteredBlocks, block)
+					}
+				}
+
+				// Add tool result messages first
+				messages = append(messages, toolResultMessages...)
+
+				// Use centralized converter for content and tool calls
+				if len(filteredBlocks) > 0 {
+					content, toolCallMaps := core.ConvertBlocksToOpenAIContentMap(filteredBlocks)
+
+					// Convert tool call maps to ToolCall structs
+					var toolCalls []ToolCall
+					for _, tcMap := range toolCallMaps {
+						fn := tcMap["function"].(map[string]interface{})
+						toolCalls = append(toolCalls, ToolCall{
+							ID:   tcMap["id"].(string),
+							Type: tcMap["type"].(string),
+							Function: FunctionCall{
+								Name:      fn["name"].(string),
+								Arguments: fn["arguments"].(string),
+							},
+						})
+					}
+
+					// For assistant messages with only tool calls and no content, use empty string
+					if msg.Role == core.RoleAssistant && len(toolCalls) > 0 && content == nil {
+						content = ""
+					}
+
+					// Create the message with content and tool calls
 					messages = append(messages, ArgoMessage{
 						Role:      string(msg.Role),
-						Content:   textContent, // OpenAI allows text content with tool calls
+						Content:   content,
 						ToolCalls: toolCalls,
 					})
-				} else if hasText {
-					// Message with text content
-					messages = append(messages, ArgoMessage{
-						Role:    string(msg.Role),
-						Content: textContent,
-					})
 				}
-				// If only tool_result blocks were processed, they were already added as separate messages
 
 			} else {
-				// For non-OpenAI providers or OpenAI without tool blocks, preserve array as is
+				// For non-OpenAI providers, preserve array as is
 				messages = append(messages, ArgoMessage{
 					Role:    string(msg.Role),
 					Content: contentArray,
@@ -378,8 +311,96 @@ func estimateTokenCount(content []AnthropicContentBlock) int {
 	return totalLength / 4
 }
 
+// logOmittedFields logs fields that are omitted when converting from Anthropic to Argo
+func (c *Converter) logOmittedFields(ctx context.Context, req *AnthropicRequest) {
+	if req.TopK != nil {
+		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by Argo)", *req.TopK)
+	}
+	if len(req.Metadata) > 0 {
+		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by Argo)", req.Metadata)
+	}
+}
+
+// applyThinkingConfig applies thinking configuration based on model type
+func (c *Converter) applyThinkingConfig(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest) {
+	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+		modelLower := strings.ToLower(req.Model)
+		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
+			// For GPT and O3/O4 models, convert to reasoning_effort
+			argoReq.ReasoningEffort = "high"
+			logger.From(ctx).Debugf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model)
+		} else if strings.HasPrefix(modelLower, "claude") {
+			// For Claude models (opus/sonnet), pass through the thinking structure
+			argoReq.Thinking = req.Thinking
+			logger.From(ctx).Debugf("Passing through thinking structure for Claude model %s", req.Model)
+		}
+	}
+}
+
+// setArgoMaxTokens sets max_tokens for Argo request based on provider
+func (c *Converter) setArgoMaxTokens(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest, provider string) {
+	if provider == "openai" {
+		// For OpenAI models, use max_completion_tokens
+		argoReq.MaxCompletionTokens = req.MaxTokens
+	} else {
+		// For non-OpenAI models, handle max_tokens for Argo requests
+		// Drop max_tokens >= 21000 for:
+		// 1. Non-streaming requests
+		// 2. Streaming requests with tools (which use the non-streaming endpoint)
+		if (!req.Stream || len(req.Tools) > 0) && req.MaxTokens >= 21000 {
+			// Drop max_tokens field entirely if >= 21000
+			logger.From(ctx).Debugf("Dropping max_tokens field (was %d) for Argo request (streaming=%v, tools=%d)",
+				req.MaxTokens, req.Stream, len(req.Tools))
+			// MaxTokens will remain nil/0, which means it won't be included in JSON
+		} else {
+			argoReq.MaxTokens = req.MaxTokens
+		}
+	}
+}
+
+// extractArgoSystemMessage extracts system message from Anthropic format for Argo
+func (c *Converter) extractArgoSystemMessage(system json.RawMessage) (*ArgoMessage, error) {
+	if system == nil {
+		return nil, nil
+	}
+
+	// Check if system is a string or array
+	var systemContent string
+
+	// Try to unmarshal as array first
+	var systemArray []AnthropicContentBlock
+	if err := json.Unmarshal(system, &systemArray); err == nil {
+		// For system messages with arrays, we need to extract text
+		// Argo expects system content as a string
+		text, err := extractSystemContent(system)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract system content: %w", err)
+		}
+		systemContent = text
+	} else {
+		// Try as string
+		var systemStr string
+		if err := json.Unmarshal(system, &systemStr); err == nil {
+			systemContent = systemStr
+		} else {
+			return nil, fmt.Errorf("failed to parse system content")
+		}
+	}
+
+	if systemContent != "" {
+		return &ArgoMessage{
+			Role:    "system",
+			Content: systemContent,
+		}, nil
+	}
+	return nil, nil
+}
+
 // ConvertArgoToAnthropicWithRequest converts an Argo response to Anthropic format with request for token estimation
 func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
+	// Generate a response ID since Argo doesn't provide one
+	responseID := generateResponseID()
+
 	// Handle different response formats
 	switch r := resp.Response.(type) {
 	case string:
@@ -387,6 +408,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		outputTokens := EstimateTokenCount(r)
 		inputTokens := EstimateRequestTokens(req)
 		return &AnthropicResponse{
+			ID:    responseID,
 			Type:  "message",
 			Model: originalModel,
 			Role:  core.RoleAssistant,
@@ -429,6 +451,21 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 					case "text":
 						if text, ok := blockMap["text"].(string); ok {
 							block.Text = text
+						}
+					case "image":
+						// Parse image blocks
+						if source, ok := blockMap["source"].(map[string]interface{}); ok {
+							block.Source = source
+						}
+					case "audio", "input_audio":
+						// Parse audio blocks
+						if inputAudio, ok := blockMap["input_audio"].(map[string]interface{}); ok {
+							block.InputAudio = inputAudio
+						}
+					case "file":
+						// Parse file blocks
+						if file, ok := blockMap["file"].(map[string]interface{}); ok {
+							block.File = file
 						}
 					case "tool_use":
 						if id, ok := blockMap["id"].(string); ok {
@@ -528,6 +565,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		outputTokens := estimateTokenCount(content)
 		inputTokens := EstimateRequestTokens(req)
 		return &AnthropicResponse{
+			ID:         responseID,
 			Type:       "message",
 			Model:      originalModel,
 			Role:       core.RoleAssistant,
@@ -545,6 +583,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		outputTokens := EstimateTokenCount(text)
 		inputTokens := EstimateRequestTokens(req)
 		return &AnthropicResponse{
+			ID:    responseID,
 			Type:  "message",
 			Model: originalModel,
 			Role:  core.RoleAssistant,

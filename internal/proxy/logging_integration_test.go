@@ -109,9 +109,11 @@ func TestLoggingWithModelMapping(t *testing.T) {
 
 	// Create server config
 	config := &Config{
+		Provider:           "argo", // Add provider
 		ArgoBaseURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
+		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -171,9 +173,11 @@ func TestStreamingRequestLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
+		Provider:           "argo", // Add provider
 		ArgoBaseURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
+		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -236,9 +240,11 @@ func TestConcurrentRequestLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
+		Provider:           "argo", // Add provider
 		ArgoBaseURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
+		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -329,9 +335,11 @@ func TestRequestDurationLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
+		Provider:           "argo", // Add provider
 		ArgoBaseURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
+		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -408,9 +416,11 @@ func TestPingIntervalLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
+		Provider:           "argo", // Add provider
 		ArgoBaseURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
+		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -425,7 +435,14 @@ func TestPingIntervalLogging(t *testing.T) {
 		},
 		Stream: true,
 		Tools: []AnthropicTool{
-			{Name: "test_tool", Description: "Test tool"},
+			{
+				Name:        "test_tool",
+				Description: "Test tool",
+				InputSchema: map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
 		},
 	}
 
@@ -488,8 +505,8 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 			continue
 		}
 		msg, _ := m["message"].(string)
-		if strings.HasPrefix(msg, "Incoming Anthropic Request: ") {
-			payload := strings.TrimPrefix(msg, "Incoming Anthropic Request: ")
+		if strings.HasPrefix(msg, "Request details: ") {
+			payload := strings.TrimPrefix(msg, "Request details: ")
 			var pj map[string]interface{}
 			if json.Unmarshal([]byte(payload), &pj) == nil && pj["model"] != nil {
 				found = true
@@ -499,7 +516,7 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 	}
 	if !found {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON Incoming Anthropic Request log")
+		t.Errorf("missing JSON Request details log")
 	}
 }
 
@@ -548,8 +565,8 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 			continue
 		}
 		msg, _ := m["message"].(string)
-		if strings.HasPrefix(msg, "Incoming Anthropic Streaming Request: ") {
-			payload := strings.TrimPrefix(msg, "Incoming Anthropic Streaming Request: ")
+		if strings.HasPrefix(msg, "Streaming request details: ") {
+			payload := strings.TrimPrefix(msg, "Streaming request details: ")
 			var pj map[string]interface{}
 			if json.Unmarshal([]byte(payload), &pj) == nil && pj["stream"] == true {
 				found = true
@@ -559,7 +576,7 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 	}
 	if !found {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON Incoming Anthropic Streaming Request log")
+		t.Errorf("missing JSON Streaming request details log")
 	}
 }
 

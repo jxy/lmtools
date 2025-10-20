@@ -5,7 +5,6 @@ package proxy
 
 import (
 	"lmtools/internal/core"
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -158,7 +157,9 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 
 			data, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "data: %s\n\n", string(data))
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 			
 			// Use context-aware delay
 			timer := time.NewTimer(50 * time.Millisecond)
@@ -174,7 +175,9 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 		// Send completion
 		fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-e2e\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}]}\n\n")
 		fmt.Fprintf(w, "data: [DONE]\n\n")
-		w.(http.Flusher).Flush()
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 		return
 	}
 
@@ -281,7 +284,9 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 
 			jsonData, _ := json.Marshal(data)
 			fmt.Fprintf(w, "data: %s\n\n", string(jsonData))
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 			
 			// Use context-aware delay
 			timer := time.NewTimer(50 * time.Millisecond)
@@ -376,7 +381,9 @@ func (m *E2EMockProvider) handleArgoE2E(w http.ResponseWriter, r *http.Request, 
 		// Stream character by character
 		for _, char := range responseText {
 			fmt.Fprintf(w, "%c", char)
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 			
 			// Use context-aware delay
 			timer := time.NewTimer(20 * time.Millisecond)
@@ -539,7 +546,7 @@ func TestE2EStreamingResponses(t *testing.T) {
 	// Collect events
 	var events []string
 	var textChunks []string
-	scanner := NewSSEScanner(resp.Body)
+	scanner := NewTestSSEScanner(resp.Body)
 
 	for scanner.Scan() {
 		event := scanner.Event()
@@ -904,54 +911,6 @@ func countTokens(req OpenAIRequest) int {
 	return tokens
 }
 
-// SSEScanner helps parse Server-Sent Events
-type SSEScanner struct {
-	scanner      *bufio.Scanner
-	currentEvent string
-	currentData  string
-}
-
-func NewSSEScanner(r io.Reader) *SSEScanner {
-	return &SSEScanner{
-		scanner: bufio.NewScanner(r),
-	}
-}
-
-func (s *SSEScanner) Scan() bool {
-	s.currentEvent = ""
-	s.currentData = ""
-
-	for s.scanner.Scan() {
-		line := s.scanner.Text()
-
-		if line == "" {
-			// Empty line signals end of event
-			if s.currentEvent != "" || s.currentData != "" {
-				return true
-			}
-			continue
-		}
-
-		if strings.HasPrefix(line, "event: ") {
-			s.currentEvent = strings.TrimPrefix(line, "event: ")
-		} else if strings.HasPrefix(line, "data: ") {
-			s.currentData = strings.TrimPrefix(line, "data: ")
-			if s.currentData == "[DONE]" {
-				return false
-			}
-		}
-	}
-
-	return false
-}
-
-func (s *SSEScanner) Event() string {
-	return s.currentEvent
-}
-
-func (s *SSEScanner) Data() string {
-	return s.currentData
-}
 
 // TestProviderFlagPrecedence tests that the provider flag takes precedence over model name patterns
 func TestProviderFlagPrecedence(t *testing.T) {
@@ -995,11 +954,11 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			expectProvider: "openai",
 		},
 		{
-			name:           "Provider=argo but no credentials",
-			provider:       "argo",
-			model:          "gpt-4",
-			hasOpenAI:      true,
-			expectProvider: "openai", // Falls back to available provider
+			name:        "Provider=argo but no credentials",
+			provider:    "argo",
+			model:       "gpt-4",
+			hasOpenAI:   true,
+			expectError: true, // Should error when provider lacks credentials
 		},
 		{
 			name:        "No available provider",

@@ -101,3 +101,31 @@ func NewServerWithCleanup(config *Config) (http.Handler, func()) {
 func NewServerForTesting(config *Config) (http.Handler, func()) {
 	return NewServerWithOptions(config, WithDisableKeepAlives(true))
 }
+
+// NewServerForErrorTests creates a server with minimal retry delays for error propagation tests
+// This allows tests to verify retry behavior without waiting for production-level backoff delays
+func NewServerForErrorTests(config *Config) http.Handler {
+	mapper := NewModelMapper(config)
+
+	// Create a custom retry client with very short delays for testing
+	// We still want to test that retries happen, but not wait for production delays
+	testRetryClient := retry.NewClientWithOptions(
+		10*time.Second, // timeout
+		3,              // max 3 retries instead of 8 for faster tests
+		&retryLoggerAdapter{ctx: context.Background()},
+		extractRequestLogger,
+	)
+
+	server := &Server{
+		config:    config,
+		mapper:    mapper,
+		converter: NewConverter(mapper),
+		client:    testRetryClient,
+	}
+
+	// Wrap with middleware
+	handler := http.Handler(server)
+	handler = NewProxyMiddleware(handler, config)
+
+	return handler
+}

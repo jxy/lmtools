@@ -44,6 +44,81 @@ func (m *MockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (m *MockProvider) streamOpenAIResponse(w http.ResponseWriter, r *http.Request, configuredResp interface{}) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+
+	// Convert configured response to streaming format
+	if resp, ok := configuredResp.(*OpenAIResponse); ok {
+		// Stream the content from the configured response
+		for _, choice := range resp.Choices {
+			// Handle content based on its type
+			var content string
+			switch v := choice.Message.Content.(type) {
+			case string:
+				content = v
+			case *string:
+				if v != nil {
+					content = *v
+				}
+			default:
+				// Try to convert to string
+				content = fmt.Sprintf("%v", v)
+			}
+
+			if content != "" {
+				// Split content into words for streaming
+				words := strings.Fields(content)
+				for i, word := range words {
+					if i > 0 {
+						word = " " + word // Add space before all words except first
+					}
+					chunk := fmt.Sprintf(`data: {"id":"%s","choices":[{"delta":{"content":"%s"},"index":%d}]}`,
+						resp.ID, word, choice.Index)
+					fmt.Fprintf(w, "%s\n\n", chunk)
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+
+					// Small delay between chunks
+					timer := time.NewTimer(5 * time.Millisecond)
+					select {
+					case <-r.Context().Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+						// Continue
+					}
+				}
+			}
+
+			// Handle tool calls if present
+			for _, toolCall := range choice.Message.ToolCalls {
+				chunk := fmt.Sprintf(`data: {"id":"%s","choices":[{"delta":{"tool_calls":[{"id":"%s","type":"function","function":{"name":"%s","arguments":"%s"}}]},"index":%d}]}`,
+					resp.ID, toolCall.ID, toolCall.Function.Name, toolCall.Function.Arguments, choice.Index)
+				fmt.Fprintf(w, "%s\n\n", chunk)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+
+			// Send finish reason
+			chunk := fmt.Sprintf(`data: {"id":"%s","choices":[{"delta":{},"finish_reason":"%s","index":%d}]}`,
+				resp.ID, choice.FinishReason, choice.Index)
+			fmt.Fprintf(w, "%s\n\n", chunk)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}
+
+	// Send [DONE]
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body []byte) {
 	// Check authorization
 	auth := r.Header.Get("Authorization")
@@ -58,6 +133,26 @@ func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body
 		return
 	}
 
+	// Check for configured response
+	if configuredResp, ok := m.responses[r.URL.Path]; ok {
+		m.t.Logf("Using configured response for %s", r.URL.Path)
+
+		// Handle streaming if requested
+		if req.Stream {
+			// Stream the configured response
+			m.streamOpenAIResponse(w, r, configuredResp)
+			return
+		}
+
+		// Non-streaming: return configured response
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(configuredResp); err != nil {
+			m.t.Logf("Failed to encode OpenAI response: %v", err)
+		}
+		return
+	}
+
+	// Default behavior when no response is configured
 	// Handle streaming
 	if req.Stream {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -74,7 +169,9 @@ func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body
 
 		for _, chunk := range chunks {
 			fmt.Fprintf(w, "%s\n\n", chunk)
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 
 			// Use context-aware delay
 			timer := time.NewTimer(10 * time.Millisecond)
@@ -162,7 +259,9 @@ func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body
 		for _, chunk := range chunks {
 			data, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "data: %s\n\n", string(data))
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 
 			// Use context-aware delay
 			timer := time.NewTimer(10 * time.Millisecond)
@@ -218,7 +317,9 @@ func (m *MockProvider) handleArgo(w http.ResponseWriter, r *http.Request, body [
 		response := "Hello from mock Argo streaming!"
 		for _, char := range response {
 			fmt.Fprintf(w, "%c", char)
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 
 			// Use context-aware delay
 			timer := time.NewTimer(20 * time.Millisecond)

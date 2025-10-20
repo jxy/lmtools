@@ -175,13 +175,21 @@ func buildArgoChatRequestTyped(cfg RequestConfig, messages []TypedMessage, strea
 	var argoMessages []interface{}
 	switch provider {
 	case constants.ProviderAnthropic:
-		argoMessages = ToAnthropic(finalMessages)
+		// Use typed conversion with helper function
+		typedMessages := ToAnthropicTyped(finalMessages)
+		argoMessages = MarshalAnthropicMessagesForRequest(typedMessages)
 	case constants.ProviderOpenAI:
-		argoMessages = ToOpenAI(finalMessages)
+		// Use typed conversion with helper function
+		typedMessages := ToOpenAITyped(finalMessages)
+		argoMessages = MarshalOpenAIMessagesForRequest(typedMessages)
 	case constants.ProviderGoogle:
-		argoMessages = ToGoogleForArgo(finalMessages) // Use Argo variant that keeps system
+		// Use typed conversion with helper function
+		typedMessages := ToGoogleForArgoTyped(finalMessages)
+		argoMessages = MarshalGoogleMessagesForRequest(typedMessages)
 	default:
-		argoMessages = ToOpenAI(finalMessages) // Default to OpenAI format
+		// Default to OpenAI format with helper function
+		typedMessages := ToOpenAITyped(finalMessages)
+		argoMessages = MarshalOpenAIMessagesForRequest(typedMessages)
 	}
 
 	// Create request with appropriate format
@@ -398,48 +406,6 @@ func parseResponse(provider string, data []byte, isEmbed bool) (Response, error)
 	}
 }
 
-// convertAnthropicToolsToOpenAI converts Anthropic tool definitions to OpenAI format
-func convertAnthropicToolsToOpenAI(tools []ToolDefinition) []map[string]interface{} {
-	openAITools := make([]map[string]interface{}, 0, len(tools))
-	for _, tool := range tools {
-		openAITool := map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        tool.Name,
-				"description": tool.Description,
-				"parameters":  tool.InputSchema,
-			},
-		}
-		openAITools = append(openAITools, openAITool)
-	}
-	return openAITools
-}
-
-// convertAnthropicToolsToGoogle converts Anthropic tools to Google format
-func convertAnthropicToolsToGoogle(tools []ToolDefinition) []map[string]interface{} {
-	googleTools := make([]map[string]interface{}, 0, len(tools))
-	for _, tool := range tools {
-		// Convert schema to Google format with uppercase types
-		params := ConvertSchemaToGoogleFormat(tool.InputSchema)
-
-		googleTool := map[string]interface{}{
-			"name":        tool.Name,
-			"description": tool.Description,
-			"parameters":  params,
-		}
-
-		// Extract and add required field at top level if it exists
-		if schema, ok := tool.InputSchema.(map[string]interface{}); ok {
-			if required, exists := schema["required"]; exists {
-				googleTool["required"] = required
-			}
-		}
-
-		googleTools = append(googleTools, googleTool)
-	}
-	return googleTools
-}
-
 // ConvertedTools represents the result of converting tools for a specific provider
 type ConvertedTools struct {
 	Tools      interface{}
@@ -448,6 +414,7 @@ type ConvertedTools struct {
 
 // ConvertToolsForProvider converts tools to the appropriate format based on the model
 // Exported for use by proxy converter
+// Returns ConvertedTools with typed structures for each provider
 func ConvertToolsForProvider(model string, tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
 	if len(tools) == 0 {
 		return ConvertedTools{}
@@ -457,69 +424,75 @@ func ConvertToolsForProvider(model string, tools []ToolDefinition, toolChoice *T
 
 	switch provider {
 	case constants.ProviderOpenAI:
-		// OpenAI format with type/function wrapper
-		openAITools := convertAnthropicToolsToOpenAI(tools)
+		// Use typed OpenAI format
+		openAITools := ConvertToolsToOpenAITyped(tools)
 		// Convert tool choice
 		if toolChoice != nil {
 			if toolChoice.Type == "tool" && toolChoice.Name != "" {
+				// Use typed structure for specific function choice
 				return ConvertedTools{
 					Tools: openAITools,
-					ToolChoice: map[string]interface{}{
-						"type": "function",
-						"function": map[string]string{
-							"name": toolChoice.Name,
+					ToolChoice: OpenAIToolChoice{
+						Type: "function",
+						Function: &OpenAIToolChoiceFunction{
+							Name: toolChoice.Name,
 						},
 					},
 				}
 			}
-			return ConvertedTools{Tools: openAITools, ToolChoice: toolChoice.Type}
+			// For auto/none/required, return plain string (OpenAI API requirement)
+			return ConvertedTools{
+				Tools:      openAITools,
+				ToolChoice: toolChoice.Type, // String type like "auto", "none", etc.
+			}
 		}
+		// Default to string "auto" (OpenAI API expects plain string)
 		return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
 
 	case constants.ProviderGoogle:
-		// Google format with uppercase types
-		googleTools := convertAnthropicToolsToGoogle(tools)
+		// Use typed Google format
+		googleTools := ConvertToolsToGoogleTyped(tools)
 		return ConvertedTools{Tools: googleTools, ToolChoice: nil} // Google doesn't use tool_choice
 
 	case constants.ProviderAnthropic:
-		// Keep native Anthropic format
-		anthropicTools := make([]map[string]interface{}, 0, len(tools))
-		for _, tool := range tools {
-			anthropicTool := map[string]interface{}{
-				"name":         tool.Name,
-				"description":  tool.Description,
-				"input_schema": tool.InputSchema,
-			}
-			anthropicTools = append(anthropicTools, anthropicTool)
-		}
+		// Use typed Anthropic format
+		anthropicTools := ConvertToolsToAnthropicTyped(tools)
 		// Convert tool choice
 		if toolChoice != nil {
 			return ConvertedTools{
 				Tools: anthropicTools,
-				ToolChoice: map[string]interface{}{
-					"type": toolChoice.Type,
-					"name": toolChoice.Name,
+				ToolChoice: AnthropicToolChoice{
+					Type: toolChoice.Type,
+					Name: toolChoice.Name,
 				},
 			}
 		}
-		return ConvertedTools{Tools: anthropicTools, ToolChoice: map[string]string{"type": "auto"}}
+		return ConvertedTools{
+			Tools: anthropicTools,
+			ToolChoice: AnthropicToolChoice{
+				Type: "auto",
+			},
+		}
 
 	default:
-		// Default to OpenAI format
-		openAITools := convertAnthropicToolsToOpenAI(tools)
+		// Default to typed OpenAI format
+		openAITools := ConvertToolsToOpenAITyped(tools)
 		if toolChoice != nil {
 			if toolChoice.Type == "tool" && toolChoice.Name != "" {
 				return ConvertedTools{
 					Tools: openAITools,
-					ToolChoice: map[string]interface{}{
-						"type": "function",
-						"function": map[string]string{
-							"name": toolChoice.Name,
+					ToolChoice: OpenAIToolChoice{
+						Type: "function",
+						Function: &OpenAIToolChoiceFunction{
+							Name: toolChoice.Name,
 						},
 					},
 				}
 			}
-			return ConvertedTools{Tools: openAITools, ToolChoice: toolChoice.Type}
+			return ConvertedTools{
+				Tools:      openAITools,
+				ToolChoice: toolChoice.Type,
+			}
 		}
 		return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
 	}

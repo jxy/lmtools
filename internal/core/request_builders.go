@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/auth"
@@ -60,8 +61,9 @@ func buildProviderRequest(cfg RequestConfig, url string, body []byte, provider s
 
 // buildOpenAIToolAwareRequest builds an OpenAI-compatible request with tool support
 func buildOpenAIToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Convert messages to OpenAI format preserving tool interactions
-	openAIMessages := ToOpenAI(typedMessages)
+	// Convert messages to OpenAI format using typed conversion and helper
+	typedOpenAIMessages := ToOpenAITyped(typedMessages)
+	openAIMessages := MarshalOpenAIMessagesForRequest(typedOpenAIMessages)
 
 	// Build OpenAI request with tool support
 	reqMap := map[string]interface{}{
@@ -98,8 +100,9 @@ func buildOpenAIToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage
 
 // buildAnthropicToolAwareRequest builds an Anthropic-compatible request with tool support
 func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Convert messages to Anthropic format preserving tool interactions
-	anthropicMessages := ToAnthropic(typedMessages)
+	// Convert messages to Anthropic format using typed conversion and helper
+	typedAnthropicMessages := ToAnthropicTyped(typedMessages)
+	anthropicMessages := MarshalAnthropicMessagesForRequest(typedAnthropicMessages)
 
 	// Build Anthropic request with tool support
 	reqMap := map[string]interface{}{
@@ -140,9 +143,50 @@ func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMess
 }
 
 // buildGoogleToolAwareRequest builds a Google-compatible request with tool support
-func buildGoogleToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Convert messages to Google format
-	googleMessages := ToGoogle(typedMessages)
+func buildGoogleToolAwareRequest(ctx context.Context, cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	// Convert messages to Google format using typed conversion
+	typedGoogleMessages := ToGoogleTyped(typedMessages)
+
+	// Convert typed messages to []interface{} with proper parts structure
+	googleMessages := make([]interface{}, 0, len(typedGoogleMessages))
+	for _, msg := range typedGoogleMessages {
+		msgMap := map[string]interface{}{
+			"role": msg.Role,
+		}
+
+		// Convert parts to []interface{} - Google needs specific structure for parts
+		if len(msg.Parts) > 0 {
+			partMaps := make([]map[string]interface{}, 0, len(msg.Parts))
+			for _, part := range msg.Parts {
+				partMap := make(map[string]interface{})
+
+				// Add fields based on what's present
+				if part.Text != "" {
+					partMap["text"] = part.Text
+				}
+				if part.FunctionCall != nil {
+					partMap["functionCall"] = map[string]interface{}{
+						"name": part.FunctionCall.Name,
+						"args": part.FunctionCall.Args,
+					}
+				}
+				if part.FunctionResponse != nil {
+					partMap["functionResponse"] = map[string]interface{}{
+						"name": part.FunctionResponse.Name,
+						"response": map[string]interface{}{
+							"content": part.FunctionResponse.Response.Content,
+							"error":   part.FunctionResponse.Response.Error,
+						},
+					}
+				}
+
+				partMaps = append(partMaps, partMap)
+			}
+			msgMap["parts"] = partMaps
+		}
+
+		googleMessages = append(googleMessages, msgMap)
+	}
 
 	// Build Google request - note: Google has different structure
 	reqMap := map[string]interface{}{
@@ -159,23 +203,14 @@ func buildGoogleToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage
 		}
 	}
 
-	// Add tools if enabled
+	// Add tools if enabled using ConvertToolsForProvider
 	if len(toolDefs) > 0 {
-		var tools []map[string]interface{}
-		for _, def := range toolDefs {
-			// Convert schema to Google format
-			params := ConvertSchemaToGoogleFormat(def.InputSchema).(map[string]interface{})
-			tools = append(tools, map[string]interface{}{
-				"functionDeclarations": []map[string]interface{}{
-					{
-						"name":        def.Name,
-						"description": def.Description,
-						"parameters":  params,
-					},
-				},
-			})
+		// Use ConvertToolsForProvider to get properly formatted Google tools
+		converted := ConvertToolsForProvider(model, toolDefs, nil)
+		if converted.Tools != nil {
+			// converted.Tools contains []GoogleTool which already has the right structure
+			reqMap["tools"] = converted.Tools
 		}
-		reqMap["tools"] = tools
 
 		// Enable function calling
 		reqMap["toolConfig"] = map[string]interface{}{
@@ -232,7 +267,7 @@ func buildChatRequestFromTyped(cfg RequestConfig, typedMessages []TypedMessage, 
 		}
 		return buildAnthropicToolAwareRequest(cfg, msgs, model, sys, toolDefs, nil, stream)
 	case constants.ProviderGoogle:
-		return buildGoogleToolAwareRequest(cfg, typedMessages, model, toolDefs, nil, stream)
+		return buildGoogleToolAwareRequest(context.TODO(), cfg, typedMessages, model, toolDefs, nil, stream)
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
 	}

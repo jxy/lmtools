@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // TestLazyFileConcurrentCreation tests that concurrent log writes
@@ -44,9 +43,6 @@ func TestLazyFileConcurrentCreation(t *testing.T) {
 	}
 
 	wg.Wait()
-
-	// Give a small delay for any buffered writes
-	time.Sleep(10 * time.Millisecond)
 
 	// Verify exactly one log file was created
 	logFiles, err := filepath.Glob(filepath.Join(tempDir, "*.log"))

@@ -345,6 +345,18 @@ chmod 600 ~/.openai-key ~/.google-key  # Secure the files
 
 ## API Proxy Usage Examples
 
+### Supported Endpoints
+
+The proxy supports both Anthropic and OpenAI API formats:
+
+#### Anthropic-Compatible Endpoints
+- `POST /v1/messages` - Chat completions (Anthropic format)
+- `POST /v1/messages/count_tokens` - Token counting
+
+#### OpenAI-Compatible Endpoints (NEW)
+- `POST /v1/chat/completions` - Chat completions (OpenAI format)
+- `GET /v1/models` - List available models
+
 ### With Claude Code
 
 ```bash
@@ -356,6 +368,8 @@ claude
 ```
 
 ### Direct API Calls
+
+#### Anthropic Format
 
 ```bash
 # Basic chat completion
@@ -380,6 +394,53 @@ curl -X POST http://localhost:8082/v1/messages/count_tokens \
   }'
 ```
 
+#### OpenAI Format
+
+```bash
+# Basic chat completion (OpenAI format)
+curl -X POST http://localhost:8082/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [
+      {"role": "user", "content": "Hello, how are you?"}
+    ],
+    "max_tokens": 100
+  }'
+
+# With tools/functions
+curl -X POST http://localhost:8082/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [
+      {"role": "user", "content": "What is the weather in New York?"}
+    ],
+    "tools": [{
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get the weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "The city and state"
+            }
+          },
+          "required": ["location"]
+        }
+      }
+    }],
+    "max_tokens": 100
+  }'
+
+# List available models
+curl -X GET http://localhost:8082/v1/models
+```
+
 ### Testing the API Proxy
 
 A test script is available to verify the proxy is working correctly:
@@ -391,23 +452,39 @@ A test script is available to verify the proxy is working correctly:
 
 ## Model Mapping
 
-The proxy automatically maps Anthropic model names to appropriate providers:
+The proxy automatically maps model names to appropriate providers:
 
+### Anthropic Models
 | Anthropic Model | Mapped To | Provider |
 |----------------|-----------|----------|
-| *haiku* | `SMALL_MODEL` | Based on model/config |
-| *sonnet* | `BIG_MODEL` | Based on model/config |
+| *haiku* | `SMALL_MODEL` | Based on config |
+| *sonnet*, *opus* | `BIG_MODEL` | Based on config |
+
+### OpenAI Models
+| OpenAI Model | Behavior |
+|--------------|----------|
+| gpt-4, gpt-4-turbo, gpt-5 | Pass-through when provider=openai |
+| gpt-3.5-turbo, gpt-4-mini | Pass-through when provider=openai |
+| o1-preview, o1-mini | Pass-through when provider=openai |
+
+When using Argo provider, OpenAI model names are canonicalized:
+- `gpt-5` → `gpt5`
+- `gpt-4.1` → `gpt41`
+- `gpt-4o` → `gpt4o`
 | Other models | Direct passthrough | Auto-detected from provider model lists |
 
 ### Provider Selection Logic
 
-1. If model contains "haiku" → maps to `SMALL_MODEL`
-2. If model contains "sonnet" → maps to `BIG_MODEL`
-3. Otherwise, checks if model exists in known model lists
-4. Provider is determined by:
-   - Model's presence in provider-specific lists
-   - `PREFERRED_PROVIDER` setting
-   - Availability of API keys
+Provider selection is simple and explicit:
+- Requests are always routed to the provider set by the `-provider` flag (default: argo)
+- If the selected provider lacks credentials (API key or ProviderURL), the request fails with an error
+- No automatic fallback to other providers occurs
+
+Model name mapping:
+- Anthropic models (starting with "claude-"):
+  - Models containing "haiku" → map to configured `SMALL_MODEL`
+  - All other Claude models (opus, sonnet, etc.) → map to configured `BIG_MODEL`
+- All non-Anthropic model names → pass through unchanged to the provider
 
 ### Dynamic Model Defaults
 
@@ -494,11 +571,27 @@ The proxy is built with a modular architecture:
 
 ## API Proxy Streaming
 
-The proxy supports full Server-Sent Events (SSE) streaming:
-- Native streaming for OpenAI and Google providers
-- Simulated streaming for Argo (converts non-streaming responses)
+The proxy supports full Server-Sent Events (SSE) streaming for both Anthropic and OpenAI formats:
+
+### Anthropic Format (`/v1/messages`)
+- Native streaming for all providers
+- Automatic format conversion from OpenAI/Google/Argo to Anthropic SSE
+- Content blocks with text and tool use support
+- Ping keep-alive events to prevent timeouts
+
+### OpenAI Format (`/v1/chat/completions`)
+- Native pass-through for OpenAI provider with minimal overhead
+- Real-time conversion from Anthropic/Google/Argo streams
+- Delta-based streaming with proper tool call support
+- Automatic model name mapping and preservation
+- Compatible with OpenAI SDK and tools expecting OpenAI SSE format
+
+### Streaming Features
 - Automatic ping keep-alive events to prevent timeouts
 - Provider-specific response parsing and formatting
+- Graceful fallback to simulated streaming when native streaming unavailable
+- Tool call streaming with incremental argument updates
+- Token usage reporting when available from provider
 
 ## Thinking Field Support
 

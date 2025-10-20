@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"lmtools/internal/constants"
 	"strings"
 )
 
@@ -17,171 +16,20 @@ func NewModelMapper(config *Config) *ModelMapper {
 	}
 }
 
-// MapModel maps an incoming model name to the appropriate provider and model
-func (m *ModelMapper) MapModel(model string) (provider, mappedModel string) {
-	// Remove any existing provider prefix
-	cleanModel := m.cleanModelName(model)
-
-	// For Anthropic model names (claude-*), use configurable mapping
-	if strings.HasPrefix(strings.ToLower(cleanModel), "claude-") {
-		if strings.Contains(strings.ToLower(cleanModel), "haiku") {
-			return m.mapToSmallModel()
-		} else {
-			// All non-haiku Claude models map to Model
-			return m.mapToModel()
+// MapModel maps an incoming model name to the appropriate model for the configured provider.
+// For Anthropic models: haiku -> SmallModel, others -> Model
+// For all other models: pass through unchanged
+// Note: Provider is always taken from config, not returned here (KISS principle)
+func (m *ModelMapper) MapModel(model string) string {
+	// Map Anthropic models to big/small models
+	if strings.HasPrefix(strings.ToLower(model), "claude-") {
+		if strings.Contains(strings.ToLower(model), "haiku") {
+			// Haiku models map to SmallModel
+			return m.config.SmallModel
 		}
+		// All non-haiku Claude models (opus, sonnet, etc.) map to Model
+		return m.config.Model
 	}
-
-	// For all other models, use the provider flag to determine routing
-	// The provider flag takes precedence over model name patterns
-	return m.mapToProvider(cleanModel)
-}
-
-// cleanModelName removes provider prefixes from model names
-func (m *ModelMapper) cleanModelName(model string) string {
-	prefixes := []string{"anthropic/", "openai/", "google/", "argo/"}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(model, prefix) {
-			return strings.TrimPrefix(model, prefix)
-		}
-	}
+	// Pass through all other models unchanged
 	return model
-}
-
-// mapToSmallModel maps to the configured small model
-func (m *ModelMapper) mapToSmallModel() (provider, model string) {
-	smallModel := m.config.SmallModel
-
-	// Use preferred provider if credentials are available
-	switch m.config.Provider {
-	case constants.ProviderAnthropic:
-		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderAnthropic, smallModel
-		}
-	case constants.ProviderGoogle:
-		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderGoogle, smallModel
-		}
-	case constants.ProviderArgo:
-		if m.config.ArgoUser != "" {
-			return constants.ProviderArgo, smallModel
-		}
-	default: // "openai" or any other value defaults to OpenAI
-		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderOpenAI, smallModel
-		}
-	}
-
-	// Fallback to any available provider
-	if m.config.AnthropicAPIKey != "" {
-		return "anthropic", smallModel
-	}
-	if m.config.OpenAIAPIKey != "" {
-		return "openai", smallModel
-	}
-	if m.config.GoogleAPIKey != "" {
-		return "google", smallModel
-	}
-	if m.config.ArgoUser != "" {
-		return "argo", smallModel
-	}
-
-	// No credentials available
-	return "", ""
-}
-
-// mapToModel maps to the configured model
-func (m *ModelMapper) mapToModel() (provider, model string) {
-	model = m.config.Model
-
-	// Use preferred provider if credentials are available
-	switch m.config.Provider {
-	case constants.ProviderAnthropic:
-		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderAnthropic, model
-		}
-	case constants.ProviderGoogle:
-		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderGoogle, model
-		}
-	case constants.ProviderArgo:
-		if m.config.ArgoUser != "" {
-			return constants.ProviderArgo, model
-		}
-	default: // "openai" or any other value defaults to OpenAI
-		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderOpenAI, model
-		}
-	}
-
-	// Fallback to any available provider
-	if m.config.AnthropicAPIKey != "" {
-		return "anthropic", model
-	}
-	if m.config.OpenAIAPIKey != "" {
-		return "openai", model
-	}
-	if m.config.GoogleAPIKey != "" {
-		return "google", model
-	}
-	if m.config.ArgoUser != "" {
-		return "argo", model
-	}
-
-	// No credentials available
-	return "", ""
-}
-
-// mapToProvider maps a model to the configured provider
-func (m *ModelMapper) mapToProvider(model string) (provider, mappedModel string) {
-	// Use the configured provider if credentials are available
-	switch m.config.Provider {
-	case constants.ProviderAnthropic:
-		if m.config.AnthropicAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderAnthropic, model
-		}
-	case constants.ProviderGoogle:
-		if m.config.GoogleAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderGoogle, model
-		}
-	case constants.ProviderArgo:
-		if m.config.ArgoUser != "" {
-			return constants.ProviderArgo, model
-		}
-	default: // "openai" or any other value defaults to OpenAI
-		if m.config.OpenAIAPIKey != "" || m.config.ProviderURL != "" {
-			return constants.ProviderOpenAI, model
-		}
-	}
-
-	// Fallback to any available provider if preferred provider has no credentials
-	if m.config.AnthropicAPIKey != "" {
-		return "anthropic", model
-	}
-	if m.config.OpenAIAPIKey != "" {
-		return "openai", model
-	}
-	if m.config.GoogleAPIKey != "" {
-		return "google", model
-	}
-	if m.config.ArgoUser != "" {
-		return "argo", model
-	}
-
-	// No credentials available
-	return "", ""
-}
-
-// GetAPIKey returns the appropriate API key for a provider
-func (m *ModelMapper) GetAPIKey(provider string) string {
-	switch provider {
-	case constants.ProviderOpenAI:
-		return m.config.OpenAIAPIKey
-	case constants.ProviderGoogle:
-		return m.config.GoogleAPIKey
-	case constants.ProviderAnthropic:
-		return m.config.AnthropicAPIKey
-	default:
-		return ""
-	}
 }

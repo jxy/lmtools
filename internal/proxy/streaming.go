@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -498,7 +497,7 @@ func NewOpenAIStreamParser(handler *AnthropicStreamHandler) *OpenAIStreamParser 
 
 // Parse parses an OpenAI streaming response
 func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
-	scanner := bufio.NewScanner(reader)
+	scanner := NewSSEScanner(reader)
 
 	for scanner.Scan() {
 		line := scanner.Text()

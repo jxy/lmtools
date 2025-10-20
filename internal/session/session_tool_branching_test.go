@@ -372,7 +372,15 @@ func TestSessionRequestJSONWithTools(t *testing.T) {
 		}
 
 		// Convert to provider format and verify JSON structure
-		anthropicMessages := core.ToAnthropic(typedMessages)
+		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
+		anthropicMessages := make([]interface{}, 0, len(typedAnthMessages))
+		for _, msg := range typedAnthMessages {
+			msgMap := map[string]interface{}{
+				"role":    msg.Role,
+				"content": msg.Content,
+			}
+			anthropicMessages = append(anthropicMessages, msgMap)
+		}
 		anthropicJSON, err := json.MarshalIndent(anthropicMessages, "", "  ")
 		if err != nil {
 			t.Fatalf("Failed to marshal Anthropic messages: %v", err)

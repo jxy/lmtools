@@ -106,6 +106,12 @@ type AnthropicContentBlock struct {
 	// For thinking blocks (Claude 3 Opus 4.1+)
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
+	// For image blocks
+	Source map[string]interface{} `json:"source,omitempty"`
+	// For audio blocks (OpenAI input_audio)
+	InputAudio map[string]interface{} `json:"input_audio,omitempty"`
+	// For file blocks
+	File map[string]interface{} `json:"file,omitempty"`
 	// For tool use
 	ID    string                 `json:"id,omitempty"`
 	Name  string                 `json:"name,omitempty"`
@@ -338,6 +344,7 @@ type OpenAIStreamChunk struct {
 	Created int64               `json:"created"`
 	Model   string              `json:"model"`
 	Choices []OpenAIStreamDelta `json:"choices"`
+	Usage   *OpenAIUsage        `json:"usage,omitempty"`
 }
 
 // OpenAIStreamDelta represents a delta in streaming
@@ -349,9 +356,23 @@ type OpenAIStreamDelta struct {
 
 // OpenAIDelta represents the delta content
 type OpenAIDelta struct {
-	Role      *core.Role `json:"role,omitempty"`
-	Content   *string    `json:"content,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role      *core.Role      `json:"role,omitempty"`
+	Content   *string         `json:"content,omitempty"`
+	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// ToolCallDelta represents a tool call delta in streaming
+type ToolCallDelta struct {
+	Index    int                `json:"index"`
+	ID       string             `json:"id,omitempty"`
+	Type     string             `json:"type,omitempty"`
+	Function *FunctionCallDelta `json:"function,omitempty"`
+}
+
+// FunctionCallDelta represents a function call delta
+type FunctionCallDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 // Google AI API Models

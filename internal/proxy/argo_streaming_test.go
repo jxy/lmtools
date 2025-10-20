@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +22,7 @@ type SSEEvent struct {
 // parseSSEEvents parses raw SSE output into structured events
 func parseSSEEvents(output string) []SSEEvent {
 	var events []SSEEvent
-	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner := NewSSEScanner(strings.NewReader(output))
 
 	var currentEvent SSEEvent
 	for scanner.Scan() {
@@ -104,8 +103,9 @@ func TestStreamFromArgoEventSequence(t *testing.T) {
 
 			for _, chunk := range chunks {
 				fmt.Fprint(w, chunk)
-				w.(http.Flusher).Flush()
-				time.Sleep(5 * time.Millisecond)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
 			}
 			return
 		}

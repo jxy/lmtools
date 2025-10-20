@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Helper functions to reduce duplication in stream handlers
@@ -268,7 +268,7 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 // parseAnthropicStream parses Anthropic's SSE format
 func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHandler) error {
 	log := logger.From(handler.ctx)
-	scanner := bufio.NewScanner(body)
+	scanner := NewSSEScanner(body)
 	var currentEvent string
 
 	for scanner.Scan() {
@@ -612,4 +612,340 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 
 	// Send [DONE] marker to properly close the stream
 	return handler.SendDone()
+}
+
+// streamOpenAIFromAnthropic handles streaming from Anthropic API and converts to OpenAI format
+func (s *Server) streamOpenAIFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
+	// Enable streaming
+	anthReq.Stream = true
+
+	// Marshal request
+	reqBody, err := json.Marshal(anthReq)
+	if err != nil {
+		return errors.WrapError("marshal Anthropic request", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", s.config.AnthropicURL+"/v1/messages", bytes.NewReader(reqBody))
+	if err != nil {
+		return errors.WrapError("create Anthropic request", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	if key := s.config.AnthropicAPIKey; key != "" {
+		req.Header.Set("x-api-key", key)
+	}
+
+	// Send request
+	resp, err := s.client.Do(ctx, req, "anthropic")
+	if err != nil {
+		return errors.WrapError("send Anthropic request", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		s.logErrorResponse(ctx, "anthropic", resp.StatusCode, body)
+		return NewResponseError(resp.StatusCode, string(body))
+	}
+
+	// Create converter
+	converter := NewOpenAIStreamConverter(writer, ctx)
+
+	// Parse Anthropic SSE stream
+	scanner := NewSSEScanner(resp.Body)
+	var currentEvent string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Handle event lines
+		if strings.HasPrefix(line, "event: ") {
+			currentEvent = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		// Handle data lines
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+
+			// Convert to OpenAI format
+			if err := converter.HandleAnthropicEvent(currentEvent, json.RawMessage(data)); err != nil {
+				logger.From(ctx).Errorf("Failed to handle Anthropic event: %v", err)
+				return err
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return errors.WrapError("read Anthropic stream", err)
+	}
+
+	return nil
+}
+
+// streamOpenAIFromGoogle handles streaming from Google AI API and converts to OpenAI format
+func (s *Server) streamOpenAIFromGoogle(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
+	// Convert to Google format
+	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
+	if err != nil {
+		return errors.WrapError("convert to Google format", err)
+	}
+
+	// Marshal request
+	reqBody, err := json.Marshal(googleReq)
+	if err != nil {
+		return errors.WrapError("marshal Google request", err)
+	}
+
+	// Construct streaming URL with model
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent", s.config.GoogleURL, anthReq.Model)
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		return errors.WrapError("create Google request", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json")
+
+	// Apply API key
+	if key := s.config.GoogleAPIKey; key != "" {
+		if err := auth.ApplyGoogleAPIKey(req, key); err != nil {
+			return errors.WrapError("apply Google API key", err)
+		}
+	}
+
+	// Send request
+	resp, err := s.client.Do(ctx, req, "google")
+	if err != nil {
+		return errors.WrapError("send Google request", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		s.logErrorResponse(ctx, "google", resp.StatusCode, body)
+		return NewResponseError(resp.StatusCode, string(body))
+	}
+
+	// Create converter
+	converter := NewOpenAIStreamConverter(writer, ctx)
+
+	// Send initial role
+	role := "assistant"
+	if err := writer.WriteDelta("", &role, nil); err != nil {
+		return err
+	}
+
+	// Parse Google stream
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var chunk map[string]interface{}
+		if err := decoder.Decode(&chunk); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		// Convert to OpenAI format
+		if err := converter.HandleGoogleChunk(chunk); err != nil {
+			logger.From(ctx).Errorf("Failed to handle Google chunk: %v", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+// streamOpenAIFromArgo handles streaming from Argo API and converts to OpenAI format
+func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
+	log := logger.From(ctx)
+
+	// Check if tools are present
+	hasTools := len(anthReq.Tools) > 0
+
+	if hasTools {
+		// Argo doesn't support streaming with tools, simulate it
+		log.Infof("Tools present - using simulated streaming for OpenAI format")
+		return s.simulateOpenAIStreamFromArgo(ctx, anthReq, writer)
+	}
+
+	// No tools - use real streaming endpoint
+	log.Infof("No tools - using real Argo streaming endpoint")
+
+	// Get streaming response from Argo
+	streamBody, err := s.forwardToArgoStream(ctx, anthReq)
+	if err != nil {
+		return err
+	}
+	defer streamBody.Close()
+
+	// Create converter
+	converter := NewOpenAIStreamConverter(writer, ctx)
+
+	// Send initial role
+	role := "assistant"
+	if err := writer.WriteDelta("", &role, nil); err != nil {
+		return err
+	}
+
+	// Stream the plain text response with UTF-8 safety
+	buffer := make([]byte, 1024)
+	utf8Rest := make([]byte, 0, 4) // Buffer for incomplete UTF-8 sequences
+
+	for {
+		n, err := streamBody.Read(buffer)
+		if n > 0 {
+			// Combine any leftover bytes with new data
+			data := append(utf8Rest, buffer[:n]...)
+
+			// Find the last valid UTF-8 boundary
+			lastValid := len(data)
+			for i := len(data) - 1; i >= 0 && i >= len(data)-4; i-- {
+				if utf8.RuneStart(data[i]) {
+					// Check if this starts a valid complete rune
+					if r, size := utf8.DecodeRune(data[i:]); r != utf8.RuneError || size == len(data)-i {
+						lastValid = i + size
+						break
+					}
+					// This starts an incomplete rune
+					lastValid = i
+					break
+				}
+			}
+
+			// Send the complete UTF-8 portion
+			if lastValid > 0 {
+				text := string(data[:lastValid])
+				if err := converter.HandleArgoText(text); err != nil {
+					logger.From(ctx).Errorf("Failed to handle Argo text: %v", err)
+					return err
+				}
+			}
+
+			// Keep any incomplete sequence for next iteration
+			if lastValid < len(data) {
+				utf8Rest = append(utf8Rest[:0], data[lastValid:]...)
+			} else {
+				utf8Rest = utf8Rest[:0]
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				// Send any remaining bytes if they form valid UTF-8
+				if len(utf8Rest) > 0 && utf8.Valid(utf8Rest) {
+					if err := converter.HandleArgoText(string(utf8Rest)); err != nil {
+						logger.From(ctx).Errorf("Failed to handle final Argo text: %v", err)
+					}
+				}
+				break
+			}
+			return err
+		}
+	}
+
+	// Complete the stream
+	return converter.Complete("stop")
+}
+
+// simulateOpenAIStreamFromArgo simulates OpenAI streaming when Argo has tools
+func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
+	log := logger.From(ctx)
+
+	// Get non-streaming response from Argo
+	argoResp, err := s.forwardToArgo(ctx, anthReq)
+	if err != nil {
+		return err
+	}
+
+	// Convert to Anthropic format
+	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+
+	// Log tool calls from response if present
+	for _, block := range anthResp.Content {
+		if block.Type == "tool_use" {
+			if inputJSON, err := json.Marshal(block.Input); err == nil {
+				log.Debugf("Tool call from response: %s: %s", block.Name, string(inputJSON))
+			}
+		}
+	}
+
+	// Send initial role
+	role := "assistant"
+	if err := writer.WriteDelta("", &role, nil); err != nil {
+		return err
+	}
+
+	// Stream each content block
+	for i, block := range anthResp.Content {
+		switch block.Type {
+		case "text":
+			// Use UTF-8 aware chunking to prevent character splitting
+			chunks := splitTextForStreaming(ctx, block.Text, 50)
+			for _, chunk := range chunks {
+				if err := writer.WriteDelta(chunk, nil, nil); err != nil {
+					return err
+				}
+			}
+
+		case "tool_use":
+			// Send tool call
+			toolCall := &ToolCallDelta{
+				Index: i,
+				ID:    block.ID,
+				Type:  "function",
+				Function: &FunctionCallDelta{
+					Name: block.Name,
+				},
+			}
+
+			// Send initial tool call with name
+			if err := writer.WriteToolCallDelta(i, toolCall, nil); err != nil {
+				return err
+			}
+
+			// Send arguments
+			args, _ := json.Marshal(block.Input)
+			argsCall := &ToolCallDelta{
+				Index: i,
+				Function: &FunctionCallDelta{
+					Arguments: string(args),
+				},
+			}
+			if err := writer.WriteToolCallDelta(i, argsCall, nil); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Send usage if available
+	if anthResp.Usage != nil {
+		usage := &OpenAIUsage{
+			PromptTokens:     anthResp.Usage.InputTokens,
+			CompletionTokens: anthResp.Usage.OutputTokens,
+			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
+		}
+		if err := writer.WriteUsage(usage); err != nil {
+			return err
+		}
+	}
+
+	// Map stop reason to finish reason
+	finishReason := MapStopReasonToOpenAIFinishReason(anthResp.StopReason)
+
+	// Send finish reason
+	if err := writer.WriteDelta("", nil, &finishReason); err != nil {
+		return err
+	}
+
+	// Send [DONE]
+	return writer.WriteDone()
 }

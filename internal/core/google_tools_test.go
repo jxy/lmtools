@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ func TestBuildGoogleToolAwareRequest(t *testing.T) {
 	toolDefs := GetBuiltinUniversalCommandTool()
 
 	// Build request with tools
-	req, body, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-1.5-pro", toolDefs, nil, false)
+	req, body, err := buildGoogleToolAwareRequest(context.Background(), cfg, messages, "gemini-1.5-pro", toolDefs, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build Google request: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestGoogleToolExecutionFlow(t *testing.T) {
 	toolDefs := GetBuiltinUniversalCommandTool()
 
 	// Build request
-	_, body, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-1.5-pro", toolDefs, nil, false)
+	_, body, err := buildGoogleToolAwareRequest(context.Background(), cfg, messages, "gemini-1.5-pro", toolDefs, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestGoogleToolExecutionFlow(t *testing.T) {
 	// 4. Build follow-up request with tool result
 	messagesWithTool := append(messages, modelResponse, toolResult)
 
-	_, body2, err := buildGoogleToolAwareRequest(cfg, messagesWithTool, "gemini-1.5-pro", toolDefs, nil, false)
+	_, body2, err := buildGoogleToolAwareRequest(context.Background(), cfg, messagesWithTool, "gemini-1.5-pro", toolDefs, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build follow-up request: %v", err)
 	}

@@ -7,9 +7,13 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"strings"
+	"time"
 )
 
 // ConvertAnthropicToOpenAI converts an Anthropic request to OpenAI format
+// ARCHITECTURAL NOTE: This conversion goes through TypedRequest as the
+// canonical intermediate representation to ensure consistency.
+// Flow: Anthropic -> TypedRequest -> OpenAI
 func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *AnthropicRequest) (*OpenAIRequest, error) {
 	// Log omitted fields at DEBUG level
 	if req.TopK != nil {
@@ -150,6 +154,15 @@ func (c *Converter) convertAnthropicMessageToOpenAI(ctx context.Context, msg Ant
 				if input, ok := blockMap["input"].(map[string]interface{}); ok {
 					block.Input = input
 				}
+				if source, ok := blockMap["source"].(map[string]interface{}); ok {
+					block.Source = source
+				}
+				if inputAudio, ok := blockMap["input_audio"].(map[string]interface{}); ok {
+					block.InputAudio = inputAudio
+				}
+				if file, ok := blockMap["file"].(map[string]interface{}); ok {
+					block.File = file
+				}
 				if toolUseID, ok := blockMap["tool_use_id"].(string); ok {
 					block.ToolUseID = toolUseID
 				}
@@ -174,40 +187,10 @@ func (c *Converter) convertAnthropicMessageToOpenAI(ctx context.Context, msg Ant
 func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role string, blocks []AnthropicContentBlock) (OpenAIMessage, error) {
 	msg := OpenAIMessage{Role: core.Role(role)}
 
-	// Check if this is a tool call response
-	var hasToolCalls bool
-	var toolCalls []ToolCall
-	textContent := ""
-
+	// First, handle special cases that don't go through the unified converter
 	for _, block := range blocks {
-		switch block.Type {
-		case "text":
-			textContent += block.Text
-		case "thinking":
-			// OpenAI doesn't support thinking blocks, so we drop them and log at DEBUG level
-			droppedBlock := map[string]interface{}{
-				"type":     "thinking",
-				"thinking": block.Thinking,
-			}
-			logger.From(ctx).Debugf("Dropping thinking content block (not supported by OpenAI): %+v", droppedBlock)
-		case "tool_use":
-			hasToolCalls = true
-			// Convert tool input to JSON string
-			inputJSON, err := json.Marshal(block.Input)
-			if err != nil {
-				return msg, fmt.Errorf("failed to marshal tool input: %w", err)
-			}
-			toolCall := ToolCall{
-				ID:   block.ID,
-				Type: "function",
-				Function: FunctionCall{
-					Name:      block.Name,
-					Arguments: string(inputJSON),
-				},
-			}
-			toolCalls = append(toolCalls, toolCall)
-		case "tool_result":
-			// This is a tool response message
+		if block.Type == "tool_result" {
+			// Tool result becomes a separate message with "tool" role
 			msg.Role = core.RoleTool
 			msg.ToolCallID = block.ToolUseID
 			// Extract content from json.RawMessage
@@ -225,15 +208,46 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 		}
 	}
 
-	// If we have tool calls, add them to the message
-	if hasToolCalls {
-		msg.ToolCalls = toolCalls
-		// OpenAI expects null content when tool_calls are present
-		msg.Content = nil
-	} else {
-		msg.Content = textContent
+	// Log thinking blocks at DEBUG level before filtering
+	for _, block := range blocks {
+		if block.Type == "thinking" {
+			droppedBlock := map[string]interface{}{
+				"type":     "thinking",
+				"thinking": block.Thinking,
+			}
+			logger.From(ctx).Debugf("Dropping thinking content block (not supported by OpenAI): %+v", droppedBlock)
+		}
 	}
 
+	// Convert AnthropicContentBlock to core.Block using centralized converter
+	coreBlocks := AnthropicBlocksToCore(blocks)
+
+	// Use the unified converter
+	content, typedToolCalls := core.ConvertBlocksToOpenAIContent(coreBlocks)
+
+	// Convert typed tool calls to ToolCall structs
+	if len(typedToolCalls) > 0 {
+		msg.ToolCalls = make([]ToolCall, len(typedToolCalls))
+		for i, tc := range typedToolCalls {
+			msg.ToolCalls[i] = ToolCall{
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: FunctionCall{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			}
+		}
+		// OpenAI expects null content when tool_calls are present
+		// unless it's multimodal content (array format)
+		if _, isArray := content.([]interface{}); !isArray {
+			msg.Content = nil
+		} else {
+			msg.Content = content
+		}
+	} else {
+		msg.Content = content
+	}
 	return msg, nil
 }
 
@@ -317,4 +331,152 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 	}
 
 	return anthResp
+}
+
+// ConvertOpenAIRequestToAnthropic converts an OpenAI request to Anthropic format
+// ARCHITECTURAL NOTE: This conversion ALWAYS goes through TypedRequest as the
+// canonical intermediate representation. This ensures consistency and maintains
+// a single source of truth for message handling logic.
+// Flow: OpenAI -> TypedRequest -> Anthropic
+func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *OpenAIRequest) (*AnthropicRequest, error) {
+	// Use the typed conversion path as the single source of truth
+	typed := OpenAIRequestToTyped(req)
+
+	// Convert typed to Anthropic format
+	anthReq := &AnthropicRequest{
+		Model:         req.Model, // Use the original model from the request
+		Stream:        typed.Stream,
+		StopSequences: typed.Stop,
+		Temperature:   typed.Temperature,
+		TopP:          typed.TopP,
+	}
+
+	// Set max tokens if provided
+	if typed.MaxTokens != nil {
+		anthReq.MaxTokens = *typed.MaxTokens
+	}
+
+	// Set system message if present
+	if typed.System != "" {
+		systemJSON, _ := json.Marshal(typed.System)
+		anthReq.System = json.RawMessage(systemJSON)
+	}
+
+	// Convert messages using core.ToAnthropicTyped
+	typedAnthMessages := core.ToAnthropicTyped(typed.Messages)
+	messages := make([]AnthropicMessage, 0, len(typedAnthMessages))
+	for _, msg := range typedAnthMessages {
+		// Convert core.AnthropicMessage to proxy.AnthropicMessage
+		anthMsg := AnthropicMessage{
+			Role: core.Role(msg.Role),
+		}
+
+		// Handle content conversion
+		if msg.Content != nil {
+			contentJSON, err := json.Marshal(msg.Content)
+			if err != nil {
+				// Log error but continue
+				logger.From(ctx).Warnf("Failed to marshal content: %v", err)
+				anthMsg.Content = json.RawMessage(`""`)
+			} else {
+				anthMsg.Content = json.RawMessage(contentJSON)
+			}
+		} else {
+			// Empty content
+			anthMsg.Content = json.RawMessage(`""`)
+		}
+
+		messages = append(messages, anthMsg)
+	}
+	anthReq.Messages = messages
+
+	// Convert tools
+	if len(typed.Tools) > 0 {
+		tools := make([]AnthropicTool, len(typed.Tools))
+		for i, tool := range typed.Tools {
+			tools[i] = AnthropicTool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: tool.InputSchema,
+			}
+		}
+		anthReq.Tools = tools
+	}
+
+	// Convert tool choice
+	if typed.ToolChoice != nil {
+		anthReq.ToolChoice = &AnthropicToolChoice{
+			Type: typed.ToolChoice.Type,
+			Name: typed.ToolChoice.Name,
+		}
+	}
+
+	return anthReq, nil
+}
+
+// ConvertAnthropicResponseToOpenAI converts an Anthropic response to OpenAI format
+func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, originalModel string) *OpenAIResponse {
+	// Generate ID if missing
+	responseID := resp.ID
+	if responseID == "" {
+		responseID = generateUUID("chatcmpl-")
+	} else if !strings.HasPrefix(responseID, "chatcmpl-") {
+		// If we have an ID but it's not in OpenAI format, prepend the prefix
+		responseID = "chatcmpl-" + responseID
+	}
+
+	// Convert Anthropic response to OpenAI response format
+	openAIResp := &OpenAIResponse{
+		ID:      responseID,
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   originalModel,
+	}
+
+	// Convert usage if present
+	if resp.Usage != nil {
+		openAIResp.Usage = AnthropicUsageToOpenAI(resp.Usage)
+	}
+
+	// Convert Anthropic blocks to core.Blocks using centralized converter
+	coreBlocks := AnthropicBlocksToCore(resp.Content)
+
+	// Use unified converter to get OpenAI content and tool calls
+	content, toolCallMaps := core.ConvertBlocksToOpenAIContentMap(coreBlocks)
+
+	// Build the message
+	message := OpenAIMessage{
+		Role:    core.RoleAssistant,
+		Content: content,
+	}
+
+	// Convert tool call maps to ToolCall structs
+	if len(toolCallMaps) > 0 {
+		message.ToolCalls = make([]ToolCall, len(toolCallMaps))
+		for i, tcMap := range toolCallMaps {
+			fn := tcMap["function"].(map[string]interface{})
+			message.ToolCalls[i] = ToolCall{
+				ID:   tcMap["id"].(string),
+				Type: tcMap["type"].(string),
+				Function: FunctionCall{
+					Name:      fn["name"].(string),
+					Arguments: fn["arguments"].(string),
+				},
+			}
+		}
+	}
+
+	// Map stop reason to finish reason
+	finishReason := MapStopReasonToOpenAIFinishReason(resp.StopReason)
+
+	// Add single choice
+	openAIResp.Choices = []OpenAIChoice{
+		{
+			Index:        0,
+			Message:      message,
+			FinishReason: finishReason,
+		},
+	}
+
+	return openAIResp
 }

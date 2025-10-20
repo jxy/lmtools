@@ -2,83 +2,85 @@ package proxy
 
 import (
 	"encoding/json"
-	"fmt"
+	"net/http"
 )
 
-// Error types
+// Error type constants - used for both OpenAI and Anthropic error responses
 const (
-	ErrTypeValidation  = "invalid_request_error"
-	ErrTypeAuth        = "authentication_error"
-	ErrTypePermission  = "permission_error"
-	ErrTypeNotFound    = "not_found_error"
-	ErrTypeRate        = "rate_limit_error"
-	ErrTypeServer      = "api_error"
-	ErrTypeOverload    = "overloaded_error"
-	ErrTypePayloadSize = "request_too_large"
+	ErrTypeInvalidRequest  = "invalid_request_error"
+	ErrTypeAuthentication  = "authentication_error"
+	ErrTypePermission      = "permission_error"
+	ErrTypeNotFound        = "not_found_error"
+	ErrTypeRateLimit       = "rate_limit_error"
+	ErrTypeServer          = "api_error"
+	ErrTypeOverloaded      = "overloaded_error"
+	ErrTypePayloadTooLarge = "request_too_large"
 )
 
-// APIError represents an API error with additional context
-type APIError struct {
-	Type    string                 `json:"type"`
-	Message string                 `json:"message"`
-	Details map[string]interface{} `json:"details,omitempty"`
-	err     error
+// OpenAIError represents an error response in OpenAI format
+type OpenAIError struct {
+	Error OpenAIErrorDetail `json:"error"`
 }
 
-// NewAPIError creates a new API error
-func NewAPIError(errType, context, message string, err error) *APIError {
-	fullMessage := message
-	if context != "" {
-		fullMessage = fmt.Sprintf("[%s] %s", context, message)
-	}
-
-	apiErr := &APIError{
-		Type:    errType,
-		Message: fullMessage,
-		err:     err,
-	}
-
-	if err != nil {
-		apiErr = apiErr.WithDetails("error", err.Error())
-	}
-
-	return apiErr
+// OpenAIErrorDetail contains the error details
+type OpenAIErrorDetail struct {
+	Message string  `json:"message"`
+	Type    string  `json:"type"`
+	Param   *string `json:"param,omitempty"`
+	Code    string  `json:"code,omitempty"`
 }
 
-// WithDetails adds additional details to the error
-func (e *APIError) WithDetails(key string, value interface{}) *APIError {
-	if e.Details == nil {
-		e.Details = make(map[string]interface{})
-	}
-	e.Details[key] = value
-	return e
+// AnthropicError represents an error response in Anthropic format
+type AnthropicError struct {
+	Error AnthropicErrorDetail `json:"error"`
 }
 
-// Error implements the error interface
-func (e *APIError) Error() string {
-	if e.err != nil {
-		return fmt.Sprintf("%s: %s", e.Message, e.err.Error())
-	}
-	return e.Message
+// AnthropicErrorDetail contains the error details for Anthropic format
+type AnthropicErrorDetail struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
 }
 
-// MarshalJSON implements json.Marshaler
-func (e *APIError) MarshalJSON() ([]byte, error) {
-	// Create the error response in Anthropic format
-	errResp := map[string]interface{}{
-		"error": map[string]interface{}{
-			"type":    e.Type,
-			"message": e.Message,
+// ErrorPayload is an interface for error payloads
+type ErrorPayload interface {
+	// Marker interface for type safety
+	isErrorPayload()
+}
+
+// Implement the marker interface
+func (OpenAIError) isErrorPayload()    {}
+func (AnthropicError) isErrorPayload() {}
+
+// sendError is a unified function to send JSON error responses
+// It accepts any ErrorPayload and writes it as JSON
+func sendError(w http.ResponseWriter, status int, payload ErrorPayload) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		// If we can't encode the error, fall back to plain text
+		http.Error(w, "Failed to encode error response", status)
+	}
+}
+
+// sendOpenAIError sends an error response in OpenAI format
+func (s *Server) sendOpenAIError(w http.ResponseWriter, errType, message, code string, status int) {
+	errorResponse := OpenAIError{
+		Error: OpenAIErrorDetail{
+			Message: message,
+			Type:    errType,
+			Code:    code,
 		},
 	}
+	sendError(w, status, errorResponse)
+}
 
-	// Add details if present
-	if len(e.Details) > 0 {
-		errorObj := errResp["error"].(map[string]interface{})
-		for k, v := range e.Details {
-			errorObj[k] = v
-		}
+// sendAnthropicError sends an error response in Anthropic format
+func (s *Server) sendAnthropicError(w http.ResponseWriter, errType, message string, status int) {
+	errorResponse := AnthropicError{
+		Error: AnthropicErrorDetail{
+			Type:    errType,
+			Message: message,
+		},
 	}
-
-	return json.Marshal(errResp)
+	sendError(w, status, errorResponse)
 }

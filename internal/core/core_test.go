@@ -538,7 +538,6 @@ func TestStreamingFallbackAccumulation(t *testing.T) {
 		for _, b := range []byte(expectedContent) {
 			_, _ = w.Write([]byte{b})
 			w.(http.Flusher).Flush()
-			time.Sleep(10 * time.Millisecond)
 		}
 	}))
 	defer ts.Close()

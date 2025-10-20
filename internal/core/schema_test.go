@@ -321,16 +321,19 @@ func TestConvertToolsForArgoModelEdgeCases(t *testing.T) {
 			tools:     []ToolDefinition{basicTool, complexTool},
 			expectNil: false,
 			validate: func(t *testing.T, result interface{}) {
-				tools, ok := result.([]map[string]interface{})
+				tools, ok := result.([]OpenAITool)
 				if !ok {
-					t.Fatal("Expected []map[string]interface{} for OpenAI tools")
+					t.Fatal("Expected []OpenAITool for OpenAI tools")
 				}
 				if len(tools) != 2 {
 					t.Errorf("Expected 2 tools, got %d", len(tools))
 				}
 				// Check that tools have the OpenAI format with type/function wrapper
-				if tools[0]["type"] != "function" {
+				if tools[0].Type != "function" {
 					t.Error("Expected OpenAI tool to have type 'function'")
+				}
+				if tools[0].Function.Name != "get_weather" {
+					t.Errorf("Expected first tool name 'get_weather', got %v", tools[0].Function.Name)
 				}
 			},
 		},
@@ -340,16 +343,19 @@ func TestConvertToolsForArgoModelEdgeCases(t *testing.T) {
 			tools:     []ToolDefinition{basicTool},
 			expectNil: false,
 			validate: func(t *testing.T, result interface{}) {
-				tools, ok := result.([]map[string]interface{})
+				tools, ok := result.([]AnthropicTool)
 				if !ok {
-					t.Fatal("Expected []map[string]interface{} for Anthropic tools")
+					t.Fatal("Expected []AnthropicTool for Anthropic tools")
 				}
 				if len(tools) != 1 {
 					t.Errorf("Expected 1 tool, got %d", len(tools))
 				}
 				// Check that tools have the Anthropic format
-				if tools[0]["name"] == nil || tools[0]["description"] == nil || tools[0]["input_schema"] == nil {
-					t.Error("Expected Anthropic tool to have name, description, and input_schema fields")
+				if tools[0].Name != "get_weather" {
+					t.Errorf("Expected tool name 'get_weather', got %v", tools[0].Name)
+				}
+				if tools[0].Description == "" || tools[0].InputSchema == nil {
+					t.Error("Expected Anthropic tool to have description and input_schema fields")
 				}
 			},
 		},
@@ -359,21 +365,27 @@ func TestConvertToolsForArgoModelEdgeCases(t *testing.T) {
 			tools:     []ToolDefinition{basicTool, complexTool},
 			expectNil: false,
 			validate: func(t *testing.T, result interface{}) {
-				googleTools, ok := result.([]map[string]interface{})
+				googleTools, ok := result.([]GoogleTool)
 				if !ok {
-					t.Fatal("Expected []map[string]interface{} for Google tools")
+					t.Fatal("Expected []GoogleTool for Google tools")
 				}
-				if len(googleTools) != 2 {
-					t.Errorf("Expected 2 tools, got %d", len(googleTools))
+				if len(googleTools) != 1 {
+					t.Errorf("Expected 1 GoogleTool container, got %d", len(googleTools))
+				}
+
+				// Check function declarations
+				if len(googleTools[0].FunctionDeclarations) != 2 {
+					t.Errorf("Expected 2 function declarations, got %d", len(googleTools[0].FunctionDeclarations))
 				}
 
 				// Check first function
-				if googleTools[0]["name"] != "get_weather" {
-					t.Errorf("Expected name 'get_weather', got %v", googleTools[0]["name"])
+				if googleTools[0].FunctionDeclarations[0].Name != "get_weather" {
+					t.Errorf("Expected name 'get_weather', got %v", googleTools[0].FunctionDeclarations[0].Name)
 				}
 
 				// Check that additionalProperties was removed from complex tool
-				if params, ok := googleTools[1]["parameters"].(map[string]interface{}); ok {
+				params := googleTools[0].FunctionDeclarations[1].Parameters
+				if params != nil {
 					if props, ok := params["properties"].(map[string]interface{}); ok {
 						if filters, ok := props["filters"].(map[string]interface{}); ok {
 							if _, hasAdditional := filters["additionalProperties"]; hasAdditional {
@@ -390,16 +402,19 @@ func TestConvertToolsForArgoModelEdgeCases(t *testing.T) {
 			tools:     []ToolDefinition{basicTool},
 			expectNil: false,
 			validate: func(t *testing.T, result interface{}) {
-				tools, ok := result.([]map[string]interface{})
+				tools, ok := result.([]OpenAITool)
 				if !ok {
-					t.Fatal("Expected []map[string]interface{} for unknown model (defaults to OpenAI)")
+					t.Fatal("Expected []OpenAITool for unknown model (defaults to OpenAI)")
 				}
 				if len(tools) != 1 {
 					t.Errorf("Expected 1 tool, got %d", len(tools))
 				}
 				// Check that it uses OpenAI format
-				if tools[0]["type"] != "function" {
+				if tools[0].Type != "function" {
 					t.Error("Expected unknown model to default to OpenAI format with type 'function'")
+				}
+				if tools[0].Function.Name != "get_weather" {
+					t.Errorf("Expected tool name 'get_weather', got %v", tools[0].Function.Name)
 				}
 			},
 		},

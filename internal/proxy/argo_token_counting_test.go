@@ -39,7 +39,6 @@ func TestArgoStreamingTokenCounting(t *testing.T) {
 					return
 				}
 				w.(http.Flusher).Flush()
-				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}))

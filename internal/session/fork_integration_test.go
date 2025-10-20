@@ -200,7 +200,15 @@ func TestForkSessionWithToolInteractions(t *testing.T) {
 		}
 
 		// Convert to untyped format for testing
-		messages := core.ToAnthropic(typedMessages)
+		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
+		messages := make([]interface{}, 0, len(typedAnthMessages))
+		for _, msg := range typedAnthMessages {
+			msgMap := map[string]interface{}{
+				"role":    msg.Role,
+				"content": msg.Content,
+			}
+			messages = append(messages, msgMap)
+		}
 
 		// Debug: Log the converted messages
 		for i, msg := range messages {
@@ -238,6 +246,26 @@ func TestForkSessionWithToolInteractions(t *testing.T) {
 					}
 				} else if content, ok := m["content"].(string); ok {
 					t.Logf("  Content string: %s", content)
+				} else if contentSlice, ok := m["content"].([]core.AnthropicContent); ok {
+					// Handle case where content is []core.AnthropicContent (typed)
+					t.Logf("  Content array (AnthropicContent) with %d blocks", len(contentSlice))
+					for j, b := range contentSlice {
+						t.Logf("    Block %d: type=%v", j, b.Type)
+						switch b.Type {
+						case "tool_use":
+							foundToolCall = true
+							// Verify tool call details
+							if b.Name != "universal_command" {
+								t.Errorf("Expected tool name 'universal_command', got %v", b.Name)
+							}
+						case "tool_result":
+							foundToolResult = true
+							// Verify tool result details
+							if b.ToolUseID != "call_123" {
+								t.Errorf("Expected tool_use_id 'call_123', got %v", b.ToolUseID)
+							}
+						}
+					}
 				} else if contentSlice, ok := m["content"].([]map[string]interface{}); ok {
 					// Handle case where content is []map[string]interface{} instead of []interface{}
 					t.Logf("  Content array (typed) with %d blocks", len(contentSlice))
@@ -542,7 +570,15 @@ func TestToolMessageReconstructionInSession(t *testing.T) {
 		}
 
 		// Convert to untyped format for testing
-		messages := core.ToAnthropic(typedMessages)
+		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
+		messages := make([]interface{}, 0, len(typedAnthMessages))
+		for _, msg := range typedAnthMessages {
+			msgMap := map[string]interface{}{
+				"role":    msg.Role,
+				"content": msg.Content,
+			}
+			messages = append(messages, msgMap)
+		}
 
 		// Verify all tool calls and results are present
 		toolCallCount := 0
@@ -566,6 +602,16 @@ func TestToolMessageReconstructionInSession(t *testing.T) {
 							case "tool_result":
 								toolResultCount++
 							}
+						}
+					}
+				} else if blocks, ok := m["content"].([]core.AnthropicContent); ok {
+					// Handle case where content is []core.AnthropicContent (typed)
+					for _, b := range blocks {
+						switch b.Type {
+						case "tool_use":
+							toolCallCount++
+						case "tool_result":
+							toolResultCount++
 						}
 					}
 				} else if blocks, ok := m["content"].([]map[string]interface{}); ok {
@@ -719,7 +765,15 @@ func TestForkSessionWithIDCollisions(t *testing.T) {
 		}
 
 		// Convert to check tool interactions
-		messages := core.ToAnthropic(typedMessages)
+		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
+		messages := make([]interface{}, 0, len(typedAnthMessages))
+		for _, msg := range typedAnthMessages {
+			msgMap := map[string]interface{}{
+				"role":    msg.Role,
+				"content": msg.Content,
+			}
+			messages = append(messages, msgMap)
+		}
 
 		// Verify we have the right tool calls from the sibling branch
 		foundEchoTool := false
@@ -742,6 +796,24 @@ func TestForkSessionWithIDCollisions(t *testing.T) {
 												foundLsTool = true
 											}
 										}
+									}
+								}
+							}
+						}
+					}
+				} else if contentSlice, ok := m["content"].([]core.AnthropicContent); ok {
+					// Handle case where content is []core.AnthropicContent (typed)
+					for _, b := range contentSlice {
+						if b.Type == "tool_use" && b.Name == "universal_command" {
+							// Check the input to determine which tool call it is
+							var input map[string]interface{}
+							if err := json.Unmarshal(b.Input, &input); err == nil {
+								if cmd, ok := input["command"].([]interface{}); ok && len(cmd) > 0 {
+									switch cmd[0] {
+									case "echo":
+										foundEchoTool = true
+									case "ls":
+										foundLsTool = true
 									}
 								}
 							}

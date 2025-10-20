@@ -47,43 +47,47 @@ func TestMapperAnthropicProvider(t *testing.T) {
 			wantModel:    "claude-3-haiku-20240307",
 		},
 		{
-			name: "anthropic provider with anthropic/ prefix",
+			name: "anthropic provider maps opus to model",
 			config: &Config{
 				Provider:        "anthropic",
 				AnthropicAPIKey: "test-key",
 				Model:           "claude-3-opus-20240229",
 			},
-			inputModel:   "anthropic/claude-3-opus-20240229",
+			inputModel:   "claude-3-opus-20240229",
 			wantProvider: "anthropic",
 			wantModel:    "claude-3-opus-20240229",
 		},
 		{
-			name: "anthropic provider fallback when preferred not available",
+			name: "anthropic provider with non-claude model",
 			config: &Config{
-				Provider:        "openai",
+				Provider:        "anthropic",
+				AnthropicAPIKey: "test-key",
+				Model:           "gpt-4",
+				SmallModel:      "gpt-3.5-turbo",
+			},
+			inputModel:   "gpt-4",
+			wantProvider: "anthropic",
+			wantModel:    "gpt-4", // Non-Claude models pass through unchanged
+		},
+		{
+			name: "anthropic provider maps haiku to small model",
+			config: &Config{
+				Provider:        "anthropic",
 				AnthropicAPIKey: "test-key",
 				Model:           "claude-3-opus-20240229",
+				SmallModel:      "claude-3-haiku-20240307",
 			},
-			inputModel:   "claude-3-opus-20240229",
+			inputModel:   "claude-3-haiku-20240307",
 			wantProvider: "anthropic",
-			wantModel:    "claude-3-opus-20240229",
-		},
-		{
-			name: "no anthropic credentials",
-			config: &Config{
-				Provider: "anthropic",
-				Model:    "claude-3-opus-20240229",
-			},
-			inputModel:   "claude-3-opus-20240229",
-			wantProvider: "",
-			wantModel:    "",
+			wantModel:    "claude-3-haiku-20240307", // Maps to SmallModel
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mapper := NewModelMapper(tt.config)
-			gotProvider, gotModel := mapper.MapModel(tt.inputModel)
+			gotModel := mapper.MapModel(tt.inputModel)
+			gotProvider := tt.config.Provider
 
 			if gotProvider != tt.wantProvider {
 				t.Errorf("MapModel() provider = %v, want %v", gotProvider, tt.wantProvider)
@@ -305,7 +309,9 @@ func TestStreamFromAnthropic(t *testing.T) {
 		for _, e := range events {
 			fmt.Fprintf(w, "event: %s\n", e.event)
 			fmt.Fprintf(w, "data: %s\n\n", e.data)
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 		}
 	}))
 	defer mockServer.Close()
@@ -393,7 +399,9 @@ func TestAnthropicIntegration(t *testing.T) {
 			fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 			fmt.Fprintf(w, "event: message_stop\n")
 			fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
-			w.(http.Flusher).Flush()
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 		} else {
 			// Handle non-streaming
 			resp := AnthropicResponse{
