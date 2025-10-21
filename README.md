@@ -565,9 +565,10 @@ The proxy is built with a modular architecture:
 
 - **Configuration**: Command-line flag based configuration with validation
 - **Model Mapper**: Handles model name mapping and provider selection
-- **Converters**: Transform between API formats while preserving functionality
-- **HTTP Server**: Routes requests to appropriate handlers
-- **Streaming**: Server-Sent Events for real-time responses
+- **Typed Message System**: Core abstraction using TypedMessage and Block interface for unified message handling
+- **Converters**: Transform between Anthropic, OpenAI, Google, and Argo API formats
+- **HTTP Server**: Routes requests to appropriate handlers (supports both Anthropic and OpenAI endpoints)
+- **Streaming**: Server-Sent Events for real-time responses in both Anthropic and OpenAI formats
 
 ## API Proxy Streaming
 
