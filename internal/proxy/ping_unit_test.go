@@ -104,10 +104,10 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 	// Send initial events
 	if err := handler.SendMessageStart(); err != nil {
-		t.Fatalf("Failed to send message_start: %v", err)
+		t.Fatalf("Failed to send message start: %v", err)
 	}
 	if err := handler.SendContentBlockStart(0, "text"); err != nil {
-		t.Fatalf("Failed to send content_block_start: %v", err)
+		t.Fatalf("Failed to send content block start: %v", err)
 	}
 	if err := handler.SendPing(); err != nil {
 		t.Fatalf("Failed to send initial ping: %v", err)

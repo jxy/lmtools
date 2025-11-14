@@ -5,7 +5,12 @@ import (
 	"fmt"
 )
 
-// parseArgoResponseWithTools parses Argo response with tool call support
+// parseArgoResponseWithTools parses Argo response with tool call support.
+//
+// DESIGN NOTE: This function does not take a context.Context parameter because:
+// 1. It's a pure parsing function with no I/O operations that would benefit from cancellation
+// 2. Adding context would require changes throughout the call chain for minimal benefit
+// 3. Debug logging is handled by ExtractEmbeddedToolCalls when needed
 func parseArgoResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
 	if isEmbed {
 		// Embedding responses don't have tool calls
@@ -45,6 +50,9 @@ func parseArgoResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, 
 		// Response with potential tool calls
 		var content string
 		var toolCalls []ToolCall
+		// Track whether tool_calls field exists and whether it's an empty array
+		toolCallsExists := false
+		toolCallsPresentAndEmpty := false
 
 		// Extract content text
 		if contentStr, ok := resp["content"].(string); ok {
@@ -53,10 +61,14 @@ func parseArgoResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, 
 
 		// Extract tool calls
 		if toolCallsRaw, ok := resp["tool_calls"]; ok {
+			toolCallsExists = true
 			// Handle both array and single object formats
 			var toolCallsArray []interface{}
 			if arr, ok := toolCallsRaw.([]interface{}); ok {
 				toolCallsArray = arr
+				if len(arr) == 0 {
+					toolCallsPresentAndEmpty = true
+				}
 			} else if obj, ok := toolCallsRaw.(map[string]interface{}); ok {
 				// Single object - wrap in array
 				toolCallsArray = []interface{}{obj}
@@ -111,6 +123,18 @@ func parseArgoResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, 
 				}
 
 				toolCalls = append(toolCalls, toolCall)
+			}
+		}
+
+		// Workaround: Argo sometimes embeds one or more tool_use JSON objects inside content
+		// while providing an empty/missing tool_calls array. Extract all of them in order.
+		if (toolCallsPresentAndEmpty || !toolCallsExists) && len(toolCalls) == 0 && content != "" {
+			// Use the new simplified extraction pipeline
+			// Note: Tool validation happens at a higher level where tool definitions are available
+			extractedContent, extractedCalls, err := ExtractEmbeddedToolCalls(content, nil)
+			if err == nil && len(extractedCalls) > 0 {
+				content = extractedContent
+				toolCalls = extractedCalls
 			}
 		}
 

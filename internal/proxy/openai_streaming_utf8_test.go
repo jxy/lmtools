@@ -130,6 +130,8 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 			lines := strings.Split(response, "\n")
 
 			var chunks []string
+			sawInitialAssistant := false
+			sawFinalStop := false
 			for _, line := range lines {
 				if strings.HasPrefix(line, "data: ") {
 					data := strings.TrimPrefix(line, "data: ")
@@ -147,14 +149,32 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 					if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 						if choice, ok := choices[0].(map[string]interface{}); ok {
 							if delta, ok := choice["delta"].(map[string]interface{}); ok {
-								if content, ok := delta["content"].(string); ok && content != "" {
-									chunks = append(chunks, content)
-
-									// Verify this chunk is valid UTF-8
-									if !utf8.ValidString(content) {
-										t.Errorf("Chunk contains invalid UTF-8: %q (bytes: %v)", content, []byte(content))
+								// Accept content either as a non-empty string OR as null on first delta
+								if contentVal, hasContent := delta["content"]; hasContent {
+									if contentStr, ok := contentVal.(string); ok && contentStr != "" {
+										chunks = append(chunks, contentStr)
+										if !utf8.ValidString(contentStr) {
+											t.Errorf("Chunk contains invalid UTF-8: %q (bytes: %v)", contentStr, []byte(contentStr))
+										}
+									} else if contentVal == nil {
+										if role, ok := delta["role"].(string); ok && role == "assistant" {
+											sawInitialAssistant = true
+										}
 									}
 								}
+								// For intermediate chunks, finish_reason should be null
+								if _, ok := choice["finish_reason"]; ok {
+									if choice["finish_reason"] != nil {
+										// Only final chunk contains a non-null finish_reason
+										if fr, _ := choice["finish_reason"].(string); fr != "stop" {
+											t.Errorf("Expected intermediate finish_reason null; got: %v", choice["finish_reason"])
+										}
+									}
+								}
+							}
+							// Catch finish_reason on the same chunk
+							if fr, ok := choice["finish_reason"].(string); ok && fr == "stop" {
+								sawFinalStop = true
 							}
 						}
 					}
@@ -167,6 +187,12 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 			// Verify we got the original content back
 			if reconstructed != tt.response {
 				t.Errorf("Reconstructed text doesn't match original\nGot:  %q\nWant: %q", reconstructed, tt.response)
+			}
+			if !sawInitialAssistant {
+				t.Error("Did not see initial assistant delta with content:null")
+			}
+			if !sawFinalStop {
+				t.Error("Did not see final finish_reason=stop")
 			}
 
 			// Verify each chunk is valid UTF-8
@@ -275,6 +301,10 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 
 	var textChunks []string
 	var toolCallFound bool
+	var sawInitialEmpty bool
+	var argConcat string
+	var sawFinishToolCalls bool
+	var sawInitialAssistant bool
 	for _, line := range lines {
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
@@ -292,6 +322,14 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 			if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						// First delta: role assistant with content:null
+						if role, ok := delta["role"].(string); ok && role == "assistant" {
+							if _, hasContent := delta["content"]; hasContent {
+								if delta["content"] == nil {
+									sawInitialAssistant = true
+								}
+							}
+						}
 						// Check for text content
 						if content, ok := delta["content"].(string); ok && content != "" {
 							textChunks = append(textChunks, content)
@@ -309,10 +347,15 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 							for _, tc := range toolCalls {
 								if tcMap, ok := tc.(map[string]interface{}); ok {
 									if fn, ok := tcMap["function"].(map[string]interface{}); ok {
-										if args, ok := fn["arguments"].(string); ok && args != "" {
+										if args, ok := fn["arguments"].(string); ok {
+											if args == "" { // initial empty arguments chunk
+												sawInitialEmpty = true
+												continue
+											}
 											if !utf8.ValidString(args) {
 												t.Errorf("Tool arguments contain invalid UTF-8: %q", args)
 											}
+											argConcat += args
 										}
 									}
 								}
@@ -333,9 +376,47 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 		t.Errorf("Reconstructed text doesn't match\nGot:  %q\nWant: %q", reconstructedText, expectedText)
 	}
 
-	// Verify tool call was found
+	// Verify tool call was found in the stream
 	if !toolCallFound {
 		t.Error("Tool call was not found in the stream")
+	}
+	if !sawInitialAssistant {
+		t.Error("Did not see initial assistant delta with content:null")
+	}
+	if !sawInitialEmpty {
+		t.Error("Did not see initial empty arguments chunk for tool call")
+	}
+	// Ensure finish_reason: tool_calls appeared and intermediate chunks have finish_reason null
+	for _, line := range lines {
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "" || data == "[DONE]" {
+				continue
+			}
+			var chunk map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+			if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if fr, ok := choice["finish_reason"].(string); ok && fr == "tool_calls" {
+						sawFinishToolCalls = true
+						break
+					}
+					// Intermediate chunks should present finish_reason key and be null
+					if _, present := choice["finish_reason"]; present {
+						if choice["finish_reason"] != nil {
+							if fr, _ := choice["finish_reason"].(string); fr != "tool_calls" {
+								t.Errorf("Expected intermediate finish_reason null; got: %v", choice["finish_reason"])
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if !sawFinishToolCalls {
+		t.Error("Did not see finish_reason=tool_calls during stream")
 	}
 
 	t.Logf("Successfully streamed mixed content with tools: %d text chunks, tool calls found", len(textChunks))

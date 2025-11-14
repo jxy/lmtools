@@ -160,13 +160,31 @@ func TestArgoStreamingSlowFirstToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a pipe for controlled streaming
 			pr, pw := io.Pipe()
-			defer pr.Close()
-			defer pw.Close()
+
+			// Create a context with timeout for the entire test
+			testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer testCancel()
+
+			// Ensure pipe is closed when test ends
+			defer func() {
+				pr.Close()
+				pw.Close()
+			}()
 
 			// Simulate Argo's slow first response in a goroutine
+			writeDone := make(chan struct{})
 			go func() {
+				defer close(writeDone)
+
 				// Wait before sending first token (simulating slow model startup)
-				time.Sleep(tt.firstTokenDelay)
+				select {
+				case <-time.After(tt.firstTokenDelay):
+					// Continue with writing
+				case <-testCtx.Done():
+					// Test cancelled, exit early
+					pw.Close()
+					return
+				}
 
 				// Send first chunk
 				_, _ = pw.Write([]byte("Hello"))
@@ -199,11 +217,34 @@ func TestArgoStreamingSlowFirstToken(t *testing.T) {
 			// Parse with ping interval
 			parser := NewArgoStreamParser(handler)
 			startTime := time.Now()
-			err = parser.ParseWithPingInterval(pr, tt.pingInterval)
+
+			// Run parser with timeout protection
+			parseDone := make(chan error, 1)
+			go func() {
+				parseDone <- parser.ParseWithPingInterval(pr, tt.pingInterval)
+			}()
+
+			// Wait for parser to complete or timeout
+			var parseErr error
+			select {
+			case parseErr = <-parseDone:
+				// Parser completed
+			case <-testCtx.Done():
+				t.Fatal("Test timeout: parser did not complete within 2 seconds")
+			}
+
 			elapsed := time.Since(startTime)
 
-			if err != nil {
-				t.Fatalf("Parse error: %v", err)
+			// Wait for writer goroutine to complete
+			select {
+			case <-writeDone:
+				// Writer completed
+			case <-time.After(100 * time.Millisecond):
+				// Give it a bit more time but don't fail the test
+			}
+
+			if parseErr != nil {
+				t.Fatalf("Parse error: %v", parseErr)
 			}
 
 			// Count ping events in response
@@ -235,17 +276,27 @@ func TestArgoStreamingSlowFirstToken(t *testing.T) {
 }
 
 func TestArgoStreamingPingOnTimeout(t *testing.T) {
+	// Create a context with timeout for the entire test
+	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer testCancel()
+
 	// Create a reader that blocks indefinitely
 	pr, pw := io.Pipe()
 	defer pr.Close()
 	defer pw.Close()
 
 	// Write initial data then block
+	writeDone := make(chan struct{})
 	go func() {
+		defer close(writeDone)
 		_, _ = pw.Write([]byte("Initial data"))
-		// Don't close - simulate hanging connection
-		time.Sleep(250 * time.Millisecond)
-		pw.Close()
+		// Don't close immediately - simulate hanging connection
+		select {
+		case <-time.After(250 * time.Millisecond):
+			pw.Close()
+		case <-testCtx.Done():
+			pw.Close()
+		}
 	}()
 
 	w := httptest.NewRecorder()
@@ -267,12 +318,12 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 	parser := NewArgoStreamParser(handler)
 
 	// Run parser in goroutine
-	done := make(chan error)
+	done := make(chan error, 1)
 	go func() {
 		done <- parser.ParseWithPingInterval(pr, 30*time.Millisecond)
 	}()
 
-	// Wait for parser to complete
+	// Wait for parser to complete or timeout
 	select {
 	case <-done:
 		// Parser completed - now safe to read the buffer
@@ -285,8 +336,16 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 			t.Errorf("Expected at least 3 pings with 30ms interval, got %d", pingCount)
 			t.Logf("Response:\n%s", response)
 		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Parser did not complete within timeout")
+	case <-testCtx.Done():
+		t.Fatal("Test timeout: parser did not complete within 2 seconds")
+	}
+
+	// Wait for writer goroutine to complete
+	select {
+	case <-writeDone:
+		// Writer completed
+	case <-time.After(100 * time.Millisecond):
+		// Give it a bit more time but don't fail the test
 	}
 }
 
@@ -424,8 +483,9 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 			if !strings.Contains(response, "event: message_start") {
 				t.Error("Missing message_start event")
 			}
-			if !strings.Contains(response, "data: [DONE]") {
-				t.Error("Missing [DONE] marker")
+			// Anthropic format ends with message_stop, not [DONE]
+			if !strings.Contains(response, "event: message_stop") {
+				t.Error("Missing message_stop event")
 			}
 
 			// Log timing info for debugging

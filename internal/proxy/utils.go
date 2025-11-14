@@ -71,6 +71,16 @@ func extractRequestLogger(ctx context.Context) retry.Logger {
 
 // doJSON is a generic helper for making JSON API requests to providers
 // It handles marshaling, request creation, header application, execution, and unmarshaling
+//
+// DEBUG LEVEL LOGGING DECISION:
+// This function intentionally logs full raw responses at DEBUG level without truncation or redaction.
+// This is a deliberate design decision because:
+// - DEBUG level is NEVER enabled in production environments (only for development/troubleshooting)
+// - No privacy concerns exist since DEBUG logs are not used in production
+// - Full, untruncated responses are essential for diagnosing provider-specific issues
+// - Developers need complete context to debug parsing problems and edge cases
+// - No additional gating or filtering is needed beyond the DEBUG level check
+// This approach provides maximum debugging capability while maintaining production safety.
 func (s *Server) doJSON(
 	ctx context.Context,
 	url string,
@@ -119,17 +129,30 @@ func (s *Server) doJSON(
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
+		// Log raw response in error case for debugging
+		// DEBUG level only - no truncation needed as DEBUG is not used in production
+		if log.IsDebugEnabled() {
+			log.Debugf("Raw %s error response: %s", provider, string(body))
+		}
 		s.logErrorResponse(ctx, provider, resp.StatusCode, body)
 		return NewResponseError(resp.StatusCode, string(body))
 	}
 
-	// Parse response
-	if err := json.Unmarshal(body, respBody); err != nil {
-		return errors.WrapError(fmt.Sprintf("parse %s response", provider), err)
+	// Log raw response for debugging (successful response)
+	// DEBUG level only - no truncation needed as DEBUG is not used in production
+	if log.IsDebugEnabled() {
+		log.Debugf("Raw %s response: %s", provider, string(body))
 	}
 
-	// Log response if debug enabled
-	logger.DebugJSON(log, fmt.Sprintf("%s response", provider), respBody)
+	// Parse response
+	if err := json.Unmarshal(body, respBody); err != nil {
+		// Log raw response when parsing fails for debugging
+		// DEBUG level only - no truncation needed as DEBUG is not used in production
+		if log.IsDebugEnabled() {
+			log.Debugf("Raw %s response (parse failed): %s", provider, string(body))
+		}
+		return errors.WrapError(fmt.Sprintf("parse %s response", provider), err)
+	}
 
 	return nil
 }

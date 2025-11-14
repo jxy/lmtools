@@ -247,8 +247,8 @@ func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 	log := logger.From(ctx)
 
-	// Create OpenAI stream writer
-	writer, err := NewOpenAIStreamWriter(w, originalModel, ctx)
+	// Create OpenAI stream writer with include_usage option
+	writer, err := NewOpenAIStreamWriter(w, originalModel, ctx, WithIncludeUsage(includeUsageFromMetadata(anthReq)))
 	if err != nil {
 		log.Errorf("Failed to create OpenAI stream writer: %v", err)
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to initialize streaming", "stream_init_error", http.StatusInternalServerError)

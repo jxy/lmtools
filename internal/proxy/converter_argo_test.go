@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"lmtools/internal/core"
+	"strings"
 	"testing"
 )
 
@@ -114,6 +115,215 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConvertArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedInContent(t *testing.T) {
+	converter := &Converter{}
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			"content":    "Now let me read the openai_convert.go file to understand the current ConvertBlocksToOpenAIContent implementation:{'type': 'tool_use', 'id': 'toolu_vrtx_01TCVSw8Ff8eJHs5nSaZsPBt', 'name': 'Read', 'input': {'file_path': '/path/to/project/internal/core/openai_convert.go'}}",
+			"tool_calls": []interface{}{},
+		},
+	}
+
+	req := &AnthropicRequest{
+		Model:    "claude-3-sonnet-20240229",
+		Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}},
+	}
+
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	// Expect first block to be trimmed text, second to be tool_use
+	if len(result.Content) < 2 {
+		t.Fatalf("Expected at least 2 content blocks, got %d", len(result.Content))
+	}
+	if result.Content[0].Type != "text" {
+		t.Errorf("Expected first block type 'text', got %s", result.Content[0].Type)
+	}
+	if result.Content[1].Type != "tool_use" {
+		t.Errorf("Expected second block type 'tool_use', got %s", result.Content[1].Type)
+	}
+	if result.Content[1].Name != "Read" {
+		t.Errorf("Unexpected tool name: %s", result.Content[1].Name)
+	}
+	if _, ok := result.Content[1].Input["file_path"]; !ok {
+		t.Errorf("Expected file_path in tool_use input, got %v", result.Content[1].Input)
+	}
+}
+
+// Ensure trailing punctuation/formatting suffix after embedded tool call is preserved
+func TestConvertArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctuation(t *testing.T) {
+	converter := &Converter{}
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			// Note trailing period after the embedded JSON
+			"content":    "Run it now:{'type': 'tool_use', 'id': 'tool_1', 'name': 'Read', 'input': {'file_path': '/path/a'}}.",
+			"tool_calls": []interface{}{},
+		},
+	}
+
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"go"`)}}}
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	// Expect text → tool_use → text blocks: prefix "Run it now:" and suffix "."
+	if len(result.Content) < 3 {
+		t.Fatalf("Expected at least 3 blocks, got %d: %+v", len(result.Content), result.Content)
+	}
+	if result.Content[0].Type != "text" || result.Content[0].Text != "Run it now:" {
+		t.Errorf("unexpected first text block: %+v", result.Content[0])
+	}
+	if result.Content[1].Type != "tool_use" {
+		t.Errorf("expected tool_use as second block, got: %+v", result.Content[1])
+	}
+	// Find the last text block for suffix; should be a single period
+	last := result.Content[len(result.Content)-1]
+	if last.Type != "text" || strings.TrimSpace(last.Text) != "." {
+		t.Errorf("suffix punctuation not preserved; got: %+v", last)
+	}
+}
+
+// Simplified case: single-quoted embedded tool_use with content and file_path; ensure full input preserved
+func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuotedSimplified(t *testing.T) {
+	converter := &Converter{}
+
+	// This string simulates the content after Argo JSON decoding (first-level escapes resolved):
+	// single-quoted JSON-like object embedded in content, with inner content containing newlines and double quotes.
+	// Use raw string to avoid Go escaping; include backslashes before apostrophes inside the single-quoted string.
+	embedded := `...{'id': 'toolu', 'input': {'content': 'package core\n\nimport (\n\t"encoding/json"\n\t"strings"\n)\n\n "\'type\': \'tool_use\'")', 'file_path': 'embed_refactored.go'}, 'name': 'Write', 'type': 'tool_use'}`
+
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			"content":    embedded,
+			"tool_calls": []interface{}{},
+		},
+	}
+
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}}
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	var found bool
+	for _, b := range result.Content {
+		if b.Type == "tool_use" && b.Name == "Write" {
+			found = true
+			gotContent, ok := b.Input["content"].(string)
+			if !ok {
+				t.Fatalf("content not a string: %T", b.Input["content"])
+			}
+			// Expected content with actual newlines and double quotes preserved (after normalization)
+			wantContent := "package core\n\nimport (\n\t\"encoding/json\"\n\t\"strings\"\n)\n\n \"'type': 'tool_use'\")"
+			if gotContent != wantContent {
+				t.Errorf("content mismatch\nwant: %q\ngot:  %q", wantContent, gotContent)
+			}
+			fp, ok := b.Input["file_path"].(string)
+			if !ok || fp != "embed_refactored.go" {
+				t.Errorf("file_path mismatch; got %v", b.Input["file_path"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("tool_use Write not found; content: %+v", result.Content)
+	}
+}
+
+// Full-case derived from DEBUG: ensure both content and file_path are present
+func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentAndFilePath(t *testing.T) {
+	converter := &Converter{}
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			"content": `Let me create the refactored version with the content parameter:
+
+{'id': 'toolu_vrtx_01KTmrSzwXSRQnBJfCuSy7vv', 'input': {'content': 'package core\n\nimport (\n\t"encoding/json"\n\t"strings"\n)\n\n// EmbeddedCall represents a tool call embedded in content by Argo\n...', 'file_path': '/path/to/project/internal/core/argo_embed_refactored.go'}, 'name': 'Write', 'type': 'tool_use'}`,
+			"tool_calls": []interface{}{},
+		},
+	}
+
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"please write"`)}}}
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	var found bool
+	for _, b := range result.Content {
+		if b.Type == "tool_use" && b.Name == "Write" {
+			found = true
+			if _, ok := b.Input["content"]; !ok {
+				t.Errorf("missing content in input: %v", b.Input)
+			}
+			fp, ok := b.Input["file_path"].(string)
+			if !ok || fp == "" {
+				t.Errorf("missing/empty file_path: %v", b.Input["file_path"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("tool_use Write not found; content: %+v", result.Content)
+	}
+}
+
+func TestConvertArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbeddedInContent(t *testing.T) {
+	converter := &Converter{}
+	embedded := `{'id': 'call_123', 'type': 'function', 'function': {'name': 'universal_command', 'arguments': '{"command":["ls","-la"]}'}}`
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			"content":    "I'll run a command for you:" + embedded,
+			"tool_calls": []interface{}{},
+		},
+	}
+
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}}
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	if len(result.Content) < 2 {
+		t.Fatalf("Expected at least 2 content blocks, got %d", len(result.Content))
+	}
+	if result.Content[1].Type != "tool_use" || result.Content[1].Name != "universal_command" {
+		t.Errorf("Expected tool_use with name universal_command, got type=%s name=%s", result.Content[1].Type, result.Content[1].Name)
+	}
+	if _, ok := result.Content[1].Input["command"]; !ok {
+		t.Errorf("Expected command in tool_use input, got %v", result.Content[1].Input)
+	}
+}
+
+func TestConvertArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCalls(t *testing.T) {
+	converter := &Converter{}
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			"content": "Step 1: read file:{'type': 'tool_use', 'id': 'toolu_r1', 'name': 'Read', 'input': {'file_path': '/path/a'}} Next, grep it:{'type': 'tool_use', 'id': 'toolu_r2', 'name': 'Grep', 'input': {'pattern': 'foo', 'glob': '*.go'}}",
+		},
+	}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}}
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	// Expect alternating text/tool/text/tool/text blocks
+	var names []string
+	var textCount int
+	for _, b := range result.Content {
+		switch b.Type {
+		case "tool_use":
+			names = append(names, b.Name)
+		case "text":
+			textCount++
+		}
+	}
+	if len(names) != 2 || names[0] != "Read" || names[1] != "Grep" {
+		t.Errorf("Expected tool names [Read, Grep], got %v", names)
+	}
+	if textCount < 2 {
+		t.Errorf("Expected at least 2 text blocks, got %d", textCount)
 	}
 }
 

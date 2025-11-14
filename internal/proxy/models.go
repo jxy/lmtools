@@ -102,7 +102,7 @@ type AnthropicMessage struct {
 // AnthropicContentBlock represents different types of content blocks
 type AnthropicContentBlock struct {
 	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Text string `json:"text"`
 	// For thinking blocks (Claude 3 Opus 4.1+)
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
@@ -120,6 +120,88 @@ type AnthropicContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+}
+
+// MarshalJSON provides custom JSON encoding to match Anthropic's event schema:
+//   - For text blocks: always include an explicit "text" field (may be empty string)
+//   - For tool_use blocks: include id, name and always include an "input" object
+//     (even when empty). Do not include a "text" field for tool_use blocks.
+//   - For tool_result blocks: include tool_use_id, content, is_error when present.
+//   - For other block types: include non-empty fields as usual.
+func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
+	// Build shape conditionally based on type
+	m := map[string]interface{}{
+		"type": b.Type,
+	}
+
+	switch b.Type {
+	case "text":
+		// Anthropic examples include an explicit empty text field at start
+		m["text"] = b.Text
+	case "tool_use":
+		if b.ID != "" {
+			m["id"] = b.ID
+		}
+		if b.Name != "" {
+			m["name"] = b.Name
+		}
+		// Always include input object; use empty object when nil
+		if b.Input == nil {
+			m["input"] = map[string]interface{}{}
+		} else {
+			m["input"] = b.Input
+		}
+	case "tool_result":
+		if b.ToolUseID != "" {
+			m["tool_use_id"] = b.ToolUseID
+		}
+		if len(b.Content) > 0 {
+			m["content"] = b.Content
+		}
+		if b.IsError {
+			m["is_error"] = true
+		}
+	default:
+		// Best-effort for other types: include only non-zero fields
+		if b.Text != "" {
+			m["text"] = b.Text
+		}
+		if b.Thinking != "" {
+			m["thinking"] = b.Thinking
+		}
+		if b.Signature != "" {
+			m["signature"] = b.Signature
+		}
+		if b.Source != nil {
+			m["source"] = b.Source
+		}
+		if b.InputAudio != nil {
+			m["input_audio"] = b.InputAudio
+		}
+		if b.File != nil {
+			m["file"] = b.File
+		}
+		if b.ID != "" {
+			m["id"] = b.ID
+		}
+		if b.Name != "" {
+			m["name"] = b.Name
+		}
+		if b.Input != nil {
+			m["input"] = b.Input
+		}
+		if b.ToolUseID != "" {
+			m["tool_use_id"] = b.ToolUseID
+		}
+		if len(b.Content) > 0 {
+			m["content"] = b.Content
+		}
+		if b.IsError {
+			m["is_error"] = b.IsError
+		}
+	}
+
+	return json.Marshal(m)
 }
 
 // AnthropicTool represents a tool definition
@@ -184,9 +266,10 @@ type ContentBlockDeltaEvent struct {
 
 // DeltaContent represents the delta content in a streaming event
 type DeltaContent struct {
-	Type        string `json:"type"`
-	Text        string `json:"text,omitempty"`
-	PartialJSON string `json:"partial_json,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// Use pointer so empty string is emitted when explicitly present
+	PartialJSON *string `json:"partial_json,omitempty"`
 }
 
 // ContentBlockStopEvent represents a content_block_stop event
@@ -225,6 +308,11 @@ type ErrorInfo struct {
 	Message string `json:"message"`
 }
 
+// PingEvent represents a ping event for keeping the connection alive
+type PingEvent struct {
+	Type string `json:"type"`
+}
+
 // AnthropicTokenCountRequest represents a token counting request
 type AnthropicTokenCountRequest struct {
 	Model    string             `json:"model"`
@@ -242,22 +330,28 @@ type AnthropicTokenCountResponse struct {
 
 // OpenAIRequest represents a request to the OpenAI Chat Completion API
 type OpenAIRequest struct {
-	Model            string          `json:"model"`
-	Messages         []OpenAIMessage `json:"messages"`
-	Temperature      *float64        `json:"temperature,omitempty"`
-	TopP             *float64        `json:"top_p,omitempty"`
-	N                *int            `json:"n,omitempty"`
-	Stream           bool            `json:"stream,omitempty"`
-	Stop             []string        `json:"stop,omitempty"`
-	MaxTokens        *int            `json:"max_tokens,omitempty"`
-	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
-	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
-	LogitBias        map[string]int  `json:"logit_bias,omitempty"`
-	User             string          `json:"user,omitempty"`
-	Tools            []OpenAITool    `json:"tools,omitempty"`
-	ToolChoice       interface{}     `json:"tool_choice,omitempty"`
-	ResponseFormat   *ResponseFormat `json:"response_format,omitempty"`
-	ReasoningEffort  string          `json:"reasoning_effort,omitempty"`
+	Model            string               `json:"model"`
+	Messages         []OpenAIMessage      `json:"messages"`
+	Temperature      *float64             `json:"temperature,omitempty"`
+	TopP             *float64             `json:"top_p,omitempty"`
+	N                *int                 `json:"n,omitempty"`
+	Stream           bool                 `json:"stream,omitempty"`
+	Stop             []string             `json:"stop,omitempty"`
+	MaxTokens        *int                 `json:"max_tokens,omitempty"`
+	PresencePenalty  *float64             `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float64             `json:"frequency_penalty,omitempty"`
+	LogitBias        map[string]int       `json:"logit_bias,omitempty"`
+	User             string               `json:"user,omitempty"`
+	Tools            []OpenAITool         `json:"tools,omitempty"`
+	ToolChoice       interface{}          `json:"tool_choice,omitempty"`
+	ResponseFormat   *ResponseFormat      `json:"response_format,omitempty"`
+	ReasoningEffort  string               `json:"reasoning_effort,omitempty"`
+	StreamOptions    *OpenAIStreamOptions `json:"stream_options,omitempty"`
+}
+
+// OpenAIStreamOptions represents streaming options for OpenAI requests
+type OpenAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 // OpenAIMessage represents a message in the OpenAI format
@@ -344,21 +438,45 @@ type OpenAIStreamChunk struct {
 	Created int64               `json:"created"`
 	Model   string              `json:"model"`
 	Choices []OpenAIStreamDelta `json:"choices"`
-	Usage   *OpenAIUsage        `json:"usage,omitempty"`
+	// Always include usage key; nil encodes as null to match OpenAI include_usage behavior
+	Usage *OpenAIUsage `json:"usage"`
 }
 
 // OpenAIStreamDelta represents a delta in streaming
 type OpenAIStreamDelta struct {
-	Index        int         `json:"index"`
-	Delta        OpenAIDelta `json:"delta"`
-	FinishReason *string     `json:"finish_reason,omitempty"`
+	Index int         `json:"index"`
+	Delta OpenAIDelta `json:"delta"`
+	// Always include finish_reason key; nil encodes as null for consistent schema
+	FinishReason *string `json:"finish_reason"`
 }
 
 // OpenAIDelta represents the delta content
 type OpenAIDelta struct {
-	Role      *core.Role      `json:"role,omitempty"`
-	Content   *string         `json:"content,omitempty"`
-	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+	Role    *core.Role `json:"role,omitempty"`
+	Content *string    `json:"content,omitempty"`
+	// ContentNull forces encoding of `"content": null` when true.
+	// This allows us to emit null only for the first assistant delta
+	// during tool call emission, while leaving final delta as `{}`.
+	ContentNull bool            `json:"-"`
+	ToolCalls   []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// MarshalJSON implements custom JSON encoding for OpenAIDelta to support
+// conditional inclusion of `content: null` in the first assistant delta.
+func (d OpenAIDelta) MarshalJSON() ([]byte, error) {
+	m := map[string]interface{}{}
+	if d.Role != nil {
+		m["role"] = d.Role
+	}
+	if d.ContentNull {
+		m["content"] = nil
+	} else if d.Content != nil {
+		m["content"] = *d.Content
+	}
+	if len(d.ToolCalls) > 0 {
+		m["tool_calls"] = d.ToolCalls
+	}
+	return json.Marshal(m)
 }
 
 // ToolCallDelta represents a tool call delta in streaming
@@ -372,7 +490,7 @@ type ToolCallDelta struct {
 // FunctionCallDelta represents a function call delta
 type FunctionCallDelta struct {
 	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
+	Arguments string `json:"arguments"`
 }
 
 // Google AI API Models

@@ -56,7 +56,10 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 		// Handle content - need to convert []interface{} to []core.OpenAIContent if needed
 		switch content := msg.Content.(type) {
 		case string:
-			openAITypedMessages[i].Content = content
+			openAITypedMessages[i].Content = core.OpenAIContentUnion{
+				Text:     &content,
+				Contents: nil,
+			}
 		case []interface{}:
 			// Convert to []core.OpenAIContent
 			openAIContent := make([]core.OpenAIContent, 0, len(content))
@@ -97,25 +100,50 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 						}
 					case "input_audio":
 						if audioMap, ok := contentMap["input_audio"].(map[string]interface{}); ok {
+							audioData := &core.AudioData{
+								ID:       core.GetString(audioMap, "id"),
+								Format:   core.GetString(audioMap, "format"),
+								Data:     core.GetString(audioMap, "data"),
+								URL:      core.GetString(audioMap, "url"),
+								Duration: core.GetInt(audioMap, "duration"),
+							}
+							// Ensure audio format defaults to "wav" if not specified
+							if audioData.Format == "" && audioData.Data != "" {
+								audioData.Format = "wav"
+							}
 							openAIContent = append(openAIContent, core.OpenAIContent{
 								Type:       "input_audio",
-								InputAudio: audioMap,
+								InputAudio: audioData,
 							})
 						}
 					case "file":
 						if fileMap, ok := contentMap["file"].(map[string]interface{}); ok {
+							fileData := &core.FileData{
+								FileID:   core.GetString(fileMap, "file_id"),
+								Name:     core.GetString(fileMap, "name"),
+								MimeType: core.GetString(fileMap, "mime_type"),
+								Data:     core.GetString(fileMap, "data"),
+								URL:      core.GetString(fileMap, "url"),
+								Size:     core.GetInt64(fileMap, "size"),
+							}
 							openAIContent = append(openAIContent, core.OpenAIContent{
 								Type: "file",
-								File: fileMap,
+								File: fileData,
 							})
 						}
 					}
 				}
 			}
-			openAITypedMessages[i].Content = openAIContent
+			openAITypedMessages[i].Content = core.OpenAIContentUnion{
+				Text:     nil,
+				Contents: openAIContent,
+			}
 		default:
-			// For any other type, pass it through as is
-			openAITypedMessages[i].Content = msg.Content
+			// For any other type, omit content entirely
+			openAITypedMessages[i].Content = core.OpenAIContentUnion{
+				Text:     nil,
+				Contents: nil,
+			}
 		}
 
 		// Handle tool calls
@@ -229,14 +257,55 @@ func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 		var content interface{}
 		if len(msg.Content) > 0 {
 			if err := json.Unmarshal(msg.Content, &content); err == nil {
-				anthropicTypedMessages[i].Content = content
+				// Convert to AnthropicContentUnion
+				switch c := content.(type) {
+				case string:
+					anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
+						Text:     &c,
+						Contents: nil,
+					}
+				case []interface{}:
+					// Convert to []core.AnthropicContent
+					contents := make([]core.AnthropicContent, 0, len(c))
+					for _, item := range c {
+						if m, ok := item.(map[string]interface{}); ok {
+							ac := core.AnthropicContent{}
+							if t, ok := m["type"].(string); ok {
+								ac.Type = t
+							}
+							if text, ok := m["text"].(string); ok {
+								ac.Text = text
+							}
+							// Add more field conversions as needed
+							contents = append(contents, ac)
+						}
+					}
+					anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
+						Text:     nil,
+						Contents: contents,
+					}
+				default:
+					emptyStr := ""
+					anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
+						Text:     &emptyStr,
+						Contents: nil,
+					}
+				}
 			} else {
 				// If unmarshal fails, treat as empty content
-				anthropicTypedMessages[i].Content = ""
+				emptyStr := ""
+				anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
+					Text:     &emptyStr,
+					Contents: nil,
+				}
 			}
 		} else {
 			// Empty content
-			anthropicTypedMessages[i].Content = ""
+			emptyStr := ""
+			anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
+				Text:     &emptyStr,
+				Contents: nil,
+			}
 		}
 	}
 

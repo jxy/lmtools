@@ -20,11 +20,16 @@ const (
 	DefaultTextChunkSize = 20
 
 	// DefaultJSONChunkSize is the default chunk size for JSON streaming
-	DefaultJSONChunkSize = 15
+	// Increased to reduce the number of partial_json events while keeping granularity
+	DefaultJSONChunkSize = 64
 
 	// DefaultPingInterval is the default interval for sending ping events during streaming
 	// This is set to 15 seconds for production use to avoid excessive network traffic
 	DefaultPingInterval = 15 // seconds
+
+	// IncludeUsageKey is the metadata key for requesting usage information in streaming responses
+	// Used in OpenAI-compatible streaming to include token usage in the final chunk
+	IncludeUsageKey = "stream_options.include_usage"
 )
 
 // Provider constants

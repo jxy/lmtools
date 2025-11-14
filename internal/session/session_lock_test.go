@@ -1,5 +1,4 @@
 //go:build !windows
-// +build !windows
 
 package session
 
@@ -69,16 +68,28 @@ func TestWithSessionLock_Timeout(t *testing.T) {
 	// Hold the lock in a goroutine
 	holding := make(chan struct{})
 	done := make(chan struct{})
+	lockErr := make(chan error, 1)
+
 	go func() {
-		_ = WithSessionLock(sessionPath, 0, func() error {
+		err := WithSessionLock(sessionPath, 0, func() error {
 			close(holding)
-			<-done // Wait until told to release
-			return nil
+			select {
+			case <-done: // Wait until told to release
+				return nil
+			case <-time.After(2 * time.Second): // Timeout protection
+				return nil // Release lock after timeout
+			}
 		})
+		lockErr <- err
 	}()
 
-	// Wait for lock to be held
-	<-holding
+	// Wait for lock to be held with timeout
+	select {
+	case <-holding:
+		// Lock is held, continue
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for lock to be held")
+	}
 
 	// Try to acquire with timeout
 	err := WithSessionLock(sessionPath, 50*time.Millisecond, func() error {
@@ -91,6 +102,15 @@ func TestWithSessionLock_Timeout(t *testing.T) {
 	}
 
 	close(done) // Release the lock
+
+	// Wait for the goroutine to complete
+	select {
+	case <-lockErr:
+		// Goroutine completed
+	case <-time.After(500 * time.Millisecond):
+		// Don't fail the test, but log it
+		t.Log("Warning: lock holder goroutine did not complete in time")
+	}
 }
 
 func TestWithSessionLockT_ReturnsValue(t *testing.T) {

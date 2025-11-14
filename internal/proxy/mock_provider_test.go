@@ -348,7 +348,7 @@ func (m *MockProvider) handleArgo(w http.ResponseWriter, r *http.Request, body [
 	if hasTools || (len(req.Messages) > 0 && strings.Contains(fmt.Sprintf("%v", req.Messages[0].Content), "list")) {
 		// Response with tool use
 		resp := ArgoChatResponse{
-			Response: "I'll help you list the directory contents.\n\n<tool>LS</tool>\n<args>{\"path\":\"/usr/home/jin/K/W/P002/lmtools\"}</args>",
+			Response: "I'll help you list the directory contents.\n\n<tool>LS</tool>\n<args>{\"path\":\"/path/to/project\"}</args>",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {

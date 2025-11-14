@@ -109,9 +109,10 @@ func TestSimulatedStreamingFormat(t *testing.T) {
 		}
 	}
 
-	// Check that stream ends with [DONE]
-	if !strings.Contains(streamOutput, "data: [DONE]") {
-		t.Error("Stream does not end with data: [DONE]")
+	// Check that stream ends properly (Anthropic format doesn't use [DONE])
+	// The stream should end with message_stop
+	if !strings.Contains(streamOutput, `"type":"message_stop"`) {
+		t.Error("Stream does not end with message_stop event")
 	}
 
 	// Verify content_block_delta events contain text

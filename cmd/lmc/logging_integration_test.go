@@ -1,16 +1,14 @@
 //go:build integration
-// +build integration
 
 package main
 
 import (
+	"lmtools/internal/mockserver"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"lmtools/internal/mockserver"
 )
 
 func TestLoggingIntegration(t *testing.T) {
@@ -27,10 +25,10 @@ func TestLoggingIntegration(t *testing.T) {
 	defer ms.Close()
 
 	// Test 1: Embedding request with logging
-	stdout, stderr, logDir, err := runLmcCommandWithLogDir(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-e", "-model", "v3large",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-		"Test message for embedding")
-
+	logDir := t.TempDir()
+	stdout, stderr, err := runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "testuser", "-e", "-model", "v3large", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+		"Test message for embedding", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run embedding: %v\nStderr: %s", err, stderr)
 	}
@@ -50,16 +48,18 @@ func TestLoggingIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read log directory: %v", err)
 	}
+	if len(entries) == 0 {
+		t.Errorf("No log files found in %s", logDir)
+	}
 
 	if !assertRecentLogFiles(t, logDir, "_embed_input", ".json") {
 		t.Error("Request log file not found")
 	}
 
 	// Test 2: Chat request with logging (use same log dir)
-	stdout, stderr, err = runLmcCommandWithSpecificLogDir(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-		"Test chat message", logDir)
-
+	_, stderr, err = runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+		"Test chat message", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run chat: %v\nStderr: %s", err, stderr)
 	}
@@ -68,6 +68,9 @@ func TestLoggingIntegration(t *testing.T) {
 	entries, err = os.ReadDir(logDir)
 	if err != nil {
 		t.Fatalf("Failed to read log directory: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Errorf("No log files found in %s after chat", logDir)
 	}
 
 	if !assertRecentLogFiles(t, logDir, "_chat_input", ".json") {
@@ -100,13 +103,13 @@ func TestLoggingIntegration(t *testing.T) {
 					if line == "" {
 						continue
 					}
-					
+
 					// Log format is now: [LEVEL] [RFC3339Nano timestamp] [component] message
 					// Example: [INFO] [2025-08-13T03:42:20.524221955Z] [lmc] message
-					
+
 					// Should contain [INFO] or [WARN] or [DEBUG] or [ERROR]
-					if !strings.Contains(line, "[INFO]") && !strings.Contains(line, "[WARN]") && 
-					   !strings.Contains(line, "[DEBUG]") && !strings.Contains(line, "[ERROR]") {
+					if !strings.Contains(line, "[INFO]") && !strings.Contains(line, "[WARN]") &&
+						!strings.Contains(line, "[DEBUG]") && !strings.Contains(line, "[ERROR]") {
 						t.Errorf("Log line missing level: %s", line)
 						continue
 					}
@@ -117,7 +120,7 @@ func TestLoggingIntegration(t *testing.T) {
 						t.Errorf("Log line missing or invalid timestamp format: %s", line)
 					}
 				}
-				
+
 				t.Logf("Process log validated: %s", entry.Name())
 				break
 			}
@@ -140,10 +143,9 @@ func TestStreamingLogging(t *testing.T) {
 	defer ms.Close()
 
 	// Test streaming request with custom log directory
-	stdout, stderr, err := runLmcCommandWithSpecificLogDir(t, lmcBin,
+	stdout, stderr, err := runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-stream", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-		"Test streaming message", logDir)
-
+		"Test streaming message", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run streaming: %v\nStderr: %s", err, stderr)
 	}
@@ -184,7 +186,6 @@ func TestStreamingLogging(t *testing.T) {
 	stdout, _, err = runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
-	
 	if err != nil {
 		t.Fatalf("Failed to show sessions: %v", err)
 	}
@@ -218,9 +219,9 @@ func TestConcurrentLogging(t *testing.T) {
 	for i := 0; i < numProcesses; i++ {
 		go func(id int) {
 			// Use specific log dir for concurrent test
-			_, stderr, err := runLmcCommandWithSpecificLogDir(t, lmcBin,
-				[]string{"-argo-user", "testuser", "-e",  "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-				"Concurrent test message", logDir)
+			_, stderr, err := runLmcCommand(t, lmcBin,
+				[]string{"-argo-user", "testuser", "-e", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+				"Concurrent test message", WithLogDir(logDir))
 			if err != nil {
 				t.Logf("Process %d failed: %v, stderr: %s", id, err, stderr)
 			}

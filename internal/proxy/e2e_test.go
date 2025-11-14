@@ -1,14 +1,13 @@
 //go:build e2e
-// +build e2e
 
 package proxy
 
 import (
-	"lmtools/internal/core"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/core"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,7 +35,7 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 		OpenAIAPIKey:       "test-openai-key",
 		GoogleAPIKey:       "test-google-key",
 		ArgoUser:           "testuser",
-		Provider:  "openai",
+		Provider:           "openai",
 		SmallModel:         "gpt-4o-mini",
 		Model:              "gpt-4o",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
@@ -119,7 +118,7 @@ func (m *E2EMockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req OpenAIRequest
-	json.Unmarshal(body, &req)
+	_ = json.Unmarshal(body, &req)
 
 	// Different responses based on model
 	var responseText string
@@ -160,7 +159,7 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
-			
+
 			// Use context-aware delay
 			timer := time.NewTimer(50 * time.Millisecond)
 			select {
@@ -211,7 +210,9 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			m.t.Logf("encode openai tools resp: %v", err)
+		}
 		return
 	}
 
@@ -235,12 +236,14 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		m.t.Logf("encode openai resp: %v", err)
+	}
 }
 
 func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req GoogleRequest
-	json.Unmarshal(body, &req)
+	_ = json.Unmarshal(body, &req)
 
 	// Extract model from URL
 	model := "gemini-2.0-flash"
@@ -287,7 +290,7 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
-			
+
 			// Use context-aware delay
 			timer := time.NewTimer(50 * time.Millisecond)
 			select {
@@ -339,7 +342,9 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				m.t.Logf("encode google tools resp: %v", err)
+			}
 			return
 		}
 	}
@@ -364,12 +369,14 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		m.t.Logf("encode google resp: %v", err)
+	}
 }
 
 func (m *E2EMockProvider) handleArgoE2E(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req ArgoChatRequest
-	json.Unmarshal(body, &req)
+	_ = json.Unmarshal(body, &req)
 
 	responseText := fmt.Sprintf("Argo response for user %s using model %s", req.User, req.Model)
 
@@ -384,7 +391,7 @@ func (m *E2EMockProvider) handleArgoE2E(w http.ResponseWriter, r *http.Request, 
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
-			
+
 			// Use context-aware delay
 			timer := time.NewTimer(20 * time.Millisecond)
 			select {
@@ -404,7 +411,9 @@ func (m *E2EMockProvider) handleArgoE2E(w http.ResponseWriter, r *http.Request, 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		m.t.Logf("encode argo resp: %v", err)
+	}
 }
 
 // Test functions
@@ -871,7 +880,9 @@ func TestE2EPerformance(t *testing.T) {
 			reqBody, _ := json.Marshal(req)
 
 			// Warm up
-			http.Post(suite.server.URL+"/v1/messages", "application/json", bytes.NewReader(reqBody))
+			if _, err := http.Post(suite.server.URL+"/v1/messages", "application/json", bytes.NewReader(reqBody)); err != nil {
+				t.Logf("post error: %v", err)
+			}
 
 			// Measure
 			start := time.Now()
@@ -910,7 +921,6 @@ func countTokens(req OpenAIRequest) int {
 	}
 	return tokens
 }
-
 
 // TestProviderFlagPrecedence tests that the provider flag takes precedence over model name patterns
 func TestProviderFlagPrecedence(t *testing.T) {
@@ -973,10 +983,10 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			// Create mock servers
 			openAIMock := httptest.NewServer(NewMockOpenAI(t))
 			defer openAIMock.Close()
-			
+
 			googleMock := httptest.NewServer(NewMockGoogle(t))
 			defer googleMock.Close()
-			
+
 			argoMock := httptest.NewServer(NewMockArgo(t))
 			defer argoMock.Close()
 
@@ -1110,7 +1120,9 @@ func BenchmarkE2ESimpleChat(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		io.ReadAll(resp.Body)
+		if _, err := io.ReadAll(resp.Body); err != nil {
+			b.Logf("read body error: %v", err)
+		}
 		resp.Body.Close()
 	}
 }

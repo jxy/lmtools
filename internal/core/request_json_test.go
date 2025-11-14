@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -467,7 +466,7 @@ func TestGoogleRequestJSON_NoToolChoice(t *testing.T) {
 	}
 	tools := createTestTools()
 
-	req, _, err := buildGoogleToolAwareRequest(context.TODO(), cfg, messages, "gemini-pro", tools, nil, false)
+	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", tools, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -511,7 +510,7 @@ func TestGoogleRequestJSON_PartsStructure(t *testing.T) {
 		NewTextMessage("assistant", "I'm doing well, thank you!"),
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(context.TODO(), cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -568,7 +567,7 @@ func TestGoogleRequestJSON_SystemInstruction(t *testing.T) {
 		NewTextMessage("user", "Hello"),
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(context.TODO(), cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -619,7 +618,7 @@ func TestGoogleRequestJSON_FunctionCalls(t *testing.T) {
 		},
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(context.TODO(), cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}

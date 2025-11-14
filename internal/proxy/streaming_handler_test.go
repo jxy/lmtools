@@ -92,14 +92,14 @@ func TestStreamingEventSequence(t *testing.T) {
 
 	// Check for required events
 	requiredEvents := []string{
-		"event: message_start",
-		"event: content_block_start",
-		"event: ping",
-		"event: content_block_delta",
-		"event: content_block_stop",
-		"event: message_delta",
-		"event: message_stop",
-		"data: [DONE]",
+		"event: " + EventMessageStart,
+		"event: " + EventContentBlockStart,
+		"event: " + EventPing,
+		"event: " + EventContentBlockDelta,
+		"event: " + EventContentBlockStop,
+		"event: " + EventMessageDelta,
+		"event: " + EventMessageStop,
+		// Anthropic format doesn't use [DONE]
 	}
 
 	for _, event := range requiredEvents {
@@ -130,17 +130,17 @@ func TestStreamingEventSequence(t *testing.T) {
 	}
 
 	// Count events
-	messageStartCount := strings.Count(output, "event: message_start")
+	messageStartCount := strings.Count(output, "event: "+EventMessageStart)
 	if messageStartCount != 1 {
 		t.Errorf("Expected 1 message_start event, got %d", messageStartCount)
 	}
 
-	contentBlockStartCount := strings.Count(output, "event: content_block_start")
+	contentBlockStartCount := strings.Count(output, "event: "+EventContentBlockStart)
 	if contentBlockStartCount != 2 { // One for text, one for tool
 		t.Errorf("Expected 2 content_block_start events, got %d", contentBlockStartCount)
 	}
 
-	contentBlockStopCount := strings.Count(output, "event: content_block_stop")
+	contentBlockStopCount := strings.Count(output, "event: "+EventContentBlockStop)
 	if contentBlockStopCount != 2 { // One for text, one for tool
 		t.Errorf("Expected 2 content_block_stop events, got %d", contentBlockStopCount)
 	}

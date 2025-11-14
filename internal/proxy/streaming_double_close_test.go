@@ -21,14 +21,12 @@ func TestStreamingNoDoubleClose(t *testing.T) {
 
 	// Simulate what happens in simulateStreamingFromArgo
 
-	// 1. Send message_start
+	// 1. Start text stream (combines message_start and content_block_start)
 	if err := handler.SendMessageStart(); err != nil {
-		t.Fatalf("Failed to send message_start: %v", err)
+		t.Fatalf("Failed to send message start: %v", err)
 	}
-
-	// 2. Send content_block_start for text
 	if err := handler.SendContentBlockStart(0, "text"); err != nil {
-		t.Fatalf("Failed to send content_block_start: %v", err)
+		t.Fatalf("Failed to send content block start: %v", err)
 	}
 
 	// 3. Send ping
@@ -136,7 +134,18 @@ func TestStreamingDoubleCloseAttempt(t *testing.T) {
 
 	// Check output
 	output := recorder.Body.String()
-	stopCount := strings.Count(output, `"index":0,"type":"content_block_stop"`)
+	// Look for content_block_stop events with index 0, regardless of field order
+	stopCount := 0
+	lines := strings.Split(output, "\n")
+	for i := 0; i < len(lines)-1; i++ {
+		if lines[i] == "event: content_block_stop" && strings.HasPrefix(lines[i+1], "data: ") {
+			dataLine := strings.TrimPrefix(lines[i+1], "data: ")
+			// Check if this is for index 0 (field order agnostic)
+			if strings.Contains(dataLine, `"index":0`) && strings.Contains(dataLine, `"type":"content_block_stop"`) {
+				stopCount++
+			}
+		}
+	}
 
 	if stopCount != 1 {
 		t.Errorf("Expected 1 content_block_stop for index 0, found %d", stopCount)

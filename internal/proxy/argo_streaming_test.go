@@ -170,7 +170,7 @@ func TestStreamFromArgoEventSequence(t *testing.T) {
 		"content_block_stop",
 		"message_delta",
 		"message_stop",
-		"[DONE]",
+		// Anthropic format doesn't use [DONE]
 	}
 
 	// Verify the sequence matches (allowing for multiple content_block_delta events)
@@ -190,15 +190,15 @@ func TestStreamFromArgoEventSequence(t *testing.T) {
 		t.Errorf("Second event should be content_block_start, got %s", sequence[1])
 	}
 
-	// Find the last three events
-	if len(sequence) >= 3 {
-		lastThree := sequence[len(sequence)-3:]
-		expectedLast := []string{"message_delta", "message_stop", "[DONE]"}
+	// Find the last two events (Anthropic format ends with message_delta, message_stop)
+	if len(sequence) >= 2 {
+		lastTwo := sequence[len(sequence)-2:]
+		expectedLast := []string{"message_delta", "message_stop"}
 
 		for i, expected := range expectedLast {
-			if lastThree[i] != expected {
+			if lastTwo[i] != expected {
 				t.Errorf("Event %d from end should be %s, got %s",
-					3-i, expected, lastThree[i])
+					2-i, expected, lastTwo[i])
 			}
 		}
 	}
@@ -250,10 +250,7 @@ func TestStreamFromArgoNoDuplicates(t *testing.T) {
 		t.Logf("Full output:\n%s", output)
 	}
 
-	if counts["[DONE]"] != 1 {
-		t.Errorf("Expected exactly 1 [DONE] event, got %d", counts["[DONE]"])
-		t.Logf("Full output:\n%s", output)
-	}
+	// Anthropic format doesn't use [DONE], just verify message_stop is present
 
 	// Also verify other events appear correct number of times
 	if counts["message_start"] != 1 {
@@ -335,9 +332,7 @@ func TestStreamFromArgoWithSlowStream(t *testing.T) {
 	if counts["message_stop"] != 1 {
 		t.Errorf("Expected exactly 1 message_stop event, got %d", counts["message_stop"])
 	}
-	if counts["[DONE]"] != 1 {
-		t.Errorf("Expected exactly 1 [DONE] event, got %d", counts["[DONE]"])
-	}
+	// Anthropic format ends with message_stop, not [DONE]
 
 	t.Logf("Slow streaming test passed with %d pings", pingCount)
 }
@@ -431,8 +426,8 @@ func TestStreamFromArgoComplete(t *testing.T) {
 	sequence := extractEventSequence(events)
 
 	// Verify sequence
-	if len(sequence) < 7 {
-		t.Errorf("Expected at least 7 events, got %d: %v", len(sequence), sequence)
+	if len(sequence) < 6 {
+		t.Errorf("Expected at least 6 events, got %d: %v", len(sequence), sequence)
 	}
 
 	// Verify no duplicates
@@ -444,7 +439,7 @@ func TestStreamFromArgoComplete(t *testing.T) {
 		"content_block_stop":  1,
 		"message_delta":       1,
 		"message_stop":        1,
-		"[DONE]":              1,
+		// Anthropic format doesn't use [DONE]
 	}
 
 	for event, expectedCount := range criticalEvents {

@@ -13,18 +13,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Helper functions to reduce duplication in stream handlers
-
-// startTextStream sends initial stream events for text content
-func startTextStream(handler *AnthropicStreamHandler) error {
-	if err := handler.SendMessageStart(); err != nil {
-		return err
-	}
-	return handler.SendContentBlockStart(0, "text")
-}
 
 // streamFromOpenAI handles streaming from OpenAI API
 func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
@@ -68,7 +59,10 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Send initial events
-	if err := startTextStream(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
+		return err
+	}
+	if err := handler.SendContentBlockStart(0, "text"); err != nil {
 		return err
 	}
 
@@ -125,7 +119,10 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Send initial events
-	if err := startTextStream(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
+		return err
+	}
+	if err := handler.SendContentBlockStart(0, "text"); err != nil {
 		return err
 	}
 
@@ -165,13 +162,17 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 	defer streamBody.Close()
 
 	// Send initial events
-	if err := startTextStream(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
+		return err
+	}
+	if err := handler.SendContentBlockStart(0, "text"); err != nil {
 		return err
 	}
 
-	// Use ArgoStreamParser with ping interval to handle the plain text stream
+	// Ensure content_block_start is sent before deltas for each block
+	// Event order: message_start → content_block_start → deltas → content_block_stop → message_stop
 	parser := NewArgoStreamParser(handler)
-	// The parser handles sending all closing events (message_stop, [DONE]) when EOF is reached
+	// The parser handles sending all closing events (message_stop) when EOF is reached
 	return parser.ParseWithPingInterval(streamBody, pingInterval)
 }
 
@@ -181,8 +182,10 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 func (s *Server) streamFromArgoWithPings(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
 	log := logger.From(ctx)
 
-	// Log the streaming request
-	logger.DebugJSON(log, "Outgoing Argo Request (simulated streaming with tools)", anthReq)
+	// Send message_start before sending any pings while waiting for Argo
+	if err := handler.SendMessageStart(); err != nil {
+		return err
+	}
 
 	// Forward to Argo's non-streaming endpoint while sending pings
 	log.Debugf("Waiting for Argo response with pings every %v", pingInterval)
@@ -197,29 +200,13 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, anthReq *Anthropic
 	// Update model in handler
 	handler.UpdateModel(anthResp.Model)
 
-	// Send initial stream events
-	if err := startTextStream(handler); err != nil {
-		return err
-	}
-
 	// Stream the content (simulate streaming by chunking the response)
 	if err := s.streamArgoResponseContent(ctx, anthResp, handler); err != nil {
 		return err
 	}
 
-	// Set final metadata
-	handler.SetStopReason(anthResp.StopReason)
-	if anthResp.Usage != nil {
-		handler.SetUsage(anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens)
-	}
-
-	// Send message stop
-	if err := handler.SendMessageStop(); err != nil {
-		return err
-	}
-
-	// Send [DONE] marker to properly close the stream
-	return handler.SendDone()
+	// Use the new FinishStream helper for consistent completion
+	return handler.FinishStream(anthResp.StopReason, anthResp.Usage)
 }
 
 // streamFromAnthropic handles streaming from Anthropic API
@@ -286,28 +273,28 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 
 			// Parse based on event type
 			switch currentEvent {
-			case "message_start":
+			case EventMessageStart:
 				var evt MessageStartEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					handler.UpdateModel(evt.Message.Model)
 					// Forward the event to the client
-					if err := handler.SendEvent("message_start", evt); err != nil {
+					if err := handler.SendEvent(EventMessageStart, evt); err != nil {
 						return err
 					}
 				}
 
-			case "content_block_start":
+			case EventContentBlockStart:
 				var evt ContentBlockStartEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					// Log the content block start event
 					log.Debugf("Content block start: type=%s", evt.ContentBlock.Type)
 					// Forward the event to the client
-					if err := handler.SendEvent("content_block_start", evt); err != nil {
+					if err := handler.SendEvent(EventContentBlockStart, evt); err != nil {
 						return err
 					}
 				}
 
-			case "content_block_delta":
+			case EventContentBlockDelta:
 				var evt ContentBlockDeltaEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					// If it's a text_delta, accumulate the text
@@ -315,22 +302,22 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 						handler.state.AccumulatedText += evt.Delta.Text
 					}
 					// Forward the event to the client
-					if err := handler.SendEvent("content_block_delta", evt); err != nil {
+					if err := handler.SendEvent(EventContentBlockDelta, evt); err != nil {
 						return err
 					}
 				}
 
-			case "content_block_stop":
+			case EventContentBlockStop:
 				// Block completed
 				var evt ContentBlockStopEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					// Forward the event to the client
-					if err := handler.SendEvent("content_block_stop", evt); err != nil {
+					if err := handler.SendEvent(EventContentBlockStop, evt); err != nil {
 						return err
 					}
 				}
 
-			case "message_delta":
+			case EventMessageDelta:
 				var evt MessageDeltaEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					if evt.Delta.StopReason != "" {
@@ -340,31 +327,35 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 						handler.SetUsage(evt.Usage.InputTokens, evt.Usage.OutputTokens)
 					}
 					// Forward the event to the client
-					if err := handler.SendEvent("message_delta", evt); err != nil {
+					if err := handler.SendEvent(EventMessageDelta, evt); err != nil {
 						return err
 					}
 				}
 
-			case "message_stop":
-				// Stream completed
+			case EventMessageStop:
+				// Stream completed; ensure we sent a message_delta earlier
 				var evt MessageStopEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					// Forward the event to the client
-					if err := handler.SendEvent("message_stop", evt); err != nil {
+					if err := handler.SendEvent(EventMessageStop, evt); err != nil {
 						return err
 					}
 				}
 				return nil
 
-			case "error":
+			case EventError:
 				var evt ErrorEvent
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
 					// Forward the error event to the client
-					if err := handler.SendEvent("error", evt); err != nil {
+					if err := handler.SendEvent(EventError, evt); err != nil {
 						return err
 					}
 					return fmt.Errorf("%s: %s", evt.Error.Type, evt.Error.Message)
 				}
+
+			default:
+				// Log unknown event types for debugging
+				log.Debugf("Unknown SSE event type: %s, data: %s", currentEvent, data)
 			}
 		}
 	}
@@ -454,15 +445,7 @@ func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *Anthro
 // streamTextBlock streams a text content block
 func (s *Server) streamTextBlock(content string, blockIndex int, handler *AnthropicStreamHandler) error {
 	// Send content block start event
-	blockStart := ContentBlockStartEvent{
-		Type:  "content_block_start",
-		Index: blockIndex,
-		ContentBlock: AnthropicContentBlock{
-			Type: "text",
-			Text: "",
-		},
-	}
-	if err := handler.SendEvent("content_block_start", blockStart); err != nil {
+	if err := handler.SendContentBlockStart(blockIndex, "text"); err != nil {
 		return err
 	}
 
@@ -472,31 +455,20 @@ func (s *Server) streamTextBlock(content string, blockIndex int, handler *Anthro
 		chunkSize = constants.DefaultTextChunkSize * 2 // Larger chunks for longer content
 	}
 
-	// Use splitTextForStreaming to respect UTF-8 boundaries
-	chunks := splitTextForStreaming(handler.ctx, content, chunkSize)
+	// Use ContentSplitter for UTF-8 aware text chunking
+	splitter := NewContentSplitter(handler.ctx, TextMode, chunkSize)
+	chunks := splitter.Split(content)
 
 	// Stream each chunk
 	for _, chunk := range chunks {
 		// Send as content_block_delta event
-		delta := ContentBlockDeltaEvent{
-			Type:  "content_block_delta",
-			Index: blockIndex,
-			Delta: DeltaContent{
-				Type: "text_delta",
-				Text: chunk,
-			},
-		}
-		if err := handler.SendEvent("content_block_delta", delta); err != nil {
+		if err := handler.SendTextDelta(chunk); err != nil {
 			return err
 		}
 	}
 
 	// Send content block stop event
-	blockStop := ContentBlockStopEvent{
-		Type:  "content_block_stop",
-		Index: blockIndex,
-	}
-	if err := handler.SendEvent("content_block_stop", blockStop); err != nil {
+	if err := handler.SendContentBlockStop(blockIndex); err != nil {
 		return err
 	}
 
@@ -507,18 +479,13 @@ func (s *Server) streamTextBlock(content string, blockIndex int, handler *Anthro
 func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
 	log := logger.From(ctx)
 
-	// Send tool use start event
-	toolStart := ContentBlockStartEvent{
-		Type:  "content_block_start",
-		Index: blockIndex,
-		ContentBlock: AnthropicContentBlock{
-			ID:   block.ID,
-			Type: "tool_use",
-			Name: block.Name,
-		},
+	// Send tool use start event with empty input field
+	if err := handler.SendToolUseStart(blockIndex, block.ID, block.Name); err != nil {
+		return err
 	}
 
-	if err := handler.SendEvent("content_block_start", toolStart); err != nil {
+	// Send initial empty partial_json delta (Anthropic format requirement)
+	if err := handler.SendToolInputDelta(blockIndex, ""); err != nil {
 		return err
 	}
 
@@ -530,34 +497,27 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 	inputStr := string(inputJSON)
 	chunkSize := constants.DefaultJSONChunkSize
 
-	// Use splitTextForStreaming to respect UTF-8 boundaries in JSON content
-	chunks := splitTextForStreaming(ctx, inputStr, chunkSize)
+	// Use ContentSplitter for JSON-aware chunking to respect UTF-8 and escape boundaries
+	splitter := NewContentSplitter(ctx, JSONMode, chunkSize)
+	chunks := splitter.Split(inputStr)
 
 	// Stream each chunk
 	for _, chunk := range chunks {
-		delta := ContentBlockDeltaEvent{
-			Type:  "content_block_delta",
-			Index: blockIndex,
-			Delta: DeltaContent{
-				Type:        "input_json_delta",
-				PartialJSON: chunk,
-			},
-		}
-
-		if err := handler.SendEvent("content_block_delta", delta); err != nil {
+		if err := handler.SendToolInputDelta(blockIndex, chunk); err != nil {
 			return err
 		}
 	}
 
 	// Send tool use stop event
-	if err := handler.SendEvent("content_block_stop", ContentBlockStopEvent{
-		Type:  "content_block_stop",
-		Index: blockIndex,
-	}); err != nil {
+	if err := handler.SendContentBlockStop(blockIndex); err != nil {
 		return err
 	}
 
-	log.Debugf("Streamed tool use block: %s", block.Name)
+	// Log the full tool use block details
+	if log.IsDebugEnabled() {
+		toolJSON, _ := json.Marshal(block)
+		log.Debugf("Streamed tool use block: %s", string(toolJSON))
+	}
 	return nil
 }
 
@@ -565,14 +525,17 @@ func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBloc
 func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
 	log := logger.From(ctx)
 
+	// Send message_start up front so clients receive it before any pings
+	if err := handler.SendMessageStart(); err != nil {
+		return err
+	}
+
 	// If ping interval specified, wait with pings
 	var argoResp *ArgoChatResponse
 	var err error
 
 	if pingInterval > 0 {
 		log.Debugf("Waiting for Argo response with pings every %v", pingInterval)
-		// Log the streaming request
-		logger.DebugJSON(log, "Outgoing Argo Streaming Request", anthReq)
 		argoResp, err = s.waitForArgoResponseWithPings(ctx, anthReq, handler, pingInterval)
 	} else {
 		// Get non-streaming response from Argo
@@ -589,29 +552,13 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 	// Update model in handler
 	handler.UpdateModel(anthResp.Model)
 
-	// Send initial stream events
-	if err := startTextStream(handler); err != nil {
-		return err
-	}
-
 	// Stream the content
 	if err := s.streamArgoResponseContent(ctx, anthResp, handler); err != nil {
 		return err
 	}
 
-	// Set final metadata
-	handler.SetStopReason(anthResp.StopReason)
-	if anthResp.Usage != nil {
-		handler.SetUsage(anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens)
-	}
-
-	// Send message stop
-	if err := handler.SendMessageStop(); err != nil {
-		return err
-	}
-
-	// Send [DONE] marker to properly close the stream
-	return handler.SendDone()
+	// Use the new FinishStream helper for consistent completion
+	return handler.FinishStream(anthResp.StopReason, anthResp.Usage)
 }
 
 // streamOpenAIFromAnthropic handles streaming from Anthropic API and converts to OpenAI format
@@ -738,9 +685,8 @@ func (s *Server) streamOpenAIFromGoogle(ctx context.Context, anthReq *AnthropicR
 	// Create converter
 	converter := NewOpenAIStreamConverter(writer, ctx)
 
-	// Send initial role
-	role := "assistant"
-	if err := writer.WriteDelta("", &role, nil); err != nil {
+	// Send initial assistant delta
+	if err := writer.WriteInitialAssistantDelta(); err != nil {
 		return err
 	}
 
@@ -791,63 +737,26 @@ func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicReq
 	// Create converter
 	converter := NewOpenAIStreamConverter(writer, ctx)
 
-	// Send initial role
-	role := "assistant"
-	if err := writer.WriteDelta("", &role, nil); err != nil {
+	// Send initial assistant delta
+	if err := writer.WriteInitialAssistantDelta(); err != nil {
 		return err
 	}
 
-	// Stream the plain text response with UTF-8 safety
-	buffer := make([]byte, 1024)
-	utf8Rest := make([]byte, 0, 4) // Buffer for incomplete UTF-8 sequences
+	// Read the entire stream into memory first
+	// This is necessary because ContentSplitter works on complete strings
+	data, err := io.ReadAll(streamBody)
+	if err != nil {
+		return err
+	}
 
-	for {
-		n, err := streamBody.Read(buffer)
-		if n > 0 {
-			// Combine any leftover bytes with new data
-			data := append(utf8Rest, buffer[:n]...)
+	// Use ContentSplitter for proper UTF-8 aware chunking
+	splitter := NewContentSplitter(ctx, TextMode, 1024)
+	chunks := splitter.Split(string(data))
 
-			// Find the last valid UTF-8 boundary
-			lastValid := len(data)
-			for i := len(data) - 1; i >= 0 && i >= len(data)-4; i-- {
-				if utf8.RuneStart(data[i]) {
-					// Check if this starts a valid complete rune
-					if r, size := utf8.DecodeRune(data[i:]); r != utf8.RuneError || size == len(data)-i {
-						lastValid = i + size
-						break
-					}
-					// This starts an incomplete rune
-					lastValid = i
-					break
-				}
-			}
-
-			// Send the complete UTF-8 portion
-			if lastValid > 0 {
-				text := string(data[:lastValid])
-				if err := converter.HandleArgoText(text); err != nil {
-					logger.From(ctx).Errorf("Failed to handle Argo text: %v", err)
-					return err
-				}
-			}
-
-			// Keep any incomplete sequence for next iteration
-			if lastValid < len(data) {
-				utf8Rest = append(utf8Rest[:0], data[lastValid:]...)
-			} else {
-				utf8Rest = utf8Rest[:0]
-			}
-		}
-		if err != nil {
-			if err == io.EOF {
-				// Send any remaining bytes if they form valid UTF-8
-				if len(utf8Rest) > 0 && utf8.Valid(utf8Rest) {
-					if err := converter.HandleArgoText(string(utf8Rest)); err != nil {
-						logger.From(ctx).Errorf("Failed to handle final Argo text: %v", err)
-					}
-				}
-				break
-			}
+	// Stream each chunk
+	for _, chunk := range chunks {
+		if err := converter.HandleArgoText(chunk); err != nil {
+			logger.From(ctx).Errorf("Failed to handle Argo text chunk: %v", err)
 			return err
 		}
 	}
@@ -878,9 +787,8 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 		}
 	}
 
-	// Send initial role
-	role := "assistant"
-	if err := writer.WriteDelta("", &role, nil); err != nil {
+	// Send initial assistant delta
+	if err := writer.WriteInitialAssistantDelta(); err != nil {
 		return err
 	}
 
@@ -888,64 +796,67 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 	for i, block := range anthResp.Content {
 		switch block.Type {
 		case "text":
-			// Use UTF-8 aware chunking to prevent character splitting
-			chunks := splitTextForStreaming(ctx, block.Text, 50)
+			// Determine chunk size based on content length (same logic as streamTextBlock)
+			chunkSize := constants.DefaultTextChunkSize
+			if len(block.Text) > 1000 {
+				chunkSize = constants.DefaultTextChunkSize * 2 // Larger chunks for longer content
+			}
+
+			// Use ContentSplitter for UTF-8 aware chunking to prevent character splitting
+			splitter := NewContentSplitter(ctx, TextMode, chunkSize)
+			chunks := splitter.Split(block.Text)
 			for _, chunk := range chunks {
-				if err := writer.WriteDelta(chunk, nil, nil); err != nil {
+				if err := writer.WriteContent(chunk); err != nil {
 					return err
 				}
 			}
 
 		case "tool_use":
-			// Send tool call
-			toolCall := &ToolCallDelta{
-				Index: i,
-				ID:    block.ID,
-				Type:  "function",
-				Function: &FunctionCallDelta{
-					Name: block.Name,
-				},
-			}
-
-			// Send initial tool call with name
-			if err := writer.WriteToolCallDelta(i, toolCall, nil); err != nil {
+			// Send initial tool call with ID, name, and empty arguments
+			if err := writer.WriteToolCallIntro(i, block.ID, block.Name); err != nil {
 				return err
 			}
 
-			// Send arguments
+			// Stream arguments in incremental deltas per OpenAI spec
 			args, _ := json.Marshal(block.Input)
-			argsCall := &ToolCallDelta{
-				Index: i,
-				Function: &FunctionCallDelta{
-					Arguments: string(args),
-				},
-			}
-			if err := writer.WriteToolCallDelta(i, argsCall, nil); err != nil {
-				return err
+			argStr := string(args)
+			splitter := NewContentSplitter(ctx, JSONMode, 64)
+			for _, part := range splitter.Split(argStr) {
+				if err := writer.WriteToolArguments(i, part); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
-	// Send usage if available
-	if anthResp.Usage != nil {
-		usage := &OpenAIUsage{
-			PromptTokens:     anthResp.Usage.InputTokens,
-			CompletionTokens: anthResp.Usage.OutputTokens,
-			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
-		}
-		if err := writer.WriteUsage(usage); err != nil {
-			return err
-		}
-	}
+	// Usage Streaming Implementation:
+	//
+	// OpenAI format requires special handling for usage information:
+	// 1. Check if constants.IncludeUsageKey is true (via Anthropic metadata)
+	// 2. If false (default): No usage chunk is sent
+	// 3. If true: Send usage as a separate chunk after finish_reason
+	//
+	// The metadata key constants.IncludeUsageKey is used to pass this
+	// OpenAI-specific option through the Anthropic request format.
+	//
+	// Note: Intermediate chunks have explicit "usage: null" due to the
+	// OpenAIStreamChunk.Usage field being a pointer without omitempty tag.
+	// This matches OpenAI's behavior where usage is always present in the schema.
+	// The include_usage flag is now set when creating the writer in handlers_openai.go
 
 	// Map stop reason to finish reason
 	finishReason := MapStopReasonToOpenAIFinishReason(anthResp.StopReason)
 
-	// Send finish reason
-	if err := writer.WriteDelta("", nil, &finishReason); err != nil {
-		return err
+	// Prepare usage if available
+	var usage *OpenAIUsage
+	if anthResp.Usage != nil {
+		usage = &OpenAIUsage{
+			PromptTokens:     anthResp.Usage.InputTokens,
+			CompletionTokens: anthResp.Usage.OutputTokens,
+			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
+		}
 	}
 
-	// Send [DONE]
-	return writer.WriteDone()
+	// Write finish sequence: final chunk with finish_reason, optional usage, then [DONE]
+	return writer.WriteFinish(finishReason, usage)
 }

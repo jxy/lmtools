@@ -595,7 +595,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 							"id": "call_47BSzK51qN5Fq0hMJT1HXx5j",
 							"name": "Read",
 							"input": {
-								"file_path": "/usr/home/jin/K/W/P002/lmtools/cmd/apiproxy/run_tests.sh"
+								"file_path": "/path/to/project/cmd/apiproxy/run_tests.sh"
 							}
 						}]`),
 					},
@@ -617,7 +617,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 								Type: "function",
 								Function: FunctionCall{
 									Name:      "Read",
-									Arguments: `{"file_path":"/usr/home/jin/K/W/P002/lmtools/cmd/apiproxy/run_tests.sh"}`,
+									Arguments: `{"file_path":"/path/to/project/cmd/apiproxy/run_tests.sh"}`,
 								},
 							},
 						},

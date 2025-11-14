@@ -94,11 +94,11 @@ func TestModelRecordingInSessions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to glob message files: %v", err)
 			}
-			
+
 			if len(msgFiles) < 2 {
 				t.Fatalf("Expected at least 2 message files, got %d", len(msgFiles))
 			}
-			
+
 			// Find the assistant message file
 			var assistantMsgPath string
 			for _, msgFile := range msgFiles {
@@ -106,7 +106,7 @@ func TestModelRecordingInSessions(t *testing.T) {
 				if err != nil {
 					continue
 				}
-				
+
 				// Parse JSON to check role
 				var msg map[string]interface{}
 				if err := json.Unmarshal(data, &msg); err == nil {
@@ -116,22 +116,22 @@ func TestModelRecordingInSessions(t *testing.T) {
 					}
 				}
 			}
-			
+
 			if assistantMsgPath == "" {
 				t.Fatal("No assistant message file found")
 			}
-			
+
 			// Read and verify the assistant message
 			data, err := os.ReadFile(assistantMsgPath)
 			if err != nil {
 				t.Fatalf("Failed to read assistant message: %v", err)
 			}
-			
+
 			var rawMsg map[string]interface{}
 			if err := json.Unmarshal(data, &rawMsg); err != nil {
 				t.Fatalf("Failed to unmarshal message: %v", err)
 			}
-			
+
 			// Verify the model is recorded correctly
 			if model, ok := rawMsg["model"].(string); !ok || model != tt.expectedModel {
 				t.Errorf("Expected model %q, got %v", tt.expectedModel, rawMsg["model"])

@@ -35,13 +35,17 @@ coverage:
 	@echo "Coverage report saved to coverage.html"
 	@go tool cover -func=coverage.out | grep "total:" | awk '{print "Total coverage: " $$3}'
 
-# Run linting
+# Run linting (both unit-only and with build tags)
 lint:
 	golangci-lint run
+	golangci-lint run --build-tags=integration
+	golangci-lint run --build-tags=e2e
 
-# Auto-fix linting issues
+# Auto-fix linting issues (unit-only); then check tagged build
 lint-fix:
 	golangci-lint run --fix
+	golangci-lint run --build-tags=integration --fix
+	golangci-lint run --build-tags=e2e --fix
 
 # Clean build artifacts
 clean:

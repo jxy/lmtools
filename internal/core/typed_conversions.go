@@ -1,13 +1,80 @@
+// Package core provides type-safe conversions between different LLM provider formats.
+//
+// ARCHITECTURAL OVERVIEW:
+// This package implements a strongly-typed message system that replaces generic
+// map[string]interface{} usage throughout the codebase. All provider-specific
+// formats are converted to/from a canonical TypedMessage representation.
+//
+// UNION TYPE PATTERN:
+// The package defines content union types (OpenAIContentUnion, AnthropicContentUnion)
+// that handle the polymorphic nature of LLM API content fields, which can be either
+// a simple string or an array of content objects.
+//
+// KEY DESIGN DECISIONS:
+//
+// 1. Union types CANNOT be marshaled directly:
+//   - They implement UnmarshalJSON for parsing provider responses
+//   - They deliberately fail MarshalJSON to prevent accidental misuse
+//   - This compile-time safety prevents runtime errors
+//
+// 2. Request building uses dedicated marshal functions:
+//   - MarshalAnthropicMessagesForRequest: Builds Anthropic API format
+//   - MarshalOpenAIMessagesForRequest: Builds OpenAI API format
+//   - MarshalGoogleMessagesForRequest: Builds Google API format
+//   - These functions handle union types correctly via ToMap() methods
+//
+// 3. Type safety throughout:
+//   - No map[string]interface{} in business logic
+//   - Compile-time type checking for all conversions
+//   - Clear error messages when misused
+//
+// USAGE EXAMPLES:
+//
+// Correct usage for request building:
+//
+//	messages := []TypedMessage{...}
+//	openAIMessages := ToOpenAITyped(messages)
+//	requestBody := MarshalOpenAIMessagesForRequest(openAIMessages)
+//	jsonBytes, _ := json.Marshal(requestBody) // Safe!
+//
+// Incorrect usage (will fail at runtime):
+//
+//	messages := []OpenAIMessage{...} // Has OpenAIContentUnion inside
+//	jsonBytes, _ := json.Marshal(messages) // RUNTIME ERROR!
+//
+// BEST PRACTICES:
+// - Always use TypedMessage for internal processing
+// - Convert to provider format only at API boundaries
+// - Use Marshal*ForRequest functions for building requests
+// - Never attempt to marshal union types directly
+// - Validate union types with ValidateForMarshal() when needed
 package core
 
 import (
 	"encoding/json"
+	"log"
+	"strings"
 )
 
 // ARCHITECTURAL NOTE: These conversion functions use strongly typed structures
 // instead of map[string]interface{}. This ensures type safety and makes the
 // code more maintainable. All conversions go through TypedMessage as the
 // canonical internal representation.
+//
+// UNION TYPE HANDLING:
+// This package defines content union types (OpenAIContentUnion, AnthropicContentUnion)
+// that represent the different ways content can be structured in API requests.
+// These union types intentionally fail MarshalJSON to prevent accidental direct
+// marshaling. They are internal representations that must be converted to the
+// appropriate format using the Marshal*ForRequest functions.
+//
+// IMPORTANT: Never marshal union types directly. Always use:
+//   - MarshalAnthropicMessagesForRequest for Anthropic API format
+//   - MarshalOpenAIMessagesForRequest for OpenAI API format
+//   - MarshalGoogleMessagesForRequest for Google API format
+//
+// These marshal functions handle the union types correctly and produce
+// the exact JSON structure expected by each provider's API.
 
 // ToAnthropicTyped converts TypedMessage to strongly typed Anthropic format
 func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
@@ -21,7 +88,11 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 		// Check if we have only a single text block
 		if len(msg.Blocks) == 1 {
 			if textBlock, ok := msg.Blocks[0].(TextBlock); ok {
-				anthMsg.Content = textBlock.Text
+				text := textBlock.Text
+				anthMsg.Content = AnthropicContentUnion{
+					Text:     &text,
+					Contents: nil,
+				}
 				result = append(result, anthMsg)
 				continue
 			}
@@ -49,29 +120,24 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 				audioContent := AnthropicContent{
 					Type: "input_audio",
 				}
-				inputAudioMap := make(map[string]interface{})
-
-				if b.Data != "" {
-					inputAudioMap["data"] = b.Data
-					if b.Format != "" {
-						inputAudioMap["format"] = b.Format
-					} else {
-						inputAudioMap["format"] = "wav"
-					}
-				} else if b.ID != "" {
-					inputAudioMap["id"] = b.ID
+				// Properly map audio fields
+				audioData := &AudioData{
+					ID:       b.ID,
+					Data:     b.Data,
+					Format:   b.Format,
+					URL:      b.URL,
+					Duration: b.Duration,
 				}
-
-				if len(inputAudioMap) > 0 {
-					audioContent.InputAudio = inputAudioMap
-					content = append(content, audioContent)
-				}
+				// Default format if not specified
+				ensureAudioFormat(audioData)
+				audioContent.InputAudio = audioData
+				content = append(content, audioContent)
 			case FileBlock:
-				// Use proper Anthropic file block format
+				// Use proper Anthropic file block format with FileID
 				content = append(content, AnthropicContent{
 					Type: "file",
-					File: map[string]interface{}{
-						"file_id": b.FileID,
+					File: &FileData{
+						FileID: b.FileID,
 					},
 				})
 			case ToolUseBlock:
@@ -92,7 +158,10 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 		}
 
 		if len(content) > 0 {
-			anthMsg.Content = content
+			anthMsg.Content = AnthropicContentUnion{
+				Text:     nil,
+				Contents: content,
+			}
 		}
 		result = append(result, anthMsg)
 	}
@@ -112,7 +181,7 @@ func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 		// Handle different roles
 		switch msg.Role {
 		case string(RoleAssistant):
-			content, toolCalls := ConvertBlocksToOpenAITyped(msg.Blocks)
+			content, toolCalls := ConvertBlocksToOpenAIContentTyped(msg.Blocks)
 			openAIMsg.Content = content
 			openAIMsg.ToolCalls = toolCalls
 
@@ -131,17 +200,25 @@ func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 				for _, block := range msg.Blocks {
 					switch b := block.(type) {
 					case ToolResultBlock:
+						content := b.Content
 						toolMsg := OpenAIMessage{
 							Role:       "tool",
 							ToolCallID: b.ToolUseID,
-							Content:    b.Content,
+							Content: OpenAIContentUnion{
+								Text:     &content,
+								Contents: nil,
+							},
 						}
 						result = append(result, toolMsg)
 					case TextBlock:
 						// Add any text blocks as a user message
+						text := b.Text
 						userMsg := OpenAIMessage{
-							Role:    "user",
-							Content: b.Text,
+							Role: "user",
+							Content: OpenAIContentUnion{
+								Text:     &text,
+								Contents: nil,
+							},
 						}
 						result = append(result, userMsg)
 					}
@@ -150,19 +227,19 @@ func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 				continue
 			} else {
 				// Regular user message
-				content, _ := ConvertBlocksToOpenAITyped(msg.Blocks)
-				if content == nil {
-					openAIMsg.Content = ""
-				} else {
-					openAIMsg.Content = content
-				}
+				content, _ := ConvertBlocksToOpenAIContentTyped(msg.Blocks)
+				openAIMsg.Content = content
 			}
 
 		default:
 			// System and other roles - just extract text
 			for _, block := range msg.Blocks {
 				if textBlock, ok := block.(TextBlock); ok {
-					openAIMsg.Content = textBlock.Text
+					text := textBlock.Text
+					openAIMsg.Content = OpenAIContentUnion{
+						Text:     &text,
+						Contents: nil,
+					}
 					break
 				}
 			}
@@ -172,13 +249,6 @@ func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 	}
 
 	return result
-}
-
-// ConvertBlocksToOpenAITyped converts blocks to OpenAI content and tool calls using typed structures
-// This function delegates to the single source of truth (ConvertBlocksToOpenAIContent) to avoid duplication
-func ConvertBlocksToOpenAITyped(blocks []Block) (content interface{}, toolCalls []OpenAIToolCall) {
-	// Use the single source of truth for OpenAI content conversion
-	return ConvertBlocksToOpenAIContent(blocks)
 }
 
 // ToGoogleTyped converts TypedMessage to strongly typed Google format
@@ -281,24 +351,40 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 func ConvertToolsToOpenAITyped(tools []ToolDefinition) []OpenAITool {
 	openAITools := make([]OpenAITool, 0, len(tools))
 	for _, tool := range tools {
-		// Handle nil or invalid InputSchema
-		var parameters map[string]interface{}
+		// InputSchema can be map[string]interface{} or json.RawMessage
+		var jsonParams json.RawMessage
+
 		if tool.InputSchema != nil {
-			// Safe type assertion with fallback
-			if params, ok := tool.InputSchema.(map[string]interface{}); ok {
-				parameters = params
-			} else {
-				// Provide default schema if type assertion fails
-				parameters = map[string]interface{}{
+			switch schema := tool.InputSchema.(type) {
+			case map[string]interface{}:
+				// Most common case - convert map to JSON
+				if data, err := json.Marshal(schema); err == nil {
+					jsonParams = json.RawMessage(data)
+				}
+			case json.RawMessage:
+				// Already in JSON format (used in tests)
+				jsonParams = schema
+			case []byte:
+				// Raw bytes (convert to RawMessage)
+				jsonParams = json.RawMessage(schema)
+			default:
+				// Fallback - provide default schema
+				defaultSchema := map[string]interface{}{
 					"type":       "object",
 					"properties": map[string]interface{}{},
+				}
+				if data, err := json.Marshal(defaultSchema); err == nil {
+					jsonParams = json.RawMessage(data)
 				}
 			}
 		} else {
 			// Provide default schema for nil InputSchema
-			parameters = map[string]interface{}{
+			defaultSchema := map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
+			}
+			if data, err := json.Marshal(defaultSchema); err == nil {
+				jsonParams = json.RawMessage(data)
 			}
 		}
 
@@ -307,7 +393,7 @@ func ConvertToolsToOpenAITyped(tools []ToolDefinition) []OpenAITool {
 			Function: OpenAIToolFunction{
 				Name:        tool.Name,
 				Description: tool.Description,
-				Parameters:  parameters,
+				Parameters:  jsonParams,
 			},
 		})
 	}
@@ -318,31 +404,47 @@ func ConvertToolsToOpenAITyped(tools []ToolDefinition) []OpenAITool {
 func ConvertToolsToAnthropicTyped(tools []ToolDefinition) []AnthropicTool {
 	anthropicTools := make([]AnthropicTool, 0, len(tools))
 	for _, tool := range tools {
-		// Handle nil or invalid InputSchema
-		var inputSchema map[string]interface{}
+		// InputSchema can be map[string]interface{} or json.RawMessage
+		var jsonSchema json.RawMessage
+
 		if tool.InputSchema != nil {
-			// Safe type assertion with fallback
-			if schema, ok := tool.InputSchema.(map[string]interface{}); ok {
-				inputSchema = schema
-			} else {
-				// Provide default schema if type assertion fails
-				inputSchema = map[string]interface{}{
+			switch schema := tool.InputSchema.(type) {
+			case map[string]interface{}:
+				// Most common case - convert map to JSON
+				if data, err := json.Marshal(schema); err == nil {
+					jsonSchema = json.RawMessage(data)
+				}
+			case json.RawMessage:
+				// Already in JSON format (used in tests)
+				jsonSchema = schema
+			case []byte:
+				// Raw bytes (convert to RawMessage)
+				jsonSchema = json.RawMessage(schema)
+			default:
+				// Fallback - provide default schema
+				defaultSchema := map[string]interface{}{
 					"type":       "object",
 					"properties": map[string]interface{}{},
+				}
+				if data, err := json.Marshal(defaultSchema); err == nil {
+					jsonSchema = json.RawMessage(data)
 				}
 			}
 		} else {
 			// Provide default schema for nil InputSchema
-			inputSchema = map[string]interface{}{
+			defaultSchema := map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
+			}
+			if data, err := json.Marshal(defaultSchema); err == nil {
+				jsonSchema = json.RawMessage(data)
 			}
 		}
 
 		anthropicTools = append(anthropicTools, AnthropicTool{
 			Name:        tool.Name,
 			Description: tool.Description,
-			InputSchema: inputSchema,
+			InputSchema: jsonSchema,
 		})
 	}
 	return anthropicTools
@@ -357,33 +459,50 @@ func ConvertToolsToGoogleTyped(tools []ToolDefinition) []GoogleTool {
 	// Google uses a single tool object with multiple function declarations
 	declarations := make([]GoogleFunctionDeclaration, 0, len(tools))
 	for _, tool := range tools {
-		// Handle nil or invalid InputSchema
-		var params map[string]interface{}
+		// InputSchema can be map[string]interface{} or json.RawMessage
+		var jsonParams json.RawMessage
+
 		if tool.InputSchema != nil {
-			// Convert schema to Google format
+			// First convert to Google format if needed
 			converted := ConvertSchemaToGoogleFormat(tool.InputSchema)
-			// Safe type assertion with fallback
-			if p, ok := converted.(map[string]interface{}); ok {
-				params = p
-			} else {
-				// Provide default schema if type assertion fails
-				params = map[string]interface{}{
+
+			switch schema := converted.(type) {
+			case map[string]interface{}:
+				// Most common case - convert map to JSON
+				if data, err := json.Marshal(schema); err == nil {
+					jsonParams = json.RawMessage(data)
+				}
+			case json.RawMessage:
+				// Already in JSON format
+				jsonParams = schema
+			case []byte:
+				// Raw bytes (convert to RawMessage)
+				jsonParams = json.RawMessage(schema)
+			default:
+				// Fallback - provide default schema
+				defaultSchema := map[string]interface{}{
 					"type":       "object",
 					"properties": map[string]interface{}{},
+				}
+				if data, err := json.Marshal(defaultSchema); err == nil {
+					jsonParams = json.RawMessage(data)
 				}
 			}
 		} else {
 			// Provide default schema for nil InputSchema
-			params = map[string]interface{}{
+			defaultSchema := map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
+			}
+			if data, err := json.Marshal(defaultSchema); err == nil {
+				jsonParams = json.RawMessage(data)
 			}
 		}
 
 		declarations = append(declarations, GoogleFunctionDeclaration{
 			Name:        tool.Name,
 			Description: tool.Description,
-			Parameters:  params,
+			Parameters:  jsonParams,
 		})
 	}
 
@@ -405,25 +524,28 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 		case "tool":
 			// Tool result message in OpenAI format
 			typed.Role = "user"
+			// Extract content from ContentUnion
+			var content string
+			if msg.Content.Text != nil {
+				content = *msg.Content.Text
+			}
 			typed.Blocks = []Block{
 				ToolResultBlock{
 					ToolUseID: msg.ToolCallID,
-					Content:   msg.Content.(string),
+					Content:   content,
 					IsError:   false,
 				},
 			}
 
 		default:
 			// System, user, or assistant message
-			// Handle content (can be string or array)
-			switch content := msg.Content.(type) {
-			case string:
-				if content != "" {
-					typed.Blocks = append(typed.Blocks, TextBlock{Text: content})
-				}
-			case []OpenAIContent:
-				// Handle multimodal content
-				for _, item := range content {
+			// Handle content from ContentUnion
+			if msg.Content.Text != nil && *msg.Content.Text != "" {
+				// Simple text content
+				typed.Blocks = append(typed.Blocks, TextBlock{Text: *msg.Content.Text})
+			} else if len(msg.Content.Contents) > 0 {
+				// Array of content blocks
+				for _, item := range msg.Content.Contents {
 					switch item.Type {
 					case "text":
 						if item.Text != "" {
@@ -438,25 +560,21 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 						}
 					case "input_audio":
 						if item.InputAudio != nil {
-							audioBlock := AudioBlock{}
-							if id, ok := item.InputAudio["id"].(string); ok {
-								audioBlock.ID = id
+							audioBlock := AudioBlock{
+								ID:       item.InputAudio.ID,
+								Data:     item.InputAudio.Data,
+								Format:   item.InputAudio.Format,
+								URL:      item.InputAudio.URL,
+								Duration: item.InputAudio.Duration,
 							}
-							if data, ok := item.InputAudio["data"].(string); ok {
-								audioBlock.Data = data
-							}
-							if format, ok := item.InputAudio["format"].(string); ok {
-								audioBlock.Format = format
-							}
-							if audioBlock.ID != "" || audioBlock.Data != "" {
+							// Only add if we have some audio content
+							if audioBlock.ID != "" || audioBlock.Data != "" || audioBlock.URL != "" {
 								typed.Blocks = append(typed.Blocks, audioBlock)
 							}
 						}
 					case "file":
-						if item.File != nil {
-							if fileID, ok := item.File["file_id"].(string); ok && fileID != "" {
-								typed.Blocks = append(typed.Blocks, FileBlock{FileID: fileID})
-							}
+						if item.File != nil && item.File.FileID != "" {
+							typed.Blocks = append(typed.Blocks, FileBlock{FileID: item.File.FileID})
 						}
 					}
 				}
@@ -483,10 +601,28 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 func MarshalAnthropicMessagesForRequest(messages []AnthropicMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
-		msgMap := map[string]interface{}{
-			"role":    msg.Role,
-			"content": msg.Content,
+		// Validate the content union before marshaling
+		if err := msg.Content.ValidateForMarshal(); err != nil {
+			log.Printf("Warning: Invalid AnthropicContentUnion in message: %v", err)
+			// Continue processing despite validation error
 		}
+
+		msgMap := map[string]interface{}{
+			"role": msg.Role,
+		}
+
+		// Extract the actual content value from ContentUnion
+		if len(msg.Content.Contents) > 0 {
+			contentArray := make([]interface{}, len(msg.Content.Contents))
+			for i, c := range msg.Content.Contents {
+				contentArray[i] = c.ToMap()
+			}
+			msgMap["content"] = contentArray
+		} else if msg.Content.Text != nil && *msg.Content.Text != "" {
+			// Only include content if non-empty string
+			msgMap["content"] = *msg.Content.Text
+		}
+
 		result = append(result, msgMap)
 	}
 	return result
@@ -497,10 +633,29 @@ func MarshalAnthropicMessagesForRequest(messages []AnthropicMessage) []interface
 func MarshalOpenAIMessagesForRequest(messages []OpenAIMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
-		msgMap := map[string]interface{}{
-			"role":    msg.Role,
-			"content": msg.Content,
+		// Validate the content union before marshaling
+		if err := msg.Content.ValidateForMarshal(); err != nil {
+			log.Printf("Warning: Invalid OpenAIContentUnion in message: %v", err)
+			// Continue processing despite validation error
 		}
+
+		msgMap := map[string]interface{}{
+			"role": msg.Role,
+		}
+
+		// Extract the actual content value from ContentUnion
+		if len(msg.Content.Contents) > 0 {
+			// Convert []OpenAIContent to []interface{} via ToMap
+			contentArray := make([]interface{}, len(msg.Content.Contents))
+			for i, c := range msg.Content.Contents {
+				contentArray[i] = c.ToMap()
+			}
+			msgMap["content"] = contentArray
+		} else if msg.Content.Text != nil && *msg.Content.Text != "" {
+			// Only include content if non-empty string
+			msgMap["content"] = *msg.Content.Text
+		}
+
 		if len(msg.ToolCalls) > 0 {
 			msgMap["tool_calls"] = msg.ToolCalls
 		}
@@ -518,9 +673,18 @@ func MarshalGoogleMessagesForRequest(messages []GoogleMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
 		msgMap := map[string]interface{}{
-			"role":  msg.Role,
-			"parts": msg.Parts,
+			"role": msg.Role,
 		}
+
+		// Convert parts to []map[string]interface{} using ToMap() method
+		if len(msg.Parts) > 0 {
+			partMaps := make([]map[string]interface{}, 0, len(msg.Parts))
+			for _, part := range msg.Parts {
+				partMaps = append(partMaps, part.ToMap())
+			}
+			msgMap["parts"] = partMaps
+		}
+
 		result = append(result, msgMap)
 	}
 	return result
@@ -533,12 +697,13 @@ func FromAnthropicTyped(messages []AnthropicMessage) []TypedMessage {
 	for _, msg := range messages {
 		typed := TypedMessage{Role: msg.Role}
 
-		// Handle content - can be string or array of blocks
-		switch content := msg.Content.(type) {
-		case string:
-			typed.Blocks = []Block{TextBlock{Text: content}}
-		case []AnthropicContent:
-			for _, block := range content {
+		// Handle content from ContentUnion
+		if msg.Content.Text != nil && *msg.Content.Text != "" {
+			// Simple text content
+			typed.Blocks = []Block{TextBlock{Text: *msg.Content.Text}}
+		} else if len(msg.Content.Contents) > 0 {
+			// Array of content blocks
+			for _, block := range msg.Content.Contents {
 				switch block.Type {
 				case "text":
 					typed.Blocks = append(typed.Blocks, TextBlock{Text: block.Text})
@@ -558,30 +723,24 @@ func FromAnthropicTyped(messages []AnthropicMessage) []TypedMessage {
 					if block.Source != nil {
 						typed.Blocks = append(typed.Blocks, ImageBlock{
 							URL:    block.Source.URL,
-							Detail: "auto",
+							Detail: "auto", // Don't conflate MediaType with Detail
 						})
 					}
 				case "input_audio":
 					if block.InputAudio != nil {
-						audioBlock := AudioBlock{}
-						if id, ok := block.InputAudio["id"].(string); ok {
-							audioBlock.ID = id
-						}
-						if data, ok := block.InputAudio["data"].(string); ok {
-							audioBlock.Data = data
-						}
-						if format, ok := block.InputAudio["format"].(string); ok {
-							audioBlock.Format = format
-						}
-						if audioBlock.ID != "" || audioBlock.Data != "" {
-							typed.Blocks = append(typed.Blocks, audioBlock)
-						}
+						typed.Blocks = append(typed.Blocks, AudioBlock{
+							ID:       block.InputAudio.ID,
+							Data:     block.InputAudio.Data,
+							Format:   block.InputAudio.Format,
+							URL:      block.InputAudio.URL,
+							Duration: block.InputAudio.Duration,
+						})
 					}
 				case "file":
-					if block.File != nil {
-						if fileID, ok := block.File["file_id"].(string); ok && fileID != "" {
-							typed.Blocks = append(typed.Blocks, FileBlock{FileID: fileID})
-						}
+					if block.File != nil && block.File.FileID != "" {
+						typed.Blocks = append(typed.Blocks, FileBlock{
+							FileID: block.File.FileID,
+						})
 					}
 				}
 			}
@@ -591,4 +750,125 @@ func FromAnthropicTyped(messages []AnthropicMessage) []TypedMessage {
 	}
 
 	return result
+}
+
+// ConvertBlocksToOpenAIContentTyped converts blocks to strongly typed OpenAI content and tool calls.
+// It builds OpenAIContentUnion directly without going through map[string]interface{} intermediates.
+func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []OpenAIToolCall) {
+	var union OpenAIContentUnion
+	var toolCalls []OpenAIToolCall
+	var parts []OpenAIContent
+	var textBuilder strings.Builder
+	hasNonText := false
+
+	for _, block := range blocks {
+		switch v := block.(type) {
+		case TextBlock:
+			// Accumulate text for potential string-only content
+			textBuilder.WriteString(v.Text)
+			// Also add to content parts for multimodal case
+			parts = append(parts, OpenAIContent{
+				Type: "text",
+				Text: v.Text,
+			})
+
+		case ImageBlock:
+			hasNonText = true
+			imagePart := OpenAIContent{
+				Type: "image_url",
+				ImageURL: &OpenAIImageURL{
+					URL: v.URL,
+				},
+			}
+			// Add detail if specified
+			if v.Detail != "" {
+				imagePart.ImageURL.Detail = v.Detail
+			}
+			parts = append(parts, imagePart)
+
+		case AudioBlock:
+			hasNonText = true
+			audioPart := OpenAIContent{
+				Type: "input_audio",
+			}
+			inputAudio := &AudioData{}
+
+			// Include data and format if available
+			if v.Data != "" {
+				inputAudio.Data = v.Data
+				if v.Format != "" {
+					inputAudio.Format = v.Format
+				} else {
+					inputAudio.Format = "wav" // Default format
+				}
+			} else if v.ID != "" {
+				// Otherwise use ID if available
+				inputAudio.ID = v.ID
+			}
+
+			// Only add audio part if we have data
+			if inputAudio.Data != "" || inputAudio.ID != "" {
+				audioPart.InputAudio = inputAudio
+				parts = append(parts, audioPart)
+			}
+
+		case FileBlock:
+			hasNonText = true
+			parts = append(parts, OpenAIContent{
+				Type: "file",
+				File: &FileData{
+					FileID: v.FileID,
+				},
+			})
+
+		case ToolUseBlock:
+			// Convert to OpenAI tool call format
+			toolCall := OpenAIToolCall{
+				ID:   v.ID,
+				Type: "function",
+				Function: OpenAIFunctionCall{
+					Name: v.Name,
+				},
+			}
+			// Add arguments if present
+			if len(v.Input) > 0 {
+				toolCall.Function.Arguments = string(v.Input)
+			}
+			toolCalls = append(toolCalls, toolCall)
+
+		case ToolResultBlock:
+			// Tool results are handled separately in ToOpenAI
+			// This function only handles content that goes into the message content field
+			// Tool results become separate "tool" role messages in OpenAI format
+			continue
+		}
+	}
+
+	// Determine the appropriate content format
+	if hasNonText {
+		// Multimodal content always requires array format
+		union.Contents = parts
+		return union, toolCalls
+	}
+
+	if len(toolCalls) > 0 {
+		// When there are tool calls with text-only content, return the text
+		if textBuilder.Len() > 0 {
+			text := textBuilder.String()
+			union.Text = &text
+			return union, toolCalls
+		}
+		// Tool calls only, no content
+		return union, toolCalls
+	}
+
+	// Text-only content can be a simple string
+	if textBuilder.Len() > 0 {
+		text := textBuilder.String()
+		union.Text = &text
+		return union, toolCalls
+	}
+
+	// No content
+	return union, toolCalls
 }

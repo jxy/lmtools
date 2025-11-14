@@ -1,3 +1,31 @@
+// Package proxy provides streaming functionality for various LLM providers.
+//
+// Usage Streaming Rules:
+//
+// Anthropic Format:
+// - Usage is ALWAYS included in the message_delta event
+// - The message_delta event contains both input_tokens and output_tokens
+// - Usage appears BEFORE message_stop
+// - No conditional inclusion based on request parameters
+//
+// Example Anthropic stream sequence:
+//
+//	→ event: message_start
+//	→ event: content_block_start
+//	→ event: content_block_delta
+//	→ event: content_block_stop
+//	→ event: message_delta (includes usage)
+//	→ event: message_stop
+//
+// OpenAI Format (handled by stream_openai.go):
+// - Usage ONLY included when constants.IncludeUsageKey is true
+// - Usage appears in separate chunk AFTER finish_reason
+// - See stream_openai.go for detailed OpenAI rules
+//
+// Google Format:
+// - Usage included in usageMetadata field of each response chunk
+// - Contains promptTokenCount, candidatesTokenCount, totalTokenCount
+// - Always present in streaming responses
 package proxy
 
 import (
@@ -39,6 +67,13 @@ func NewSSEWriter(w http.ResponseWriter, ctx context.Context) (*SSEWriter, error
 
 // WriteEvent writes an SSE event
 func (s *SSEWriter) WriteEvent(eventType, data string) error {
+	// Check context cancellation first
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	default:
+	}
+
 	// Log the event being sent to client
 	if eventType != "" {
 		logger.From(s.ctx).Debugf("→ CLIENT: event: %s | data: %s", eventType, data)
@@ -60,6 +95,13 @@ func (s *SSEWriter) WriteEvent(eventType, data string) error {
 
 // WriteJSON writes a JSON object as an SSE event
 func (s *SSEWriter) WriteJSON(eventType string, data interface{}) error {
+	// Check context cancellation first
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	default:
+	}
+
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -126,84 +168,34 @@ func NewAnthropicStreamHandler(w http.ResponseWriter, originalModel string, ctx 
 
 // SendMessageStart sends the initial message_start event
 func (h *AnthropicStreamHandler) SendMessageStart() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	messageData := map[string]interface{}{
-		"type": "message_start",
-		"message": map[string]interface{}{
-			"id":            h.state.MessageID,
-			"type":          "message",
-			"role":          "assistant",
-			"model":         h.originalModel,
-			"content":       []interface{}{},
-			"stop_reason":   nil,
-			"stop_sequence": nil,
-			"usage": map[string]interface{}{
-				"input_tokens":                h.state.InputTokens,
-				"cache_creation_input_tokens": 0,
-				"cache_read_input_tokens":     0,
-				"output_tokens":               0,
-			},
-		},
-	}
-	return h.sse.WriteJSON("message_start", messageData)
+	evt := NewMessageStart(h.state.MessageID, h.originalModel, h.state.InputTokens, h.state.OutputTokens)
+	return h.SendEvent(EventMessageStart, evt)
 }
 
 // SendContentBlockStart sends a content_block_start event
 func (h *AnthropicStreamHandler) SendContentBlockStart(index int, blockType string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	contentBlock := map[string]interface{}{
-		"type": blockType,
-	}
-
-	if blockType == "text" {
-		contentBlock["text"] = ""
-	}
-
-	blockData := map[string]interface{}{
-		"type":          "content_block_start",
-		"index":         index,
-		"content_block": contentBlock,
-	}
-	return h.sse.WriteJSON("content_block_start", blockData)
+	return h.SendEvent(EventContentBlockStart, NewContentBlockStart(index, blockType))
 }
 
 // SendTextDelta sends a text delta
 func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if h.state.TextBlockClosed {
+		h.mu.Unlock()
 		logger.From(h.ctx).Debugf("SendTextDelta called but text block is closed, ignoring %d chars", len(text))
 		return nil
 	}
 
 	h.state.TextSent = true
 	h.state.AccumulatedText += text
+	h.mu.Unlock()
 
-	deltaData := map[string]interface{}{
-		"type":  "content_block_delta",
-		"index": 0,
-		"delta": map[string]interface{}{
-			"type": "text_delta",
-			"text": text,
-		},
-	}
-	if err := h.sse.WriteJSON("content_block_delta", deltaData); err != nil {
-		logger.From(h.ctx).Errorf("Failed to write text delta: %v", err)
-		return err
-	}
-	return nil
+	return h.SendEvent(EventContentBlockDelta, NewTextDelta(0, text))
 }
 
 // SendToolUseStart sends a tool_use block start
 func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	// Track the tool call (only for real streaming, not simulated)
 	if !h.simulatedStreaming {
 		h.state.ToolCalls = append(h.state.ToolCalls, AnthropicContentBlock{
@@ -213,29 +205,14 @@ func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string
 			Input: make(map[string]interface{}),
 		})
 	}
+	h.mu.Unlock()
 
-	blockData := map[string]interface{}{
-		"type":  "content_block_start",
-		"index": index,
-		"content_block": map[string]interface{}{
-			"type":  "tool_use",
-			"id":    toolID,
-			"name":  name,
-			"input": map[string]interface{}{},
-		},
-	}
-	if err := h.sse.WriteJSON("content_block_start", blockData); err != nil {
-		logger.From(h.ctx).Errorf("Failed to write tool_use start for %s: %v", name, err)
-		return err
-	}
-	return nil
+	return h.SendEvent(EventContentBlockStart, NewToolUseStart(index, toolID, name))
 }
 
 // SendToolInputDelta sends tool input delta
 func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	// For simulated streaming, we accumulate the partialJSON to update tool calls
 	// Note: partialJSON may be incomplete during streaming
 	if !h.simulatedStreaming && len(h.state.ToolCalls) > 0 {
@@ -247,91 +224,151 @@ func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON strin
 			logger.From(h.ctx).Debugf("%s", "  Real streaming: would accumulate partial JSON")
 		}
 	}
+	h.mu.Unlock()
 
-	deltaData := map[string]interface{}{
-		"type":  "content_block_delta",
-		"index": index,
-		"delta": map[string]interface{}{
-			"type":         "input_json_delta",
-			"partial_json": partialJSON,
-		},
+	return h.SendEvent(EventContentBlockDelta, NewToolInputDelta(index, partialJSON))
+}
+
+// SendContentBlockDelta sends a content_block_delta event with any delta type
+func (h *AnthropicStreamHandler) SendContentBlockDelta(index int, delta interface{}) error {
+	// Build the delta event based on the delta type
+	var deltaData ContentBlockDeltaEvent
+
+	// Check if delta is already a ContentBlockDeltaEvent
+	if evt, ok := delta.(ContentBlockDeltaEvent); ok {
+		deltaData = evt
+	} else {
+		// Set the delta based on its type
+		switch d := delta.(type) {
+		case DeltaContent:
+			// Check if it's a known delta type and use appropriate factory
+			switch d.Type {
+			case "text_delta":
+				deltaData = NewTextDelta(index, d.Text)
+			case "input_json_delta":
+				// Handle pointer for PartialJSON
+				partialJSON := ""
+				if d.PartialJSON != nil {
+					partialJSON = *d.PartialJSON
+				}
+				deltaData = NewToolInputDelta(index, partialJSON)
+			default:
+				// For other delta types, construct manually
+				deltaData = ContentBlockDeltaEvent{
+					Type:  EventContentBlockDelta,
+					Index: index,
+					Delta: d,
+				}
+			}
+		case string:
+			// Use factory for text delta
+			deltaData = NewTextDelta(index, d)
+		default:
+			// For other types, create a generic text delta as fallback
+			// This shouldn't happen in practice but provides a fallback
+			deltaData = NewTextDelta(index, fmt.Sprintf("%v", delta))
+		}
 	}
-	if err := h.sse.WriteJSON("content_block_delta", deltaData); err != nil {
-		logger.From(h.ctx).Errorf("Failed to write input_json_delta for index %d: %v", index, err)
-		return err
-	}
-	return nil
+
+	return h.SendEvent(EventContentBlockDelta, deltaData)
 }
 
 // SendContentBlockStop sends a content_block_stop event
 func (h *AnthropicStreamHandler) SendContentBlockStop(index int) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	// Check if already closed
 	if h.state.ClosedBlocks[index] {
+		h.mu.Unlock()
 		return nil
 	}
-
-	stopData := map[string]interface{}{
-		"type":  "content_block_stop",
-		"index": index,
-	}
-	if err := h.sse.WriteJSON("content_block_stop", stopData); err != nil {
-		logger.From(h.ctx).Errorf("Failed to write content_block_stop for index %d: %v", index, err)
-		return err
-	}
-
 	// Mark as closed
 	h.state.ClosedBlocks[index] = true
-	return nil
+	h.mu.Unlock()
+
+	return h.SendEvent(EventContentBlockStop, NewContentBlockStop(index))
 }
 
 // SendPing sends a ping event
 func (h *AnthropicStreamHandler) SendPing() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	return h.sse.WriteJSON("ping", map[string]string{"type": "ping"})
+	return h.SendEvent(EventPing, NewPing())
 }
 
 // SendMessageDelta sends a message_delta event
 func (h *AnthropicStreamHandler) SendMessageDelta(stopReason string, outputTokens int) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	inputTokens := h.state.InputTokens
+	h.mu.Unlock()
 
 	// The message_delta should include both input and output tokens in the usage field
-	deltaData := map[string]interface{}{
-		"type": "message_delta",
-		"delta": map[string]interface{}{
-			"stop_reason":   stopReason,
-			"stop_sequence": nil,
-		},
-		"usage": map[string]interface{}{
-			"input_tokens":  h.state.InputTokens,
-			"output_tokens": outputTokens,
-		},
+	usage := &AnthropicUsage{
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
 	}
-	return h.sse.WriteJSON("message_delta", deltaData)
+	return h.SendEvent(EventMessageDelta, NewMessageDelta(stopReason, usage))
 }
 
 // SendMessageStop sends a message_stop event
 func (h *AnthropicStreamHandler) SendMessageStop() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	return h.sse.WriteJSON("message_stop", map[string]string{"type": "message_stop"})
+	return h.SendEvent(EventMessageStop, NewMessageStop())
 }
 
-// SendDone sends the final [DONE] marker
+// SendDone sends the stream termination marker.
+//
+// IMPORTANT: This is a no-op for Anthropic format streams.
+// Anthropic streams terminate with a message_stop event, NOT a [DONE] marker.
+//
+// Provider-specific stream termination:
+//   - Anthropic: Ends with message_stop event (no [DONE])
+//   - OpenAI: Ends with [DONE] marker after finish_reason and optional usage
+//   - Google: Has its own termination mechanism
+//
+// For OpenAI format: Use OpenAIStreamWriter.WriteDone() which sends the [DONE] marker.
+// This method exists for interface compatibility but does nothing for Anthropic streams.
 func (h *AnthropicStreamHandler) SendDone() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	return h.sse.WriteEvent("", "[DONE]")
+	// Anthropic format doesn't use [DONE] marker
+	// The stream ends with message_stop event
+	return nil
 }
 
-// Complete sends the completion sequence
+// FinishStream sends the standard completion sequence for a stream.
+// This consolidates the common pattern of sending message_delta, message_stop,
+// and (for OpenAI) the [DONE] marker.
+func (h *AnthropicStreamHandler) FinishStream(stopReason string, usage *AnthropicUsage) error {
+	// Set metadata if provided
+	if usage != nil {
+		h.SetUsage(usage.InputTokens, usage.OutputTokens)
+	}
+	h.SetStopReason(stopReason)
+
+	// Get output tokens for message_delta
+	h.mu.Lock()
+	outputTokens := h.state.OutputTokens
+	h.mu.Unlock()
+
+	// Send message_delta with stop reason and usage
+	if err := h.SendMessageDelta(stopReason, outputTokens); err != nil {
+		logger.From(h.ctx).Errorf("Failed to send message_delta: %v", err)
+		return err
+	}
+
+	// Send message_stop
+	if err := h.SendMessageStop(); err != nil {
+		logger.From(h.ctx).Errorf("Failed to send message_stop: %v", err)
+		return err
+	}
+
+	// Send [DONE] for OpenAI compatibility (no-op for Anthropic)
+	if err := h.SendDone(); err != nil {
+		logger.From(h.ctx).Errorf("Failed to send [DONE]: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// Complete completes the stream by closing open blocks and sending completion events.
+// Use this when you need to close open content blocks before completing.
+// If blocks are already closed, use FinishStream() directly.
 func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	// Note: This method calls other methods that acquire the mutex,
 	// so we cannot hold the mutex for the entire method to avoid deadlock.
@@ -347,7 +384,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	toolCallsLen := len(h.state.ToolCalls)
 	h.mu.Unlock()
 
-	// Close any open blocks
+	// Close any open text blocks
 	if needToCloseText {
 		if accumulatedText != "" && !textSent {
 			// Send accumulated text
@@ -365,7 +402,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		h.mu.Unlock()
 	}
 
-	// Close tool blocks
+	// Close any open tool blocks
 	if toolIndex != nil {
 		for i := 1; i <= lastToolIndex; i++ {
 			if err := h.SendContentBlockStop(i); err != nil {
@@ -383,38 +420,13 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		logger.From(h.ctx).Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
 	}
 
-	// Send completion events
-	h.mu.Lock()
-	outputTokens := h.state.OutputTokens
-	h.mu.Unlock()
-
-	if err := h.SendMessageDelta(stopReason, outputTokens); err != nil {
-		logger.From(h.ctx).Errorf("Failed to send message_delta: %v", err)
-		return err
-	}
-
-	if err := h.SendMessageStop(); err != nil {
-		logger.From(h.ctx).Errorf("Failed to send message_stop: %v", err)
-		return err
-	}
-
-	if err := h.SendDone(); err != nil {
-		logger.From(h.ctx).Errorf("Failed to send [DONE]: %v", err)
-		return err
-	}
-
-	return nil
+	// Delegate to FinishStream for the standard completion sequence
+	return h.FinishStream(stopReason, nil)
 }
 
 // SendError sends an error event
 func (h *AnthropicStreamHandler) SendError(message string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	return h.sse.WriteJSON("error", map[string]string{
-		"type":    "error",
-		"message": message,
-	})
+	return h.SendEvent(EventError, NewError(message))
 }
 
 // Close ensures the stream is properly closed
@@ -532,10 +544,7 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			if err := p.processChunk(chunk); err != nil {
 				logger.From(p.handler.ctx).Errorf("Failed to process OpenAI stream chunk: %v", err)
 				// Send error event to client
-				if err := p.handler.sse.WriteJSON("error", map[string]string{
-					"type":    "error",
-					"message": fmt.Sprintf("Stream processing error: %v", err),
-				}); err != nil {
+				if err := p.handler.SendError(fmt.Sprintf("Stream processing error: %v", err)); err != nil {
 					logger.From(p.handler.ctx).Errorf("Failed to write error event: %v", err)
 				}
 				return err
@@ -672,10 +681,7 @@ func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 		if err := p.processChunk(chunk); err != nil {
 			logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to process Google stream chunk", err)
 			// Send error event to client
-			if err := p.handler.sse.WriteJSON("error", map[string]string{
-				"type":    "error",
-				"message": fmt.Sprintf("Stream processing error: %v", err),
-			}); err != nil {
+			if err := p.handler.SendError(fmt.Sprintf("Stream processing error: %v", err)); err != nil {
 				logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to write error event", err)
 			}
 			return err
@@ -828,10 +834,7 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 			if err := p.handler.SendTextDelta(text); err != nil {
 				logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to send Argo text delta", err)
 				// Send error event to client
-				if err := p.handler.sse.WriteJSON("error", map[string]string{
-					"type":    "error",
-					"message": fmt.Sprintf("Stream processing error: %v", err),
-				}); err != nil {
+				if err := p.handler.SendError(fmt.Sprintf("Stream processing error: %v", err)); err != nil {
 					logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to write error event", err)
 				}
 				return err

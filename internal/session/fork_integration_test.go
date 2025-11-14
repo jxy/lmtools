@@ -201,14 +201,7 @@ func TestForkSessionWithToolInteractions(t *testing.T) {
 
 		// Convert to untyped format for testing
 		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
-		messages := make([]interface{}, 0, len(typedAnthMessages))
-		for _, msg := range typedAnthMessages {
-			msgMap := map[string]interface{}{
-				"role":    msg.Role,
-				"content": msg.Content,
-			}
-			messages = append(messages, msgMap)
-		}
+		messages := core.MarshalAnthropicMessagesForRequest(typedAnthMessages)
 
 		// Debug: Log the converted messages
 		for i, msg := range messages {
@@ -571,14 +564,7 @@ func TestToolMessageReconstructionInSession(t *testing.T) {
 
 		// Convert to untyped format for testing
 		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
-		messages := make([]interface{}, 0, len(typedAnthMessages))
-		for _, msg := range typedAnthMessages {
-			msgMap := map[string]interface{}{
-				"role":    msg.Role,
-				"content": msg.Content,
-			}
-			messages = append(messages, msgMap)
-		}
+		messages := core.MarshalAnthropicMessagesForRequest(typedAnthMessages)
 
 		// Verify all tool calls and results are present
 		toolCallCount := 0
@@ -766,29 +752,44 @@ func TestForkSessionWithIDCollisions(t *testing.T) {
 
 		// Convert to check tool interactions
 		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
-		messages := make([]interface{}, 0, len(typedAnthMessages))
-		for _, msg := range typedAnthMessages {
-			msgMap := map[string]interface{}{
-				"role":    msg.Role,
-				"content": msg.Content,
-			}
-			messages = append(messages, msgMap)
-		}
+		messages := core.MarshalAnthropicMessagesForRequest(typedAnthMessages)
 
 		// Verify we have the right tool calls from the sibling branch
 		foundEchoTool := false
 		foundLsTool := false
 
-		for _, msg := range messages {
+		for i, msg := range messages {
 			if m, ok := msg.(map[string]interface{}); ok {
+				t.Logf("Message %d: role=%v, content type=%T", i, m["role"], m["content"])
 				if content, ok := m["content"].([]interface{}); ok {
-					for _, block := range content {
+					t.Logf("  Content array has %d items", len(content))
+					for j, block := range content {
 						if b, ok := block.(map[string]interface{}); ok {
+							t.Logf("    Block %d: type=%v, name=%v", j, b["type"], b["name"])
 							if b["type"] == "tool_use" {
+								t.Logf("      Tool use block found: name=%v", b["name"])
 								if b["name"] == "universal_command" {
+									t.Logf("      Input type: %T", b["input"])
 									// Check the input to determine which tool call it is
-									if input, ok := b["input"].(map[string]interface{}); ok {
-										if cmd, ok := input["command"].([]interface{}); ok && len(cmd) > 0 {
+									var inputData map[string]interface{}
+									switch v := b["input"].(type) {
+									case json.RawMessage:
+										if err := json.Unmarshal(v, &inputData); err == nil {
+											if cmd, ok := inputData["command"].([]interface{}); ok && len(cmd) > 0 {
+												t.Logf("        Command found: %v", cmd[0])
+												switch cmd[0] {
+												case "echo":
+													foundEchoTool = true
+												case "ls":
+													foundLsTool = true
+												}
+											}
+										} else {
+											t.Logf("        Failed to unmarshal json.RawMessage: %v", err)
+										}
+									case map[string]interface{}:
+										if cmd, ok := v["command"].([]interface{}); ok && len(cmd) > 0 {
+											t.Logf("        Command found: %v", cmd[0])
 											switch cmd[0] {
 											case "echo":
 												foundEchoTool = true
@@ -796,6 +797,8 @@ func TestForkSessionWithIDCollisions(t *testing.T) {
 												foundLsTool = true
 											}
 										}
+									default:
+										t.Logf("        Unexpected input type: %T", v)
 									}
 								}
 							}
@@ -821,10 +824,48 @@ func TestForkSessionWithIDCollisions(t *testing.T) {
 					}
 				} else if contentSlice, ok := m["content"].([]map[string]interface{}); ok {
 					// Handle typed array case
+					t.Logf("Found content slice with %d items", len(contentSlice))
 					for _, b := range contentSlice {
+						t.Logf("  Block type=%v, name=%v", b["type"], b["name"])
 						if b["type"] == "tool_use" && b["name"] == "universal_command" {
-							if input, ok := b["input"].(map[string]interface{}); ok {
-								if cmd, ok := input["command"].([]interface{}); ok && len(cmd) > 0 {
+							// input might be json.RawMessage or []byte
+							t.Logf("    Input type: %T", b["input"])
+							var inputData map[string]interface{}
+							switch v := b["input"].(type) {
+							case json.RawMessage:
+								t.Logf("    Input is json.RawMessage")
+								if err := json.Unmarshal(v, &inputData); err == nil {
+									if cmd, ok := inputData["command"].([]interface{}); ok && len(cmd) > 0 {
+										t.Logf("    Command: %v", cmd[0])
+										switch cmd[0] {
+										case "echo":
+											foundEchoTool = true
+										case "ls":
+											foundLsTool = true
+										}
+									}
+								} else {
+									t.Logf("    Failed to unmarshal: %v", err)
+								}
+							case []byte:
+								t.Logf("    Input is []byte")
+								if err := json.Unmarshal(v, &inputData); err == nil {
+									if cmd, ok := inputData["command"].([]interface{}); ok && len(cmd) > 0 {
+										t.Logf("    Command: %v", cmd[0])
+										switch cmd[0] {
+										case "echo":
+											foundEchoTool = true
+										case "ls":
+											foundLsTool = true
+										}
+									}
+								} else {
+									t.Logf("    Failed to unmarshal: %v", err)
+								}
+							case map[string]interface{}:
+								t.Logf("    Input is map[string]interface{}")
+								if cmd, ok := v["command"].([]interface{}); ok && len(cmd) > 0 {
+									t.Logf("    Command: %v", cmd[0])
 									switch cmd[0] {
 									case "echo":
 										foundEchoTool = true
@@ -832,6 +873,8 @@ func TestForkSessionWithIDCollisions(t *testing.T) {
 										foundLsTool = true
 									}
 								}
+							default:
+								t.Logf("    Unknown input type: %T", v)
 							}
 						}
 					}

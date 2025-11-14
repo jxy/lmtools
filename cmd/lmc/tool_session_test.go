@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 package main
 
@@ -348,7 +347,7 @@ func TestResumePendingTools(t *testing.T) {
 	tempDir := t.TempDir()
 	session.SetSessionsDir(tempDir)
 	defer session.SetSessionsDir("") // Reset
-	session.SetSkipFlockCheck(true) // Skip flock check for tests
+	session.SetSkipFlockCheck(true)  // Skip flock check for tests
 
 	// Step 1: Create a session with an assistant message containing tool calls
 	sess, err := session.CreateSession("", core.NewTestLogger(false))
@@ -541,7 +540,7 @@ func TestPendingToolsIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = session.SaveAssistantResponseWithTools(context.Background(), sess, 
+	_, err = session.SaveAssistantResponseWithTools(context.Background(), sess,
 		"I'll echo that for you:",
 		[]core.ToolCall{{
 			ID:   "call-1",
@@ -558,9 +557,9 @@ func TestPendingToolsIntegration(t *testing.T) {
 
 	// Resume with lmc binary
 	args := []string{
-		"-provider", "anthropic",  // Specify provider type
+		"-provider", "anthropic", // Specify provider type
 		"-provider-url", serverURL + "/messages",
-		"-model", "claude-3-opus-20240229",  // Use a valid model name
+		"-model", "claude-3-opus-20240229", // Use a valid model name
 		"-resume", sessionID,
 		"-sessions-dir", sessionsDir,
 		"-log-dir", logDir,
@@ -568,7 +567,10 @@ func TestPendingToolsIntegration(t *testing.T) {
 		"-tool-auto-approve",
 	}
 
-	stdout, stderr, err := runLmcCommandWithSpecificLogDir(t, binPath, args, "continuing", logDir)
+	stdout, stderr, err := runLmcCommand(t, binPath, args, "continuing", WithLogDir(logDir))
+	if err != nil {
+		t.Fatalf("Failed to run continuation: %v\nStderr: %s", err, stderr)
+	}
 
 	// Log output for debugging
 	t.Logf("stdout: %s", stdout)
@@ -630,7 +632,7 @@ func TestPendingToolsIntegration(t *testing.T) {
 		// Read and verify content
 		data, _ := os.ReadFile(toolResultsPath)
 		t.Logf("Tool results content: %s", string(data))
-		
+
 		var interaction core.ToolInteraction
 		if err := json.Unmarshal(data, &interaction); err == nil {
 			if len(interaction.Results) != 1 {

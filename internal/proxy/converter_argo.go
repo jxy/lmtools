@@ -86,22 +86,38 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 				// Add tool result messages first
 				messages = append(messages, toolResultMessages...)
 
-				// Use centralized converter for content and tool calls
+				// Use typed converter for content and tool calls
 				if len(filteredBlocks) > 0 {
-					content, toolCallMaps := core.ConvertBlocksToOpenAIContentMap(filteredBlocks)
+					contentUnion, typedToolCalls := core.ConvertBlocksToOpenAIContentTyped(filteredBlocks)
 
-					// Convert tool call maps to ToolCall structs
+					// Convert typed tool calls to proxy ToolCall structs
 					var toolCalls []ToolCall
-					for _, tcMap := range toolCallMaps {
-						fn := tcMap["function"].(map[string]interface{})
+					for _, tc := range typedToolCalls {
 						toolCalls = append(toolCalls, ToolCall{
-							ID:   tcMap["id"].(string),
-							Type: tcMap["type"].(string),
+							ID:   tc.ID,
+							Type: tc.Type,
 							Function: FunctionCall{
-								Name:      fn["name"].(string),
-								Arguments: fn["arguments"].(string),
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
 							},
 						})
+					}
+
+					// Convert content union to interface{}
+					var content interface{}
+					if len(contentUnion.Contents) > 0 {
+						// Multimodal content - convert to []interface{}
+						contentArray := make([]interface{}, len(contentUnion.Contents))
+						for i, c := range contentUnion.Contents {
+							contentArray[i] = c.ToMap()
+						}
+						content = contentArray
+					} else if contentUnion.Text != nil {
+						// Simple text content
+						content = *contentUnion.Text
+					} else {
+						// No content
+						content = nil
 					}
 
 					// For assistant messages with only tool calls and no content, use empty string
@@ -429,12 +445,71 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 		// Response with content array or tool calls
 		content := []AnthropicContentBlock{}
 
+		// Track if tool_calls is present and empty (Argo bug workaround)
+		toolCallsExists := false
+		toolCallsPresentAndEmpty := false
+		if toolCallsRaw, ok := r["tool_calls"]; ok {
+			toolCallsExists = true
+			if arr, ok := toolCallsRaw.([]interface{}); ok && len(arr) == 0 {
+				toolCallsPresentAndEmpty = true
+			}
+		}
+
 		// Check for simple content string
 		if contentStr, ok := r["content"].(string); ok && contentStr != "" {
-			content = append(content, AnthropicContentBlock{
-				Type: "text",
-				Text: contentStr,
-			})
+			// Default: add text block
+			textBlock := AnthropicContentBlock{Type: "text", Text: contentStr}
+			content = append(content, textBlock)
+
+			// Workaround: Argo sometimes embeds one or more tool_use JSON objects in content
+			// while providing an empty/missing tool_calls array. Extract all and convert to blocks.
+			if toolCallsPresentAndEmpty || !toolCallsExists {
+				// Note: Tool validation happens at a higher level where tool definitions are available
+				seq, suffix, err := core.ExtractEmbeddedToolCallsWithSequence(contentStr, nil)
+				if err == nil && len(seq) > 0 {
+					// Log that we're using the loose JSON parser workaround
+					logger.From(context.Background()).Debugf("Argo workaround: extracted %d embedded tool calls using loose JSON parser", len(seq))
+
+					// Rebuild content blocks: prefix(text) → tool_use → prefix(text) → ... → suffix(text)
+					rebuilt := make([]AnthropicContentBlock, 0, len(seq)*2+1)
+
+					// First prefix replaces initial text block
+					if len(seq) > 0 {
+						rebuilt = append(rebuilt, AnthropicContentBlock{Type: "text", Text: seq[0].Prefix})
+					}
+
+					for i, part := range seq {
+						// Tool block
+						tb := AnthropicContentBlock{Type: "tool_use", ID: part.Call.ID, Name: part.Call.Name}
+						// Parse arguments
+						var input map[string]interface{}
+						if part.Call.ArgsJSON != nil {
+							if err := json.Unmarshal(part.Call.ArgsJSON, &input); err != nil {
+								input = map[string]interface{}{"raw_arguments": string(part.Call.ArgsJSON)}
+							}
+						}
+						tb.Input = input
+						rebuilt = append(rebuilt, tb)
+
+						// Following prefix text (between this call and the next)
+						if i+1 < len(seq) {
+							rebuilt = append(rebuilt, AnthropicContentBlock{Type: "text", Text: seq[i+1].Prefix})
+						}
+					}
+
+					// Append final suffix if present
+					if suffix != "" {
+						rebuilt = append(rebuilt, AnthropicContentBlock{Type: "text", Text: suffix})
+					}
+
+					// If there were no prefixes (seq[0].Prefix empty) and no suffix, keep original text
+					if len(rebuilt) == 0 {
+						rebuilt = append(rebuilt, AnthropicContentBlock{Type: "text", Text: contentStr})
+					}
+
+					content = rebuilt
+				}
+			}
 		} else if contentArray, ok := r["content"].([]interface{}); ok {
 			// Parse content array
 			for _, item := range contentArray {

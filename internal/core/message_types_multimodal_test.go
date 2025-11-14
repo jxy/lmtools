@@ -19,22 +19,9 @@ func TestToOpenAIAssistantMultipleTextBlocks(t *testing.T) {
 		},
 	}
 
-	// Use typed conversion and convert to interface{}
+	// Use typed conversion and marshal/unmarshal to get proper format
 	typedMessages := ToOpenAITyped(messages)
-	result := make([]interface{}, 0, len(typedMessages))
-	for _, msg := range typedMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-		// Only add content if it's not nil or empty
-		if msg.Content != nil && msg.Content != "" {
-			msgMap["content"] = msg.Content
-		}
-		if len(msg.ToolCalls) > 0 {
-			msgMap["tool_calls"] = msg.ToolCalls
-		}
-		result = append(result, msgMap)
-	}
+	result := MarshalOpenAIMessagesForRequest(typedMessages)
 
 	if len(result) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(result))
@@ -68,22 +55,9 @@ func TestToOpenAIAssistantMultimodal(t *testing.T) {
 		},
 	}
 
-	// Use typed conversion and convert to interface{}
+	// Use typed conversion and marshal/unmarshal to get proper format
 	typedMessages := ToOpenAITyped(messages)
-	result := make([]interface{}, 0, len(typedMessages))
-	for _, msg := range typedMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-		// Only add content if it's not nil or empty
-		if msg.Content != nil && msg.Content != "" {
-			msgMap["content"] = msg.Content
-		}
-		if len(msg.ToolCalls) > 0 {
-			msgMap["tool_calls"] = msg.ToolCalls
-		}
-		result = append(result, msgMap)
-	}
+	result := MarshalOpenAIMessagesForRequest(typedMessages)
 
 	if len(result) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(result))
@@ -151,22 +125,9 @@ func TestToOpenAIAssistantWithToolCalls(t *testing.T) {
 		},
 	}
 
-	// Use typed conversion and convert to interface{}
+	// Use typed conversion and marshal/unmarshal to get proper format
 	typedMessages := ToOpenAITyped(messages)
-	result := make([]interface{}, 0, len(typedMessages))
-	for _, msg := range typedMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-		// Only add content if it's not nil or empty
-		if msg.Content != nil && msg.Content != "" {
-			msgMap["content"] = msg.Content
-		}
-		if len(msg.ToolCalls) > 0 {
-			msgMap["tool_calls"] = msg.ToolCalls
-		}
-		result = append(result, msgMap)
-	}
+	result := MarshalOpenAIMessagesForRequest(typedMessages)
 
 	if len(result) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(result))
@@ -251,14 +212,14 @@ func TestToAnthropicWithImageMediaType(t *testing.T) {
 			"role": msg.Role,
 		}
 
-		// Handle content based on its type
-		switch content := msg.Content.(type) {
-		case string:
-			msgMap["content"] = content
-		case []AnthropicContent:
-			// Convert typed content blocks to maps
-			contentMaps := make([]map[string]interface{}, 0, len(content))
-			for _, block := range content {
+		// Handle content based on ContentUnion structure
+		if msg.Content.Text != nil && *msg.Content.Text != "" {
+			// Simple text content
+			msgMap["content"] = *msg.Content.Text
+		} else if len(msg.Content.Contents) > 0 {
+			// Array of content blocks
+			contentMaps := make([]map[string]interface{}, 0, len(msg.Content.Contents))
+			for _, block := range msg.Content.Contents {
 				blockMap := map[string]interface{}{
 					"type": block.Type,
 				}
@@ -322,22 +283,9 @@ func TestToOpenAIAssistantAudioAndFile(t *testing.T) {
 		},
 	}
 
-	// Use typed conversion and convert to interface{}
+	// Use typed conversion and marshal/unmarshal to get proper format
 	typedMessages := ToOpenAITyped(messages)
-	result := make([]interface{}, 0, len(typedMessages))
-	for _, msg := range typedMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-		// Only add content if it's not nil or empty
-		if msg.Content != nil && msg.Content != "" {
-			msgMap["content"] = msg.Content
-		}
-		if len(msg.ToolCalls) > 0 {
-			msgMap["tool_calls"] = msg.ToolCalls
-		}
-		result = append(result, msgMap)
-	}
+	result := MarshalOpenAIMessagesForRequest(typedMessages)
 
 	if len(result) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(result))
@@ -391,22 +339,9 @@ func TestToOpenAIAssistantEmptyContent(t *testing.T) {
 		},
 	}
 
-	// Use typed conversion and convert to interface{}
+	// Use typed conversion and marshal/unmarshal to get proper format
 	typedMessages := ToOpenAITyped(messages)
-	result := make([]interface{}, 0, len(typedMessages))
-	for _, msg := range typedMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-		// Only add content if it's not nil or empty
-		if msg.Content != nil && msg.Content != "" {
-			msgMap["content"] = msg.Content
-		}
-		if len(msg.ToolCalls) > 0 {
-			msgMap["tool_calls"] = msg.ToolCalls
-		}
-		result = append(result, msgMap)
-	}
+	result := MarshalOpenAIMessagesForRequest(typedMessages)
 
 	if len(result) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(result))

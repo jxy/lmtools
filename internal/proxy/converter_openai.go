@@ -222,8 +222,8 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 	// Convert AnthropicContentBlock to core.Block using centralized converter
 	coreBlocks := AnthropicBlocksToCore(blocks)
 
-	// Use the unified converter
-	content, typedToolCalls := core.ConvertBlocksToOpenAIContent(coreBlocks)
+	// Use the typed converter
+	contentUnion, typedToolCalls := core.ConvertBlocksToOpenAIContentTyped(coreBlocks)
 
 	// Convert typed tool calls to ToolCall structs
 	if len(typedToolCalls) > 0 {
@@ -240,13 +240,33 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 		}
 		// OpenAI expects null content when tool_calls are present
 		// unless it's multimodal content (array format)
-		if _, isArray := content.([]interface{}); !isArray {
-			msg.Content = nil
+		if len(contentUnion.Contents) > 0 {
+			// Convert multimodal content to []interface{}
+			contentArray := make([]interface{}, len(contentUnion.Contents))
+			for i, c := range contentUnion.Contents {
+				contentArray[i] = c.ToMap()
+			}
+			msg.Content = contentArray
 		} else {
-			msg.Content = content
+			// Tool calls only, no content
+			msg.Content = nil
 		}
 	} else {
-		msg.Content = content
+		// Convert content union to interface{}
+		if len(contentUnion.Contents) > 0 {
+			// Multimodal content - convert to []interface{}
+			contentArray := make([]interface{}, len(contentUnion.Contents))
+			for i, c := range contentUnion.Contents {
+				contentArray[i] = c.ToMap()
+			}
+			msg.Content = contentArray
+		} else if contentUnion.Text != nil {
+			// Simple text content
+			msg.Content = *contentUnion.Text
+		} else {
+			// No content
+			msg.Content = nil
+		}
 	}
 	return msg, nil
 }
@@ -372,8 +392,30 @@ func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *Op
 		}
 
 		// Handle content conversion
-		if msg.Content != nil {
-			contentJSON, err := json.Marshal(msg.Content)
+		// Check if content is empty (both Text and Contents are empty)
+		if msg.Content.Text != nil && *msg.Content.Text == "" && len(msg.Content.Contents) == 0 {
+			// Empty content
+			anthMsg.Content = json.RawMessage(`""`)
+		} else {
+			// Marshal the actual content value, not the union struct
+			var contentJSON []byte
+			var err error
+
+			if msg.Content.Text != nil {
+				// Simple text content - marshal as string
+				contentJSON, err = json.Marshal(*msg.Content.Text)
+			} else if len(msg.Content.Contents) > 0 {
+				// Array of content blocks - use MarshalAnthropicMessagesForRequest approach
+				contentArray := make([]interface{}, len(msg.Content.Contents))
+				for i, c := range msg.Content.Contents {
+					contentArray[i] = c.ToMap()
+				}
+				contentJSON, err = json.Marshal(contentArray)
+			} else {
+				// Empty content
+				contentJSON = []byte(`""`)
+			}
+
 			if err != nil {
 				// Log error but continue
 				logger.From(ctx).Warnf("Failed to marshal content: %v", err)
@@ -381,9 +423,6 @@ func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *Op
 			} else {
 				anthMsg.Content = json.RawMessage(contentJSON)
 			}
-		} else {
-			// Empty content
-			anthMsg.Content = json.RawMessage(`""`)
 		}
 
 		messages = append(messages, anthMsg)
@@ -441,26 +480,40 @@ func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, or
 	// Convert Anthropic blocks to core.Blocks using centralized converter
 	coreBlocks := AnthropicBlocksToCore(resp.Content)
 
-	// Use unified converter to get OpenAI content and tool calls
-	content, toolCallMaps := core.ConvertBlocksToOpenAIContentMap(coreBlocks)
+	// Use typed converter to get OpenAI content and tool calls
+	contentUnion, typedToolCalls := core.ConvertBlocksToOpenAIContentTyped(coreBlocks)
 
 	// Build the message
 	message := OpenAIMessage{
-		Role:    core.RoleAssistant,
-		Content: content,
+		Role: core.RoleAssistant,
 	}
 
-	// Convert tool call maps to ToolCall structs
-	if len(toolCallMaps) > 0 {
-		message.ToolCalls = make([]ToolCall, len(toolCallMaps))
-		for i, tcMap := range toolCallMaps {
-			fn := tcMap["function"].(map[string]interface{})
+	// Convert content union to interface{}
+	if len(contentUnion.Contents) > 0 {
+		// Multimodal content - convert to []interface{}
+		contentArray := make([]interface{}, len(contentUnion.Contents))
+		for i, c := range contentUnion.Contents {
+			contentArray[i] = c.ToMap()
+		}
+		message.Content = contentArray
+	} else if contentUnion.Text != nil {
+		// Simple text content
+		message.Content = *contentUnion.Text
+	} else {
+		// No content
+		message.Content = nil
+	}
+
+	// Convert typed tool calls to proxy ToolCall structs
+	if len(typedToolCalls) > 0 {
+		message.ToolCalls = make([]ToolCall, len(typedToolCalls))
+		for i, tc := range typedToolCalls {
 			message.ToolCalls[i] = ToolCall{
-				ID:   tcMap["id"].(string),
-				Type: tcMap["type"].(string),
+				ID:   tc.ID,
+				Type: tc.Type,
 				Function: FunctionCall{
-					Name:      fn["name"].(string),
-					Arguments: fn["arguments"].(string),
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
 				},
 			}
 		}

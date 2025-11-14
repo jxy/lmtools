@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/auth"
@@ -143,50 +142,12 @@ func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMess
 }
 
 // buildGoogleToolAwareRequest builds a Google-compatible request with tool support
-func buildGoogleToolAwareRequest(ctx context.Context, cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildGoogleToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	// Convert messages to Google format using typed conversion
 	typedGoogleMessages := ToGoogleTyped(typedMessages)
 
-	// Convert typed messages to []interface{} with proper parts structure
-	googleMessages := make([]interface{}, 0, len(typedGoogleMessages))
-	for _, msg := range typedGoogleMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-
-		// Convert parts to []interface{} - Google needs specific structure for parts
-		if len(msg.Parts) > 0 {
-			partMaps := make([]map[string]interface{}, 0, len(msg.Parts))
-			for _, part := range msg.Parts {
-				partMap := make(map[string]interface{})
-
-				// Add fields based on what's present
-				if part.Text != "" {
-					partMap["text"] = part.Text
-				}
-				if part.FunctionCall != nil {
-					partMap["functionCall"] = map[string]interface{}{
-						"name": part.FunctionCall.Name,
-						"args": part.FunctionCall.Args,
-					}
-				}
-				if part.FunctionResponse != nil {
-					partMap["functionResponse"] = map[string]interface{}{
-						"name": part.FunctionResponse.Name,
-						"response": map[string]interface{}{
-							"content": part.FunctionResponse.Response.Content,
-							"error":   part.FunctionResponse.Response.Error,
-						},
-					}
-				}
-
-				partMaps = append(partMaps, partMap)
-			}
-			msgMap["parts"] = partMaps
-		}
-
-		googleMessages = append(googleMessages, msgMap)
-	}
+	// Convert typed messages to []interface{} using the centralized marshaling function
+	googleMessages := MarshalGoogleMessagesForRequest(typedGoogleMessages)
 
 	// Build Google request - note: Google has different structure
 	reqMap := map[string]interface{}{
@@ -267,7 +228,7 @@ func buildChatRequestFromTyped(cfg RequestConfig, typedMessages []TypedMessage, 
 		}
 		return buildAnthropicToolAwareRequest(cfg, msgs, model, sys, toolDefs, nil, stream)
 	case constants.ProviderGoogle:
-		return buildGoogleToolAwareRequest(context.TODO(), cfg, typedMessages, model, toolDefs, nil, stream)
+		return buildGoogleToolAwareRequest(cfg, typedMessages, model, toolDefs, nil, stream)
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
 	}

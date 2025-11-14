@@ -373,14 +373,8 @@ func TestSessionRequestJSONWithTools(t *testing.T) {
 
 		// Convert to provider format and verify JSON structure
 		typedAnthMessages := core.ToAnthropicTyped(typedMessages)
-		anthropicMessages := make([]interface{}, 0, len(typedAnthMessages))
-		for _, msg := range typedAnthMessages {
-			msgMap := map[string]interface{}{
-				"role":    msg.Role,
-				"content": msg.Content,
-			}
-			anthropicMessages = append(anthropicMessages, msgMap)
-		}
+		// Use the proper marshaling function that handles ContentUnion correctly
+		anthropicMessages := core.MarshalAnthropicMessagesForRequest(typedAnthMessages)
 		anthropicJSON, err := json.MarshalIndent(anthropicMessages, "", "  ")
 		if err != nil {
 			t.Fatalf("Failed to marshal Anthropic messages: %v", err)

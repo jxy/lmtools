@@ -408,8 +408,13 @@ func TestConvertToolsForProvider(t *testing.T) {
 				if params == nil {
 					t.Fatal("Google tools should have parameters field")
 				}
-				if params["type"] != "OBJECT" {
-					t.Errorf("Expected type='OBJECT' (uppercase) for Google, got %v", params["type"])
+				// Convert params to map to check the type field
+				var paramsMap map[string]interface{}
+				if err := json.Unmarshal(params, &paramsMap); err != nil {
+					t.Fatalf("Failed to unmarshal parameters: %v", err)
+				}
+				if paramsMap["type"] != "OBJECT" {
+					t.Errorf("Expected type='OBJECT' (uppercase) for Google, got %v", paramsMap["type"])
 				}
 				if toolChoice != nil {
 					t.Errorf("Expected tool_choice=nil for Google, got %v", toolChoice)

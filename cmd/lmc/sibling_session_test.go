@@ -1,4 +1,4 @@
-// +build integration
+//go:build integration || e2e
 
 package main
 
@@ -16,8 +16,8 @@ func TestResumeSiblingSession(t *testing.T) {
 	// Create custom sessions directory
 	sessionsDir := t.TempDir()
 
-	// Create initial session
-	stdout, stderr, err := runLmcCommand(t, lmcBin,
+	// Create initial session (stdout not needed)
+	_, stderr, err := runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", mockURL, "-sessions-dir", sessionsDir},
 		"Initial message")
 	if err != nil {
@@ -25,7 +25,7 @@ func TestResumeSiblingSession(t *testing.T) {
 	}
 
 	// Get session ID
-	stdout, stderr, err = runLmcCommand(t, lmcBin,
+	stdout, stderr, err := runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	if err != nil {
@@ -46,7 +46,7 @@ func TestResumeSiblingSession(t *testing.T) {
 	}
 
 	// Create a branch from the first message
-	stdout, stderr, err = runLmcCommand(t, lmcBin,
+	_, stderr, err = runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-branch", sessionID + "/0001", "-argo-env", mockURL, "-sessions-dir", sessionsDir},
 		"Branch message")
 	if err != nil {
@@ -59,7 +59,7 @@ func TestResumeSiblingSession(t *testing.T) {
 
 	// Try to resume the sibling session - the key test is that it shouldn't
 	// try to branch again (which would fail)
-	stdout, stderr, err = runLmcCommand(t, lmcBin,
+	_, stderr, err = runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", siblingSessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir},
 		"Test message")
 

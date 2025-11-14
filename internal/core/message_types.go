@@ -45,9 +45,11 @@ func (ImageBlock) isBlock() {}
 
 // AudioBlock represents an audio content block
 type AudioBlock struct {
-	ID     string // Audio ID for input_audio
-	Data   string // Base64 encoded audio data (optional)
-	Format string // Audio format like "wav", "mp3" (optional)
+	ID       string // Audio ID for input_audio
+	Data     string // Base64 encoded audio data (optional)
+	Format   string // Audio format like "wav", "mp3" (optional)
+	URL      string // URL to audio file (optional)
+	Duration int    // Duration in seconds (optional)
 }
 
 func (AudioBlock) isBlock() {}
@@ -72,5 +74,3 @@ func NewTextMessage(role, text string) TypedMessage {
 		Blocks: []Block{TextBlock{Text: text}},
 	}
 }
-
-// toGoogleInternal is no longer needed - functionality moved to typed conversions
