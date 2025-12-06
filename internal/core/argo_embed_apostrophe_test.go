@@ -6,12 +6,27 @@ import (
 	"testing"
 )
 
+// testToolDefs provides common tool definitions for tests
+var testToolDefs = []ToolDefinition{
+	{Name: "search"},
+	{Name: "Read"},
+	{Name: "Edit"},
+	{Name: "Grep"},
+	{Name: "Glob"},
+	{Name: "Bash"},
+	{Name: "Write"},
+	{Name: "universal_command"},
+	{Name: "tool1"},
+	{Name: "tool2"},
+	{Name: "tool3"},
+}
+
 // Test that parseEmbeddedToolCall handles apostrophes correctly
 func TestParseEmbeddedToolCall_WithApostrophes(t *testing.T) {
 	content := `Let me search for Alice's files: {'type': 'tool_use', 'id': 'tool_123', 'name': 'search', 'input': {'query': 'Alice\'s documents', 'filter': 'owner\'s name'}}`
 
-	// Use parseEmbeddedToolCalls directly instead of the wrapper
-	seq, _, err := parseEmbeddedToolCalls(content, nil)
+	// Use parseEmbeddedToolCalls directly with valid tool definitions
+	seq, _, err := parseEmbeddedToolCalls(content, testToolDefs)
 	if err != nil {
 		t.Fatal("Expected to find embedded tool call:", err)
 	}

@@ -33,11 +33,10 @@ const (
 )
 
 // IsValidToolName checks if a tool name exists in the list of valid tool definitions.
-// If validTools is nil or empty, returns true (no validation).
+// If validTools is nil or empty, returns false (no valid tool names without definitions).
 func IsValidToolName(name string, validTools []ToolDefinition) bool {
 	if len(validTools) == 0 {
-		// No validation if no tools provided (backward compatibility)
-		return true
+		return false
 	}
 
 	for _, tool := range validTools {

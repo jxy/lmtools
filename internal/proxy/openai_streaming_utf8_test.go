@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -15,16 +16,7 @@ import (
 
 // TestSimulateOpenAIStreamFromArgoUTF8 tests that simulateOpenAIStreamFromArgo respects UTF-8 boundaries
 func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
-	// Initialize logger
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	tests := []struct {
 		name     string
@@ -85,19 +77,12 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 
 			// Create config
 			config := &Config{
+				Provider:    constants.ProviderArgo,
 				ArgoUser:    "testuser",
 				ArgoEnv:     mockArgo.URL,
-				ArgoBaseURL: mockArgo.URL,
+				ProviderURL: mockArgo.URL,
 			}
-
-			// Create server
-			mapper := NewModelMapper(config)
-			server := &Server{
-				config:    config,
-				mapper:    mapper,
-				converter: NewConverter(mapper),
-				client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-			}
+			server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 			// Create response recorder
 			recorder := httptest.NewRecorder()
@@ -209,16 +194,7 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 
 // TestSimulateOpenAIStreamFromArgoWithTools tests UTF-8 handling with tool responses
 func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
-	// Initialize logger
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a mock Argo server that returns both text and tool use
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -248,19 +224,12 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 
 	// Create config
 	config := &Config{
+		Provider:    constants.ProviderArgo,
 		ArgoUser:    "testuser",
 		ArgoEnv:     mockArgo.URL,
-		ArgoBaseURL: mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-
-	// Create server
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Create response recorder
 	recorder := httptest.NewRecorder()
@@ -424,16 +393,7 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 
 // TestOpenAIStreamingChunkBoundaries tests that chunk boundaries don't split UTF-8 characters
 func TestOpenAIStreamingChunkBoundaries(t *testing.T) {
-	// Initialize logger
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a string that will likely be split at a multi-byte character boundary
 	// The chunk size is 50 bytes, so we position multi-byte characters around that boundary
@@ -456,19 +416,12 @@ func TestOpenAIStreamingChunkBoundaries(t *testing.T) {
 
 	// Create config
 	config := &Config{
+		Provider:    constants.ProviderArgo,
 		ArgoUser:    "testuser",
 		ArgoEnv:     mockArgo.URL,
-		ArgoBaseURL: mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-
-	// Create server
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Create response recorder
 	recorder := httptest.NewRecorder()

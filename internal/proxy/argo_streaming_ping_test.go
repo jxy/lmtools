@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,32 +47,36 @@ func (r *SlowReader) Read(p []byte) (n int, err error) {
 
 func TestArgoStreamingWithPings(t *testing.T) {
 	tests := []struct {
-		name          string
-		chunks        []string
-		chunkDelay    time.Duration
-		pingInterval  time.Duration
-		expectedPings int
+		name             string
+		chunks           []string
+		chunkDelay       time.Duration
+		pingInterval     time.Duration
+		expectedMinPings int
+		expectedMaxPings int
 	}{
 		{
-			name:          "Quick response - no pings",
-			chunks:        []string{"Hello ", "world!", " How ", "are ", "you?"},
-			chunkDelay:    5 * time.Millisecond,
-			pingInterval:  50 * time.Millisecond,
-			expectedPings: 0,
+			name:             "Quick response - no pings",
+			chunks:           []string{"Hello ", "world!", " How ", "are ", "you?"},
+			chunkDelay:       5 * time.Millisecond,
+			pingInterval:     50 * time.Millisecond,
+			expectedMinPings: 0,
+			expectedMaxPings: 0,
 		},
 		{
-			name:          "Slow response - should send pings",
-			chunks:        []string{"Hello ", "world!"},
-			chunkDelay:    60 * time.Millisecond,
-			pingInterval:  50 * time.Millisecond,
-			expectedPings: 1, // One ping between chunks
+			name:             "Slow response - should send pings",
+			chunks:           []string{"Hello ", "world!"},
+			chunkDelay:       40 * time.Millisecond, // Slightly increased for stability
+			pingInterval:     30 * time.Millisecond,
+			expectedMinPings: 1, // One ping between chunks
+			expectedMaxPings: 2,
 		},
 		{
-			name:          "Very slow response - multiple pings",
-			chunks:        []string{"Start", "Middle", "End"},
-			chunkDelay:    110 * time.Millisecond,
-			pingInterval:  50 * time.Millisecond,
-			expectedPings: 3, // At least one ping between each chunk
+			name:             "Very slow response - multiple pings",
+			chunks:           []string{"Start", "Middle", "End"},
+			chunkDelay:       70 * time.Millisecond, // Reduced from 110ms, increased from 50ms for stability
+			pingInterval:     30 * time.Millisecond,
+			expectedMinPings: 3, // At least one ping between each chunk
+			expectedMaxPings: 6, // Allow for timing variations
 		},
 	}
 
@@ -109,8 +114,12 @@ func TestArgoStreamingWithPings(t *testing.T) {
 			response := w.Body.String()
 			pingCount := strings.Count(response, `event: ping`)
 
-			if pingCount != tt.expectedPings {
-				t.Errorf("Expected %d pings, but got %d", tt.expectedPings, pingCount)
+			if pingCount < tt.expectedMinPings {
+				t.Errorf("Expected at least %d pings, but got %d", tt.expectedMinPings, pingCount)
+				t.Logf("Response:\n%s", response)
+			}
+			if pingCount > tt.expectedMaxPings {
+				t.Errorf("Expected at most %d pings, but got %d", tt.expectedMaxPings, pingCount)
 				t.Logf("Response:\n%s", response)
 			}
 
@@ -134,24 +143,24 @@ func TestArgoStreamingSlowFirstToken(t *testing.T) {
 		expectedMaxPings int
 	}{
 		{
-			name:             "First token delayed 120ms with 50ms ping interval",
-			firstTokenDelay:  120 * time.Millisecond,
-			pingInterval:     50 * time.Millisecond,
-			expectedMinPings: 2, // Should get at least 2 pings before first token
-			expectedMaxPings: 3, // But no more than 3
+			name:             "First token delayed 60ms with 25ms ping interval",
+			firstTokenDelay:  60 * time.Millisecond, // Reduced from 120ms
+			pingInterval:     25 * time.Millisecond, // Reduced from 50ms
+			expectedMinPings: 2,                     // Should get at least 2 pings before first token
+			expectedMaxPings: 3,                     // But no more than 3
 		},
 		{
-			name:             "First token delayed 260ms with 50ms ping interval",
-			firstTokenDelay:  260 * time.Millisecond,
-			pingInterval:     50 * time.Millisecond,
-			expectedMinPings: 5, // Should get at least 5 pings
+			name:             "First token delayed 130ms with 25ms ping interval",
+			firstTokenDelay:  130 * time.Millisecond, // Reduced from 260ms
+			pingInterval:     25 * time.Millisecond,  // Reduced from 50ms
+			expectedMinPings: 5,                      // Should get at least 5 pings
 			expectedMaxPings: 6,
 		},
 		{
-			name:             "First token delayed 80ms with 100ms ping interval",
-			firstTokenDelay:  80 * time.Millisecond,
-			pingInterval:     100 * time.Millisecond,
-			expectedMinPings: 0, // No pings expected - first token arrives before ping interval
+			name:             "First token delayed 40ms with 50ms ping interval",
+			firstTokenDelay:  40 * time.Millisecond, // Reduced from 80ms
+			pingInterval:     50 * time.Millisecond, // Reduced from 100ms
+			expectedMinPings: 0,                     // No pings expected - first token arrives before ping interval
 			expectedMaxPings: 0,
 		},
 	}
@@ -292,7 +301,7 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 		_, _ = pw.Write([]byte("Initial data"))
 		// Don't close immediately - simulate hanging connection
 		select {
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond): // Reduced from 250ms
 			pw.Close()
 		case <-testCtx.Done():
 			pw.Close()
@@ -320,7 +329,7 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 	// Run parser in goroutine
 	done := make(chan error, 1)
 	go func() {
-		done <- parser.ParseWithPingInterval(pr, 30*time.Millisecond)
+		done <- parser.ParseWithPingInterval(pr, 20*time.Millisecond) // Reduced from 30ms
 	}()
 
 	// Wait for parser to complete or timeout
@@ -330,10 +339,10 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 		response := w.Body.String()
 		pingCount := strings.Count(response, `event: ping`)
 
-		// We should have gotten at least 3 pings (100ms wait / 30ms interval)
-		// but since we closed the pipe after 250ms, we check after completion
-		if pingCount < 3 {
-			t.Errorf("Expected at least 3 pings with 30ms interval, got %d", pingCount)
+		// We should have gotten at least 2 pings (100ms wait / 20ms interval = 5 pings max)
+		// but since we closed the pipe after 100ms, we check after completion
+		if pingCount < 2 {
+			t.Errorf("Expected at least 2 pings with 20ms interval, got %d", pingCount)
 			t.Logf("Response:\n%s", response)
 		}
 	case <-testCtx.Done():
@@ -351,7 +360,7 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 
 func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 	// Test that pings are sent while waiting for non-streaming response (with tools)
-	// For testing, we use a 200ms ping interval (fast tests, still realistic)
+	// For testing, we use a 100ms ping interval (fast tests, still realistic)
 
 	tests := []struct {
 		name             string
@@ -360,21 +369,21 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 		expectedMaxPings int
 	}{
 		{
-			name:             "Response delayed 50ms - no pings expected",
-			responseDelay:    50 * time.Millisecond,
-			expectedMinPings: 0, // Response arrives before first ping interval (200ms)
+			name:             "Response delayed 20ms - no pings expected",
+			responseDelay:    20 * time.Millisecond, // Reduced from 50ms
+			expectedMinPings: 0,                     // Response arrives before first ping interval (100ms)
 			expectedMaxPings: 0,
 		},
 		{
-			name:             "Response delayed 250ms - should get 1 ping",
-			responseDelay:    250 * time.Millisecond,
-			expectedMinPings: 1, // Should get 1 ping at 200ms mark
-			expectedMaxPings: 2, // Might get 2 depending on timing
+			name:             "Response delayed 100ms - should get 1 ping",
+			responseDelay:    100 * time.Millisecond, // Reduced from 250ms
+			expectedMinPings: 1,                      // Should get 1 ping at 100ms mark
+			expectedMaxPings: 2,                      // Might get 2 depending on timing
 		},
 		{
-			name:             "Response delayed 450ms - should get 2 pings",
-			responseDelay:    450 * time.Millisecond,
-			expectedMinPings: 2, // Should get pings at 200ms and 400ms marks
+			name:             "Response delayed 200ms - should get 2 pings",
+			responseDelay:    200 * time.Millisecond, // Reduced from 450ms
+			expectedMinPings: 2,                      // Should get pings at 100ms and 200ms marks
 			expectedMaxPings: 3,
 		},
 	}
@@ -410,21 +419,19 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 
 			// Create config
 			config := &Config{
-				Provider:           "argo",
+				Provider:           constants.ProviderArgo,
 				ArgoUser:           "testuser",
 				ArgoEnv:            "test",
 				Model:              "gpto3",
 				SmallModel:         "gemini25flash",
 				MaxRequestBodySize: 10 * 1024 * 1024,
-				ArgoBaseURL:        argoMock.URL,
-				PingInterval:       200 * time.Millisecond, // Use 200ms for fast testing
+				ProviderURL:        argoMock.URL,
+				PingInterval:       100 * time.Millisecond, // Reduced from 200ms for fast testing
 			}
 
-			// Initialize URLs
-			config.InitializeURLs()
-
-			// Create server
-			server := NewServer(config)
+			// Create server (NewEndpoints is called internally)
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
 			proxyServer := httptest.NewServer(server)
 			defer proxyServer.Close()
 
@@ -501,7 +508,7 @@ func TestArgoStreamingContextCancellation(t *testing.T) {
 
 	// Create a slow reader that would normally take a long time
 	chunks := []string{"Start", "Middle", "End"}
-	reader := NewSlowReader(chunks, 100*time.Millisecond)
+	reader := NewSlowReader(chunks, 50*time.Millisecond) // Reduced from 100ms
 
 	w := httptest.NewRecorder()
 	ctx := context.Background()

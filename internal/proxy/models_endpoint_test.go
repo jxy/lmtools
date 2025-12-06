@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 )
 
 // TestModelsEndpointErrorPropagation tests that provider errors are properly propagated
+// The proxy passes through the original error status codes from the upstream provider
 func TestModelsEndpointErrorPropagation(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -21,29 +23,29 @@ func TestModelsEndpointErrorPropagation(t *testing.T) {
 			name:           "401 Unauthorized",
 			mockStatusCode: http.StatusUnauthorized,
 			mockResponse:   `{"error": "Invalid API key"}`,
-			expectedCode:   http.StatusBadGateway,
-			expectedError:  "HTTP 401",
+			expectedCode:   http.StatusUnauthorized,
+			expectedError:  "Upstream openai error",
 		},
 		{
 			name:           "403 Forbidden",
 			mockStatusCode: http.StatusForbidden,
 			mockResponse:   `{"error": "Access denied"}`,
-			expectedCode:   http.StatusBadGateway,
-			expectedError:  "HTTP 403",
+			expectedCode:   http.StatusForbidden,
+			expectedError:  "Upstream openai error",
 		},
 		{
 			name:           "500 Internal Server Error",
 			mockStatusCode: http.StatusInternalServerError,
 			mockResponse:   `{"error": "Internal server error"}`,
-			expectedCode:   http.StatusBadGateway,
-			expectedError:  "HTTP 500",
+			expectedCode:   http.StatusInternalServerError,
+			expectedError:  "Upstream openai error",
 		},
 		{
 			name:           "404 Not Found",
 			mockStatusCode: http.StatusNotFound,
 			mockResponse:   `{"error": "Endpoint not found"}`,
-			expectedCode:   http.StatusBadGateway,
-			expectedError:  "HTTP 404",
+			expectedCode:   http.StatusNotFound,
+			expectedError:  "Upstream openai error",
 		},
 	}
 
@@ -58,13 +60,13 @@ func TestModelsEndpointErrorPropagation(t *testing.T) {
 
 			// Create proxy config
 			config := &Config{
-				Provider:           "openai",
+				Provider:           constants.ProviderOpenAI,
 				ProviderURL:        mockServer.URL + "/v1",
 				MaxRequestBodySize: 100,
 			}
 
 			// Create proxy server with reduced retry delays for faster testing
-			server := NewServerForErrorTests(config)
+			server := NewTestServerWithFastRetries(t, config)
 
 			// Create test request
 			req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -100,7 +102,7 @@ func TestModelsEndpointErrorPropagation(t *testing.T) {
 
 // TestParseArgoModels tests the Argo models parsing function
 func TestParseArgoModels(t *testing.T) {
-	server := &Server{config: &Config{}}
+	server := NewMinimalTestServer(t, &Config{})
 
 	tests := []struct {
 		name          string
@@ -199,7 +201,7 @@ func TestParseArgoModels(t *testing.T) {
 
 // TestParseOpenAIModels tests the OpenAI models parsing function
 func TestParseOpenAIModels(t *testing.T) {
-	server := &Server{config: &Config{}}
+	server := NewMinimalTestServer(t, &Config{})
 
 	tests := []struct {
 		name          string
@@ -268,7 +270,7 @@ func TestParseOpenAIModels(t *testing.T) {
 
 // TestParseGoogleModels tests the Google models parsing function
 func TestParseGoogleModels(t *testing.T) {
-	server := &Server{config: &Config{}}
+	server := NewMinimalTestServer(t, &Config{})
 
 	tests := []struct {
 		name          string
@@ -350,7 +352,7 @@ func TestParseGoogleModels(t *testing.T) {
 
 // TestParseAnthropicModels tests the Anthropic models parsing function
 func TestParseAnthropicModels(t *testing.T) {
-	server := &Server{config: &Config{}}
+	server := NewMinimalTestServer(t, &Config{})
 
 	tests := []struct {
 		name          string
@@ -446,21 +448,21 @@ func TestModelsEndpointAuthentication(t *testing.T) {
 	}{
 		{
 			name:           "OpenAI Bearer Token",
-			provider:       "openai",
+			provider:       constants.ProviderOpenAI,
 			apiKey:         "sk-test123",
 			expectedHeader: "Authorization",
 			expectedValue:  "Bearer sk-test123",
 		},
 		{
 			name:           "Anthropic API Key",
-			provider:       "anthropic",
+			provider:       constants.ProviderAnthropic,
 			apiKey:         "sk-ant-test456",
 			expectedHeader: "X-Api-Key",
 			expectedValue:  "sk-ant-test456",
 		},
 		{
 			name:     "Google API Key in URL",
-			provider: "google",
+			provider: constants.ProviderGoogle,
 			apiKey:   "AIzaTest789",
 			checkURL: true,
 		},
@@ -488,7 +490,7 @@ func TestModelsEndpointAuthentication(t *testing.T) {
 					"data":   []interface{}{},
 				}
 				// For Anthropic, return models in their format
-				if tt.provider == "anthropic" {
+				if tt.provider == constants.ProviderAnthropic {
 					response = map[string]interface{}{
 						"models": []map[string]interface{}{
 							{"id": "claude-3-opus", "display_name": "Claude 3 Opus"},
@@ -508,16 +510,17 @@ func TestModelsEndpointAuthentication(t *testing.T) {
 
 			// Set API key based on provider
 			switch tt.provider {
-			case "openai":
+			case constants.ProviderOpenAI:
 				config.OpenAIAPIKey = tt.apiKey
-			case "anthropic":
+			case constants.ProviderAnthropic:
 				config.AnthropicAPIKey = tt.apiKey
-			case "google":
+			case constants.ProviderGoogle:
 				config.GoogleAPIKey = tt.apiKey
 			}
 
-			// Create proxy server
-			server := NewServer(config)
+			// Create proxy server (NewEndpoints is called internally)
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
 
 			// Create test request
 			req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -572,13 +575,14 @@ func TestModelsEndpointMalformedResponse(t *testing.T) {
 
 			// Create proxy config
 			config := &Config{
-				Provider:           "openai",
+				Provider:           constants.ProviderOpenAI,
 				ProviderURL:        mockServer.URL + "/v1",
 				MaxRequestBodySize: 100,
 			}
 
-			// Create proxy server
-			server := NewServer(config)
+			// Create proxy server (NewEndpoints is called internally)
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
 
 			// Create test request
 			req := httptest.NewRequest("GET", "/v1/models", nil)

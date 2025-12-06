@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"lmtools/internal/constants"
+	"lmtools/internal/limitio"
 	"net/http"
 	"time"
 )
@@ -94,6 +95,32 @@ func NewClientWithTransport(timeout time.Duration, maxRetries int, logger Logger
 	}
 }
 
+// NewClientForTesting creates a retryable HTTP client with fast backoff for tests.
+// Uses millisecond-level delays to speed up tests that verify retry behavior.
+func NewClientForTesting(timeout time.Duration, maxRetries int, logger Logger, loggerFromContext func(context.Context) Logger) *Client {
+	// Fast test configuration with minimal delays
+	testConfig := &Config{
+		MaxRetries:        maxRetries,
+		InitialBackoff:    1 * time.Millisecond,  // 1ms instead of 1-2 seconds
+		MaxBackoff:        10 * time.Millisecond, // 10ms instead of 30-60 seconds
+		BackoffFactor:     1.5,
+		LoggerFromContext: loggerFromContext,
+	}
+
+	// Use the same fast config for all providers in tests
+	retryers := make(map[string]*Retryer)
+	for _, provider := range []string{constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderArgo, "lmc", "default"} {
+		retryers[provider] = NewRetryer(testConfig, logger)
+	}
+
+	return &Client{
+		client: &http.Client{
+			Timeout: timeout,
+		},
+		retryers: retryers,
+	}
+}
+
 // Do executes an HTTP request with provider-specific retry logic
 func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*http.Response, error) {
 	retryer, ok := c.retryers[provider]
@@ -122,7 +149,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*h
 		if contentLength > 0 && contentLength <= maxRetryBodySize {
 			// Small body: buffer in memory for retries
 			var err error
-			bodyBytes, err = io.ReadAll(req.Body)
+			bodyBytes, err = limitio.ReadLimited(req.Body, maxRetryBodySize)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read request body: %w", err)
 			}

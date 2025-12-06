@@ -1,11 +1,55 @@
 //go:build !prod
 
+// Test Server Helpers
+//
+// This file provides test server constructors for different testing scenarios.
+// Choose the appropriate constructor based on your test needs:
+//
+// # NewTestServer(t, config) - Default choice for most tests
+//
+//	Returns: (http.Handler, cleanup func)
+//	Features: Disables HTTP keep-alives for cleaner connection handling
+//	Use for: Integration tests, endpoint tests, logging tests
+//
+// # NewTestServerWithFastRetries(t, config) - For retry logic tests
+//
+//	Returns: http.Handler (no cleanup needed)
+//	Features: Uses millisecond retry delays instead of seconds
+//	Use for: Error handling tests, retry behavior tests
+//
+// # NewTestServerDirectWithClient(t, config, client) - For internal access
+//
+//	Returns: *Server (not http.Handler)
+//	Features: No middleware wrapping, custom retry client
+//	Use for: Ping tests, streaming internals, context cancellation tests
+//
+// # NewMinimalTestServer(t, config) - For unit testing individual methods
+//
+//	Returns: *Server (minimal initialization)
+//	Features: Only config and mapper initialized
+//	Use for: Testing handleMessages errors, readResponseBody, parseArgoModels
+//
+// # NewServer(config) - Production-like behavior (rarely needed in tests)
+//
+//	Returns: (http.Handler, error)
+//	Features: Real retry delays (seconds), full middleware
+//	Use for: Testing Retry-After header behavior specifically
+//
+// Mock providers are available in test_helpers.go:
+//   - NewMockOpenAI(t) - Mock OpenAI server
+//   - NewMockGoogle(t) - Mock Google server
+//   - NewMockArgo(t) - Mock Argo server
+//
+// All test constructors call NewEndpoints() and use t.Fatalf on failure.
+// The cleanup function returned by NewTestServer should always be called via defer.
+
 package proxy
 
 import (
 	"context"
 	"lmtools/internal/retry"
 	"net/http"
+	"testing"
 	"time"
 )
 
@@ -32,8 +76,17 @@ func WithTransport(transport *http.Transport) ServerOption {
 	}
 }
 
-// NewServerWithOptions creates a new API proxy server with the given options
-func NewServerWithOptions(config *Config, opts ...ServerOption) (http.Handler, func()) {
+// newServerWithOptionsT creates a new API proxy server with the given options.
+// This is an internal helper used by NewTestServer.
+func newServerWithOptionsT(t *testing.T, config *Config, opts ...ServerOption) (http.Handler, func()) {
+	t.Helper()
+
+	// Create endpoints - fail via test API for better debugging
+	endpoints, err := NewEndpoints(config)
+	if err != nil {
+		t.Fatalf("NewServerWithOptionsT: NewEndpoints failed: %v", err)
+	}
+
 	// Apply options
 	options := &serverOptions{}
 	for _, opt := range opts {
@@ -69,6 +122,7 @@ func NewServerWithOptions(config *Config, opts ...ServerOption) (http.Handler, f
 	mapper := NewModelMapper(config)
 	server := &Server{
 		config:    config,
+		endpoints: endpoints,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
 		client:    client,
@@ -89,34 +143,40 @@ func NewServerWithOptions(config *Config, opts ...ServerOption) (http.Handler, f
 	return handler, cleanup
 }
 
-// NewServerWithCleanup creates a new API proxy server and returns both the handler and a cleanup function
-// This is primarily for testing purposes to ensure proper connection cleanup
-func NewServerWithCleanup(config *Config) (http.Handler, func()) {
-	return NewServerWithOptions(config)
+// NewTestServer creates a new API proxy server optimized for testing.
+// It disables keep-alives to ensure connections are closed after each request.
+// Use this for most tests. For tests that exercise error handling and retry
+// logic, use NewTestServerWithFastRetries instead.
+func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
+	return newServerWithOptionsT(t, config, WithDisableKeepAlives(true))
 }
 
-// NewServerForTesting creates a new API proxy server optimized for testing
-// It disables keep-alives to ensure connections are closed after each request
-func NewServerForTesting(config *Config) (http.Handler, func()) {
-	return NewServerWithOptions(config, WithDisableKeepAlives(true))
-}
+// NewTestServerWithFastRetries creates a server with minimal retry delays for error propagation tests.
+// Uses t.Fatalf for better test debugging when NewEndpoints fails.
+// Use this for tests that exercise error handling and retry logic.
+func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
+	t.Helper()
 
-// NewServerForErrorTests creates a server with minimal retry delays for error propagation tests
-// This allows tests to verify retry behavior without waiting for production-level backoff delays
-func NewServerForErrorTests(config *Config) http.Handler {
+	// Create endpoints - fail via test API for better debugging
+	endpoints, err := NewEndpoints(config)
+	if err != nil {
+		t.Fatalf("NewTestServerWithFastRetries: NewEndpoints failed: %v", err)
+	}
+
 	mapper := NewModelMapper(config)
 
-	// Create a custom retry client with very short delays for testing
-	// We still want to test that retries happen, but not wait for production delays
-	testRetryClient := retry.NewClientWithOptions(
+	// Create a custom retry client with fast backoff for testing
+	// Uses millisecond delays instead of seconds to speed up tests
+	testRetryClient := retry.NewClientForTesting(
 		10*time.Second, // timeout
-		3,              // max 3 retries instead of 8 for faster tests
+		3,              // max 3 retries
 		&retryLoggerAdapter{ctx: context.Background()},
 		extractRequestLogger,
 	)
 
 	server := &Server{
 		config:    config,
+		endpoints: endpoints,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
 		client:    testRetryClient,
@@ -127,4 +187,39 @@ func NewServerForErrorTests(config *Config) http.Handler {
 	handler = NewProxyMiddleware(handler, config)
 
 	return handler
+}
+
+// NewTestServerDirectWithClient creates a Server with a custom retry client.
+// Use this for tests that need specific client configurations.
+func NewTestServerDirectWithClient(t *testing.T, config *Config, client *retry.Client) *Server {
+	t.Helper()
+
+	// Create endpoints - fail via test API for better debugging
+	endpoints, err := NewEndpoints(config)
+	if err != nil {
+		t.Fatalf("NewTestServerDirectWithClient: NewEndpoints failed: %v", err)
+	}
+
+	mapper := NewModelMapper(config)
+	server := &Server{
+		config:    config,
+		endpoints: endpoints,
+		mapper:    mapper,
+		converter: NewConverter(mapper),
+		client:    client,
+	}
+
+	return server
+}
+
+// NewMinimalTestServer creates a Server with only config and mapper set.
+// Use this for unit tests that test individual Server methods in isolation
+// (e.g., handleMessages error paths, readResponseBody, readErrorBody).
+// For tests that need full server functionality, use NewTestServer instead.
+func NewMinimalTestServer(t *testing.T, config *Config) *Server {
+	t.Helper()
+	return &Server{
+		config: config,
+		mapper: NewModelMapper(config),
+	}
 }

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,14 +12,11 @@ import (
 func TestHandleMessagesErrorResponses(t *testing.T) {
 	// Create a test server
 	config := &Config{
-		Provider:   "argo",
+		Provider:   constants.ProviderArgo,
 		Model:      "testmodel",
 		SmallModel: "testsmall",
 	}
-	server := &Server{
-		config: config,
-		mapper: NewModelMapper(config),
-	}
+	server := NewMinimalTestServer(t, config)
 
 	tests := []struct {
 		name           string
@@ -73,7 +71,7 @@ func TestHandleMessagesErrorResponses(t *testing.T) {
 				if errResp.Error.Type != ErrTypeInvalidRequest {
 					t.Errorf("Expected error type %s, got %s", ErrTypeInvalidRequest, errResp.Error.Type)
 				}
-				if errResp.Error.Message != "Messages array cannot be empty" {
+				if errResp.Error.Message != "messages array cannot be empty" {
 					t.Errorf("Expected specific error message, got: %s", errResp.Error.Message)
 				}
 			},
@@ -122,14 +120,11 @@ func TestHandleMessagesErrorResponses(t *testing.T) {
 func TestHandleCountTokensErrorResponses(t *testing.T) {
 	// Create a test server
 	config := &Config{
-		Provider:   "argo",
+		Provider:   constants.ProviderArgo,
 		Model:      "testmodel",
 		SmallModel: "testsmall",
 	}
-	server := &Server{
-		config: config,
-		mapper: NewModelMapper(config),
-	}
+	server := NewMinimalTestServer(t, config)
 
 	tests := []struct {
 		name           string

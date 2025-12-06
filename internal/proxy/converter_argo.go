@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"strings"
@@ -49,7 +50,7 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 		var contentArray []AnthropicContentBlock
 		if err := json.Unmarshal(msg.Content, &contentArray); err == nil {
 			// For OpenAI models, use centralized converters to avoid duplication
-			if provider == "openai" {
+			if provider == constants.ProviderOpenAI {
 				// Log thinking blocks before conversion (they'll be filtered out by AnthropicBlocksToCore)
 				for _, block := range contentArray {
 					if block.Type == "thinking" {
@@ -355,7 +356,7 @@ func (c *Converter) applyThinkingConfig(ctx context.Context, req *AnthropicReque
 
 // setArgoMaxTokens sets max_tokens for Argo request based on provider
 func (c *Converter) setArgoMaxTokens(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest, provider string) {
-	if provider == "openai" {
+	if provider == constants.ProviderOpenAI {
 		// For OpenAI models, use max_completion_tokens
 		argoReq.MaxCompletionTokens = req.MaxTokens
 	} else {
@@ -464,8 +465,15 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 			// Workaround: Argo sometimes embeds one or more tool_use JSON objects in content
 			// while providing an empty/missing tool_calls array. Extract all and convert to blocks.
 			if toolCallsPresentAndEmpty || !toolCallsExists {
-				// Note: Tool validation happens at a higher level where tool definitions are available
-				seq, suffix, err := core.ExtractEmbeddedToolCallsWithSequence(contentStr, nil)
+				// Extract tool definitions from the request
+				var validTools []core.ToolDefinition
+				if req != nil && len(req.Tools) > 0 {
+					validTools = make([]core.ToolDefinition, len(req.Tools))
+					for i, tool := range req.Tools {
+						validTools[i] = core.ToolDefinition{Name: tool.Name}
+					}
+				}
+				seq, suffix, err := core.ExtractEmbeddedToolCallsWithSequence(contentStr, validTools)
 				if err == nil && len(seq) > 0 {
 					// Log that we're using the loose JSON parser workaround
 					logger.From(context.Background()).Debugf("Argo workaround: extracted %d embedded tool calls using loose JSON parser", len(seq))

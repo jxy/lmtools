@@ -293,7 +293,7 @@ func TestResponseLoggingJSON(t *testing.T) {
 			config := &Config{
 				MaxRequestBodySize: 10 * 1024 * 1024,
 			}
-			server := &Server{config: config}
+			server := NewMinimalTestServer(t, config)
 
 			// Capture logs
 			logs := captureStderrForLogging(t, func() {

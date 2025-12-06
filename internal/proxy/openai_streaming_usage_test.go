@@ -16,15 +16,7 @@ import (
 // TestSimulateOpenAIStreamIncludeUsage_TextOnly verifies usage:null appears when requested
 // and a final usage object chunk is emitted after the final finish_reason, before [DONE].
 func TestSimulateOpenAIStreamIncludeUsage_TextOnly(t *testing.T) {
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Mock Argo: simple text response
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,17 +30,12 @@ func TestSimulateOpenAIStreamIncludeUsage_TextOnly(t *testing.T) {
 
 	// Server config
 	config := &Config{
+		Provider:    constants.ProviderArgo,
 		ArgoUser:    "testuser",
 		ArgoEnv:     mockArgo.URL,
-		ArgoBaseURL: mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Recorder and writer
 	recorder := httptest.NewRecorder()
@@ -138,15 +125,7 @@ func TestSimulateOpenAIStreamIncludeUsage_TextOnly(t *testing.T) {
 
 // TestSimulateOpenAIStreamIncludeUsage_ToolCalls verifies usage streaming with tool calls present.
 func TestSimulateOpenAIStreamIncludeUsage_ToolCalls(t *testing.T) {
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Mock Argo: tool_calls structure
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,17 +151,12 @@ func TestSimulateOpenAIStreamIncludeUsage_ToolCalls(t *testing.T) {
 
 	// Server config
 	config := &Config{
+		Provider:    constants.ProviderArgo,
 		ArgoUser:    "testuser",
 		ArgoEnv:     mockArgo.URL,
-		ArgoBaseURL: mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Recorder and writer
 	recorder := httptest.NewRecorder()

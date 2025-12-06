@@ -51,7 +51,7 @@ func TestStreamTextBlockUTF8Boundaries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a test server
-			s := &Server{}
+			s := NewMinimalTestServer(t, &Config{})
 
 			// Create a test response writer
 			recorder := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestStreamToolBlockUTF8Boundaries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a test server
-			s := &Server{}
+			s := NewMinimalTestServer(t, &Config{})
 
 			// Create a test response writer
 			recorder := httptest.NewRecorder()
@@ -274,7 +274,7 @@ func TestStreamingWithSmallChunkSize(t *testing.T) {
 	content := "Test 你好 🌍 World"
 
 	// Create a test server
-	s := &Server{}
+	s := NewMinimalTestServer(t, &Config{})
 
 	// Create a test response writer
 	recorder := httptest.NewRecorder()

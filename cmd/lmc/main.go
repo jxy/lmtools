@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
-	"io"
 	"lmtools/internal/auth"
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
+	"lmtools/internal/limitio"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"lmtools/internal/session"
@@ -401,14 +401,10 @@ func readAndValidateInput(isRegeneration bool) (string, error) {
 	// Only read stdin if not regenerating
 	var inputStr string
 	if !isRegeneration {
-		inputBytes, err := io.ReadAll(os.Stdin)
+		// Read stdin with size limit to prevent DoS
+		inputBytes, err := limitio.ReadLimited(os.Stdin, constants.MaxCLIInputSize)
 		if err != nil {
 			return "", errors.WrapError("read stdin", err)
-		}
-
-		// Combined validation
-		if len(inputBytes) > core.MaxInputSizeBytes {
-			return "", errors.WrapError("validate input size", fmt.Errorf("input too large: %d bytes (max: %d bytes)", len(inputBytes), core.MaxInputSizeBytes))
 		}
 
 		inputStr = strings.TrimSpace(string(inputBytes))
@@ -614,12 +610,15 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		body, err := limitio.ReadLimited(resp.Body, constants.MaxErrorResponseSize)
+		if err != nil {
+			return errors.WrapError("fetch models", fmt.Errorf("HTTP %d (failed to read body: %v)", resp.StatusCode, err))
+		}
 		return errors.WrapError("fetch models", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body)))
 	}
 
-	// Read response
-	data, err := io.ReadAll(resp.Body)
+	// Read response with size limit
+	data, err := limitio.ReadLimited(resp.Body, constants.MaxCLIResponseSize)
 	if err != nil {
 		return errors.WrapError("read response", err)
 	}

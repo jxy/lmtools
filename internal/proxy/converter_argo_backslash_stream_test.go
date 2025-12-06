@@ -22,7 +22,7 @@ func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
 		"tool_calls": []interface{}{},
 	}}
 
-	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}, Tools: []AnthropicTool{{Name: "Write"}}}
 	anth := converter.ConvertArgoToAnthropicWithRequest(argo, req.Model, req)
 	if anth == nil {
 		t.Fatal("converter returned nil")
@@ -56,7 +56,7 @@ func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler: %v", err)
 	}
-	srv := &Server{config: &Config{}}
+	srv := NewMinimalTestServer(t, &Config{})
 	if err := srv.streamArgoResponseContent(ctx, anth, handler); err != nil {
 		t.Fatalf("streamArgoResponseContent: %v", err)
 	}

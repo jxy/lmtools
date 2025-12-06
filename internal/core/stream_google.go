@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"io"
+	"lmtools/internal/constants"
 	"os"
 )
 
@@ -13,5 +14,5 @@ import (
 
 // handleGoogleStreamWithTools handles Google's SSE format with tool support
 func handleGoogleStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (string, []ToolCall, error) {
-	return RunStream(ctx, body, logFile, out, notifier, &GoogleStreamState{}, "google")
+	return RunStream(ctx, body, logFile, out, notifier, &GoogleStreamState{}, constants.ProviderGoogle)
 }

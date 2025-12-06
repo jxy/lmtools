@@ -12,7 +12,4 @@ const (
 	// Session limits
 	MaxRetries         = 10              // Max retries for session operations
 	SessionLockTimeout = 5 * time.Second // Timeout for session lock acquisition
-
-	// Input limits
-	MaxInputSizeBytes = 1024 * 1024 // 1MB max input size
 )

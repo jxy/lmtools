@@ -162,9 +162,6 @@ func main() {
 	// Apply dynamic model defaults based on provider
 	config.ApplyDynamicModelDefaults()
 
-	// Initialize URLs
-	config.InitializeURLs()
-
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
@@ -183,7 +180,11 @@ func main() {
 	}
 
 	// Create and configure server
-	server := proxy.NewServer(config)
+	server, err := proxy.NewServer(config)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create server: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Create handler with proper middleware chain
 	handler := server

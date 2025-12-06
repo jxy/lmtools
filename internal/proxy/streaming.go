@@ -57,10 +57,7 @@ func NewSSEWriter(w http.ResponseWriter, ctx context.Context) (*SSEWriter, error
 	}
 
 	// Set headers for SSE
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+	setSSEHeaders(w)
 
 	return &SSEWriter{w: w, flusher: flusher, ctx: ctx}, nil
 }
@@ -347,20 +344,17 @@ func (h *AnthropicStreamHandler) FinishStream(stopReason string, usage *Anthropi
 
 	// Send message_delta with stop reason and usage
 	if err := h.SendMessageDelta(stopReason, outputTokens); err != nil {
-		logger.From(h.ctx).Errorf("Failed to send message_delta: %v", err)
-		return err
+		return handleStreamError(h.ctx, h, "AnthropicFinish", err)
 	}
 
 	// Send message_stop
 	if err := h.SendMessageStop(); err != nil {
-		logger.From(h.ctx).Errorf("Failed to send message_stop: %v", err)
-		return err
+		return handleStreamError(h.ctx, h, "AnthropicFinish", err)
 	}
 
 	// Send [DONE] for OpenAI compatibility (no-op for Anthropic)
 	if err := h.SendDone(); err != nil {
-		logger.From(h.ctx).Errorf("Failed to send [DONE]: %v", err)
-		return err
+		return handleStreamError(h.ctx, h, "AnthropicFinish", err)
 	}
 
 	return nil
@@ -389,13 +383,11 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		if accumulatedText != "" && !textSent {
 			// Send accumulated text
 			if err := h.SendTextDelta(accumulatedText); err != nil {
-				logger.From(h.ctx).Errorf("Failed to send accumulated text: %v", err)
-				return err
+				return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 			}
 		}
 		if err := h.SendContentBlockStop(0); err != nil {
-			logger.From(h.ctx).Errorf("Failed to close text block: %v", err)
-			return err
+			return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 		}
 		h.mu.Lock()
 		h.state.TextBlockClosed = true
@@ -406,8 +398,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	if toolIndex != nil {
 		for i := 1; i <= lastToolIndex; i++ {
 			if err := h.SendContentBlockStop(i); err != nil {
-				logger.From(h.ctx).Errorf("Failed to close tool block %d: %v", i, err)
-				return err
+				return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 			}
 		}
 	}
@@ -424,8 +415,9 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	return h.FinishStream(stopReason, nil)
 }
 
-// SendError sends an error event
-func (h *AnthropicStreamHandler) SendError(message string) error {
+// SendStreamError sends an error event to the client.
+// Implements the StreamErrorEmitter interface.
+func (h *AnthropicStreamHandler) SendStreamError(message string) error {
 	return h.SendEvent(EventError, NewError(message))
 }
 
@@ -531,8 +523,11 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			// Parse JSON chunk
 			var chunk map[string]interface{}
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				logger.From(p.handler.ctx).Errorf("Failed to parse OpenAI stream chunk: %v", err)
-				continue // Skip invalid JSON but log the error
+				// Use standardized stream error handling
+				if handleErr := handleStreamError(p.handler.ctx, nil, "OpenAIStreamParser", err); handleErr != nil {
+					return handleErr // Fatal error
+				}
+				continue // Recoverable error - skip this chunk
 			}
 
 			// Log the received chunk
@@ -542,12 +537,7 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 
 			// Process the chunk
 			if err := p.processChunk(chunk); err != nil {
-				logger.From(p.handler.ctx).Errorf("Failed to process OpenAI stream chunk: %v", err)
-				// Send error event to client
-				if err := p.handler.SendError(fmt.Sprintf("Stream processing error: %v", err)); err != nil {
-					logger.From(p.handler.ctx).Errorf("Failed to write error event: %v", err)
-				}
-				return err
+				return handleStreamError(p.handler.ctx, p.handler, "OpenAIStreamParser", err)
 			}
 		}
 	}
@@ -666,10 +656,11 @@ func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 	for {
 		var chunk map[string]interface{}
 		if err := decoder.Decode(&chunk); err != nil {
-			if err == io.EOF {
-				break
+			// Use standardized stream error handling
+			if handleErr := handleStreamError(p.handler.ctx, nil, "GoogleStreamParser", err); handleErr != nil {
+				return handleErr // Fatal error
 			}
-			return err
+			break // EOF or recoverable error
 		}
 
 		// Log the received chunk
@@ -679,12 +670,7 @@ func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 
 		// Process the chunk
 		if err := p.processChunk(chunk); err != nil {
-			logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to process Google stream chunk", err)
-			// Send error event to client
-			if err := p.handler.SendError(fmt.Sprintf("Stream processing error: %v", err)); err != nil {
-				logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to write error event", err)
-			}
-			return err
+			return handleStreamError(p.handler.ctx, p.handler, "GoogleStreamParser", err)
 		}
 	}
 
@@ -826,18 +812,17 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 
 	for {
 		select {
+		case <-p.handler.ctx.Done():
+			// Context cancelled - exit gracefully to prevent deadlock
+			return p.handler.ctx.Err()
+
 		case data := <-dataChan:
 			lastActivity = time.Now()
 			text := string(data)
 			// Log the received text chunk
 			logger.From(p.handler.ctx).Debugf("Argo Stream Chunk: %q", text)
 			if err := p.handler.SendTextDelta(text); err != nil {
-				logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to send Argo text delta", err)
-				// Send error event to client
-				if err := p.handler.SendError(fmt.Sprintf("Stream processing error: %v", err)); err != nil {
-					logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to write error event", err)
-				}
-				return err
+				return handleStreamError(p.handler.ctx, p.handler, "ArgoStreamParser", err)
 			}
 			// Argo doesn't provide token counts, so we must estimate them
 			p.handler.state.OutputTokens += EstimateTokenCount(text)
@@ -846,15 +831,16 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 			if err == io.EOF {
 				return p.handler.Complete("end_turn")
 			}
-			return err
+			return handleStreamError(p.handler.ctx, p.handler, "ArgoStreamParser", err)
 
 		case <-pingTicker.C:
 			// Only send ping if we haven't received data recently
 			if time.Since(lastActivity) >= pingInterval {
 				logger.From(p.handler.ctx).Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
 				if err := p.handler.SendPing(); err != nil {
-					logger.From(p.handler.ctx).Errorf("%s: %v", "Failed to send ping during Argo streaming", err)
-					return fmt.Errorf("client disconnected: %w", err)
+					// Client disconnected - treat as fatal error with proper handling
+					return handleStreamError(p.handler.ctx, p.handler, "ArgoStreamParser:ping",
+						fmt.Errorf("client disconnected: %w", err))
 				}
 			}
 		}

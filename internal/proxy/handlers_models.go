@@ -2,12 +2,10 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"net/http"
-	"strings"
 )
 
 // handleModels handles the models listing endpoint
@@ -27,9 +25,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	// Fetch models from the provider
 	models, err := s.fetchProviderModels(ctx)
 	if err != nil {
-		log.Errorf("Failed to fetch models from provider: %v", err)
-		// Propagate the error to the client instead of masking it
-		s.sendOpenAIError(w, ErrTypeServer, fmt.Sprintf("Failed to fetch models: %v", err), "models_fetch_error", http.StatusBadGateway)
+		s.sendProviderErrorAsOpenAI(ctx, w, s.config.Provider, err)
 		return
 	}
 
@@ -53,12 +49,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	log.Debugf("Models response: returning %d models", len(response.Data))
 
-	// Send response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Errorf("Failed to encode models response: %v", err)
-		s.sendOpenAIError(w, ErrTypeServer, "Failed to encode response", "encoding_error", http.StatusInternalServerError)
-	}
+	// Send response using centralized helper (logs errors internally)
+	_ = s.sendJSONResponse(ctx, w, response)
 }
 
 // ModelItem represents a model in the response
@@ -69,19 +61,29 @@ type ModelItem struct {
 	OwnedBy string `json:"owned_by"`
 }
 
+// handleModelsNonOK centralizes error handling for non-200 status codes from models endpoints
+// Uses centralized error helpers for consistency with streaming error handling
+func (s *Server) handleModelsNonOK(ctx context.Context, provider string, status int, body []byte) error {
+	// Log the error response using centralized helper
+	logErrorResponse(ctx, provider, status, body)
+
+	// Return ResponseError for consistent error handling
+	return NewResponseError(status, string(body))
+}
+
 // fetchProviderModels queries the provider's models endpoint and returns the list of available models
 func (s *Server) fetchProviderModels(ctx context.Context) ([]ModelItem, error) {
 	provider := s.config.Provider
 
 	// Dispatch to provider-specific function
 	switch provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		return s.fetchOpenAIModels(ctx)
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		return s.fetchAnthropicModels(ctx)
-	case "google":
+	case constants.ProviderGoogle:
 		return s.fetchGoogleModels(ctx)
-	case "argo":
+	case constants.ProviderArgo:
 		return s.fetchArgoModels(ctx)
 	default:
 		// For custom providers with ProviderURL, try OpenAI format
@@ -119,7 +121,8 @@ func (s *Server) fetchModels(ctx context.Context, url string, headers http.Heade
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
+	// Use safe response body reading with size limit
+	data, err := s.readResponseBody(resp)
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
 	}
@@ -129,10 +132,17 @@ func (s *Server) fetchModels(ctx context.Context, url string, headers http.Heade
 
 // fetchOpenAIModels fetches models from OpenAI API
 func (s *Server) fetchOpenAIModels(ctx context.Context) ([]ModelItem, error) {
-	url := "https://api.openai.com/v1/models"
-	if s.config.ProviderURL != "" {
-		url = strings.TrimRight(s.config.ProviderURL, "/") + "/models"
+	log := logger.From(ctx)
+
+	// Use precomputed models URL from endpoints
+	url := s.endpoints.OpenAIModels
+	if url == "" {
+		return nil, fmt.Errorf("openai models URL not configured")
 	}
+
+	// Log sanitized URL for debugging
+	sanitizedURL := sanitizeURLForLogging(url)
+	log.Debugf("Fetching OpenAI models from: %s", sanitizedURL)
 
 	headers := make(http.Header)
 	if s.config.OpenAIAPIKey != "" {
@@ -145,7 +155,7 @@ func (s *Server) fetchOpenAIModels(ctx context.Context) ([]ModelItem, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("openAI HTTP %d: %s", statusCode, string(data))
+		return nil, s.handleModelsNonOK(ctx, "OpenAI", statusCode, data)
 	}
 
 	return s.parseOpenAIModels(data)
@@ -153,10 +163,17 @@ func (s *Server) fetchOpenAIModels(ctx context.Context) ([]ModelItem, error) {
 
 // fetchAnthropicModels fetches models from Anthropic API
 func (s *Server) fetchAnthropicModels(ctx context.Context) ([]ModelItem, error) {
-	url := "https://api.anthropic.com/v1/models"
-	if s.config.ProviderURL != "" {
-		url = strings.TrimRight(s.config.ProviderURL, "/") + "/models"
+	log := logger.From(ctx)
+
+	// Use precomputed models URL from endpoints
+	url := s.endpoints.AnthropicModels
+	if url == "" {
+		return nil, fmt.Errorf("anthropic models URL not configured")
 	}
+
+	// Log sanitized URL for debugging
+	sanitizedURL := sanitizeURLForLogging(url)
+	log.Debugf("Fetching Anthropic models from: %s", sanitizedURL)
 
 	headers := make(http.Header)
 	if s.config.AnthropicAPIKey != "" {
@@ -170,7 +187,7 @@ func (s *Server) fetchAnthropicModels(ctx context.Context) ([]ModelItem, error) 
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("anthropic HTTP %d: %s", statusCode, string(data))
+		return nil, s.handleModelsNonOK(ctx, "Anthropic", statusCode, data)
 	}
 
 	return s.parseAnthropicModels(data)
@@ -178,10 +195,17 @@ func (s *Server) fetchAnthropicModels(ctx context.Context) ([]ModelItem, error) 
 
 // fetchGoogleModels fetches models from Google AI API
 func (s *Server) fetchGoogleModels(ctx context.Context) ([]ModelItem, error) {
-	url := "https://generativelanguage.googleapis.com/v1beta/models"
-	if s.config.ProviderURL != "" {
-		url = strings.TrimRight(s.config.ProviderURL, "/") + "/models"
+	log := logger.From(ctx)
+
+	// Use precomputed models URL from endpoints
+	url := s.endpoints.GoogleModels
+	if url == "" {
+		return nil, fmt.Errorf("google models URL not configured")
 	}
+
+	// Log sanitized URL for debugging (note: API key is in query params, will be removed)
+	sanitizedURL := sanitizeURLForLogging(url)
+	log.Debugf("Fetching Google models from: %s", sanitizedURL)
 
 	headers := make(http.Header)
 
@@ -200,7 +224,7 @@ func (s *Server) fetchGoogleModels(ctx context.Context) ([]ModelItem, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("google HTTP %d: %s", statusCode, string(data))
+		return nil, s.handleModelsNonOK(ctx, "Google", statusCode, data)
 	}
 
 	return s.parseGoogleModels(data)
@@ -208,16 +232,17 @@ func (s *Server) fetchGoogleModels(ctx context.Context) ([]ModelItem, error) {
 
 // fetchArgoModels fetches models from Argo API
 func (s *Server) fetchArgoModels(ctx context.Context) ([]ModelItem, error) {
-	var url string
-	if s.config.ProviderURL != "" {
-		url = strings.TrimRight(s.config.ProviderURL, "/") + "/models"
-	} else if s.config.ArgoBaseURL != "" {
-		url = strings.TrimRight(s.config.ArgoBaseURL, "/") + "/api/v1/models"
-	} else if s.config.ArgoEnv == "prod" {
-		url = "https://apps.inside.anl.gov/argoapi/api/v1/models"
-	} else {
-		url = "https://apps-dev.inside.anl.gov/argoapi/api/v1/models"
+	log := logger.From(ctx)
+
+	// Use precomputed models URL from endpoints
+	url := s.endpoints.ArgoModels
+	if url == "" {
+		return nil, fmt.Errorf("argo models URL not configured")
 	}
+
+	// Sanitize URL for logging (remove credentials and query params)
+	sanitizedURL := sanitizeURLForLogging(url)
+	log.Debugf("Fetching Argo models from: %s", sanitizedURL)
 
 	// Argo doesn't require authentication for models endpoint
 	headers := make(http.Header)
@@ -228,7 +253,7 @@ func (s *Server) fetchArgoModels(ctx context.Context) ([]ModelItem, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("argo HTTP %d: %s", statusCode, string(data))
+		return nil, s.handleModelsNonOK(ctx, "Argo", statusCode, data)
 	}
 
 	return s.parseArgoModels(data)
@@ -236,7 +261,20 @@ func (s *Server) fetchArgoModels(ctx context.Context) ([]ModelItem, error) {
 
 // fetchCustomProviderModels fetches models from a custom provider URL
 func (s *Server) fetchCustomProviderModels(ctx context.Context) ([]ModelItem, error) {
-	url := strings.TrimRight(s.config.ProviderURL, "/") + "/models"
+	log := logger.From(ctx)
+
+	// Construct the models endpoint URL from ProviderURL
+	if s.config.ProviderURL == "" {
+		return nil, fmt.Errorf("ProviderURL not configured for custom provider")
+	}
+	url, err := buildProviderURL(s.config.ProviderURL, "models")
+	if err != nil {
+		return nil, fmt.Errorf("invalid ProviderURL: %w", err)
+	}
+
+	// Log sanitized URL for debugging
+	sanitizedURL := sanitizeURLForLogging(url)
+	log.Debugf("Fetching custom provider models from: %s", sanitizedURL)
 
 	headers := make(http.Header)
 	// Try to add authentication based on configured keys
@@ -253,7 +291,7 @@ func (s *Server) fetchCustomProviderModels(ctx context.Context) ([]ModelItem, er
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("custom provider HTTP %d: %s", statusCode, string(data))
+		return nil, s.handleModelsNonOK(ctx, "Custom provider", statusCode, data)
 	}
 
 	// Try OpenAI format first (most common)

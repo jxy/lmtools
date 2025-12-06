@@ -3,22 +3,12 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"lmtools/internal/logger"
 	"strings"
 	"testing"
 )
 
 func TestConvertAnthropicToOpenAI_LoggingRegression(t *testing.T) {
-	// Initialize logger to capture output
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	tests := []struct {
 		name    string
@@ -95,15 +85,7 @@ func TestConvertAnthropicToOpenAI_LoggingRegression(t *testing.T) {
 }
 
 func TestConvertAnthropicToOpenAI_ThinkingBlock(t *testing.T) {
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()
@@ -141,15 +123,7 @@ func TestConvertAnthropicToOpenAI_ThinkingBlock(t *testing.T) {
 }
 
 func TestConvertAnthropicToOpenAI_PreservesValidContent(t *testing.T) {
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("info"), // INFO level, so debug logs won't appear
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()
@@ -225,16 +199,7 @@ func TestConvertAnthropicToOpenAI_PreservesValidContent(t *testing.T) {
 
 func TestMetadataLoggingFormat(t *testing.T) {
 	// This test verifies that metadata is logged as JSON, not as Go map format
-	logger.ResetForTesting()
-
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()
@@ -259,7 +224,7 @@ func TestMetadataLoggingFormat(t *testing.T) {
 		},
 	}
 
-	_, err = converter.ConvertAnthropicToOpenAI(ctx, req)
+	_, err := converter.ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -272,15 +237,7 @@ func TestMetadataLoggingFormat(t *testing.T) {
 }
 
 func TestThinkingConversion(t *testing.T) {
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()
@@ -313,15 +270,7 @@ func TestThinkingConversion(t *testing.T) {
 }
 
 func TestToolConversion(t *testing.T) {
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()
@@ -395,15 +344,7 @@ func TestToolConversion(t *testing.T) {
 }
 
 func TestToolCallConversion(t *testing.T) {
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithStderr(false),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()

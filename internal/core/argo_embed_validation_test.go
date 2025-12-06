@@ -25,16 +25,16 @@ func TestIsValidToolName(t *testing.T) {
 			expected:   false,
 		},
 		{
-			name:       "empty_tool_list_allows_all",
+			name:       "empty_tool_list_rejects_all",
 			toolName:   "any_tool",
 			validTools: []ToolDefinition{},
-			expected:   true,
+			expected:   false,
 		},
 		{
-			name:       "nil_tool_list_allows_all",
+			name:       "nil_tool_list_rejects_all",
 			toolName:   "any_tool",
 			validTools: nil,
-			expected:   true,
+			expected:   false,
 		},
 		{
 			name:       "case_sensitive_match",
@@ -103,11 +103,11 @@ func TestParseEmbeddedToolCalls_WithValidation(t *testing.T) {
 			description:   "Invalid tool name should be rejected",
 		},
 		{
-			name:          "no_validation_accepts_any",
+			name:          "nil_tools_rejects_all",
 			content:       `Tool: {'type': 'tool_use', 'name': 'AnyTool', 'id': 'test_123', 'input': {}}`,
 			validTools:    nil,
-			expectedCalls: 1,
-			description:   "Without validation, any tool name should be accepted",
+			expectedCalls: 0,
+			description:   "Without tool definitions, all tool names are rejected",
 		},
 		{
 			name:          "multiple_calls_mixed_validity",
@@ -181,11 +181,11 @@ func TestExtractEmbeddedToolCalls_WithValidation(t *testing.T) {
 			expectedPrefix: "",
 		},
 		{
-			name:           "no_validation_extracts_all",
+			name:           "nil_tools_extracts_none",
 			content:        `Tool call: {'type': 'tool_use', 'name': 'AnyTool', 'id': '123', 'input': {}}`,
 			validTools:     nil,
-			expectedCalls:  1,
-			expectedPrefix: "Tool call:",
+			expectedCalls:  0,
+			expectedPrefix: "",
 		},
 	}
 

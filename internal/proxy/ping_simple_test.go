@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -14,16 +15,7 @@ import (
 
 // TestPingDuring30MillisecondDelay verifies ping behavior with a 30ms API delay
 func TestPingDuring30MillisecondDelay(t *testing.T) {
-	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
@@ -62,21 +54,12 @@ func TestPingDuring30MillisecondDelay(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser: "testuser",
-		ArgoEnv:  mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		ArgoEnv:     mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-
-	// Set mock URL in config
-	config.ArgoBaseURL = mockArgo.URL
-
-	// Create server
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Create handler
 	w := newFlushableRecorder()

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"strings"
 	"testing"
@@ -130,6 +131,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedIn
 	req := &AnthropicRequest{
 		Model:    "claude-3-sonnet-20240229",
 		Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}},
+		Tools:    []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}},
 	}
 
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
@@ -166,7 +168,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctuation(
 		},
 	}
 
-	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"go"`)}}}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"go"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}}}
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
@@ -204,7 +206,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuotedSimpli
 		},
 	}
 
-	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}}}
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
@@ -246,7 +248,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentAndFile
 		},
 	}
 
-	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"please write"`)}}}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"please write"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}}}
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
@@ -280,7 +282,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbeddedInCo
 		},
 	}
 
-	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}, Tools: []AnthropicTool{{Name: "universal_command"}}}
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
@@ -303,7 +305,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCalls(t *t
 			"content": "Step 1: read file:{'type': 'tool_use', 'id': 'toolu_r1', 'name': 'Read', 'input': {'file_path': '/path/a'}} Next, grep it:{'type': 'tool_use', 'id': 'toolu_r2', 'name': 'Grep', 'input': {'pattern': 'foo', 'glob': '*.go'}}",
 		},
 	}
-	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}}
+	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Grep"}}}
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
@@ -329,7 +331,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCalls(t *t
 
 func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 	mapper := NewModelMapper(&Config{
-		Provider: "argo",
+		Provider: constants.ProviderArgo,
 		Model:    "gemini25pro",
 	})
 	converter := &Converter{mapper: mapper}
@@ -454,7 +456,7 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 
 func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
 	mapper := NewModelMapper(&Config{
-		Provider: "argo",
+		Provider: constants.ProviderArgo,
 		Model:    "gpt4o",
 	})
 	converter := &Converter{mapper: mapper}

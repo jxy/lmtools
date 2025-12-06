@@ -244,7 +244,7 @@ func TestStreamingRecovery(t *testing.T) {
 		_ = handler.SendTextDelta("Processing...")
 
 		// Send error event
-		err = handler.SendError("System overloaded")
+		err = handler.SendStreamError("System overloaded")
 		if err != nil {
 			t.Fatalf("Failed to send error: %v", err)
 		}

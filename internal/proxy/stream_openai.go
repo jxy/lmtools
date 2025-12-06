@@ -40,6 +40,7 @@ import (
 type OpenAIStreamWriter struct {
 	mu           sync.Mutex
 	sse          *SSEWriter
+	ctx          context.Context
 	streamID     string
 	model        string
 	created      int64
@@ -65,6 +66,7 @@ func NewOpenAIStreamWriter(w http.ResponseWriter, model string, ctx context.Cont
 
 	writer := &OpenAIStreamWriter{
 		sse:      sse,
+		ctx:      ctx,
 		streamID: generateUUID("chatcmpl-"),
 		model:    model,
 		created:  time.Now().Unix(),
@@ -266,6 +268,12 @@ func (w *OpenAIStreamWriter) WriteError(errType, message string) error {
 func (w *OpenAIStreamWriter) Close() error {
 	// No-op for now as the underlying ResponseWriter is managed by the HTTP server
 	return nil
+}
+
+// SendStreamError sends an error event to the client.
+// Implements the StreamErrorEmitter interface.
+func (w *OpenAIStreamWriter) SendStreamError(message string) error {
+	return w.WriteError("server_error", message)
 }
 
 // OpenAIStreamConverter converts from various provider formats to OpenAI streaming format

@@ -31,19 +31,13 @@ type Config struct {
 
 	// Streaming Configuration
 	PingInterval time.Duration // Ping interval (0 = use default of 15 seconds)
-
-	// API Endpoints
-	OpenAIURL    string // OpenAI API endpoint
-	GoogleURL    string // Google API endpoint
-	AnthropicURL string // Anthropic API endpoint
-	ArgoBaseURL  string // Argo API base URL (environment-specific)
 }
 
 // ApplyDynamicModelDefaults applies provider-specific model defaults
 // when the user hasn't specified models
 func (c *Config) ApplyDynamicModelDefaults() {
-	// Use provider name as-is
-	provider := strings.ToLower(c.Provider)
+	// Provider is already normalized by Validate()
+	provider := c.Provider
 
 	// If Model not specified, use provider-specific default
 	if c.Model == "" {
@@ -56,51 +50,11 @@ func (c *Config) ApplyDynamicModelDefaults() {
 	}
 }
 
-// InitializeURLs initializes the API URLs for each provider
-func (c *Config) InitializeURLs() {
-	// Normalize provider name
-	c.Provider = strings.ToLower(c.Provider)
-
-	// Initialize API URLs with defaults
-	if c.OpenAIURL == "" {
-		c.OpenAIURL = "https://api.openai.com/v1/chat/completions"
-	}
-	if c.GoogleURL == "" {
-		c.GoogleURL = "https://generativelanguage.googleapis.com/v1beta/models"
-	}
-	if c.AnthropicURL == "" {
-		c.AnthropicURL = "https://api.anthropic.com/v1/messages"
-	}
-	if c.ArgoBaseURL == "" {
-		// Set default based on environment
-		if c.ArgoEnv == "prod" {
-			c.ArgoBaseURL = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
-		} else {
-			c.ArgoBaseURL = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource"
-		}
-	}
-
-	// Apply custom provider URL if specified
-	if c.ProviderURL != "" {
-		switch c.Provider {
-		case constants.ProviderOpenAI:
-			// Always treat ProviderURL as a base URL and append the endpoint
-			c.OpenAIURL = strings.TrimRight(c.ProviderURL, "/") + "/chat/completions"
-		case constants.ProviderGoogle:
-			c.GoogleURL = c.ProviderURL
-		case constants.ProviderAnthropic:
-			c.AnthropicURL = c.ProviderURL
-		case constants.ProviderArgo:
-			c.ArgoBaseURL = c.ProviderURL
-		}
-	}
-
-	// No longer maintaining hardcoded model lists
-	// Models are queried dynamically from provider APIs
-}
-
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	// Normalize provider name once at validation
+	c.Provider = strings.ToLower(c.Provider)
+
 	// Validate preferred provider
 	validProviders := []string{constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderAnthropic, constants.ProviderArgo}
 	valid := false
@@ -137,18 +91,4 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
-}
-
-// GetArgoURL returns the full Argo URL for the given endpoint
-func (c *Config) GetArgoURL(endpoint string) string {
-	switch endpoint {
-	case "chat":
-		return c.ArgoBaseURL + "/chat/"
-	case "streamchat":
-		return c.ArgoBaseURL + "/streamchat/"
-	case "embed":
-		return c.ArgoBaseURL + "/embed/"
-	default:
-		return c.ArgoBaseURL
-	}
 }

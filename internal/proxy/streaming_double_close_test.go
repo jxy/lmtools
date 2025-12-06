@@ -1,33 +1,19 @@
 package proxy
 
 import (
-	"context"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
 // TestStreamingNoDoubleClose tests that content blocks are not closed twice
 func TestStreamingNoDoubleClose(t *testing.T) {
-	// Create a test response writer
-	recorder := httptest.NewRecorder()
+	// Create a test response writer with flusher support
+	recorder := newFlushableRecorder()
 
-	// Create handler
-	ctx := context.Background()
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", ctx)
-	if err != nil {
-		t.Fatalf("Failed to create handler: %v", err)
-	}
+	// Create handler using the shared helper
+	handler := newTestAnthropicStreamHandler(t, recorder, "claude-3-opus-20240229")
 
 	// Simulate what happens in simulateStreamingFromArgo
-
-	// 1. Start text stream (combines message_start and content_block_start)
-	if err := handler.SendMessageStart(); err != nil {
-		t.Fatalf("Failed to send message start: %v", err)
-	}
-	if err := handler.SendContentBlockStart(0, "text"); err != nil {
-		t.Fatalf("Failed to send content block start: %v", err)
-	}
 
 	// 3. Send ping
 	if err := handler.SendPing(); err != nil {
@@ -107,19 +93,13 @@ func TestStreamingNoDoubleClose(t *testing.T) {
 
 // TestStreamingDoubleCloseAttempt tests that attempting to close a block twice is handled gracefully
 func TestStreamingDoubleCloseAttempt(t *testing.T) {
-	// Create a test response writer
-	recorder := httptest.NewRecorder()
+	// Create a test response writer with flusher support
+	recorder := newFlushableRecorder()
 
-	// Create handler
-	ctx := context.Background()
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", ctx)
-	if err != nil {
-		t.Fatalf("Failed to create handler: %v", err)
-	}
+	// Create handler using the shared helper
+	handler := newTestAnthropicStreamHandler(t, recorder, "claude-3-opus-20240229")
 
-	// Send initial events
-	_ = handler.SendMessageStart()
-	_ = handler.SendContentBlockStart(0, "text")
+	// Send a text delta
 	_ = handler.SendTextDelta("Test")
 
 	// Close block 0

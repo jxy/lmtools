@@ -4,6 +4,13 @@ import (
 	"testing"
 )
 
+// Tool definitions for these tests - including tool names with dots
+var codeTestToolDefs = []ToolDefinition{
+	{Name: "universal_command"},
+	{Name: "method.Name"},
+	{Name: "part.Call.Name"},
+}
+
 // TestParseEmbeddedToolCalls_IgnoresCodeExamples tests that code examples
 // containing tool-like structures are not incorrectly parsed as tool calls
 func TestParseEmbeddedToolCalls_IgnoresCodeExamples(t *testing.T) {
@@ -57,7 +64,7 @@ func TestParseEmbeddedToolCalls_IgnoresCodeExamples(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, codeTestToolDefs)
 			found := err == nil
 			if found != tt.expectFound {
 				t.Errorf("%s: expected found=%v, got %v", tt.description, tt.expectFound, found)

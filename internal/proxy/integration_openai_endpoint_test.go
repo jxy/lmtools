@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,7 @@ import (
 
 func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
 	// Create mock provider
-	mockProvider := NewMockProvider(t, "openai")
+	mockProvider := NewMockProvider(t, constants.ProviderOpenAI)
 
 	// Set up expected response
 	mockProvider.responses["/v1/chat/completions"] = &OpenAIResponse{
@@ -41,15 +42,16 @@ func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
 
 	// Create proxy config with increased body size limit
 	config := &Config{
-		OpenAIURL:          mockServer.URL + "/v1/chat/completions",
+		ProviderURL:        mockServer.URL + "/v1/chat/completions",
 		OpenAIAPIKey:       "test-key",
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
 		Model:              "gpt-4",
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 
-	// Create proxy server
-	server := NewServer(config)
+	// Create proxy server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create test request
 	reqBody := OpenAIRequest{
@@ -103,7 +105,7 @@ func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
 
 func TestOpenAIChatCompletionsWithTools(t *testing.T) {
 	// Create mock provider
-	mockProvider := NewMockProvider(t, "openai")
+	mockProvider := NewMockProvider(t, constants.ProviderOpenAI)
 
 	// Set up expected response with tool calls
 	mockProvider.responses["/v1/chat/completions"] = &OpenAIResponse{
@@ -144,15 +146,16 @@ func TestOpenAIChatCompletionsWithTools(t *testing.T) {
 
 	// Create proxy config with increased body size limit
 	config := &Config{
-		OpenAIURL:          mockServer.URL + "/v1/chat/completions",
+		ProviderURL:        mockServer.URL + "/v1/chat/completions",
 		OpenAIAPIKey:       "test-key",
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
 		Model:              "gpt-4",
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 
-	// Create proxy server
-	server := NewServer(config)
+	// Create proxy server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create test request with tools
 	reqBody := OpenAIRequest{
@@ -255,15 +258,16 @@ func TestModelsEndpoint(t *testing.T) {
 
 	// Create proxy config with mock provider URL
 	config := &Config{
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        mockServer.URL + "/v1",
 		Model:              "gpt-4",
 		SmallModel:         "gpt-3.5-turbo",
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 
-	// Create proxy server
-	server := NewServer(config)
+	// Create proxy server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -320,11 +324,13 @@ func TestModelsEndpoint(t *testing.T) {
 func TestOpenAIErrorHandling(t *testing.T) {
 	// Create proxy config with increased body size limit
 	config := &Config{
+		Provider:           constants.ProviderOpenAI,
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 
-	// Create proxy server
-	server := NewServer(config)
+	// Create proxy server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Test invalid method
 	req := httptest.NewRequest("GET", "/v1/chat/completions", nil)

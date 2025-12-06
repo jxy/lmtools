@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"strings"
 	"time"
 )
@@ -21,7 +22,7 @@ func (s *Server) parseArgoModels(data []byte) ([]ModelItem, error) {
 				ID:      model,
 				Object:  "model",
 				Created: created,
-				OwnedBy: "argo",
+				OwnedBy: constants.ProviderArgo,
 			})
 		}
 		return result, nil
@@ -37,7 +38,7 @@ func (s *Server) parseArgoModels(data []byte) ([]ModelItem, error) {
 				ID:      model,
 				Object:  "model",
 				Created: created,
-				OwnedBy: "argo",
+				OwnedBy: constants.ProviderArgo,
 			})
 		}
 		return result, nil
@@ -61,7 +62,7 @@ func (s *Server) parseArgoModels(data []byte) ([]ModelItem, error) {
 					ID:      model.ID,
 					Object:  "model",
 					Created: created,
-					OwnedBy: "argo",
+					OwnedBy: constants.ProviderArgo,
 				})
 			}
 			return result, nil
@@ -72,7 +73,7 @@ func (s *Server) parseArgoModels(data []byte) ([]ModelItem, error) {
 					ID:      model.ID,
 					Object:  "model",
 					Created: created,
-					OwnedBy: "argo",
+					OwnedBy: constants.ProviderArgo,
 				})
 			}
 			return result, nil
@@ -121,7 +122,7 @@ func (s *Server) parseGoogleModels(data []byte) ([]ModelItem, error) {
 			ID:      modelID,
 			Object:  "model",
 			Created: created,
-			OwnedBy: "google",
+			OwnedBy: constants.ProviderGoogle,
 		})
 	}
 
@@ -168,7 +169,7 @@ func (s *Server) parseAnthropicModels(data []byte) ([]ModelItem, error) {
 			ID:      model.ID,
 			Object:  "model",
 			Created: created,
-			OwnedBy: "anthropic",
+			OwnedBy: constants.ProviderAnthropic,
 		})
 	}
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"net/http"
 	"net/http/httptest"
@@ -17,11 +18,22 @@ import (
 )
 
 func TestIntegrationBasicChat(t *testing.T) {
-	proxyServer, openAIMock, googleMock, argoMock := SetupTestServer(t)
-	defer proxyServer.Close()
-	defer openAIMock.Close()
-	defer googleMock.Close()
-	defer argoMock.Close()
+	openAIMock := httptest.NewServer(NewMockOpenAI(t))
+	t.Cleanup(openAIMock.Close)
+
+	config := &Config{
+		OpenAIAPIKey:       "test-openai-key",
+		Provider:           constants.ProviderOpenAI,
+		ProviderURL:        openAIMock.URL + "/v1",
+		SmallModel:         "gpt-4o-mini",
+		Model:              "gpt-4o",
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
+
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+	proxyServer := httptest.NewServer(server)
+	t.Cleanup(proxyServer.Close)
 
 	tests := []struct {
 		name      string
@@ -113,10 +125,23 @@ func TestIntegrationBasicChat(t *testing.T) {
 }
 
 func TestIntegrationStreaming(t *testing.T) {
-	// Use SetupArgoTestServer to ensure routing through Argo for simulated streaming with pings
-	proxyServer, argoMock := SetupArgoTestServer(t)
-	defer proxyServer.Close()
-	defer argoMock.Close()
+	argoMock := httptest.NewServer(NewMockArgo(t))
+	t.Cleanup(argoMock.Close)
+
+	config := &Config{
+		Provider:           constants.ProviderArgo,
+		ProviderURL:        argoMock.URL,
+		ArgoUser:           "testuser",
+		ArgoEnv:            "test",
+		Model:              "gpto3",
+		SmallModel:         "gemini25flash",
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
+
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+	proxyServer := httptest.NewServer(server)
+	t.Cleanup(proxyServer.Close)
 
 	// Make streaming request
 	req := AnthropicRequest{
@@ -170,9 +195,9 @@ func TestIntegrationRetry(t *testing.T) {
 	// Create a mock server that fails initially then succeeds
 	attemptCount := 0
 	retryMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify it's hitting the chat endpoint
-		if r.URL.Path != "/chat/" {
-			t.Errorf("Expected path /chat/, got %s", r.URL.Path)
+		// Verify it's hitting the chat endpoint (now includes /api/v1 prefix)
+		if r.URL.Path != "/api/v1/resource/chat/" {
+			t.Errorf("Expected path /api/v1/resource/chat/, got %s", r.URL.Path)
 		}
 
 		attemptCount++
@@ -202,17 +227,14 @@ func TestIntegrationRetry(t *testing.T) {
 		// Don't set OpenAI/Google keys so Argo is used
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
-		ArgoBaseURL:        retryMock.URL, // Use ArgoBaseURL instead
-		Provider:           "argo",
-		ProviderURL:        "",
+		ProviderURL:        retryMock.URL, // Use ProviderURL instead
+		Provider:           constants.ProviderArgo,
 		SmallModel:         "gpt35",
 		Model:              "gpt4",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
-	config.InitializeURLs()
-
-	// Create proxy server
-	server := NewServer(config)
+	// Create proxy server with fast retries (NewEndpoints is called internally)
+	server := NewTestServerWithFastRetries(t, config)
 	proxyServer := httptest.NewServer(server)
 	defer proxyServer.Close()
 
@@ -270,9 +292,9 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 	// Test retry with 429 rate limit errors
 	attemptCount := 0
 	rateLimitMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify it's hitting the chat endpoint
-		if r.URL.Path != "/chat/" {
-			t.Errorf("Expected path /chat/, got %s", r.URL.Path)
+		// Verify it's hitting the chat endpoint (now includes /api/v1 prefix)
+		if r.URL.Path != "/api/v1/resource/chat/" {
+			t.Errorf("Expected path /api/v1/resource/chat/, got %s", r.URL.Path)
 		}
 
 		attemptCount++
@@ -303,16 +325,18 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 		// Don't set OpenAI/Google keys so Argo is used
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
-		ArgoBaseURL:        rateLimitMock.URL, // Use ArgoBaseURL instead
-		Provider:           "argo",
+		ProviderURL:        rateLimitMock.URL, // Use ProviderURL instead
+		Provider:           constants.ProviderArgo,
 		SmallModel:         "gpt35",
 		Model:              "gpt4",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
-	config.InitializeURLs()
-
-	// Create proxy server
-	server := NewServer(config)
+	// Use production server to test real Retry-After header handling
+	// (NewTestServerWithFastRetries ignores Retry-After and uses millisecond delays)
+	server, err := NewServer(config)
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
 	proxyServer := httptest.NewServer(server)
 	defer proxyServer.Close()
 
@@ -375,7 +399,22 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 }
 
 func TestIntegrationSimulatedStreamingWithTools(t *testing.T) {
-	proxyServer, _, _, _ := SetupTestServer(t)
+	openAIMock := httptest.NewServer(NewMockOpenAI(t))
+	t.Cleanup(openAIMock.Close)
+
+	config := &Config{
+		OpenAIAPIKey:       "test-openai-key",
+		Provider:           constants.ProviderOpenAI,
+		ProviderURL:        openAIMock.URL + "/v1",
+		SmallModel:         "gpt-4o-mini",
+		Model:              "gpt-4o",
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
+
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+	proxyServer := httptest.NewServer(server)
+	t.Cleanup(proxyServer.Close)
 
 	// Make streaming request with tools
 	req := AnthropicRequest{
@@ -512,7 +551,7 @@ func TestCustomProviderURL(t *testing.T) {
 	}{
 		{
 			name:              "OpenAI custom URL",
-			preferredProvider: "openai",
+			preferredProvider: constants.ProviderOpenAI,
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -555,13 +594,12 @@ func TestCustomProviderURL(t *testing.T) {
 					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
-					Provider:           "openai",
+					Provider:           constants.ProviderOpenAI,
 					ProviderURL:        customMock.URL + "/custom/openai/path",
 					SmallModel:         "gpt-4o-mini",
 					Model:              "gpt-4o",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
-				config.InitializeURLs()
 
 				return config, customMock
 			},
@@ -569,7 +607,7 @@ func TestCustomProviderURL(t *testing.T) {
 		},
 		{
 			name:              "Google custom URL",
-			preferredProvider: "google",
+			preferredProvider: constants.ProviderGoogle,
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -604,13 +642,12 @@ func TestCustomProviderURL(t *testing.T) {
 					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
-					Provider:           "google",
+					Provider:           constants.ProviderGoogle,
 					ProviderURL:        customMock.URL + "/custom/google/models",
 					SmallModel:         "gemini-2.0-flash",
 					Model:              "gemini-2.5-pro-preview-03-25",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
-				config.InitializeURLs()
 
 				return config, customMock
 			},
@@ -618,15 +655,15 @@ func TestCustomProviderURL(t *testing.T) {
 		},
 		{
 			name:              "Argo custom URL",
-			preferredProvider: "argo",
+			preferredProvider: constants.ProviderArgo,
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					t.Logf("Custom Argo mock received: %s %s", r.Method, r.URL.Path)
 
-					// Argo URLs end with /chat/
-					if !strings.HasSuffix(r.URL.Path, "/chat/") {
-						t.Errorf("Expected path to end with /chat/, got %s", r.URL.Path)
+					// Argo URLs end with /api/v1/resource/chat/
+					if !strings.HasSuffix(r.URL.Path, "/api/v1/resource/chat/") {
+						t.Errorf("Expected path to end with /api/v1/resource/chat/, got %s", r.URL.Path)
 					}
 
 					// Return a simple response
@@ -643,17 +680,16 @@ func TestCustomProviderURL(t *testing.T) {
 					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
-					Provider:           "argo",
+					Provider:           constants.ProviderArgo,
 					ProviderURL:        customMock.URL + "/custom/argo",
 					SmallModel:         "gpt35",
 					Model:              "gpt4",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
-				config.InitializeURLs()
 
 				return config, customMock
 			},
-			expectedPath: "/custom/argo/chat/",
+			expectedPath: "/custom/argo/api/v1/resource/chat/",
 		},
 	}
 
@@ -664,7 +700,8 @@ func TestCustomProviderURL(t *testing.T) {
 			defer customMock.Close()
 
 			// Create proxy server with custom config
-			server := NewServer(config)
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
 			proxyServer := httptest.NewServer(server)
 			defer proxyServer.Close()
 

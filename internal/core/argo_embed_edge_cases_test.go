@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+// edgeCaseToolDefs provides common tool definitions for edge case tests
+var edgeCaseToolDefs = []ToolDefinition{
+	{Name: "Edit"},
+	{Name: "test"},
+	{Name: "test1"},
+	{Name: "test2"},
+	{Name: "test_func"},
+	{Name: "EndTool"},
+	{Name: "EndToolDQ"},
+	{Name: "Tool1"},
+	{Name: "Tool2"},
+	{Name: "Tool3"},
+	{Name: "TodoWrite"},
+	{Name: "MultiClear"},
+	{Name: "NestedTest"},
+	{Name: "MixedArrays"},
+	{Name: "clear_list"},
+}
+
 // TestParseEmbeddedToolCalls_EdgeCases tests edge cases for embedded JSON parsing
 func TestParseEmbeddedToolCalls_EdgeCases(t *testing.T) {
 	tests := []struct {
@@ -133,7 +152,7 @@ func TestParseEmbeddedToolCalls_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, suffix, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, suffix, err := parseEmbeddedToolCalls(tt.content, edgeCaseToolDefs)
 			ok := err == nil
 
 			if ok != tt.expectedOK {
@@ -163,7 +182,7 @@ func TestParseEmbeddedToolCalls_EdgeCases(t *testing.T) {
 func TestQuotedBraceInProse(t *testing.T) {
 	content := "Now I'll rename the function to better reflect its actual behavior. Since it's just finding the next '{' character without any quote awareness, I'll rename it to `findNextBrace`:\n\n{'id': 'toolu_vrtx_01TjCdtZQwUxvJCYxsJqCfEr', 'input': {'file_path': '/path/to/project/internal/core/json_normalizer.go', 'new_string': '// findNextBrace finds the next \\'{\\' character starting from pos.\\n// Note: This is a simple character search that doesn\\'t track quotes because after\\n// normalization, quotes in free text can be unbalanced. We scan every \\'{\\' and let\\n// JSON parsing decide if it\\'s valid.\\nfunc findNextBrace(s string, pos int) int {\\n\\tif pos < 0 {\\n\\t\\tpos = 0\\n\\t}\\n\\tfor i := pos; i < len(s); i++ {\\n\\t\\tif s[i] == \\'{\\' {\\n\\t\\t\\treturn i\\n\\t\\t}\\n\\t}\\n\\treturn -1\\n}', 'old_string': '// nextBraceOutsideQuotes finds the next \\'{\\' at or after pos that is outside quoted strings.\\nfunc nextBraceOutsideQuotes(s string, pos int) int {\\n\\t// Per strict pipeline: after simple quote normalization, quotes in free text\\n\\t// can be unbalanced. We should scan every \\'{\\' and let JSON parsing decide.\\n\\tif pos < 0 {\\n\\t\\tpos = 0\\n\\t}\\n\\tfor i := pos; i < len(s); i++ {\\n\\t\\tif s[i] == \\'{\\' {\\n\\t\\t\\treturn i\\n\\t\\t}\\n\\t}\\n\\treturn -1\\n}'}, 'name': 'Edit', 'type': 'tool_use'}"
 
-	seq, suffix, err := parseEmbeddedToolCalls(content, nil)
+	seq, suffix, err := parseEmbeddedToolCalls(content, edgeCaseToolDefs)
 	if err != nil {
 		t.Fatalf("Expected to parse embedded tool call despite quoted '{' in prose: %v", err)
 	}
@@ -224,7 +243,7 @@ func TestParseEmbeddedToolCall_ThinWrapper(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use parseEmbeddedToolCalls directly instead of the wrapper
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, edgeCaseToolDefs)
 			ok := err == nil
 			var call *EmbeddedCall
 			if ok && len(seq) > 0 {
@@ -350,7 +369,7 @@ func TestParseEmbeddedToolCalls_EmptyArrays(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, edgeCaseToolDefs)
 			if err != nil {
 				t.Fatalf("%s: failed to parse embedded tool call: %v", tt.description, err)
 			}
@@ -400,7 +419,7 @@ func TestParseEmbeddedToolCalls_DeeplyNestedEscapes(t *testing.T) {
 	expectedNewString := "\tvar argsJSON json.RawMessage\n\tif input, ok := raw[\"input\"].(map[string]interface{}); ok {\n\t\tif b, err := marshalPreservingEmptyArrays(input); err == nil {\n\t\t\targsJSON = json.RawMessage(b)\n\t\t}\n\t}"
 	expectedOldString := "\tvar argsJSON json.RawMessage\n\tif input, ok := raw[\"input\"].(map[string]interface{}); ok {\n\t\tif b, err := json.Marshal(input); err == nil {\n\t\t\targsJSON = json.RawMessage(b)\n\t\t}\n\t}"
 
-	seq, suffix, err := parseEmbeddedToolCalls(content, nil)
+	seq, suffix, err := parseEmbeddedToolCalls(content, edgeCaseToolDefs)
 	// Test that parsing succeeds
 	if err != nil {
 		t.Fatalf("Failed to parse embedded tool call with deeply nested escapes: %v", err)

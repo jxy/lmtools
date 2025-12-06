@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -12,35 +13,13 @@ import (
 	"time"
 )
 
-// flushableRecorder wraps httptest.ResponseRecorder to implement http.Flusher
-type flushableRecorder struct {
-	*httptest.ResponseRecorder
-}
-
-func (f *flushableRecorder) Flush() {
-	// No-op for testing - ResponseRecorder buffers everything
-}
-
-func newFlushableRecorder() *flushableRecorder {
-	return &flushableRecorder{httptest.NewRecorder()}
-}
-
 // TestPingEventsDuringSlowArgoResponse tests ping events directly without middleware
 func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping long-running test in short mode")
 	}
 
-	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
@@ -79,21 +58,12 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser: "testuser",
-		ArgoEnv:  mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		ArgoEnv:     mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-
-	// Set mock URL in config
-	config.ArgoBaseURL = mockArgo.URL
-
-	// Create server components directly (bypass middleware)
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Create streaming handler
 	w := newFlushableRecorder()
@@ -167,16 +137,7 @@ func TestPingEventsDuringSlowArgoResponse(t *testing.T) {
 
 // TestPingEventsQuickResponse tests that we only get initial ping with fast response
 func TestPingEventsQuickResponse(t *testing.T) {
-	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a mock Argo server that responds immediately
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,21 +151,12 @@ func TestPingEventsQuickResponse(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser: "testuser",
-		ArgoEnv:  mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		ArgoEnv:     mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-
-	// Set mock URL in config
-	config.ArgoBaseURL = mockArgo.URL
-
-	// Create server components
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Create handler
 	w := newFlushableRecorder()
@@ -254,27 +206,18 @@ func TestPingEventsQuickResponse(t *testing.T) {
 
 // TestPingIntervalClamping tests that ping intervals below 100ms are clamped to the minimum
 func TestPingIntervalClamping(t *testing.T) {
-	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
 
-	// Create a mock Argo server with 150ms delay
+	// Create a mock Argo server with 50ms delay (reduced from 150ms for faster tests)
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Logf("Mock Argo received request, simulating 150ms delay...")
+		t.Logf("Mock Argo received request, simulating 50ms delay...")
 
 		// Use timer with proper cleanup instead of time.Sleep
-		timer := time.NewTimer(150 * time.Millisecond)
+		timer := time.NewTimer(50 * time.Millisecond)
 		defer timer.Stop()
 
 		select {
@@ -302,21 +245,12 @@ func TestPingIntervalClamping(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser: "testuser",
-		ArgoEnv:  mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		ArgoEnv:     mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-
-	// Set mock URL in config
-	config.ArgoBaseURL = mockArgo.URL
-
-	// Create server components
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Test with very small interval (10ms) which should be clamped to 100ms
 	testCases := []struct {

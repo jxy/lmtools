@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+// falsePositiveToolDefs provides tool definitions for false positive tests
+// These include tools that appear in the valid test cases
+var falsePositiveToolDefs = []ToolDefinition{
+	{Name: "Edit"},
+	{Name: "test_func"},
+	{Name: "List"},
+}
+
 // TestParseEmbeddedToolCalls_FalsePositives tests JSON objects that should NOT be detected as tool calls
 // These tests verify that the parser correctly rejects JSON that doesn't match the strict tool call structure
 func TestParseEmbeddedToolCalls_FalsePositives(t *testing.T) {
@@ -204,7 +212,7 @@ func TestParseEmbeddedToolCalls_FalsePositives(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, falsePositiveToolDefs)
 
 			// All these should fail to parse as tool calls
 			if err == nil && len(seq) > 0 {
@@ -288,7 +296,7 @@ func TestParseEmbeddedToolCalls_StrictValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, falsePositiveToolDefs)
 
 			if tt.shouldPass {
 				if err != nil || len(seq) == 0 {
@@ -395,7 +403,7 @@ func TestParseEmbeddedToolCalls_FieldTypeValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, falsePositiveToolDefs)
 
 			if tt.shouldFail {
 				if err == nil && len(seq) > 0 {

@@ -1,75 +1,30 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/logger"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-// SetupTestServer creates a test server with mock providers
-func SetupTestServer(t *testing.T) (*httptest.Server, *httptest.Server, *httptest.Server, *httptest.Server) {
+// SetupTestLogger initializes logger for tests with standard options.
+// Call this at the start of tests that need logging.
+func SetupTestLogger(t *testing.T) {
 	t.Helper()
-	// Create mock providers
-	openAIMock := httptest.NewServer(NewMockOpenAI(t))
-	googleMock := httptest.NewServer(NewMockGoogle(t))
-	argoMock := httptest.NewServer(NewMockArgo(t))
-
-	// Create config
-	config := &Config{
-		OpenAIAPIKey:       "test-openai-key",
-		GoogleAPIKey:       "test-google-key",
-		ArgoUser:           "testuser",
-		ArgoEnv:            "test",
-		Provider:           "openai",
-		SmallModel:         "gpt-4o-mini",
-		Model:              "gpt-4o",
-		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
-		// Set mock URLs
-		OpenAIURL:   openAIMock.URL + "/v1/chat/completions",
-		GoogleURL:   googleMock.URL + "/v1beta/models",
-		ArgoBaseURL: argoMock.URL,
+	logger.ResetForTesting()
+	if err := logger.InitializeWithOptions(
+		logger.WithLevel("debug"),
+		logger.WithFormat("text"),
+		logger.WithStderr(true),
+		logger.WithFile(false),
+	); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
 	}
-
-	// Initialize URLs
-	config.InitializeURLs()
-
-	// Create server
-	server := NewServer(config)
-	proxyServer := httptest.NewServer(server)
-
-	return proxyServer, openAIMock, googleMock, argoMock
-}
-
-// SetupArgoTestServer creates a test server configured to use Argo provider
-func SetupArgoTestServer(t *testing.T) (*httptest.Server, *httptest.Server) {
-	t.Helper()
-	// Create mock Argo provider
-	argoMock := httptest.NewServer(NewMockArgo(t))
-
-	// Create config with Argo as the provider
-	config := &Config{
-		Provider:           "argo",
-		ArgoUser:           "testuser",
-		ArgoEnv:            "test",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",
-		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
-		// Set mock URL
-		ArgoBaseURL: argoMock.URL,
-	}
-
-	// Initialize URLs
-	config.InitializeURLs()
-
-	// Create server
-	server := NewServer(config)
-	proxyServer := httptest.NewServer(server)
-
-	return proxyServer, argoMock
 }
 
 // MockOpenAI creates a mock OpenAI server
@@ -104,7 +59,7 @@ func NewMockOpenAI(t *testing.T) http.Handler {
 
 		// Handle streaming
 		if req.Stream {
-			w.Header().Set("Content-Type", "text/event-stream")
+			setSSEHeaders(w)
 			w.WriteHeader(http.StatusOK)
 
 			// Send streaming chunks
@@ -164,7 +119,7 @@ func NewMockGoogle(t *testing.T) http.Handler {
 
 		// Handle streaming
 		if strings.Contains(r.URL.Path, "streamGenerateContent") {
-			w.Header().Set("Content-Type", "text/event-stream")
+			setSSEHeaders(w)
 			w.WriteHeader(http.StatusOK)
 
 			// Send streaming response
@@ -244,4 +199,54 @@ func NewMockArgo(t *testing.T) http.Handler {
 			t.Logf("Failed to encode response: %v", err)
 		}
 	})
+}
+
+// flushableRecorder wraps httptest.ResponseRecorder to implement http.Flusher.
+// This is used in streaming tests where the handler expects a Flusher.
+type flushableRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+// Flush implements http.Flusher. It's a no-op since ResponseRecorder buffers everything.
+func (f *flushableRecorder) Flush() {}
+
+// newFlushableRecorder creates a new flushableRecorder for streaming tests.
+func newFlushableRecorder() *flushableRecorder {
+	return &flushableRecorder{httptest.NewRecorder()}
+}
+
+// newTestAnthropicStreamHandler creates an Anthropic stream handler and sends
+// initial events (message_start, content_block_start for text). This helper
+// reduces boilerplate in streaming tests.
+func newTestAnthropicStreamHandler(t *testing.T, w http.ResponseWriter, model string) *AnthropicStreamHandler {
+	t.Helper()
+	ctx := context.Background()
+	h, err := NewAnthropicStreamHandler(w, model, ctx)
+	if err != nil {
+		t.Fatalf("Failed to create handler: %v", err)
+	}
+	if err := h.SendMessageStart(); err != nil {
+		t.Fatalf("Failed to send message start: %v", err)
+	}
+	if err := h.SendContentBlockStart(0, "text"); err != nil {
+		t.Fatalf("Failed to send content block start: %v", err)
+	}
+	return h
+}
+
+// newTestAnthropicStreamHandlerWithContext creates an Anthropic stream handler with a
+// provided context and sends initial events (message_start, content_block_start for text).
+func newTestAnthropicStreamHandlerWithContext(t *testing.T, w http.ResponseWriter, model string, ctx context.Context) *AnthropicStreamHandler {
+	t.Helper()
+	h, err := NewAnthropicStreamHandler(w, model, ctx)
+	if err != nil {
+		t.Fatalf("Failed to create handler: %v", err)
+	}
+	if err := h.SendMessageStart(); err != nil {
+		t.Fatalf("Failed to send message start: %v", err)
+	}
+	if err := h.SendContentBlockStart(0, "text"); err != nil {
+		t.Fatalf("Failed to send content block start: %v", err)
+	}
+	return h
 }

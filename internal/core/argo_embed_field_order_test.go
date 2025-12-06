@@ -6,6 +6,39 @@ import (
 	"testing"
 )
 
+// fieldOrderToolDefs provides tool definitions for field order tests
+var fieldOrderToolDefs = []ToolDefinition{
+	{Name: "Edit"},
+	{Name: "TestTool"},
+	{Name: "MiddleTool"},
+	{Name: "NameFirst"},
+	{Name: "InputFirst"},
+	{Name: "Tool1"},
+	{Name: "Tool2"},
+	{Name: "test_func"},
+	{Name: "ComplexTool"},
+	{Name: "TrailTool"},
+	{Name: "Perm1"},
+	{Name: "Perm2"},
+	{Name: "Perm3"},
+	{Name: "Perm4"},
+	{Name: "Perm5"},
+	{Name: "Perm6"},
+	{Name: "Perm7"},
+	{Name: "Perm8"},
+	{Name: "Perm9"},
+	{Name: "Perm10"},
+	{Name: "Perm11"},
+	{Name: "Perm12"},
+	{Name: "SingleTool"},
+	{Name: "StandardTool"},
+	{Name: "FirstTool"},
+	{Name: "LastTool"},
+	{Name: "Tool"},
+	{Name: "Read"},
+	{Name: "Grep"},
+}
+
 // This file tests that embedded tool calls in Argo responses are correctly parsed
 // regardless of the order of fields in the JSON object. This addresses an issue
 // where tool calls with the 'type' field at the end (instead of at the beginning)
@@ -110,7 +143,7 @@ func TestParseEmbeddedToolCalls_FieldOrder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, suffix, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, suffix, err := parseEmbeddedToolCalls(tt.content, fieldOrderToolDefs)
 			ok := err == nil
 
 			if ok != tt.expectedOK {
@@ -198,7 +231,7 @@ func TestParseEmbeddedToolCall_FieldOrder(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use parseEmbeddedToolCalls directly instead of the wrapper
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, fieldOrderToolDefs)
 			ok := err == nil
 			var call *EmbeddedCall
 			if ok && len(seq) > 0 {
@@ -231,7 +264,7 @@ func TestNormalizeFieldOrder_RealWorldCase(t *testing.T) {
 	// Match the same escaping as TestNormalizeFieldOrder_RealWorldCase to reflect raw content (not doubly JSON-escaped)
 	content := `There's an issue with the escape sequence in the test. Let me fix it{'id': 'toolu_vrtx_01XqLnQUvXJJJJJJJJJJJJJJj', 'input': {'file_path': '/path/to/project/internal/core/argo_embed_edge_cases_test.go', 'new_string': '\t\t\tname:          "apostrophe_adjacent_to_delimiter",\n\t\t\tcontent:       "Let\'s analyze: {\'type\': \'tool_use\', \'name\': \'test\', \'id\': \'123\', \'input\': {\'text\': \'It\\\'s working\'}}",\n\t\t\texpectedCalls: 1,\n\t\t\texpectedOK:    true,\n\t\t\tdescription:   "Handle apostrophes adjacent to JSON delimiters",', 'old_string': '\t\t\tname:          "apostrophe_adjacent_to_delimiter",\n\t\t\tcontent:       "Let\'s analyze: {\'type\': \'tool_use\', \'name\': \'test\', \'id\': \'123\', \'input\': {\'text\': \'It\'s working\'}}",\n\t\t\texpectedCalls: 1,\n\t\t\texpectedOK:    true,\n\t\t\tdescription:   "Handle apostrophes adjacent to JSON delimiters",'}, 'name': 'Edit', 'type': 'tool_use'}`
 
-	seq, _, err := parseEmbeddedToolCalls(content, nil)
+	seq, _, err := parseEmbeddedToolCalls(content, fieldOrderToolDefs)
 	if err != nil {
 		t.Errorf("Failed to parse real-world case with type at end: %v", err)
 	}
@@ -306,7 +339,7 @@ func TestExactApiProxyFailingCase(t *testing.T) {
 		}
 	}
 
-	seq, suffix, err := parseEmbeddedToolCalls(content, nil)
+	seq, suffix, err := parseEmbeddedToolCalls(content, fieldOrderToolDefs)
 	if err != nil {
 		t.Errorf("Failed to parse the exact apiproxy failing case: %v", err)
 		t.Logf("Content length: %d", len(content))
@@ -429,7 +462,7 @@ func TestNoSpaceBeforeJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, fieldOrderToolDefs)
 			ok := err == nil
 
 			if ok != tt.expectedOK {
@@ -492,7 +525,7 @@ func TestGraduallyComplexEscaping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq, _, err := parseEmbeddedToolCalls(tt.content, nil)
+			seq, _, err := parseEmbeddedToolCalls(tt.content, fieldOrderToolDefs)
 			ok := err == nil
 
 			if ok != tt.expectedOK {

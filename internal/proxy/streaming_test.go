@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -16,9 +18,23 @@ func TestSimulatedStreamingFormat(t *testing.T) {
 	t.Parallel()
 
 	// Setup test server configured for Argo provider
-	proxyServer, argoMock := SetupArgoTestServer(t)
-	defer proxyServer.Close()
-	defer argoMock.Close()
+	argoMock := httptest.NewServer(NewMockArgo(t))
+	t.Cleanup(argoMock.Close)
+
+	config := &Config{
+		Provider:           constants.ProviderArgo,
+		ProviderURL:        argoMock.URL,
+		ArgoUser:           "testuser",
+		ArgoEnv:            "test",
+		Model:              "gpto3",
+		SmallModel:         "gemini25flash",
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
+
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+	proxyServer := httptest.NewServer(server)
+	t.Cleanup(proxyServer.Close)
 
 	// Test simulated streaming with Argo
 	// Argo doesn't support real streaming with tools, so it will simulate streaming

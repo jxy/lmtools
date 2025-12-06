@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"net/http"
 	"net/http/httptest"
@@ -15,17 +16,6 @@ import (
 	"testing"
 	"time"
 )
-
-func init() {
-	// Initialize logger with request counter enabled for all proxy tests
-	_ = logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-		logger.WithComponent("test"),
-	)
-}
 
 // LogCapture captures logs for testing
 type LogCapture struct {
@@ -86,6 +76,8 @@ func createMockProvider(t *testing.T, responseFunc func(w http.ResponseWriter, r
 }
 
 func TestLoggingWithModelMapping(t *testing.T) {
+	SetupTestLogger(t)
+
 	// Create mock Argo provider
 	mockArgo := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
@@ -109,16 +101,17 @@ func TestLoggingWithModelMapping(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "argo", // Add provider
-		ArgoBaseURL:        mockArgo.URL,
+		Provider:           constants.ProviderArgo, // Add provider
+		ProviderURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
 		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create test request
 	anthReq := AnthropicRequest{
@@ -149,6 +142,8 @@ func TestLoggingWithModelMapping(t *testing.T) {
 }
 
 func TestStreamingRequestLogging(t *testing.T) {
+	SetupTestLogger(t)
+
 	// Create mock Argo provider for streaming
 	mockArgo := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
 		// For streamchat endpoint, send plain text response
@@ -173,16 +168,17 @@ func TestStreamingRequestLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "argo", // Add provider
-		ArgoBaseURL:        mockArgo.URL,
+		Provider:           constants.ProviderArgo, // Add provider
+		ProviderURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
 		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create streaming request
 	anthReq := AnthropicRequest{
@@ -212,6 +208,8 @@ func TestStreamingRequestLogging(t *testing.T) {
 }
 
 func TestConcurrentRequestLogging(t *testing.T) {
+	SetupTestLogger(t)
+
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 
@@ -240,8 +238,8 @@ func TestConcurrentRequestLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "argo", // Add provider
-		ArgoBaseURL:        mockProvider.URL,
+		Provider:           constants.ProviderArgo, // Add provider
+		ProviderURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
 		SmallModel:         "gemini25flash",  // Add small model
@@ -249,7 +247,7 @@ func TestConcurrentRequestLogging(t *testing.T) {
 	}
 
 	// Create server with cleanup using testing-optimized configuration
-	server, cleanup := NewServerForTesting(config)
+	server, cleanup := NewTestServer(t, config)
 
 	// Number of concurrent requests
 	numRequests := 10
@@ -302,6 +300,8 @@ func TestConcurrentRequestLogging(t *testing.T) {
 }
 
 func TestRequestDurationLogging(t *testing.T) {
+	SetupTestLogger(t)
+
 	// Create test-controlled context for clean shutdown
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
@@ -335,16 +335,17 @@ func TestRequestDurationLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "argo", // Add provider
-		ArgoBaseURL:        mockProvider.URL,
+		Provider:           constants.ProviderArgo, // Add provider
+		ProviderURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
 		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create request
 	anthReq := AnthropicRequest{
@@ -380,6 +381,8 @@ func TestRequestDurationLogging(t *testing.T) {
 }
 
 func TestPingIntervalLogging(t *testing.T) {
+	SetupTestLogger(t)
+
 	// This test verifies that ping interval is logged correctly (not as pointer)
 	// In a real implementation, we would capture logs and verify the format
 
@@ -416,16 +419,17 @@ func TestPingIntervalLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "argo", // Add provider
-		ArgoBaseURL:        mockProvider.URL,
+		Provider:           constants.ProviderArgo, // Add provider
+		ProviderURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
 		Model:              "gpto3",
 		SmallModel:         "gemini25flash",  // Add small model
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create streaming request with tools (forces simulated streaming)
 	anthReq := AnthropicRequest{
@@ -480,8 +484,9 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: "anthropic", AnthropicAPIKey: "k", AnthropicURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
-	server := NewServer(config)
+	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
 	old := os.Stderr
 	os.Stderr = w
@@ -530,7 +535,7 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		logger.WithComponent("test"),
 	)
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
+		setSSEHeaders(w)
 		fmt.Fprintf(w, "event: message_start\n")
 		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n")
 		fmt.Fprintf(w, "event: message_stop\n")
@@ -540,8 +545,9 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		}
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: "anthropic", AnthropicAPIKey: "k", AnthropicURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
-	server := NewServer(config)
+	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
 	old := os.Stderr
 	os.Stderr = w
@@ -594,8 +600,9 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer mockArgo.Close()
-	config := &Config{Provider: "argo", ArgoUser: "u", ArgoBaseURL: mockArgo.URL, Model: "claude-3-haiku-20240307", SmallModel: "claude-3-haiku-20240307", MaxRequestBodySize: 10 * 1024 * 1024}
-	server := NewServer(config)
+	config := &Config{Provider: constants.ProviderArgo, ArgoUser: "u", ProviderURL: mockArgo.URL, Model: "claude-3-haiku-20240307", SmallModel: "claude-3-haiku-20240307", MaxRequestBodySize: 10 * 1024 * 1024}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
 	old := os.Stderr
 	os.Stderr = w
@@ -649,8 +656,9 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: "anthropic", AnthropicAPIKey: "k", AnthropicURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
-	server := NewServer(config)
+	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
 	old := os.Stderr
 	os.Stderr = w

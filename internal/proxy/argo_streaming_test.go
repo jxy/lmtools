@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -367,13 +368,16 @@ func TestStreamFromArgoComplete(t *testing.T) {
 
 	// Create server with config (keeping for documentation, though not used directly)
 	config := &Config{
+		Provider:     constants.ProviderArgo,
 		ArgoUser:     "testuser",
 		ArgoEnv:      "test",
-		ArgoBaseURL:  mockArgo.URL,
+		ProviderURL:  mockArgo.URL,
 		PingInterval: 100 * time.Millisecond,
 	}
-	config.InitializeURLs()
-	_ = NewServer(config) // We test the core logic directly, not through the server
+	// Create server (NewEndpoints is called internally)
+	// We test the core logic directly, not through the server
+	_, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Create test request handler (for documentation of the expected request format)
 	_ = httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{

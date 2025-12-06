@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -15,15 +16,7 @@ import (
 // TestContextCancellationDuringPing tests that context cancellation properly stops the streaming
 func TestContextCancellationDuringPing(t *testing.T) {
 	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a context we control for the mock server handler
 	// This allows us to cleanly shutdown the handler before closing the server
@@ -60,33 +53,21 @@ func TestContextCancellationDuringPing(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser: "testuser",
-		ArgoEnv:  mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		ArgoEnv:     mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
 
-	// Set mock URL in config
-	config.ArgoBaseURL = mockArgo.URL
+	// Create server with shorter timeout for testing using helper
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(5*time.Second, logger.GetLogger()))
 
-	// Create server with shorter timeout for testing
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(5*time.Second, logger.GetLogger()), // Shorter timeout for test responsiveness
-	}
-
-	// Create handler with its own context
+	// Create handler with its own context using the shared helper
 	w := newFlushableRecorder()
 	handlerCtx := context.Background() // Use independent context for handler
-	handler, err := NewAnthropicStreamHandler(w, "gpt35", handlerCtx)
-	if err != nil {
-		t.Fatalf("Failed to create stream handler: %v", err)
-	}
+	handler := newTestAnthropicStreamHandlerWithContext(t, w, "gpt35", handlerCtx)
 
-	// Send initial events
-	_ = handler.SendMessageStart()
-	_ = handler.SendContentBlockStart(0, "text")
+	// Send ping
 	_ = handler.SendPing()
 
 	// Create request
@@ -141,15 +122,7 @@ func TestContextCancellationDuringPing(t *testing.T) {
 // TestFastResponseNoPingDuringWait tests that fast responses don't trigger pings while waiting
 func TestFastResponseNoPingDuringWait(t *testing.T) {
 	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a mock Argo server that responds immediately
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -163,33 +136,21 @@ func TestFastResponseNoPingDuringWait(t *testing.T) {
 
 	// Create config
 	config := &Config{
-		ArgoUser: "testuser",
-		ArgoEnv:  mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		ArgoEnv:     mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
 
-	// Set mock URL in config
-	config.ArgoBaseURL = mockArgo.URL
+	// Create server using helper
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Second, logger.GetLogger()))
 
-	// Create server
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Second, logger.GetLogger()),
-	}
-
-	// Create handler
+	// Create handler using the shared helper
 	w := newFlushableRecorder()
 	ctx := context.Background()
-	handler, err := NewAnthropicStreamHandler(w, "gpt35", ctx)
-	if err != nil {
-		t.Fatalf("Failed to create stream handler: %v", err)
-	}
+	handler := newTestAnthropicStreamHandlerWithContext(t, w, "gpt35", ctx)
 
-	// Send initial events
-	_ = handler.SendMessageStart()
-	_ = handler.SendContentBlockStart(0, "text")
+	// Send ping
 	_ = handler.SendPing()
 
 	// Create request
@@ -205,7 +166,7 @@ func TestFastResponseNoPingDuringWait(t *testing.T) {
 
 	// Execute with 1 second ping interval (should never trigger)
 	startTime := time.Now()
-	err = server.simulateStreamingFromArgoWithInterval(context.Background(), anthReq, handler, 1*time.Second)
+	err := server.simulateStreamingFromArgoWithInterval(context.Background(), anthReq, handler, 1*time.Second)
 	duration := time.Since(startTime)
 
 	if err != nil {

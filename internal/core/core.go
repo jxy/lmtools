@@ -14,6 +14,7 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/errors"
+	"lmtools/internal/limitio"
 	"net/http"
 	"os"
 	"strings"
@@ -290,8 +291,7 @@ func HandleResponse(ctx context.Context, cfg RequestConfig, resp *http.Response,
 	// Validate HTTP status first
 	if resp.StatusCode != http.StatusOK {
 		// Read limited body for error message
-		limitedBody := io.LimitReader(resp.Body, 1024) // 1KB limit
-		errorData, err := io.ReadAll(limitedBody)
+		errorData, err := limitio.ReadLimitedWithKind(resp.Body, constants.MaxErrorResponseSize, "API error response")
 		if err != nil {
 			errorData = []byte("failed to read error response")
 		}
@@ -367,8 +367,8 @@ func handleStreamingResponse(ctx context.Context, cfg RequestConfig, resp *http.
 
 // handleNonStreamingResponse handles non-streaming responses
 func handleNonStreamingResponse(cfg RequestConfig, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
-	// Read response body
-	data, err := io.ReadAll(resp.Body)
+	// Read response body with size limit from constants
+	data, err := limitio.ReadLimitedWithKind(resp.Body, constants.DefaultMaxResponseBodySize, "API response body")
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to read response body: %w", err)
 	}

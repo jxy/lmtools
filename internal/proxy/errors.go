@@ -1,5 +1,20 @@
 package proxy
 
+// Error Response Formatting
+//
+// This file provides HTTP response formatting for API errors.
+//
+// Use this file for:
+//   - HTTP response formatting (sendError, sendOpenAIError, sendAnthropicError)
+//   - Error type constants (ErrTypeInvalidRequest, etc.)
+//   - Structured error response types (OpenAIError, AnthropicError)
+//
+// For HTTP-level provider error handling (non-200 responses from upstream),
+// see provider_errors.go.
+//
+// For parse-level streaming error handling (JSON syntax/type errors in streams),
+// see stream_errors.go.
+
 import (
 	"encoding/json"
 	"net/http"
@@ -8,12 +23,10 @@ import (
 // Error type constants - used for both OpenAI and Anthropic error responses
 const (
 	ErrTypeInvalidRequest  = "invalid_request_error"
-	ErrTypeAuthentication  = "authentication_error"
-	ErrTypePermission      = "permission_error"
+	ErrTypeAuthentication  = "authentication_error" // Covers both 401 and 403
 	ErrTypeNotFound        = "not_found_error"
 	ErrTypeRateLimit       = "rate_limit_error"
 	ErrTypeServer          = "api_error"
-	ErrTypeOverloaded      = "overloaded_error"
 	ErrTypePayloadTooLarge = "request_too_large"
 )
 

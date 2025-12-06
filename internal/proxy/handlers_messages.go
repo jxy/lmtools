@@ -3,12 +3,27 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"lmtools/internal/errors"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"net/http"
 	"time"
 )
+
+// parseAnthropicRequest reads and validates an Anthropic API request.
+func (s *Server) parseAnthropicRequest(r *http.Request) (*AnthropicRequest, error) {
+	body, err := s.readRequestBody(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read request body: %w", err)
+	}
+	var req AnthropicRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, fmt.Errorf("invalid JSON in request body")
+	}
+	if len(req.Messages) == 0 {
+		return nil, fmt.Errorf("messages array cannot be empty")
+	}
+	return &req, nil
+}
 
 // handleMessages processes the main messages endpoint
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -23,26 +38,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read request body
-	body, err := io.ReadAll(r.Body)
+	// Parse and validate request
+	anthReq, err := s.parseAnthropicRequest(r)
 	if err != nil {
-		log.Errorf("Failed to read request body: %v", err)
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Failed to read request", http.StatusBadRequest)
-		return
-	}
-
-	// Parse Anthropic request
-	var anthReq AnthropicRequest
-	if err := json.Unmarshal(body, &anthReq); err != nil {
-		log.Errorf("Failed to parse request: %v", err)
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate messages are not empty
-	if len(anthReq.Messages) == 0 {
-		log.Warnf("Request with empty messages")
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Messages array cannot be empty", http.StatusBadRequest)
+		log.Errorf("Failed to parse request: %s", err)
+		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -89,9 +89,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Route based on streaming preference
 	if anthReq.Stream {
-		s.handleStreamingRequest(w, r, &anthReq, provider, originalModel, mappedModel)
+		s.handleStreamingRequest(w, r, anthReq, provider, originalModel, mappedModel)
 	} else {
-		s.handleNonStreamingRequest(w, r, &anthReq, provider, originalModel, mappedModel)
+		s.handleNonStreamingRequest(w, r, anthReq, provider, originalModel, mappedModel)
 	}
 }
 
@@ -107,26 +107,11 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
-	// Read request body
-	body, err := io.ReadAll(r.Body)
+	// Parse and validate request
+	req, err := s.parseAnthropicRequest(r)
 	if err != nil {
-		log.Errorf("Failed to read request body: %v", err)
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Failed to read request", http.StatusBadRequest)
-		return
-	}
-
-	// Parse request - reuse AnthropicRequest structure
-	var req AnthropicRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		log.Errorf("Failed to parse count tokens request: %v", err)
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate messages are not empty
-	if len(req.Messages) == 0 {
-		log.Warnf("Count tokens request with empty messages")
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Messages array cannot be empty", http.StatusBadRequest)
+		log.Errorf("Failed to parse count tokens request: %s", err)
+		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -149,7 +134,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	// For now, provide a simple estimation
 	// This could be enhanced with provider-specific token counting
-	inputTokens := EstimateRequestTokens(&req)
+	inputTokens := EstimateRequestTokens(req)
 
 	// Create response - use a simple map for now
 	resp := map[string]interface{}{
@@ -160,12 +145,9 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	log.Debugf("Count tokens response: input_tokens=%d", inputTokens)
 	logger.DebugJSON(log, "Token Count Response", resp)
 
-	// Send response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Errorf("Failed to encode response: %v", err)
-		s.sendAnthropicError(w, ErrTypeServer, "Failed to encode response", http.StatusInternalServerError)
-		return
+	// Send response using centralized helper (logs errors internally)
+	if err := s.sendJSONResponse(ctx, w, resp); err != nil {
+		return // Error already logged, can't send another response
 	}
 
 	// Log input tokens info
@@ -186,7 +168,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 
 	// Route to appropriate provider
 	switch provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		openAIResp, openAIErr := s.forwardToOpenAI(ctx, anthReq)
 		if openAIErr != nil {
 			err = openAIErr
@@ -194,7 +176,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 			anthResp = s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel)
 		}
 
-	case "google":
+	case constants.ProviderGoogle:
 		googleResp, googleErr := s.forwardToGoogle(ctx, anthReq)
 		if googleErr != nil {
 			err = googleErr
@@ -202,7 +184,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 			anthResp = s.converter.ConvertGoogleToAnthropic(googleResp, originalModel)
 		}
 
-	case "argo":
+	case constants.ProviderArgo:
 		// Check if tools are requested
 		if len(anthReq.Tools) > 0 {
 			log.Warnf("Tools requested but not supported by Argo provider, falling back to non-streaming")
@@ -224,30 +206,15 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		anthResp, err = s.forwardToAnthropic(ctx, anthReq)
 
 	default:
-		err = errors.WrapError("route request", fmt.Errorf("unknown provider: %s", provider))
+		err = fmt.Errorf("route request: %w", fmt.Errorf("unknown provider: %s", provider))
 	}
 
 	if err != nil {
-		log.Errorf("Provider %s request failed: %v", provider, err)
-
-		// Try to extract status code and body from error
-		statusCode := http.StatusInternalServerError
-		errorMsg := fmt.Sprintf("Upstream %s error (HTTP %d)", provider, statusCode)
-
-		if respErr, ok := err.(*ResponseError); ok {
-			statusCode = respErr.StatusCode
-			// Include truncated error body for better debugging
-			if respErr.Body != "" {
-				truncated := truncateErrorBody(respErr.Body, 512)
-				errorMsg = fmt.Sprintf("Upstream %s error (HTTP %d): %s", provider, statusCode, truncated)
-			}
-		}
-
-		s.sendAnthropicError(w, ErrTypeServer, errorMsg, statusCode)
+		s.sendProviderErrorAsAnthropic(ctx, w, provider, err)
 		return
 	}
 
@@ -266,12 +233,8 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	// Log the complete response before sending (only if debug enabled)
 	logger.DebugJSON(log, "Sending Anthropic response", anthResp)
 
-	// Send response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(anthResp); err != nil {
-		log.Errorf("Failed to encode response: %v", err)
-		s.sendAnthropicError(w, ErrTypeServer, "Failed to encode response", http.StatusInternalServerError)
-	}
+	// Send response using centralized helper (logs errors internally)
+	_ = s.sendJSONResponse(ctx, w, anthResp)
 }
 
 // handleStreamingRequest processes streaming requests
@@ -289,24 +252,21 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 
 	// Route to appropriate streaming provider
 	switch provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		err = s.streamFromOpenAI(ctx, anthReq, handler)
-	case "google":
+	case constants.ProviderGoogle:
 		err = s.streamFromGoogle(ctx, anthReq, handler)
-	case "argo":
+	case constants.ProviderArgo:
 		err = s.streamFromArgo(ctx, anthReq, handler)
-	case "anthropic":
+	case constants.ProviderAnthropic:
 		err = s.streamFromAnthropic(ctx, anthReq, handler)
 	default:
-		err = errors.WrapError("stream request", fmt.Errorf("unknown provider: %s", provider))
+		err = fmt.Errorf("stream request: %w", fmt.Errorf("unknown provider: %s", provider))
 	}
 
 	if err != nil {
-		log.Errorf("Streaming from %s failed: %v", provider, err)
-		// Try to send error event if possible
-		if sendErr := handler.SendError(err.Error()); sendErr != nil {
-			log.Errorf("Failed to send error event: %v", sendErr)
-		}
+		// handleStreamError classifies error, logs appropriately, and notifies client
+		_ = handleStreamError(ctx, handler, fmt.Sprintf("Anthropic->%s", provider), err)
 	}
 
 	// Ensure stream is properly closed

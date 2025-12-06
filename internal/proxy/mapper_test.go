@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"lmtools/internal/constants"
 	"testing"
 )
 
@@ -15,133 +16,133 @@ func TestModelMapper(t *testing.T) {
 		{
 			name: "haiku maps to small model",
 			config: &Config{
-				Provider:   "openai",
+				Provider:   constants.ProviderOpenAI,
 				SmallModel: "gpt-4o-mini",
 				Model:      "gpt-4o",
 			},
 			inputModel:       "claude-3-haiku-20240307",
-			expectedProvider: "openai",
+			expectedProvider: constants.ProviderOpenAI,
 			expectedModel:    "gpt-4o-mini",
 		},
 		{
 			name: "sonnet maps to model",
 			config: &Config{
-				Provider:   "openai",
+				Provider:   constants.ProviderOpenAI,
 				SmallModel: "gpt-4o-mini",
 				Model:      "gpt-4o",
 			},
 			inputModel:       "claude-3-sonnet-20240229",
-			expectedProvider: "openai",
+			expectedProvider: constants.ProviderOpenAI,
 			expectedModel:    "gpt-4o",
 		},
 		{
 			name: "opus maps to model",
 			config: &Config{
-				Provider:   "google",
+				Provider:   constants.ProviderGoogle,
 				SmallModel: "gemini-2.0-flash",
 				Model:      "gemini-2.5-pro",
 			},
 			inputModel:       "claude-3-opus-20240229",
-			expectedProvider: "google",
+			expectedProvider: constants.ProviderGoogle,
 			expectedModel:    "gemini-2.5-pro",
 		},
 		{
 			name: "haiku with google provider",
 			config: &Config{
-				Provider:   "google",
+				Provider:   constants.ProviderGoogle,
 				SmallModel: "gemini-2.0-flash",
 				Model:      "gemini-2.5-pro-preview-03-25",
 			},
 			inputModel:       "claude-3-haiku",
-			expectedProvider: "google",
+			expectedProvider: constants.ProviderGoogle,
 			expectedModel:    "gemini-2.0-flash",
 		},
 		{
 			name: "sonnet with argo provider",
 			config: &Config{
-				Provider:   "argo",
+				Provider:   constants.ProviderArgo,
 				SmallModel: "gemini25flash",
 				Model:      "claudesonnet4",
 			},
 			inputModel:       "claude-3-sonnet",
-			expectedProvider: "argo",
+			expectedProvider: constants.ProviderArgo,
 			expectedModel:    "claudesonnet4",
 		},
 		{
 			name: "non-claude model passes through unchanged",
 			config: &Config{
-				Provider:   "openai",
+				Provider:   constants.ProviderOpenAI,
 				SmallModel: "gpt-4o-mini",
 				Model:      "gpt-4o",
 			},
 			inputModel:       "gpt-4o",
-			expectedProvider: "openai",
+			expectedProvider: constants.ProviderOpenAI,
 			expectedModel:    "gpt-4o",
 		},
 		{
 			name: "gemini model passes through unchanged",
 			config: &Config{
-				Provider:   "google",
+				Provider:   constants.ProviderGoogle,
 				SmallModel: "gemini-flash",
 				Model:      "gemini-pro",
 			},
 			inputModel:       "gemini-2.0-flash",
-			expectedProvider: "google",
+			expectedProvider: constants.ProviderGoogle,
 			expectedModel:    "gemini-2.0-flash",
 		},
 		{
 			name: "non-claude model passes through unchanged",
 			config: &Config{
-				Provider:   "openai",
+				Provider:   constants.ProviderOpenAI,
 				SmallModel: "small",
 				Model:      "big",
 			},
 			inputModel:       "gpt-4o",
-			expectedProvider: "openai",
+			expectedProvider: constants.ProviderOpenAI,
 			expectedModel:    "gpt-4o",
 		},
 		{
 			name: "unknown model passes through with configured provider",
 			config: &Config{
-				Provider:   "argo",
+				Provider:   constants.ProviderArgo,
 				SmallModel: "small",
 				Model:      "big",
 			},
 			inputModel:       "unknown-model",
-			expectedProvider: "argo",
+			expectedProvider: constants.ProviderArgo,
 			expectedModel:    "unknown-model",
 		},
 		{
 			name: "haiku model maps to small model",
 			config: &Config{
-				Provider:   "anthropic",
+				Provider:   constants.ProviderAnthropic,
 				SmallModel: "claude-3-haiku-20240307",
 				Model:      "claude-3-opus-20240229",
 			},
 			inputModel:       "claude-3-haiku-20240307",
-			expectedProvider: "anthropic",
+			expectedProvider: constants.ProviderAnthropic,
 			expectedModel:    "claude-3-haiku-20240307",
 		},
 		{
 			name: "provider always comes from config",
 			config: &Config{
-				Provider:   "argo",
+				Provider:   constants.ProviderArgo,
 				SmallModel: "small",
 				Model:      "big",
 			},
 			inputModel:       "gpt-4",
-			expectedProvider: "argo",
+			expectedProvider: constants.ProviderArgo,
 			expectedModel:    "gpt-4",
 		},
 		{
 			name: "claude-haiku-3 also maps to small model",
 			config: &Config{
-				Provider:   "openai",
+				Provider:   constants.ProviderOpenAI,
 				SmallModel: "gpt-3.5-turbo",
 				Model:      "gpt-4",
 			},
 			inputModel:       "claude-haiku-3",
-			expectedProvider: "openai",
+			expectedProvider: constants.ProviderOpenAI,
 			expectedModel:    "gpt-3.5-turbo",
 		},
 	}

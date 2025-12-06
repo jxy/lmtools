@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"lmtools/internal/auth"
-	"lmtools/internal/errors"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"net/http"
 )
@@ -17,11 +17,11 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
-		return nil, errors.WrapError("convert to OpenAI format", err)
+		return nil, fmt.Errorf("convert to OpenAI format: %w", err)
 	}
 
 	var openAIResp OpenAIResponse
-	err = s.doJSON(ctx, s.config.OpenAIURL, openAIReq, func(req *http.Request) {
+	err = s.doJSON(ctx, s.endpoints.OpenAI, openAIReq, func(req *http.Request) {
 		if key := s.config.OpenAIAPIKey; key != "" {
 			req.Header.Set("Authorization", "Bearer "+key)
 		}
@@ -38,11 +38,14 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	// Convert to Google format
 	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
-		return nil, errors.WrapError("convert to Google format", err)
+		return nil, fmt.Errorf("convert to Google format: %w", err)
 	}
 
 	// Construct URL with model
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", s.config.GoogleURL, anthReq.Model)
+	url, err := buildGoogleModelURL(s.endpoints.Google, anthReq.Model, "generateContent")
+	if err != nil {
+		return nil, fmt.Errorf("build Google URL: %w", err)
+	}
 
 	var googleResp GoogleResponse
 	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
@@ -66,11 +69,11 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
-		return nil, errors.WrapError("convert to Argo format", err)
+		return nil, fmt.Errorf("convert to Argo format: %w", err)
 	}
 
 	var argoResp ArgoChatResponse
-	err = s.doJSON(ctx, s.config.GetArgoURL("chat"), argoReq, nil, &argoResp, "Argo")
+	err = s.doJSON(ctx, s.endpoints.GetArgoURL("chat"), argoReq, nil, &argoResp, "Argo")
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +84,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 // forwardToAnthropic forwards a request to the Anthropic API
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
-	err := s.doJSON(ctx, s.config.AnthropicURL+"/v1/messages", anthReq, func(req *http.Request) {
+	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
 		req.Header.Set("anthropic-version", "2023-06-01")
 		if key := s.config.AnthropicAPIKey; key != "" {
 			req.Header.Set("x-api-key", key)
@@ -102,19 +105,19 @@ func (s *Server) forwardToArgoStream(ctx context.Context, anthReq *AnthropicRequ
 	// Convert to Argo format
 	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
-		return nil, errors.WrapError("convert to Argo format", err)
+		return nil, fmt.Errorf("convert to Argo format: %w", err)
 	}
 
 	// Marshal request
 	reqBody, err := json.Marshal(argoReq)
 	if err != nil {
-		return nil, errors.WrapError("marshal Argo request", err)
+		return nil, fmt.Errorf("marshal Argo request: %w", err)
 	}
 
 	// Create HTTP request - use streamchat endpoint
-	req, err := http.NewRequestWithContext(ctx, "POST", s.config.GetArgoURL("streamchat"), bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.endpoints.GetArgoURL("streamchat"), bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, errors.WrapError("create Argo stream request", err)
+		return nil, fmt.Errorf("create Argo stream request: %w", err)
 	}
 
 	// Add headers
@@ -124,19 +127,19 @@ func (s *Server) forwardToArgoStream(ctx context.Context, anthReq *AnthropicRequ
 	logger.DebugJSON(log, "Outgoing Argo Streaming Request", argoReq)
 
 	// Send request
-	resp, err := s.client.Do(ctx, req, "argo")
+	resp, err := s.client.Do(ctx, req, constants.ProviderArgo)
 	if err != nil {
-		return nil, errors.WrapError("send Argo stream request", err)
+		return nil, fmt.Errorf("send Argo stream request: %w", err)
 	}
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		s.logErrorResponse(ctx, "argo", resp.StatusCode, body)
-		return nil, NewResponseError(resp.StatusCode, string(body))
+		// HandleStreamingError reads the body but doesn't close it
+		err := s.HandleStreamingError(ctx, constants.ProviderArgo, resp)
+		resp.Body.Close() // Ensure body is closed after reading
+		return nil, err
 	}
 
-	// Return the response body for streaming
+	// Return the response body for streaming (caller is responsible for closing)
 	return resp.Body, nil
 }

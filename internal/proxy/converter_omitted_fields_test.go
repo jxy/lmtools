@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"os"
@@ -12,17 +13,6 @@ import (
 	"strings"
 	"testing"
 )
-
-func init() {
-	// Initialize logger with request counter enabled for all proxy tests
-	_ = logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-		logger.WithComponent("test"),
-	)
-}
 
 func TestOmittedFieldsLogging(t *testing.T) {
 	tests := []struct {
@@ -48,7 +38,7 @@ func TestOmittedFieldsLogging(t *testing.T) {
 					},
 				}
 			},
-			targetProvider: "openai",
+			targetProvider: constants.ProviderOpenAI,
 			expectedLogs: []string{
 				"Omitting top_k=10 from Anthropic request (not supported by OpenAI)",
 				"Omitting metadata from Anthropic request (not supported by OpenAI)",
@@ -73,7 +63,7 @@ func TestOmittedFieldsLogging(t *testing.T) {
 					},
 				}
 			},
-			targetProvider: "google",
+			targetProvider: constants.ProviderGoogle,
 			expectedLogs: []string{
 				"Omitting metadata from Anthropic request (not supported by Google)",
 				"Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=tool, name=get_weather",
@@ -96,7 +86,7 @@ func TestOmittedFieldsLogging(t *testing.T) {
 					},
 				}
 			},
-			targetProvider: "argo",
+			targetProvider: constants.ProviderArgo,
 			expectedLogs: []string{
 				"Omitting top_k=5 from Anthropic request (not supported by Argo)",
 				"Omitting metadata from Anthropic request (not supported by Argo)",
@@ -116,7 +106,7 @@ func TestOmittedFieldsLogging(t *testing.T) {
 					},
 				}
 			},
-			targetProvider: "openai",
+			targetProvider: constants.ProviderOpenAI,
 			expectedLogs:   []string{},
 		},
 	}
@@ -144,7 +134,7 @@ func TestOmittedFieldsLogging(t *testing.T) {
 
 			// Create converter with minimal config
 			config := &Config{
-				Provider: "openai",
+				Provider: constants.ProviderOpenAI,
 			}
 			mapper := NewModelMapper(config)
 			converter := NewConverter(mapper)
@@ -154,17 +144,17 @@ func TestOmittedFieldsLogging(t *testing.T) {
 
 			// Convert based on target provider
 			switch tt.targetProvider {
-			case "openai":
+			case constants.ProviderOpenAI:
 				_, err := converter.ConvertAnthropicToOpenAI(context.Background(), req)
 				if err != nil {
 					t.Fatalf("Failed to convert to OpenAI: %v", err)
 				}
-			case "google":
+			case constants.ProviderGoogle:
 				_, err := converter.ConvertAnthropicToGoogle(context.Background(), req)
 				if err != nil {
 					t.Fatalf("Failed to convert to Google: %v", err)
 				}
-			case "argo":
+			case constants.ProviderArgo:
 				_, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")
 				if err != nil {
 					t.Fatalf("Failed to convert to Argo: %v", err)
@@ -234,7 +224,7 @@ func TestOmittedFieldsLoggingWithoutFile(t *testing.T) {
 
 	// Create converter and test request with minimal config
 	config := &Config{
-		Provider: "openai",
+		Provider: constants.ProviderOpenAI,
 	}
 	mapper := NewModelMapper(config)
 	converter := NewConverter(mapper)
@@ -326,7 +316,7 @@ func TestOmittedFieldsLoggingJSON(t *testing.T) {
 					},
 				}
 			},
-			targetProvider: "argo",
+			targetProvider: constants.ProviderArgo,
 			expectedJSON: map[string]interface{}{
 				"user": map[string]interface{}{
 					"id":   "123",
@@ -366,11 +356,11 @@ func TestOmittedFieldsLoggingJSON(t *testing.T) {
 			// Setup and convert request
 			req := tt.setupRequest()
 			switch tt.targetProvider {
-			case "openai":
+			case constants.ProviderOpenAI:
 				_, _ = converter.ConvertAnthropicToOpenAI(ctx, req)
-			case "google":
+			case constants.ProviderGoogle:
 				_, _ = converter.ConvertAnthropicToGoogle(ctx, req)
-			case "argo":
+			case constants.ProviderArgo:
 				_, _ = converter.ConvertAnthropicToArgo(ctx, req, "testuser")
 			}
 
@@ -459,7 +449,7 @@ func TestNoMapSyntaxInOmittedFieldLogs(t *testing.T) {
 	)
 
 	// Create converter
-	config := &Config{Provider: "openai"}
+	config := &Config{Provider: constants.ProviderOpenAI}
 	mapper := NewModelMapper(config)
 	converter := NewConverter(mapper)
 

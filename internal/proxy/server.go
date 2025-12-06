@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -47,19 +48,32 @@ const (
 	maxPingInterval = 60 * time.Second
 )
 
-// Server represents the API proxy server
+// Server represents the API proxy server.
+// It stores both config (for credentials, provider name, and settings) and
+// endpoints (for precomputed URLs). All URL access should use s.endpoints.*,
+// while credentials and configuration use s.config.*. Endpoints are always
+// derived from Config via NewEndpoints() in NewServer.
 type Server struct {
 	config    *Config
+	endpoints *Endpoints
 	mapper    *ModelMapper
 	converter *Converter
 	client    *retry.Client
 }
 
-// NewServer creates a new API proxy server
-func NewServer(config *Config) http.Handler {
+// NewServer creates a new API proxy server.
+// It initializes endpoints and returns an error if initialization fails.
+func NewServer(config *Config) (http.Handler, error) {
+	// Create endpoints - single source of truth for URL initialization
+	endpoints, err := NewEndpoints(config)
+	if err != nil {
+		return nil, fmt.Errorf("initialize endpoints: %w", err)
+	}
+
 	mapper := NewModelMapper(config)
 	server := &Server{
 		config:    config,
+		endpoints: endpoints,
 		mapper:    mapper,
 		converter: NewConverter(mapper),
 		client:    retry.NewClientWithOptions(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
@@ -69,5 +83,5 @@ func NewServer(config *Config) http.Handler {
 	handler := http.Handler(server)
 	handler = NewProxyMiddleware(handler, config)
 
-	return handler
+	return handler, nil
 }

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -15,15 +16,7 @@ import (
 // TestOpenAIStreamingJSONUnicodeEscape ensures simulateOpenAIStreamFromArgo uses JSON-aware chunking
 // and does not split within \uXXXX escape sequences for tool arguments.
 func TestOpenAIStreamingJSONUnicodeEscape(t *testing.T) {
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Prepare Argo response with a tool_use-like payload
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,17 +45,12 @@ func TestOpenAIStreamingJSONUnicodeEscape(t *testing.T) {
 
 	// Server config
 	config := &Config{
+		Provider:    constants.ProviderArgo,
 		ArgoUser:    "testuser",
 		ArgoEnv:     mockArgo.URL,
-		ArgoBaseURL: mockArgo.URL,
+		ProviderURL: mockArgo.URL,
 	}
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Prepare SSE recorder and writer
 	recorder := httptest.NewRecorder()

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -13,21 +14,12 @@ import (
 )
 
 func TestArgoStreamingTokenCounting(t *testing.T) {
-	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 	defer logger.Close()
 
 	// Create a mock Argo server that streams a response
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/streamchat" {
+		if strings.HasSuffix(r.URL.Path, "/streamchat/") {
 			// Simulate Argo streaming response
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusOK)
@@ -46,18 +38,11 @@ func TestArgoStreamingTokenCounting(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		ArgoBaseURL: mockArgo.URL,
+		Provider:    constants.ProviderArgo,
+		ProviderURL: mockArgo.URL,
 		ArgoUser:    "testuser",
 	}
-
-	// Create server components
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Create a test request
 	anthReq := &AnthropicRequest{

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"net/http"
 	"net/http/httptest"
@@ -26,41 +27,39 @@ type E2ETestSuite struct {
 // SetupE2ETestSuite creates a new test suite
 func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 	// Create mock providers
-	openAIMock := httptest.NewServer(NewE2EMockProvider(t, "openai"))
-	googleMock := httptest.NewServer(NewE2EMockProvider(t, "google"))
-	argoMock := httptest.NewServer(NewE2EMockProvider(t, "argo"))
+	openAIMock := httptest.NewServer(NewE2EMockProvider(t, constants.ProviderOpenAI))
+	googleMock := httptest.NewServer(NewE2EMockProvider(t, constants.ProviderGoogle))
+	argoMock := httptest.NewServer(NewE2EMockProvider(t, constants.ProviderArgo))
 
 	// Create config
 	config := &Config{
 		OpenAIAPIKey:       "test-openai-key",
 		GoogleAPIKey:       "test-google-key",
 		ArgoUser:           "testuser",
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
+		ProviderURL:        openAIMock.URL + "/v1/chat/completions",
 		SmallModel:         "gpt-4o-mini",
 		Model:              "gpt-4o",
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
-	// Set mock URLs in config
-	config.OpenAIURL = openAIMock.URL + "/v1/chat/completions"
-	config.GoogleURL = googleMock.URL + "/v1beta/models"
-	config.ArgoBaseURL = argoMock.URL
-
-	// Create proxy server
-	proxyServer := httptest.NewServer(NewServer(config))
+	// Create proxy server (NewEndpoints is called internally by NewServer)
+	server, serverCleanup := NewTestServer(t, config)
+	proxyServer := httptest.NewServer(server)
 
 	suite := &E2ETestSuite{
 		server: proxyServer,
 		config: config,
 		mockProviders: map[string]*httptest.Server{
-			"openai": openAIMock,
-			"google": googleMock,
-			"argo":   argoMock,
+			constants.ProviderOpenAI: openAIMock,
+			constants.ProviderGoogle: googleMock,
+			constants.ProviderArgo:   argoMock,
 		},
 	}
 
 	// Cleanup function
 	t.Cleanup(func() {
+		serverCleanup()
 		proxyServer.Close()
 		openAIMock.Close()
 		googleMock.Close()
@@ -107,11 +106,11 @@ func (m *E2EMockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.t.Logf("[%s] %s %s", m.provider, r.Method, r.URL.Path)
 
 	switch m.provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		m.handleOpenAIE2E(w, r, body)
-	case "google":
+	case constants.ProviderGoogle:
 		m.handleGoogleE2E(w, r, body)
-	case "argo":
+	case constants.ProviderArgo:
 		m.handleArgoE2E(w, r, body)
 	}
 }
@@ -133,7 +132,7 @@ func (m *E2EMockProvider) handleOpenAIE2E(w http.ResponseWriter, r *http.Request
 
 	// Handle streaming
 	if req.Stream {
-		w.Header().Set("Content-Type", "text/event-stream")
+		setSSEHeaders(w)
 		w.WriteHeader(http.StatusOK)
 
 		// Stream the response word by word
@@ -263,7 +262,7 @@ func (m *E2EMockProvider) handleGoogleE2E(w http.ResponseWriter, r *http.Request
 
 	// Handle streaming
 	if strings.Contains(r.URL.Path, "streamGenerateContent") {
-		w.Header().Set("Content-Type", "text/event-stream")
+		setSSEHeaders(w)
 		w.WriteHeader(http.StatusOK)
 
 		// Stream response in chunks
@@ -432,35 +431,35 @@ func TestE2EBasicChat(t *testing.T) {
 			name:           "Haiku maps to small model",
 			model:          "claude-3-haiku-20240307",
 			message:        "Hello",
-			expectProvider: "openai",
+			expectProvider: constants.ProviderOpenAI,
 			expectContent:  "GPT-4o-mini",
 		},
 		{
 			name:           "Sonnet maps to big model",
 			model:          "claude-3-5-sonnet-20241022",
 			message:        "Hello",
-			expectProvider: "openai",
+			expectProvider: constants.ProviderOpenAI,
 			expectContent:  "GPT-4o",
 		},
 		{
 			name:           "Direct Google AI model",
 			model:          "gemini-2.0-flash",
 			message:        "Hello",
-			expectProvider: "openai", // With provider=openai, all models go to OpenAI
+			expectProvider: constants.ProviderOpenAI, // With provider=openai, all models go to OpenAI
 			expectContent:  "Response from OpenAI model: gemini-2.0-flash",
 		},
 		{
 			name:           "Custom model uses preferred provider",
 			model:          "llama-70b",
 			message:        "Hello",
-			expectProvider: "openai",
+			expectProvider: constants.ProviderOpenAI,
 			expectContent:  "Response from OpenAI",
 		},
 		{
 			name:           "Direct OpenAI model",
 			model:          "gpt-4",
 			message:        "Hello",
-			expectProvider: "openai",
+			expectProvider: constants.ProviderOpenAI,
 			expectContent:  "Response from OpenAI",
 		},
 	}
@@ -614,8 +613,8 @@ func TestE2EToolUse(t *testing.T) {
 		model    string
 		provider string
 	}{
-		{"claude-3-sonnet-20240229", "openai"},
-		{"gemini-1.5-pro", "google"},
+		{"claude-3-sonnet-20240229", constants.ProviderOpenAI},
+		{"gemini-1.5-pro", constants.ProviderGoogle},
 	}
 
 	for _, p := range providers {
@@ -795,7 +794,7 @@ func TestE2EErrorHandling(t *testing.T) {
 			request:    "invalid json",
 			endpoint:   "/v1/messages",
 			expectCode: http.StatusBadRequest,
-			expectErr:  "Invalid request body",
+			expectErr:  "invalid JSON in request body",
 		},
 		{
 			name: "Missing required fields",
@@ -804,7 +803,7 @@ func TestE2EErrorHandling(t *testing.T) {
 			},
 			endpoint:   "/v1/messages",
 			expectCode: http.StatusBadRequest,
-			expectErr:  "Messages array cannot be empty",
+			expectErr:  "messages array cannot be empty",
 		},
 		{
 			name:       "Invalid endpoint",
@@ -937,42 +936,42 @@ func TestProviderFlagPrecedence(t *testing.T) {
 	}{
 		{
 			name:           "Provider=argo with gpt model",
-			provider:       "argo",
+			provider:       constants.ProviderArgo,
 			model:          "gpt-4",
 			hasArgo:        true,
-			expectProvider: "argo",
+			expectProvider: constants.ProviderArgo,
 		},
 		{
 			name:           "Provider=argo with Google AI model",
-			provider:       "argo",
+			provider:       constants.ProviderArgo,
 			model:          "gemini-2.0-flash",
 			hasArgo:        true,
-			expectProvider: "argo",
+			expectProvider: constants.ProviderArgo,
 		},
 		{
 			name:           "Provider=google with gpt model",
-			provider:       "google",
+			provider:       constants.ProviderGoogle,
 			model:          "gpt-4",
 			hasGoogle:      true,
-			expectProvider: "google",
+			expectProvider: constants.ProviderGoogle,
 		},
 		{
 			name:           "Provider=openai with custom model",
-			provider:       "openai",
+			provider:       constants.ProviderOpenAI,
 			model:          "llama-70b",
 			hasOpenAI:      true,
-			expectProvider: "openai",
+			expectProvider: constants.ProviderOpenAI,
 		},
 		{
 			name:        "Provider=argo but no credentials",
-			provider:    "argo",
+			provider:    constants.ProviderArgo,
 			model:       "gpt-4",
 			hasOpenAI:   true,
 			expectError: true, // Should error when provider lacks credentials
 		},
 		{
 			name:        "No available provider",
-			provider:    "argo",
+			provider:    constants.ProviderArgo,
 			model:       "gpt-4",
 			expectError: true,
 		},
@@ -1009,14 +1008,21 @@ func TestProviderFlagPrecedence(t *testing.T) {
 				config.ArgoUser = "testuser"
 			}
 
-			// Set mock URLs
-			config.OpenAIURL = openAIMock.URL + "/v1/chat/completions"
-			config.GoogleURL = googleMock.URL + "/v1beta/models"
-			config.ArgoBaseURL = argoMock.URL
-			config.InitializeURLs()
+			// Set ProviderURL based on active provider (only if not expecting an error)
+			if !tc.expectError {
+				switch tc.provider {
+				case constants.ProviderOpenAI:
+					config.ProviderURL = openAIMock.URL + "/v1/chat/completions"
+				case constants.ProviderGoogle:
+					config.ProviderURL = googleMock.URL + "/v1beta/models"
+				case constants.ProviderArgo:
+					config.ProviderURL = argoMock.URL
+				}
+			}
 
-			// Create proxy server
-			server := NewServer(config)
+			// Create proxy server (NewEndpoints is called internally by NewServer)
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
 			proxyServer := httptest.NewServer(server)
 			defer proxyServer.Close()
 
@@ -1069,15 +1075,15 @@ func TestProviderFlagPrecedence(t *testing.T) {
 
 			content := anthResp.Content[0].Text
 			switch tc.expectProvider {
-			case "openai":
+			case constants.ProviderOpenAI:
 				if !strings.Contains(content, "OpenAI") {
 					t.Errorf("Expected OpenAI response, got: %s", content)
 				}
-			case "google":
+			case constants.ProviderGoogle:
 				if !strings.Contains(content, "Google") {
 					t.Errorf("Expected Google response, got: %s", content)
 				}
-			case "argo":
+			case constants.ProviderArgo:
 				if !strings.Contains(content, "Argo") {
 					t.Errorf("Expected Argo response, got: %s", content)
 				}

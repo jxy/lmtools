@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"net/http"
@@ -14,17 +15,6 @@ import (
 	"sync"
 	"testing"
 )
-
-func init() {
-	// Initialize logger with request counter enabled for all proxy tests
-	_ = logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-		logger.WithComponent("test"),
-	)
-}
 
 // captureStderr captures stderr output during test execution
 func captureStderr(t *testing.T, f func()) string {
@@ -83,13 +73,17 @@ func captureStderr(t *testing.T, f func()) string {
 }
 
 func TestCountTokensEndpointLogging(t *testing.T) {
+	SetupTestLogger(t)
+
 	// Create minimal server config
 	config := &Config{
+		Provider:           constants.ProviderAnthropic,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -201,11 +195,13 @@ func TestRootEndpointLogging(t *testing.T) {
 
 	// Create minimal server config
 	config := &Config{
+		Provider:           constants.ProviderAnthropic,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -287,11 +283,13 @@ func Test404EndpointLogging(t *testing.T) {
 
 	// Create minimal server config
 	config := &Config{
+		Provider:           constants.ProviderAnthropic,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -372,11 +370,13 @@ func TestCountTokensWithDifferentInputSizes(t *testing.T) {
 
 	// Create minimal server config
 	config := &Config{
+		Provider:           constants.ProviderAnthropic,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 

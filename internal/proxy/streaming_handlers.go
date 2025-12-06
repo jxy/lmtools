@@ -8,7 +8,6 @@ import (
 	"io"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
-	"lmtools/internal/errors"
 	"lmtools/internal/logger"
 	"net/http"
 	"strings"
@@ -17,25 +16,107 @@ import (
 
 // Helper functions to reduce duplication in stream handlers
 
-// streamFromOpenAI handles streaming from OpenAI API
-func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	// Convert to OpenAI format with streaming enabled
+// googleStreamingRequest builds and sends an HTTP request for Google streaming.
+// Returns the response for streaming, caller is responsible for closing the body.
+func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
+	// Convert to Google format
+	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
+	if err != nil {
+		return nil, fmt.Errorf("convert to Google format: %w", err)
+	}
+
+	// Marshal request
+	reqBody, err := json.Marshal(googleReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Google request: %w", err)
+	}
+
+	// Construct streaming URL with model
+	url, err := buildGoogleModelURL(s.endpoints.Google, anthReq.Model, "streamGenerateContent")
+	if err != nil {
+		return nil, fmt.Errorf("build Google streaming URL: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("create Google request: %w", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json")
+
+	// Apply API key
+	if key := s.config.GoogleAPIKey; key != "" {
+		if err := auth.ApplyGoogleAPIKey(req, key); err != nil {
+			return nil, fmt.Errorf("apply Google API key: %w", err)
+		}
+	}
+
+	// Send request
+	resp, err := s.client.Do(ctx, req, constants.ProviderGoogle)
+	if err != nil {
+		return nil, fmt.Errorf("send Google request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// anthropicStreamingRequest builds and sends an HTTP request for Anthropic streaming.
+// Returns the response for streaming, caller is responsible for closing the body.
+func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
+	// Enable streaming
+	anthReq.Stream = true
+
+	// Marshal request
+	reqBody, err := json.Marshal(anthReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Anthropic request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", s.endpoints.Anthropic, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("create Anthropic request: %w", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	if key := s.config.AnthropicAPIKey; key != "" {
+		req.Header.Set("x-api-key", key)
+	}
+
+	// Send request
+	resp, err := s.client.Do(ctx, req, constants.ProviderAnthropic)
+	if err != nil {
+		return nil, fmt.Errorf("send Anthropic request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// openAIStreamingRequest builds and sends an HTTP request for OpenAI streaming.
+// Returns the response for streaming, caller is responsible for closing the body.
+func (s *Server) openAIStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
+	// Convert to OpenAI format
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
-		return errors.WrapError("convert to OpenAI format", err)
+		return nil, fmt.Errorf("convert to OpenAI format: %w", err)
 	}
 	openAIReq.Stream = true
 
 	// Marshal request
 	reqBody, err := json.Marshal(openAIReq)
 	if err != nil {
-		return errors.WrapError("marshal OpenAI request", err)
+		return nil, fmt.Errorf("marshal OpenAI request: %w", err)
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", s.config.OpenAIURL, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.endpoints.OpenAI, bytes.NewReader(reqBody))
 	if err != nil {
-		return errors.WrapError("create OpenAI request", err)
+		return nil, fmt.Errorf("create OpenAI request: %w", err)
 	}
 
 	// Add headers
@@ -45,17 +126,25 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Send request
-	resp, err := s.client.Do(ctx, req, "openai")
+	resp, err := s.client.Do(ctx, req, constants.ProviderOpenAI)
 	if err != nil {
-		return errors.WrapError("send OpenAI request", err)
+		return nil, fmt.Errorf("send OpenAI request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// streamFromOpenAI handles streaming from OpenAI API
+func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	resp, err := s.openAIStreamingRequest(ctx, anthReq)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		s.logErrorResponse(ctx, "openai", resp.StatusCode, body)
-		return NewResponseError(resp.StatusCode, string(body))
+		return s.HandleStreamingError(ctx, constants.ProviderOpenAI, resp)
 	}
 
 	// Send initial events
@@ -73,49 +162,15 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 
 // streamFromGoogle handles streaming from Google Gemini API
 func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	// Convert to Google format
-	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
+	resp, err := s.googleStreamingRequest(ctx, anthReq)
 	if err != nil {
-		return errors.WrapError("convert to Google format", err)
-	}
-
-	// Marshal request
-	reqBody, err := json.Marshal(googleReq)
-	if err != nil {
-		return errors.WrapError("marshal Google request", err)
-	}
-
-	// Construct streaming URL with model
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent", s.config.GoogleURL, anthReq.Model)
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		return errors.WrapError("create Google request", err)
-	}
-
-	// Add headers
-	req.Header.Set("Content-Type", "application/json")
-
-	// Apply API key
-	if key := s.config.GoogleAPIKey; key != "" {
-		if err := auth.ApplyGoogleAPIKey(req, key); err != nil {
-			return errors.WrapError("apply Google API key", err)
-		}
-	}
-
-	// Send request
-	resp, err := s.client.Do(ctx, req, "google")
-	if err != nil {
-		return errors.WrapError("send Google request", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		s.logErrorResponse(ctx, "google", resp.StatusCode, body)
-		return NewResponseError(resp.StatusCode, string(body))
+		return s.HandleStreamingError(ctx, constants.ProviderGoogle, resp)
 	}
 
 	// Send initial events
@@ -211,41 +266,15 @@ func (s *Server) streamFromArgoWithPings(ctx context.Context, anthReq *Anthropic
 
 // streamFromAnthropic handles streaming from Anthropic API
 func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	// Enable streaming
-	anthReq.Stream = true
-
-	// Marshal request
-	reqBody, err := json.Marshal(anthReq)
+	resp, err := s.anthropicStreamingRequest(ctx, anthReq)
 	if err != nil {
-		return errors.WrapError("marshal Anthropic request", err)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", s.config.AnthropicURL+"/v1/messages", bytes.NewReader(reqBody))
-	if err != nil {
-		return errors.WrapError("create Anthropic request", err)
-	}
-
-	// Add headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	if key := s.config.AnthropicAPIKey; key != "" {
-		req.Header.Set("x-api-key", key)
-	}
-
-	// Send request
-	resp, err := s.client.Do(ctx, req, "anthropic")
-	if err != nil {
-		return errors.WrapError("send Anthropic request", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		s.logErrorResponse(ctx, "anthropic", resp.StatusCode, body)
-		return NewResponseError(resp.StatusCode, string(body))
+		return s.HandleStreamingError(ctx, constants.ProviderAnthropic, resp)
 	}
 
 	// Parse Anthropic SSE stream directly
@@ -275,83 +304,115 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			switch currentEvent {
 			case EventMessageStart:
 				var evt MessageStartEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					handler.UpdateModel(evt.Message.Model)
-					// Forward the event to the client
-					if err := handler.SendEvent(EventMessageStart, evt); err != nil {
-						return err
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
+					continue
+				}
+				handler.UpdateModel(evt.Message.Model)
+				// Forward the event to the client
+				if err := handler.SendEvent(EventMessageStart, evt); err != nil {
+					return err
 				}
 
 			case EventContentBlockStart:
 				var evt ContentBlockStartEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					// Log the content block start event
-					log.Debugf("Content block start: type=%s", evt.ContentBlock.Type)
-					// Forward the event to the client
-					if err := handler.SendEvent(EventContentBlockStart, evt); err != nil {
-						return err
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
+					continue
+				}
+				// Log the content block start event
+				log.Debugf("Content block start: type=%s", evt.ContentBlock.Type)
+				// Forward the event to the client
+				if err := handler.SendEvent(EventContentBlockStart, evt); err != nil {
+					return err
 				}
 
 			case EventContentBlockDelta:
 				var evt ContentBlockDeltaEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					// If it's a text_delta, accumulate the text
-					if evt.Delta.Type == "text_delta" {
-						handler.state.AccumulatedText += evt.Delta.Text
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
-					// Forward the event to the client
-					if err := handler.SendEvent(EventContentBlockDelta, evt); err != nil {
-						return err
-					}
+					continue
+				}
+				// If it's a text_delta, accumulate the text
+				if evt.Delta.Type == "text_delta" {
+					handler.state.AccumulatedText += evt.Delta.Text
+				}
+				// Forward the event to the client
+				if err := handler.SendEvent(EventContentBlockDelta, evt); err != nil {
+					return err
 				}
 
 			case EventContentBlockStop:
 				// Block completed
 				var evt ContentBlockStopEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					// Forward the event to the client
-					if err := handler.SendEvent(EventContentBlockStop, evt); err != nil {
-						return err
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
+					continue
+				}
+				// Forward the event to the client
+				if err := handler.SendEvent(EventContentBlockStop, evt); err != nil {
+					return err
 				}
 
 			case EventMessageDelta:
 				var evt MessageDeltaEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					if evt.Delta.StopReason != "" {
-						handler.SetStopReason(evt.Delta.StopReason)
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
-					if evt.Usage != nil {
-						handler.SetUsage(evt.Usage.InputTokens, evt.Usage.OutputTokens)
-					}
-					// Forward the event to the client
-					if err := handler.SendEvent(EventMessageDelta, evt); err != nil {
-						return err
-					}
+					continue
+				}
+				if evt.Delta.StopReason != "" {
+					handler.SetStopReason(evt.Delta.StopReason)
+				}
+				if evt.Usage != nil {
+					handler.SetUsage(evt.Usage.InputTokens, evt.Usage.OutputTokens)
+				}
+				// Forward the event to the client
+				if err := handler.SendEvent(EventMessageDelta, evt); err != nil {
+					return err
 				}
 
 			case EventMessageStop:
 				// Stream completed; ensure we sent a message_delta earlier
 				var evt MessageStopEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					// Forward the event to the client
-					if err := handler.SendEvent(EventMessageStop, evt); err != nil {
-						return err
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
+					// For message_stop, we still return nil to end the stream gracefully
+					return nil
+				}
+				// Forward the event to the client
+				if err := handler.SendEvent(EventMessageStop, evt); err != nil {
+					return err
 				}
 				return nil
 
 			case EventError:
 				var evt ErrorEvent
-				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					// Forward the error event to the client
-					if err := handler.SendEvent(EventError, evt); err != nil {
-						return err
+				if err := json.Unmarshal([]byte(data), &evt); err != nil {
+					if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+						return handleErr
 					}
-					return fmt.Errorf("%s: %s", evt.Error.Type, evt.Error.Message)
+					continue
 				}
+				// Forward the error event to the client
+				if err := handler.SendEvent(EventError, evt); err != nil {
+					return err
+				}
+				// Upstream error events are fatal - use handleStreamError for consistent logging
+				// Pass nil emitter since we already forwarded the error to the client above
+				upstreamErr := fmt.Errorf("%s: %s", evt.Error.Type, evt.Error.Message)
+				return handleStreamError(handler.ctx, nil, "AnthropicStreamParser:upstream", upstreamErr)
 
 			default:
 				// Log unknown event types for debugging
@@ -361,7 +422,9 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 	}
 
 	if err := scanner.Err(); err != nil {
-		return errors.WrapError("read stream", err)
+		if handleErr := handleStreamError(handler.ctx, nil, "AnthropicSSEScanner", err); handleErr != nil {
+			return handleErr
+		}
 	}
 
 	return nil
@@ -563,48 +626,29 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 
 // streamOpenAIFromAnthropic handles streaming from Anthropic API and converts to OpenAI format
 func (s *Server) streamOpenAIFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
-	// Enable streaming
-	anthReq.Stream = true
-
-	// Marshal request
-	reqBody, err := json.Marshal(anthReq)
+	resp, err := s.anthropicStreamingRequest(ctx, anthReq)
 	if err != nil {
-		return errors.WrapError("marshal Anthropic request", err)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", s.config.AnthropicURL+"/v1/messages", bytes.NewReader(reqBody))
-	if err != nil {
-		return errors.WrapError("create Anthropic request", err)
-	}
-
-	// Add headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	if key := s.config.AnthropicAPIKey; key != "" {
-		req.Header.Set("x-api-key", key)
-	}
-
-	// Send request
-	resp, err := s.client.Do(ctx, req, "anthropic")
-	if err != nil {
-		return errors.WrapError("send Anthropic request", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		s.logErrorResponse(ctx, "anthropic", resp.StatusCode, body)
-		return NewResponseError(resp.StatusCode, string(body))
+		return s.HandleStreamingError(ctx, constants.ProviderAnthropic, resp)
 	}
 
+	return s.convertAnthropicStreamToOpenAI(ctx, resp.Body, writer)
+}
+
+// convertAnthropicStreamToOpenAI converts an Anthropic SSE stream to OpenAI format.
+// This function handles the SSE parsing and format conversion, keeping HTTP concerns
+// in the caller (streamOpenAIFromAnthropic).
+func (s *Server) convertAnthropicStreamToOpenAI(ctx context.Context, body io.Reader, writer *OpenAIStreamWriter) error {
 	// Create converter
 	converter := NewOpenAIStreamConverter(writer, ctx)
 
 	// Parse Anthropic SSE stream
-	scanner := NewSSEScanner(resp.Body)
+	scanner := NewSSEScanner(body)
 	var currentEvent string
 
 	for scanner.Scan() {
@@ -622,14 +666,15 @@ func (s *Server) streamOpenAIFromAnthropic(ctx context.Context, anthReq *Anthrop
 
 			// Convert to OpenAI format
 			if err := converter.HandleAnthropicEvent(currentEvent, json.RawMessage(data)); err != nil {
-				logger.From(ctx).Errorf("Failed to handle Anthropic event: %v", err)
-				return err
+				return handleStreamError(ctx, writer, "AnthropicToOpenAIConverter", err)
 			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return errors.WrapError("read Anthropic stream", err)
+		if handleErr := handleStreamError(ctx, nil, "AnthropicToOpenAISSEScanner", err); handleErr != nil {
+			return handleErr
+		}
 	}
 
 	return nil
@@ -637,74 +682,49 @@ func (s *Server) streamOpenAIFromAnthropic(ctx context.Context, anthReq *Anthrop
 
 // streamOpenAIFromGoogle handles streaming from Google AI API and converts to OpenAI format
 func (s *Server) streamOpenAIFromGoogle(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
-	// Convert to Google format
-	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
+	resp, err := s.googleStreamingRequest(ctx, anthReq)
 	if err != nil {
-		return errors.WrapError("convert to Google format", err)
-	}
-
-	// Marshal request
-	reqBody, err := json.Marshal(googleReq)
-	if err != nil {
-		return errors.WrapError("marshal Google request", err)
-	}
-
-	// Construct streaming URL with model
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent", s.config.GoogleURL, anthReq.Model)
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		return errors.WrapError("create Google request", err)
-	}
-
-	// Add headers
-	req.Header.Set("Content-Type", "application/json")
-
-	// Apply API key
-	if key := s.config.GoogleAPIKey; key != "" {
-		if err := auth.ApplyGoogleAPIKey(req, key); err != nil {
-			return errors.WrapError("apply Google API key", err)
-		}
-	}
-
-	// Send request
-	resp, err := s.client.Do(ctx, req, "google")
-	if err != nil {
-		return errors.WrapError("send Google request", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		s.logErrorResponse(ctx, "google", resp.StatusCode, body)
-		return NewResponseError(resp.StatusCode, string(body))
+		return s.HandleStreamingError(ctx, constants.ProviderGoogle, resp)
 	}
-
-	// Create converter
-	converter := NewOpenAIStreamConverter(writer, ctx)
 
 	// Send initial assistant delta
 	if err := writer.WriteInitialAssistantDelta(); err != nil {
 		return err
 	}
 
+	return s.convertGoogleStreamToOpenAI(ctx, resp.Body, writer)
+}
+
+// convertGoogleStreamToOpenAI converts a Google JSON stream to OpenAI format.
+// This function handles the JSON decoding and format conversion, keeping HTTP concerns
+// in the caller (streamOpenAIFromGoogle).
+func (s *Server) convertGoogleStreamToOpenAI(ctx context.Context, body io.Reader, writer *OpenAIStreamWriter) error {
+	// Create converter
+	converter := NewOpenAIStreamConverter(writer, ctx)
+
 	// Parse Google stream
-	decoder := json.NewDecoder(resp.Body)
+	decoder := json.NewDecoder(body)
 	for {
 		var chunk map[string]interface{}
 		if err := decoder.Decode(&chunk); err != nil {
 			if err == io.EOF {
 				break
 			}
-			return err
+			if handleErr := handleStreamError(ctx, nil, "GoogleToOpenAIDecoder", err); handleErr != nil {
+				return handleErr
+			}
+			continue // Recoverable error - skip bad chunk
 		}
 
 		// Convert to OpenAI format
 		if err := converter.HandleGoogleChunk(chunk); err != nil {
-			logger.From(ctx).Errorf("Failed to handle Google chunk: %v", err)
-			return err
+			return handleStreamError(ctx, writer, "GoogleToOpenAIConverter", err)
 		}
 	}
 
@@ -742,11 +762,11 @@ func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicReq
 		return err
 	}
 
-	// Read the entire stream into memory first
+	// Read the entire stream into memory first with size limit
 	// This is necessary because ContentSplitter works on complete strings
-	data, err := io.ReadAll(streamBody)
+	data, err := s.readStreamingBody(streamBody)
 	if err != nil {
-		return err
+		return handleStreamError(ctx, writer, "ArgoToOpenAIReader", err)
 	}
 
 	// Use ContentSplitter for proper UTF-8 aware chunking
@@ -756,8 +776,7 @@ func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicReq
 	// Stream each chunk
 	for _, chunk := range chunks {
 		if err := converter.HandleArgoText(chunk); err != nil {
-			logger.From(ctx).Errorf("Failed to handle Argo text chunk: %v", err)
-			return err
+			return handleStreamError(ctx, writer, "ArgoToOpenAIConverter", err)
 		}
 	}
 

@@ -2,23 +2,14 @@ package proxy
 
 import (
 	"context"
-	"lmtools/internal/logger"
+	"lmtools/internal/constants"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestRequestSummary(t *testing.T) {
-	// Initialize logger for testing
-	logger.ResetForTesting()
-	err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	)
-	if err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	tests := []struct {
 		name          string
@@ -36,7 +27,7 @@ func TestRequestSummary(t *testing.T) {
 			path:          "/v1/messages",
 			originalModel: "gpt-4o",
 			mappedModel:   "gpt-4o-mini",
-			provider:      "openai",
+			provider:      constants.ProviderOpenAI,
 			statusCode:    200,
 			streaming:     false,
 		},
@@ -46,7 +37,7 @@ func TestRequestSummary(t *testing.T) {
 			path:          "/v1/messages",
 			originalModel: "claude-3-opus",
 			mappedModel:   "claude-3-opus-20240229",
-			provider:      "anthropic",
+			provider:      constants.ProviderAnthropic,
 			statusCode:    200,
 			streaming:     true,
 		},
@@ -56,7 +47,7 @@ func TestRequestSummary(t *testing.T) {
 			path:          "/v1/messages",
 			originalModel: "unknown-model",
 			mappedModel:   "unknown-model",
-			provider:      "openai",
+			provider:      constants.ProviderOpenAI,
 			statusCode:    400,
 			streaming:     false,
 		},

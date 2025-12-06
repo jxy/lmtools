@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"net/http"
@@ -15,16 +16,7 @@ import (
 
 // TestMessagesEndpointLogging tests logging for the /v1/messages endpoint
 func TestMessagesEndpointLogging(t *testing.T) {
-	// Reset and initialize logger with INFO level
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 	defer logger.Close()
 
 	// Create mock Anthropic server
@@ -48,14 +40,15 @@ func TestMessagesEndpointLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "anthropic",
+		Provider:           constants.ProviderAnthropic,
 		AnthropicAPIKey:    "test-key",
-		AnthropicURL:       mockAnthropic.URL,
+		ProviderURL:        mockAnthropic.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -137,16 +130,7 @@ func TestMessagesEndpointLogging(t *testing.T) {
 
 // TestChatCompletionsEndpointLogging tests logging for the /v1/chat/completions endpoint
 func TestChatCompletionsEndpointLogging(t *testing.T) {
-	// Reset and initialize logger with INFO level
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 	defer logger.Close()
 
 	// Create mock OpenAI server
@@ -177,14 +161,15 @@ func TestChatCompletionsEndpointLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
 		OpenAIAPIKey:       "test-key",
-		OpenAIURL:          mockOpenAI.URL,
+		ProviderURL:        mockOpenAI.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -266,16 +251,7 @@ func TestChatCompletionsEndpointLogging(t *testing.T) {
 
 // TestModelsEndpointLogging tests logging for the /v1/models endpoint
 func TestModelsEndpointLogging(t *testing.T) {
-	// Reset and initialize logger with INFO level
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 	defer logger.Close()
 
 	// Create mock models server
@@ -301,14 +277,15 @@ func TestModelsEndpointLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
 		OpenAIAPIKey:       "test-key",
 		ProviderURL:        mockModels.URL, // Use ProviderURL to override the models endpoint
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -396,16 +373,7 @@ func TestModelsEndpointLogging(t *testing.T) {
 
 // TestAllEndpointsLogging tests that all endpoints produce their expected log messages
 func TestAllEndpointsLogging(t *testing.T) {
-	// Reset and initialize logger with INFO level
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 	defer logger.Close()
 
 	// Create mock server that handles all endpoints
@@ -455,16 +423,16 @@ func TestAllEndpointsLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "openai",
+		Provider:           constants.ProviderOpenAI,
 		OpenAIAPIKey:       "test-key",
-		OpenAIURL:          mockServer.URL,
+		ProviderURL:        mockServer.URL,
 		AnthropicAPIKey:    "test-key",
-		AnthropicURL:       mockServer.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 
@@ -575,22 +543,13 @@ func TestAllEndpointsLogging(t *testing.T) {
 
 // TestStreamingEndpointLogging tests that streaming requests also produce proper logs
 func TestStreamingEndpointLogging(t *testing.T) {
-	// Reset and initialize logger with INFO level
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("info"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 	defer logger.Close()
 
 	// Create mock streaming server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Return SSE stream
-		w.Header().Set("Content-Type", "text/event-stream")
+		setSSEHeaders(w)
 		fmt.Fprintf(w, "event: message_start\n")
 		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n")
 		fmt.Fprintf(w, "event: message_stop\n")
@@ -603,14 +562,15 @@ func TestStreamingEndpointLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           "anthropic",
+		Provider:           constants.ProviderAnthropic,
 		AnthropicAPIKey:    "test-key",
-		AnthropicURL:       mockServer.URL,
+		ProviderURL:        mockServer.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
-	// Create server
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 	testServer := httptest.NewServer(server)
 	defer testServer.Close()
 

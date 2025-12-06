@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -108,9 +109,7 @@ func TestStreamToolBlockWithServer(t *testing.T) {
 	}
 
 	// Create server
-	server := &Server{
-		config: &Config{},
-	}
+	server := NewMinimalTestServer(t, &Config{})
 
 	// Create a tool block
 	toolBlock := AnthropicContentBlock{
@@ -210,15 +209,7 @@ func TestCompleteWithoutDone(t *testing.T) {
 
 // New test: verify Anthropic simulated streaming never splits input_json_delta at a backslash escape
 func TestAnthropicStreaming_NoSplitInPartialJSON(t *testing.T) {
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Prepare Argo response with tool_use input containing various escapes
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,18 +241,13 @@ func TestAnthropicStreaming_NoSplitInPartialJSON(t *testing.T) {
 
 	// Server config
 	config := &Config{
+		Provider:     constants.ProviderArgo,
 		ArgoUser:     "testuser",
 		ArgoEnv:      mockArgo.URL,
-		ArgoBaseURL:  mockArgo.URL,
+		ProviderURL:  mockArgo.URL,
 		PingInterval: 1 * time.Second,
 	}
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:    config,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClient(10*time.Minute, logger.GetLogger()),
-	}
+	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
 
 	// Prepare SSE recorder and handler
 	recorder := httptest.NewRecorder()

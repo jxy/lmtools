@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
@@ -25,60 +26,60 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		{
 			name: "anthropic provider with claude model",
 			config: &Config{
-				Provider:        "anthropic",
+				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
 				Model:           "claude-3-opus-20240229",
 				SmallModel:      "claude-3-haiku-20240307",
 			},
 			inputModel:   "claude-3-opus-20240229",
-			wantProvider: "anthropic",
+			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-opus-20240229",
 		},
 		{
 			name: "anthropic provider with haiku model",
 			config: &Config{
-				Provider:        "anthropic",
+				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
 				Model:           "claude-3-opus-20240229",
 				SmallModel:      "claude-3-haiku-20240307",
 			},
 			inputModel:   "claude-3-haiku-20240307",
-			wantProvider: "anthropic",
+			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-haiku-20240307",
 		},
 		{
 			name: "anthropic provider maps opus to model",
 			config: &Config{
-				Provider:        "anthropic",
+				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
 				Model:           "claude-3-opus-20240229",
 			},
 			inputModel:   "claude-3-opus-20240229",
-			wantProvider: "anthropic",
+			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-opus-20240229",
 		},
 		{
 			name: "anthropic provider with non-claude model",
 			config: &Config{
-				Provider:        "anthropic",
+				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
 				Model:           "gpt-4",
 				SmallModel:      "gpt-3.5-turbo",
 			},
 			inputModel:   "gpt-4",
-			wantProvider: "anthropic",
+			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "gpt-4", // Non-Claude models pass through unchanged
 		},
 		{
 			name: "anthropic provider maps haiku to small model",
 			config: &Config{
-				Provider:        "anthropic",
+				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
 				Model:           "claude-3-opus-20240229",
 				SmallModel:      "claude-3-haiku-20240307",
 			},
 			inputModel:   "claude-3-haiku-20240307",
-			wantProvider: "anthropic",
+			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-haiku-20240307", // Maps to SmallModel
 		},
 	}
@@ -109,7 +110,7 @@ func TestConfigValidationAnthropic(t *testing.T) {
 		{
 			name: "valid anthropic config",
 			config: &Config{
-				Provider:        "anthropic",
+				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
 			},
 			wantErr: false,
@@ -117,7 +118,7 @@ func TestConfigValidationAnthropic(t *testing.T) {
 		{
 			name: "anthropic without key but with provider URL",
 			config: &Config{
-				Provider:    "anthropic",
+				Provider:    constants.ProviderAnthropic,
 				ProviderURL: "https://custom-anthropic.com",
 			},
 			wantErr: false,
@@ -125,7 +126,7 @@ func TestConfigValidationAnthropic(t *testing.T) {
 		{
 			name: "anthropic without key or provider URL",
 			config: &Config{
-				Provider: "anthropic",
+				Provider: constants.ProviderAnthropic,
 			},
 			wantErr: true,
 		},
@@ -144,15 +145,7 @@ func TestConfigValidationAnthropic(t *testing.T) {
 // TestForwardToAnthropic tests the forwardToAnthropic function
 func TestForwardToAnthropic(t *testing.T) {
 	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a mock Anthropic server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -204,13 +197,14 @@ func TestForwardToAnthropic(t *testing.T) {
 
 	// Create server with mock config
 	config := &Config{
-		Provider:        "anthropic",
+		Provider:        constants.ProviderAnthropic,
 		AnthropicAPIKey: "test-anthropic-key",
-		AnthropicURL:    mockServer.URL,
+		ProviderURL:     mockServer.URL,
 	}
 
 	s := &Server{
 		config:    config,
+		endpoints: &Endpoints{Anthropic: mockServer.URL},
 		mapper:    NewModelMapper(config),
 		converter: NewConverter(NewModelMapper(config)),
 		client:    retry.NewClient(5*time.Second, logger.GetLogger()),
@@ -252,15 +246,7 @@ func TestForwardToAnthropic(t *testing.T) {
 // TestStreamFromAnthropic tests the streamFromAnthropic function
 func TestStreamFromAnthropic(t *testing.T) {
 	// Initialize logger for testing
-	logger.ResetForTesting()
-	if err := logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
-		logger.WithFormat("text"),
-		logger.WithStderr(true),
-		logger.WithFile(false),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
+	SetupTestLogger(t)
 
 	// Create a mock Anthropic streaming server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -287,9 +273,7 @@ func TestStreamFromAnthropic(t *testing.T) {
 		}
 
 		// Send SSE response
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		setSSEHeaders(w)
 
 		// Send events
 		events := []struct {
@@ -318,13 +302,14 @@ func TestStreamFromAnthropic(t *testing.T) {
 
 	// Create server with mock config
 	config := &Config{
-		Provider:        "anthropic",
+		Provider:        constants.ProviderAnthropic,
 		AnthropicAPIKey: "test-anthropic-key",
-		AnthropicURL:    mockServer.URL,
+		ProviderURL:     mockServer.URL,
 	}
 
 	s := &Server{
 		config:    config,
+		endpoints: &Endpoints{Anthropic: mockServer.URL},
 		mapper:    NewModelMapper(config),
 		converter: NewConverter(NewModelMapper(config)),
 		client:    retry.NewClient(5*time.Second, logger.GetLogger()),
@@ -388,7 +373,7 @@ func TestAnthropicIntegration(t *testing.T) {
 
 		if req.Stream {
 			// Handle streaming
-			w.Header().Set("Content-Type", "text/event-stream")
+			setSSEHeaders(w)
 			fmt.Fprintf(w, "event: message_start\n")
 			fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-opus-20240229\"}}\n\n")
 			fmt.Fprintf(w, "event: content_block_start\n")
@@ -423,16 +408,16 @@ func TestAnthropicIntegration(t *testing.T) {
 
 	// Create apiproxy server
 	config := &Config{
-		Provider:            "anthropic",
+		Provider:            constants.ProviderAnthropic,
 		AnthropicAPIKey:     "test-key",
-		AnthropicURL:        mockAnthropic.URL,
+		ProviderURL:         mockAnthropic.URL,
 		Model:               "claude-3-opus-20240229",
 		MaxRequestBodySize:  10 * 1024 * 1024, // 10MB
 		MaxResponseBodySize: 10 * 1024 * 1024, // 10MB
 	}
-	config.InitializeURLs()
-
-	server := NewServer(config)
+	// Create server (NewEndpoints is called internally)
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
 
 	// Test non-streaming request
 	t.Run("non-streaming", func(t *testing.T) {

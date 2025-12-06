@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"lmtools/internal/constants"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestDynamicModelDefaults(t *testing.T) {
 	}{
 		{
 			name:               "OpenAI provider with default models",
-			preferredProvider:  "openai",
+			preferredProvider:  constants.ProviderOpenAI,
 			inputModel:         "",
 			inputSmallModel:    "",
 			expectedModel:      "gpt-5",
@@ -24,7 +25,7 @@ func TestDynamicModelDefaults(t *testing.T) {
 		},
 		{
 			name:               "Google provider with default models",
-			preferredProvider:  "google",
+			preferredProvider:  constants.ProviderGoogle,
 			inputModel:         "",
 			inputSmallModel:    "",
 			expectedModel:      "gemini-2.5-pro",
@@ -32,7 +33,7 @@ func TestDynamicModelDefaults(t *testing.T) {
 		},
 		{
 			name:               "Argo provider keeps default models",
-			preferredProvider:  "argo",
+			preferredProvider:  constants.ProviderArgo,
 			inputModel:         "",
 			inputSmallModel:    "",
 			expectedModel:      "gpt5",
@@ -40,7 +41,7 @@ func TestDynamicModelDefaults(t *testing.T) {
 		},
 		{
 			name:               "OpenAI with custom models",
-			preferredProvider:  "openai",
+			preferredProvider:  constants.ProviderOpenAI,
 			inputModel:         "gpt-4o",
 			inputSmallModel:    "gpt-4o-mini",
 			expectedModel:      "gpt-4o",
@@ -48,7 +49,7 @@ func TestDynamicModelDefaults(t *testing.T) {
 		},
 		{
 			name:               "Only big model changed",
-			preferredProvider:  "openai",
+			preferredProvider:  constants.ProviderOpenAI,
 			inputModel:         "gpt-4o",
 			inputSmallModel:    "claudesonnet4",
 			expectedModel:      "gpt-4o",
@@ -85,39 +86,39 @@ func TestProviderURLOverride(t *testing.T) {
 		providerURL       string
 		expectedOpenAI    string
 		expectedGoogle    string
-		expectedArgo      string
+		expectedArgoBase  string // Only checked when provider is argo
 	}{
 		{
 			name:              "OpenAI custom URL",
-			preferredProvider: "openai",
+			preferredProvider: constants.ProviderOpenAI,
 			providerURL:       "https://custom-openai.com/v1/chat",
 			expectedOpenAI:    "https://custom-openai.com/v1/chat/chat/completions",
-			expectedGoogle:    "https://generativelanguage.googleapis.com/v1beta/models",
-			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
+			expectedGoogle:    "", // Only selected provider URLs are initialized
+			expectedArgoBase:  "", // Not set for non-Argo providers
 		},
 		{
 			name:              "Google custom URL",
-			preferredProvider: "google",
+			preferredProvider: constants.ProviderGoogle,
 			providerURL:       "https://custom-google.com/v1beta",
-			expectedOpenAI:    "https://api.openai.com/v1/chat/completions",
+			expectedOpenAI:    "", // Only selected provider URLs are initialized
 			expectedGoogle:    "https://custom-google.com/v1beta",
-			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
+			expectedArgoBase:  "", // Not set for non-Argo providers
 		},
 		{
 			name:              "Argo custom URL",
-			preferredProvider: "argo",
+			preferredProvider: constants.ProviderArgo,
 			providerURL:       "https://custom-argo.com/api",
-			expectedOpenAI:    "https://api.openai.com/v1/chat/completions",
-			expectedGoogle:    "https://generativelanguage.googleapis.com/v1beta/models",
-			expectedArgo:      "https://custom-argo.com/api",
+			expectedOpenAI:    "",                                            // Only selected provider URLs are initialized
+			expectedGoogle:    "",                                            // Only selected provider URLs are initialized
+			expectedArgoBase:  "https://custom-argo.com/api/api/v1/resource", // argoResourcePrefix adds /api/v1/resource when not present
 		},
 		{
 			name:              "No custom URL",
-			preferredProvider: "openai",
+			preferredProvider: constants.ProviderOpenAI,
 			providerURL:       "",
 			expectedOpenAI:    "https://api.openai.com/v1/chat/completions",
-			expectedGoogle:    "https://generativelanguage.googleapis.com/v1beta/models",
-			expectedArgo:      "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource",
+			expectedGoogle:    "", // Only selected provider URLs are initialized
+			expectedArgoBase:  "", // Not set for non-Argo providers
 		},
 	}
 
@@ -129,16 +130,24 @@ func TestProviderURLOverride(t *testing.T) {
 				ArgoEnv:     "dev",
 			}
 
-			config.InitializeURLs()
+			endpoints, err := NewEndpoints(config)
+			if err != nil {
+				t.Fatalf("Failed to create endpoints: %v", err)
+			}
 
-			if config.OpenAIURL != tt.expectedOpenAI {
-				t.Errorf("Expected OpenAIURL=%s, got %s", tt.expectedOpenAI, config.OpenAIURL)
+			if endpoints.OpenAI != tt.expectedOpenAI {
+				t.Errorf("Expected OpenAI=%s, got %s", tt.expectedOpenAI, endpoints.OpenAI)
 			}
-			if config.GoogleURL != tt.expectedGoogle {
-				t.Errorf("Expected GoogleURL=%s, got %s", tt.expectedGoogle, config.GoogleURL)
+			if endpoints.Google != tt.expectedGoogle {
+				t.Errorf("Expected Google=%s, got %s", tt.expectedGoogle, endpoints.Google)
 			}
-			if config.ArgoBaseURL != tt.expectedArgo {
-				t.Errorf("Expected ArgoBaseURL=%s, got %s", tt.expectedArgo, config.ArgoBaseURL)
+			// Only check ArgoBase when testing Argo provider
+			if tt.preferredProvider == constants.ProviderArgo && endpoints.ArgoBase != tt.expectedArgoBase {
+				t.Errorf("Expected ArgoBase=%s, got %s", tt.expectedArgoBase, endpoints.ArgoBase)
+			}
+			// For non-Argo providers, ArgoBase should be empty
+			if tt.preferredProvider != constants.ProviderArgo && endpoints.ArgoBase != "" {
+				t.Errorf("Expected ArgoBase to be empty for non-Argo provider, got %s", endpoints.ArgoBase)
 			}
 		})
 	}
@@ -157,43 +166,43 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 	}{
 		{
 			name:        "OpenAI provider with API key",
-			provider:    "openai",
+			provider:    constants.ProviderOpenAI,
 			openAIKey:   "test-key",
 			expectError: false,
 		},
 		{
 			name:          "OpenAI provider without API key",
-			provider:      "openai",
+			provider:      constants.ProviderOpenAI,
 			expectError:   true,
 			errorContains: "-api-key-file is required when -provider is 'openai'",
 		},
 		{
 			name:        "OpenAI provider with custom URL (no key needed)",
-			provider:    "openai",
+			provider:    constants.ProviderOpenAI,
 			providerURL: "http://localhost:11434/v1",
 			expectError: false,
 		},
 		{
 			name:        "Google provider with API key",
-			provider:    "google",
+			provider:    constants.ProviderGoogle,
 			googleKey:   "test-key",
 			expectError: false,
 		},
 		{
 			name:          "Google provider without API key",
-			provider:      "google",
+			provider:      constants.ProviderGoogle,
 			expectError:   true,
 			errorContains: "-api-key-file is required when -provider is 'google'",
 		},
 		{
 			name:        "Argo provider with user",
-			provider:    "argo",
+			provider:    constants.ProviderArgo,
 			argoUser:    "testuser",
 			expectError: false,
 		},
 		{
 			name:          "Argo provider without user",
-			provider:      "argo",
+			provider:      constants.ProviderArgo,
 			expectError:   true,
 			errorContains: "-argo-user is required when -provider is 'argo'",
 		},
@@ -265,7 +274,7 @@ func TestOpenAIProviderURLNormalization(t *testing.T) {
 		{
 			name:        "URL already with chat/completions",
 			providerURL: "http://localhost:11434/v1/chat/completions",
-			expectedURL: "http://localhost:11434/v1/chat/completions/chat/completions",
+			expectedURL: "http://localhost:11434/v1/chat/completions",
 		},
 		{
 			name:        "HTTPS URL ending with /v1",
@@ -287,14 +296,95 @@ func TestOpenAIProviderURLNormalization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{
-				Provider:    "openai",
+				Provider:    constants.ProviderOpenAI,
 				ProviderURL: tt.providerURL,
 			}
 
-			config.InitializeURLs()
+			endpoints, err := NewEndpoints(config)
+			if err != nil {
+				t.Fatalf("Failed to create endpoints: %v", err)
+			}
 
-			if config.OpenAIURL != tt.expectedURL {
-				t.Errorf("Expected OpenAIURL=%s, got %s", tt.expectedURL, config.OpenAIURL)
+			if endpoints.OpenAI != tt.expectedURL {
+				t.Errorf("Expected OpenAI=%s, got %s", tt.expectedURL, endpoints.OpenAI)
+			}
+		})
+	}
+}
+
+func TestNewEndpointsErrorHandling(t *testing.T) {
+	tests := []struct {
+		name          string
+		provider      string
+		providerURL   string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:        "Valid OpenAI provider URL",
+			provider:    constants.ProviderOpenAI,
+			providerURL: "https://api.example.com",
+			expectError: false,
+		},
+		{
+			name:          "Invalid OpenAI provider URL",
+			provider:      constants.ProviderOpenAI,
+			providerURL:   "://invalid-url",
+			expectError:   true,
+			errorContains: "invalid openai ProviderURL",
+		},
+		{
+			name:        "Valid Google provider URL",
+			provider:    constants.ProviderGoogle,
+			providerURL: "https://api.example.com",
+			expectError: false,
+		},
+		{
+			name:          "Invalid Google provider URL",
+			provider:      constants.ProviderGoogle,
+			providerURL:   "not-a-url\x00",
+			expectError:   true,
+			errorContains: "invalid google ProviderURL",
+		},
+		{
+			name:        "Valid Anthropic provider URL",
+			provider:    constants.ProviderAnthropic,
+			providerURL: "https://api.example.com",
+			expectError: false,
+		},
+		{
+			name:        "Valid Argo provider URL",
+			provider:    constants.ProviderArgo,
+			providerURL: "https://api.example.com",
+			expectError: false,
+		},
+		{
+			name:          "Invalid URL with null bytes",
+			provider:      constants.ProviderOpenAI,
+			providerURL:   "https://example.com\x00/path",
+			expectError:   true,
+			errorContains: "invalid openai ProviderURL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Provider:    tt.provider,
+				ProviderURL: tt.providerURL,
+			}
+
+			_, err := NewEndpoints(config)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errorContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"lmtools/internal/constants"
 	"net/http"
 	"strings"
 	"testing"
@@ -33,11 +34,11 @@ func (m *MockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.t.Logf("Request body: %s", string(body))
 
 	switch m.provider {
-	case "openai":
+	case constants.ProviderOpenAI:
 		m.handleOpenAI(w, r, body)
-	case "google":
+	case constants.ProviderGoogle:
 		m.handleGoogle(w, r, body)
-	case "argo":
+	case constants.ProviderArgo:
 		m.handleArgo(w, r, body)
 	default:
 		http.Error(w, "Unknown provider", http.StatusBadRequest)
@@ -45,7 +46,7 @@ func (m *MockProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MockProvider) streamOpenAIResponse(w http.ResponseWriter, r *http.Request, configuredResp interface{}) {
-	w.Header().Set("Content-Type", "text/event-stream")
+	setSSEHeaders(w)
 	w.WriteHeader(http.StatusOK)
 
 	// Convert configured response to streaming format
@@ -155,7 +156,7 @@ func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body
 	// Default behavior when no response is configured
 	// Handle streaming
 	if req.Stream {
-		w.Header().Set("Content-Type", "text/event-stream")
+		setSSEHeaders(w)
 		w.WriteHeader(http.StatusOK)
 
 		// Send streaming chunks
@@ -226,7 +227,7 @@ func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body
 
 	// Handle streaming
 	if strings.Contains(r.URL.Path, "streamGenerateContent") {
-		w.Header().Set("Content-Type", "text/event-stream")
+		setSSEHeaders(w)
 		w.WriteHeader(http.StatusOK)
 
 		// Send Google streaming format

@@ -32,6 +32,27 @@ const (
 	IncludeUsageKey = "stream_options.include_usage"
 )
 
+// HTTP Request/Response size limits
+const (
+	// DefaultMaxRequestBodySize is the default maximum size for HTTP request bodies
+	DefaultMaxRequestBodySize = 10 * 1024 * 1024 // 10MB
+
+	// DefaultMaxResponseBodySize is the default maximum size for HTTP response bodies
+	DefaultMaxResponseBodySize = 20 * 1024 * 1024 // 20MB
+
+	// MaxErrorResponseSize is the maximum size for error response bodies
+	MaxErrorResponseSize = 10 * 1024 // 10KB
+
+	// MaxCLIInputSize is the maximum input size for CLI operations
+	MaxCLIInputSize = 10 * 1024 * 1024 // 10MB
+
+	// MaxCLIResponseSize is the maximum response size for CLI operations
+	MaxCLIResponseSize = 10 * 1024 * 1024 // 10MB
+
+	// MaxStreamingResponseSize is the maximum size for streaming response bodies
+	MaxStreamingResponseSize = 100 * 1024 * 1024 // 100MB
+)
+
 // Provider constants
 const (
 	ProviderArgo      = "argo"
