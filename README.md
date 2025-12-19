@@ -1,5 +1,7 @@
 # lmc + apiproxy
 
+> **Disclaimer**: Almost all code in this repository was "vibe-coded" by various LLMs (GPT, Claude, Gemini, etc.). Use at your own risk and review before deploying to production.
+
 `lmc` is a CLI for chatting with AI models, generating embeddings, and managing sessions. `apiproxy` is a small HTTP server that translates between Anthropic, OpenAI, Google, and Argo APIs.
 
 ## Install
