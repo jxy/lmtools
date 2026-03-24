@@ -90,36 +90,8 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 				// Use typed converter for content and tool calls
 				if len(filteredBlocks) > 0 {
 					contentUnion, typedToolCalls := core.ConvertBlocksToOpenAIContentTyped(filteredBlocks)
-
-					// Convert typed tool calls to proxy ToolCall structs
-					var toolCalls []ToolCall
-					for _, tc := range typedToolCalls {
-						toolCalls = append(toolCalls, ToolCall{
-							ID:   tc.ID,
-							Type: tc.Type,
-							Function: FunctionCall{
-								Name:      tc.Function.Name,
-								Arguments: tc.Function.Arguments,
-							},
-						})
-					}
-
-					// Convert content union to interface{}
-					var content interface{}
-					if len(contentUnion.Contents) > 0 {
-						// Multimodal content - convert to []interface{}
-						contentArray := make([]interface{}, len(contentUnion.Contents))
-						for i, c := range contentUnion.Contents {
-							contentArray[i] = c.ToMap()
-						}
-						content = contentArray
-					} else if contentUnion.Text != nil {
-						// Simple text content
-						content = *contentUnion.Text
-					} else {
-						// No content
-						content = nil
-					}
+					toolCalls := typedOpenAIToolCallsToProxy(typedToolCalls)
+					content := openAIContentUnionToInterface(contentUnion)
 
 					// For assistant messages with only tool calls and no content, use empty string
 					if msg.Role == core.RoleAssistant && len(toolCalls) > 0 && content == nil {
@@ -179,43 +151,12 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 
 // extractTextFromAnthropicMessage extracts text content from an Anthropic message
 func (c *Converter) extractTextFromAnthropicMessage(msg AnthropicMessage) (string, error) {
-	// Try to parse as string first
-	var str string
-	if err := json.Unmarshal(msg.Content, &str); err == nil {
-		return str, nil
-	}
-
-	// Try as content blocks
-	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+	text, blocks, err := parseAnthropicMessageContent(msg.Content)
+	if err == nil {
+		if text != nil {
+			return *text, nil
+		}
 		return c.extractTextFromContentBlocks(blocks), nil
-	}
-
-	// Try as array of interfaces
-	var items []interface{}
-	if err := json.Unmarshal(msg.Content, &items); err == nil {
-		if len(items) == 0 {
-			return "", nil
-		}
-
-		var builder strings.Builder
-		builder.Grow(len(items) * 50) // Approximate capacity
-
-		first := true
-		for _, item := range items {
-			if blockMap, ok := item.(map[string]interface{}); ok {
-				if blockType, ok := blockMap["type"].(string); ok && blockType == "text" {
-					if blockText, ok := blockMap["text"].(string); ok {
-						if !first {
-							builder.WriteByte('\n')
-						}
-						builder.WriteString(blockText)
-						first = false
-					}
-				}
-			}
-		}
-		return builder.String(), nil
 	}
 
 	// Fall back to string representation

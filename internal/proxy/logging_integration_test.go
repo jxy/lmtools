@@ -759,9 +759,21 @@ func TestLogTimestamps(t *testing.T) {
 		t.Errorf("Expected output to contain [INFO], got: %s", output)
 	}
 
-	// Verify ISO timestamp format
-	if !strings.Contains(output, "2025-") {
-		t.Errorf("Expected output to contain timestamp, got: %s", output)
+	// Verify RFC3339Nano timestamp format without pinning the calendar year.
+	timestampStart := strings.Index(output, "[INFO] [")
+	if timestampStart == -1 {
+		t.Errorf("Expected output to contain timestamp prefix, got: %s", output)
+	} else {
+		timestampStart += len("[INFO] [")
+		timestampEnd := strings.Index(output[timestampStart:], "]")
+		if timestampEnd == -1 {
+			t.Errorf("Expected output to contain timestamp terminator, got: %s", output)
+		} else {
+			timestamp := output[timestampStart : timestampStart+timestampEnd]
+			if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+				t.Errorf("Expected RFC3339Nano timestamp, got %q: %v", timestamp, err)
+			}
+		}
 	}
 
 	// Verify request ID is present (format: [#N])

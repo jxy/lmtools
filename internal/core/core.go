@@ -171,27 +171,7 @@ func buildArgoChatRequestTyped(cfg RequestConfig, messages []TypedMessage, strea
 
 	// Determine model provider for Argo routing
 	provider := DetermineArgoModelProvider(model)
-
-	// Convert TypedMessage to appropriate format based on model
-	var argoMessages []interface{}
-	switch provider {
-	case constants.ProviderAnthropic:
-		// Use typed conversion with helper function
-		typedMessages := ToAnthropicTyped(finalMessages)
-		argoMessages = MarshalAnthropicMessagesForRequest(typedMessages)
-	case constants.ProviderOpenAI:
-		// Use typed conversion with helper function
-		typedMessages := ToOpenAITyped(finalMessages)
-		argoMessages = MarshalOpenAIMessagesForRequest(typedMessages)
-	case constants.ProviderGoogle:
-		// Use typed conversion with helper function
-		typedMessages := ToGoogleForArgoTyped(finalMessages)
-		argoMessages = MarshalGoogleMessagesForRequest(typedMessages)
-	default:
-		// Default to OpenAI format with helper function
-		typedMessages := ToOpenAITyped(finalMessages)
-		argoMessages = MarshalOpenAIMessagesForRequest(typedMessages)
-	}
+	argoMessages := marshalTypedMessagesForProvider(provider, finalMessages, true)
 
 	// Create request with appropriate format
 	req := map[string]interface{}{
@@ -412,6 +392,29 @@ type ConvertedTools struct {
 	ToolChoice interface{}
 }
 
+func convertOpenAITools(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
+	openAITools := ConvertToolsToOpenAITyped(tools)
+	if toolChoice != nil {
+		if toolChoice.Type == "tool" && toolChoice.Name != "" {
+			return ConvertedTools{
+				Tools: openAITools,
+				ToolChoice: OpenAIToolChoice{
+					Type: "function",
+					Function: &OpenAIToolChoiceFunction{
+						Name: toolChoice.Name,
+					},
+				},
+			}
+		}
+		return ConvertedTools{
+			Tools:      openAITools,
+			ToolChoice: toolChoice.Type,
+		}
+	}
+
+	return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+}
+
 // ConvertToolsForProvider converts tools to the appropriate format based on the model
 // Exported for use by proxy converter
 // Returns ConvertedTools with typed structures for each provider
@@ -424,30 +427,7 @@ func ConvertToolsForProvider(model string, tools []ToolDefinition, toolChoice *T
 
 	switch provider {
 	case constants.ProviderOpenAI:
-		// Use typed OpenAI format
-		openAITools := ConvertToolsToOpenAITyped(tools)
-		// Convert tool choice
-		if toolChoice != nil {
-			if toolChoice.Type == "tool" && toolChoice.Name != "" {
-				// Use typed structure for specific function choice
-				return ConvertedTools{
-					Tools: openAITools,
-					ToolChoice: OpenAIToolChoice{
-						Type: "function",
-						Function: &OpenAIToolChoiceFunction{
-							Name: toolChoice.Name,
-						},
-					},
-				}
-			}
-			// For auto/none/required, return plain string (OpenAI API requirement)
-			return ConvertedTools{
-				Tools:      openAITools,
-				ToolChoice: toolChoice.Type, // String type like "auto", "none", etc.
-			}
-		}
-		// Default to string "auto" (OpenAI API expects plain string)
-		return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+		return convertOpenAITools(tools, toolChoice)
 
 	case constants.ProviderGoogle:
 		// Use typed Google format
@@ -475,26 +455,7 @@ func ConvertToolsForProvider(model string, tools []ToolDefinition, toolChoice *T
 		}
 
 	default:
-		// Default to typed OpenAI format
-		openAITools := ConvertToolsToOpenAITyped(tools)
-		if toolChoice != nil {
-			if toolChoice.Type == "tool" && toolChoice.Name != "" {
-				return ConvertedTools{
-					Tools: openAITools,
-					ToolChoice: OpenAIToolChoice{
-						Type: "function",
-						Function: &OpenAIToolChoiceFunction{
-							Name: toolChoice.Name,
-						},
-					},
-				}
-			}
-			return ConvertedTools{
-				Tools:      openAITools,
-				ToolChoice: toolChoice.Type,
-			}
-		}
-		return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+		return convertOpenAITools(tools, toolChoice)
 	}
 }
 

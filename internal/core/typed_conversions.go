@@ -56,6 +56,8 @@ import (
 	"strings"
 )
 
+var emptyToolSchemaJSON = json.RawMessage(`{"type":"object","properties":{}}`)
+
 // ARCHITECTURAL NOTE: These conversion functions use strongly typed structures
 // instead of map[string]interface{}. This ensures type safety and makes the
 // code more maintainable. All conversions go through TypedMessage as the
@@ -347,53 +349,44 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 	return result
 }
 
+func defaultToolSchemaJSON() json.RawMessage {
+	return append(json.RawMessage(nil), emptyToolSchemaJSON...)
+}
+
+func marshalToolSchema(inputSchema interface{}, transform func(interface{}) interface{}) json.RawMessage {
+	schema := inputSchema
+	if transform != nil && schema != nil {
+		schema = transform(schema)
+	}
+
+	switch s := schema.(type) {
+	case map[string]interface{}:
+		if data, err := json.Marshal(s); err == nil {
+			return json.RawMessage(data)
+		}
+	case json.RawMessage:
+		if len(s) > 0 {
+			return append(json.RawMessage(nil), s...)
+		}
+	case []byte:
+		if len(s) > 0 {
+			return json.RawMessage(append([]byte(nil), s...))
+		}
+	}
+
+	return defaultToolSchemaJSON()
+}
+
 // ConvertToolsToOpenAITyped converts tool definitions to strongly typed OpenAI format
 func ConvertToolsToOpenAITyped(tools []ToolDefinition) []OpenAITool {
 	openAITools := make([]OpenAITool, 0, len(tools))
 	for _, tool := range tools {
-		// InputSchema can be map[string]interface{} or json.RawMessage
-		var jsonParams json.RawMessage
-
-		if tool.InputSchema != nil {
-			switch schema := tool.InputSchema.(type) {
-			case map[string]interface{}:
-				// Most common case - convert map to JSON
-				if data, err := json.Marshal(schema); err == nil {
-					jsonParams = json.RawMessage(data)
-				}
-			case json.RawMessage:
-				// Already in JSON format (used in tests)
-				jsonParams = schema
-			case []byte:
-				// Raw bytes (convert to RawMessage)
-				jsonParams = json.RawMessage(schema)
-			default:
-				// Fallback - provide default schema
-				defaultSchema := map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-				}
-				if data, err := json.Marshal(defaultSchema); err == nil {
-					jsonParams = json.RawMessage(data)
-				}
-			}
-		} else {
-			// Provide default schema for nil InputSchema
-			defaultSchema := map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			}
-			if data, err := json.Marshal(defaultSchema); err == nil {
-				jsonParams = json.RawMessage(data)
-			}
-		}
-
 		openAITools = append(openAITools, OpenAITool{
 			Type: "function",
 			Function: OpenAIToolFunction{
 				Name:        tool.Name,
 				Description: tool.Description,
-				Parameters:  jsonParams,
+				Parameters:  marshalToolSchema(tool.InputSchema, nil),
 			},
 		})
 	}
@@ -404,47 +397,10 @@ func ConvertToolsToOpenAITyped(tools []ToolDefinition) []OpenAITool {
 func ConvertToolsToAnthropicTyped(tools []ToolDefinition) []AnthropicTool {
 	anthropicTools := make([]AnthropicTool, 0, len(tools))
 	for _, tool := range tools {
-		// InputSchema can be map[string]interface{} or json.RawMessage
-		var jsonSchema json.RawMessage
-
-		if tool.InputSchema != nil {
-			switch schema := tool.InputSchema.(type) {
-			case map[string]interface{}:
-				// Most common case - convert map to JSON
-				if data, err := json.Marshal(schema); err == nil {
-					jsonSchema = json.RawMessage(data)
-				}
-			case json.RawMessage:
-				// Already in JSON format (used in tests)
-				jsonSchema = schema
-			case []byte:
-				// Raw bytes (convert to RawMessage)
-				jsonSchema = json.RawMessage(schema)
-			default:
-				// Fallback - provide default schema
-				defaultSchema := map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-				}
-				if data, err := json.Marshal(defaultSchema); err == nil {
-					jsonSchema = json.RawMessage(data)
-				}
-			}
-		} else {
-			// Provide default schema for nil InputSchema
-			defaultSchema := map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			}
-			if data, err := json.Marshal(defaultSchema); err == nil {
-				jsonSchema = json.RawMessage(data)
-			}
-		}
-
 		anthropicTools = append(anthropicTools, AnthropicTool{
 			Name:        tool.Name,
 			Description: tool.Description,
-			InputSchema: jsonSchema,
+			InputSchema: marshalToolSchema(tool.InputSchema, nil),
 		})
 	}
 	return anthropicTools
@@ -459,50 +415,10 @@ func ConvertToolsToGoogleTyped(tools []ToolDefinition) []GoogleTool {
 	// Google uses a single tool object with multiple function declarations
 	declarations := make([]GoogleFunctionDeclaration, 0, len(tools))
 	for _, tool := range tools {
-		// InputSchema can be map[string]interface{} or json.RawMessage
-		var jsonParams json.RawMessage
-
-		if tool.InputSchema != nil {
-			// First convert to Google format if needed
-			converted := ConvertSchemaToGoogleFormat(tool.InputSchema)
-
-			switch schema := converted.(type) {
-			case map[string]interface{}:
-				// Most common case - convert map to JSON
-				if data, err := json.Marshal(schema); err == nil {
-					jsonParams = json.RawMessage(data)
-				}
-			case json.RawMessage:
-				// Already in JSON format
-				jsonParams = schema
-			case []byte:
-				// Raw bytes (convert to RawMessage)
-				jsonParams = json.RawMessage(schema)
-			default:
-				// Fallback - provide default schema
-				defaultSchema := map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-				}
-				if data, err := json.Marshal(defaultSchema); err == nil {
-					jsonParams = json.RawMessage(data)
-				}
-			}
-		} else {
-			// Provide default schema for nil InputSchema
-			defaultSchema := map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			}
-			if data, err := json.Marshal(defaultSchema); err == nil {
-				jsonParams = json.RawMessage(data)
-			}
-		}
-
 		declarations = append(declarations, GoogleFunctionDeclaration{
 			Name:        tool.Name,
 			Description: tool.Description,
-			Parameters:  jsonParams,
+			Parameters:  marshalToolSchema(tool.InputSchema, ConvertSchemaToGoogleFormat),
 		})
 	}
 

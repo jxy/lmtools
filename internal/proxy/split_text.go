@@ -139,7 +139,7 @@ func processInvalidUTF8(data []byte) (string, int) {
 func logInvalidUTF8(ctx context.Context, invalidBytes []byte) {
 	var escaped strings.Builder
 	for _, b := range invalidBytes {
-		escaped.WriteString(fmt.Sprintf("\\x%02X", b))
+		fmt.Fprintf(&escaped, "\\x%02X", b)
 	}
 
 	logger.From(ctx).Warnf("Invalid UTF-8 sequence in streaming text: %s", escaped.String())

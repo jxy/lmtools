@@ -103,58 +103,12 @@ func (c *Converter) convertAnthropicMessageToGoogle(msg AnthropicMessage) (Googl
 		Parts: []GooglePart{},
 	}
 
-	// Handle different content types - msg.Content is json.RawMessage
-	// Try to parse as string first
-	var str string
-	if err := json.Unmarshal(msg.Content, &str); err == nil {
-		googleContent.Parts = append(googleContent.Parts, GooglePart{Text: str})
+	text, blocks, err := parseAnthropicMessageContent(msg.Content)
+	if err == nil && text != nil {
+		googleContent.Parts = append(googleContent.Parts, GooglePart{Text: *text})
 		return googleContent, nil
 	}
-
-	// Try as content blocks
-	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-		parts, err := c.convertContentBlocksToGoogle(blocks)
-		if err != nil {
-			return googleContent, err
-		}
-		googleContent.Parts = parts
-		return googleContent, nil
-	}
-
-	// Try as array of interfaces
-	var items []interface{}
-	if err := json.Unmarshal(msg.Content, &items); err == nil {
-		// Convert to content blocks
-		blocks := []AnthropicContentBlock{}
-		for _, item := range items {
-			if blockMap, ok := item.(map[string]interface{}); ok {
-				block := AnthropicContentBlock{
-					Type: blockMap["type"].(string),
-				}
-				if text, ok := blockMap["text"].(string); ok {
-					block.Text = text
-				}
-				if name, ok := blockMap["name"].(string); ok {
-					block.Name = name
-				}
-				if id, ok := blockMap["id"].(string); ok {
-					block.ID = id
-				}
-				if input, ok := blockMap["input"].(map[string]interface{}); ok {
-					block.Input = input
-				}
-				if toolUseID, ok := blockMap["tool_use_id"].(string); ok {
-					block.ToolUseID = toolUseID
-				}
-				if content := blockMap["content"]; content != nil {
-					if contentBytes, err := json.Marshal(content); err == nil {
-						block.Content = json.RawMessage(contentBytes)
-					}
-				}
-				blocks = append(blocks, block)
-			}
-		}
+	if err == nil {
 		parts, err := c.convertContentBlocksToGoogle(blocks)
 		if err != nil {
 			return googleContent, err

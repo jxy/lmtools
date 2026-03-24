@@ -118,69 +118,16 @@ func (c *Converter) convertAnthropicMessageToOpenAI(ctx context.Context, msg Ant
 		Role: msg.Role,
 	}
 
-	// Handle different content types - msg.Content is json.RawMessage
-	// Try to parse as string first
-	var str string
-	if err := json.Unmarshal(msg.Content, &str); err == nil {
-		openAIMsg.Content = str
+	text, blocks, err := parseAnthropicMessageContent(msg.Content)
+	if err != nil {
+		openAIMsg.Content = string(msg.Content)
 		return openAIMsg, nil
 	}
-
-	// Try as content blocks
-	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-		return c.convertContentBlocksToOpenAI(ctx, string(msg.Role), blocks)
+	if text != nil {
+		openAIMsg.Content = *text
+		return openAIMsg, nil
 	}
-
-	// Try as array of interfaces
-	var items []interface{}
-	if err := json.Unmarshal(msg.Content, &items); err == nil {
-		// Convert to content blocks
-		blocks := []AnthropicContentBlock{}
-		for _, item := range items {
-			if blockMap, ok := item.(map[string]interface{}); ok {
-				block := AnthropicContentBlock{
-					Type: blockMap["type"].(string),
-				}
-				if text, ok := blockMap["text"].(string); ok {
-					block.Text = text
-				}
-				if name, ok := blockMap["name"].(string); ok {
-					block.Name = name
-				}
-				if id, ok := blockMap["id"].(string); ok {
-					block.ID = id
-				}
-				if input, ok := blockMap["input"].(map[string]interface{}); ok {
-					block.Input = input
-				}
-				if source, ok := blockMap["source"].(map[string]interface{}); ok {
-					block.Source = source
-				}
-				if inputAudio, ok := blockMap["input_audio"].(map[string]interface{}); ok {
-					block.InputAudio = inputAudio
-				}
-				if file, ok := blockMap["file"].(map[string]interface{}); ok {
-					block.File = file
-				}
-				if toolUseID, ok := blockMap["tool_use_id"].(string); ok {
-					block.ToolUseID = toolUseID
-				}
-				if content := blockMap["content"]; content != nil {
-					if contentBytes, err := json.Marshal(content); err == nil {
-						block.Content = json.RawMessage(contentBytes)
-					}
-				}
-				blocks = append(blocks, block)
-			}
-		}
-		return c.convertContentBlocksToOpenAI(ctx, string(msg.Role), blocks)
-	}
-
-	// Fall back to string representation
-	openAIMsg.Content = string(msg.Content)
-
-	return openAIMsg, nil
+	return c.convertContentBlocksToOpenAI(ctx, string(msg.Role), blocks)
 }
 
 // convertContentBlocksToOpenAI converts Anthropic content blocks to OpenAI message format
@@ -224,49 +171,19 @@ func (c *Converter) convertContentBlocksToOpenAI(ctx context.Context, role strin
 
 	// Use the typed converter
 	contentUnion, typedToolCalls := core.ConvertBlocksToOpenAIContentTyped(coreBlocks)
+	msg.ToolCalls = typedOpenAIToolCallsToProxy(typedToolCalls)
 
-	// Convert typed tool calls to ToolCall structs
-	if len(typedToolCalls) > 0 {
-		msg.ToolCalls = make([]ToolCall, len(typedToolCalls))
-		for i, tc := range typedToolCalls {
-			msg.ToolCalls[i] = ToolCall{
-				ID:   tc.ID,
-				Type: tc.Type,
-				Function: FunctionCall{
-					Name:      tc.Function.Name,
-					Arguments: tc.Function.Arguments,
-				},
-			}
-		}
+	if len(msg.ToolCalls) > 0 {
 		// OpenAI expects null content when tool_calls are present
 		// unless it's multimodal content (array format)
 		if len(contentUnion.Contents) > 0 {
-			// Convert multimodal content to []interface{}
-			contentArray := make([]interface{}, len(contentUnion.Contents))
-			for i, c := range contentUnion.Contents {
-				contentArray[i] = c.ToMap()
-			}
-			msg.Content = contentArray
+			msg.Content = openAIContentUnionToInterface(contentUnion)
 		} else {
 			// Tool calls only, no content
 			msg.Content = nil
 		}
 	} else {
-		// Convert content union to interface{}
-		if len(contentUnion.Contents) > 0 {
-			// Multimodal content - convert to []interface{}
-			contentArray := make([]interface{}, len(contentUnion.Contents))
-			for i, c := range contentUnion.Contents {
-				contentArray[i] = c.ToMap()
-			}
-			msg.Content = contentArray
-		} else if contentUnion.Text != nil {
-			// Simple text content
-			msg.Content = *contentUnion.Text
-		} else {
-			// No content
-			msg.Content = nil
-		}
+		msg.Content = openAIContentUnionToInterface(contentUnion)
 	}
 	return msg, nil
 }
@@ -488,36 +405,9 @@ func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, or
 		Role: core.RoleAssistant,
 	}
 
-	// Convert content union to interface{}
-	if len(contentUnion.Contents) > 0 {
-		// Multimodal content - convert to []interface{}
-		contentArray := make([]interface{}, len(contentUnion.Contents))
-		for i, c := range contentUnion.Contents {
-			contentArray[i] = c.ToMap()
-		}
-		message.Content = contentArray
-	} else if contentUnion.Text != nil {
-		// Simple text content
-		message.Content = *contentUnion.Text
-	} else {
-		// No content
-		message.Content = nil
-	}
+	message.Content = openAIContentUnionToInterface(contentUnion)
 
-	// Convert typed tool calls to proxy ToolCall structs
-	if len(typedToolCalls) > 0 {
-		message.ToolCalls = make([]ToolCall, len(typedToolCalls))
-		for i, tc := range typedToolCalls {
-			message.ToolCalls[i] = ToolCall{
-				ID:   tc.ID,
-				Type: tc.Type,
-				Function: FunctionCall{
-					Name:      tc.Function.Name,
-					Arguments: tc.Function.Arguments,
-				},
-			}
-		}
-	}
+	message.ToolCalls = typedOpenAIToolCallsToProxy(typedToolCalls)
 
 	// Map stop reason to finish reason
 	finishReason := MapStopReasonToOpenAIFinishReason(resp.StopReason)

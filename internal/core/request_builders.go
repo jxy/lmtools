@@ -10,6 +10,22 @@ import (
 	"strings"
 )
 
+func marshalTypedMessagesForProvider(provider string, messages []TypedMessage, keepGoogleSystem bool) []interface{} {
+	switch provider {
+	case constants.ProviderAnthropic:
+		return MarshalAnthropicMessagesForRequest(ToAnthropicTyped(messages))
+	case constants.ProviderGoogle:
+		if keepGoogleSystem {
+			return MarshalGoogleMessagesForRequest(ToGoogleForArgoTyped(messages))
+		}
+		return MarshalGoogleMessagesForRequest(ToGoogleTyped(messages))
+	case constants.ProviderOpenAI:
+		fallthrough
+	default:
+		return MarshalOpenAIMessagesForRequest(ToOpenAITyped(messages))
+	}
+}
+
 // handleAPIKeyAuth handles API key authentication for all providers
 func handleAPIKeyAuth(httpReq *http.Request, cfg RequestConfig, provider string) error {
 	if keyFile := cfg.GetAPIKeyFile(); keyFile != "" {
@@ -60,14 +76,10 @@ func buildProviderRequest(cfg RequestConfig, url string, body []byte, provider s
 
 // buildOpenAIToolAwareRequest builds an OpenAI-compatible request with tool support
 func buildOpenAIToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Convert messages to OpenAI format using typed conversion and helper
-	typedOpenAIMessages := ToOpenAITyped(typedMessages)
-	openAIMessages := MarshalOpenAIMessagesForRequest(typedOpenAIMessages)
-
 	// Build OpenAI request with tool support
 	reqMap := map[string]interface{}{
 		"model":    model,
-		"messages": openAIMessages,
+		"messages": marshalTypedMessagesForProvider(constants.ProviderOpenAI, typedMessages, false),
 		"stream":   stream,
 	}
 
@@ -99,14 +111,10 @@ func buildOpenAIToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage
 
 // buildAnthropicToolAwareRequest builds an Anthropic-compatible request with tool support
 func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Convert messages to Anthropic format using typed conversion and helper
-	typedAnthropicMessages := ToAnthropicTyped(typedMessages)
-	anthropicMessages := MarshalAnthropicMessagesForRequest(typedAnthropicMessages)
-
 	// Build Anthropic request with tool support
 	reqMap := map[string]interface{}{
 		"model":    model,
-		"messages": anthropicMessages,
+		"messages": marshalTypedMessagesForProvider(constants.ProviderAnthropic, typedMessages, false),
 		"stream":   stream,
 	}
 
@@ -143,15 +151,9 @@ func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMess
 
 // buildGoogleToolAwareRequest builds a Google-compatible request with tool support
 func buildGoogleToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Convert messages to Google format using typed conversion
-	typedGoogleMessages := ToGoogleTyped(typedMessages)
-
-	// Convert typed messages to []interface{} using the centralized marshaling function
-	googleMessages := MarshalGoogleMessagesForRequest(typedGoogleMessages)
-
 	// Build Google request - note: Google has different structure
 	reqMap := map[string]interface{}{
-		"contents": googleMessages,
+		"contents": marshalTypedMessagesForProvider(constants.ProviderGoogle, typedMessages, false),
 	}
 
 	// Add system instruction if provided

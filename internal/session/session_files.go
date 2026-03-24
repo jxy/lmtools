@@ -23,6 +23,17 @@ type MessageMetadata struct {
 	Model     *string   `json:"model"`
 }
 
+func buildMessageMetadata(msg Message) MessageMetadata {
+	metadata := MessageMetadata{
+		Role:      msg.Role,
+		Timestamp: msg.Timestamp,
+	}
+	if msg.Model != "" {
+		metadata.Model = &msg.Model
+	}
+	return metadata
+}
+
 // writeMessage atomically writes a message to disk
 func writeMessage(sessionPath, msgID string, msg Message) error {
 	// Write content file
@@ -31,21 +42,9 @@ func writeMessage(sessionPath, msgID string, msg Message) error {
 		return errors.WrapError("write message content", err)
 	}
 
-	// Prepare metadata
-	var model *string
-	if msg.Model != "" {
-		model = &msg.Model
-	}
-
-	metadata := MessageMetadata{
-		Role:      msg.Role,
-		Timestamp: msg.Timestamp,
-		Model:     model,
-	}
-
 	// Write metadata file
 	metaPath := filepath.Join(sessionPath, msgID+".json")
-	metaData, err := json.MarshalIndent(metadata, "", "  ")
+	metaData, err := json.MarshalIndent(buildMessageMetadata(msg), "", "  ")
 	if err != nil {
 		return errors.WrapError("marshal metadata", err)
 	}
@@ -519,15 +518,7 @@ func stageMessageFiles(sessionPath string, msg Message, toolInteraction *core.To
 	}
 	staging.JsonPath = tmpJson.Name()
 
-	metadata := MessageMetadata{
-		Role:      msg.Role,
-		Timestamp: msg.Timestamp,
-	}
-	if msg.Model != "" {
-		metadata.Model = &msg.Model
-	}
-
-	metaData, err := json.MarshalIndent(metadata, "", "  ")
+	metaData, err := json.MarshalIndent(buildMessageMetadata(msg), "", "  ")
 	if err != nil {
 		tmpJson.Close()
 		staging.Close()

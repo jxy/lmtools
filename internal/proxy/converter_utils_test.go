@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -173,4 +174,68 @@ func TestExtractSystemContentUtils(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseAnthropicMessageContent(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          json.RawMessage
+		wantText       *string
+		wantBlockCount int
+		wantErr        bool
+	}{
+		{
+			name:     "string content",
+			input:    json.RawMessage(`"hello"`),
+			wantText: ptr("hello"),
+		},
+		{
+			name:           "block array",
+			input:          json.RawMessage(`[{"type":"text","text":"hello"},{"type":"tool_use","id":"tool-1","name":"run","input":{"cmd":"pwd"}}]`),
+			wantBlockCount: 2,
+		},
+		{
+			name:           "single block",
+			input:          json.RawMessage(`{"type":"text","text":"single"}`),
+			wantBlockCount: 1,
+		},
+		{
+			name:    "invalid content",
+			input:   json.RawMessage(`{not-json`),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, blocks, err := parseAnthropicMessageContent(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseAnthropicMessageContent() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+
+			switch {
+			case tt.wantText != nil:
+				if text == nil || *text != *tt.wantText {
+					t.Fatalf("parseAnthropicMessageContent() text = %v, want %q", text, *tt.wantText)
+				}
+				if len(blocks) != 0 {
+					t.Fatalf("parseAnthropicMessageContent() blocks = %d, want 0", len(blocks))
+				}
+			default:
+				if text != nil {
+					t.Fatalf("parseAnthropicMessageContent() unexpected text = %q", *text)
+				}
+				if len(blocks) != tt.wantBlockCount {
+					t.Fatalf("parseAnthropicMessageContent() block count = %d, want %d", len(blocks), tt.wantBlockCount)
+				}
+			}
+		})
+	}
+}
+
+func ptr(s string) *string {
+	return &s
 }

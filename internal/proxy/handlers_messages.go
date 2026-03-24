@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/constants"
@@ -158,61 +159,67 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		len(req.Messages), len(req.Tools), http.StatusOK, false, time.Since(start))
 }
 
+func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info bool) {
+	log := logger.From(ctx)
+	for _, block := range content {
+		if block.Type != "tool_use" {
+			continue
+		}
+		if inputJSON, err := json.Marshal(block.Input); err == nil {
+			if info {
+				log.Infof("Tool call: %s: %s", block.Name, string(inputJSON))
+			} else {
+				log.Debugf("Tool call from response: %s: %s", block.Name, string(inputJSON))
+			}
+		}
+	}
+}
+
+func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *AnthropicRequest, provider, originalModel string) (*AnthropicResponse, error) {
+	log := logger.From(ctx)
+
+	switch provider {
+	case constants.ProviderOpenAI:
+		openAIResp, err := s.forwardToOpenAI(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		return s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel), nil
+
+	case constants.ProviderGoogle:
+		googleResp, err := s.forwardToGoogle(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		return s.converter.ConvertGoogleToAnthropic(googleResp, originalModel), nil
+
+	case constants.ProviderArgo:
+		if len(anthReq.Tools) > 0 {
+			log.Warnf("Tools requested but not supported by Argo provider, falling back to non-streaming")
+		}
+
+		argoResp, err := s.forwardToArgo(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq)
+		logToolUseBlocks(ctx, anthResp.Content, false)
+		return anthResp, nil
+
+	case constants.ProviderAnthropic:
+		return s.forwardToAnthropic(ctx, anthReq)
+
+	default:
+		return nil, fmt.Errorf("route request: %w", fmt.Errorf("unknown provider: %s", provider))
+	}
+}
+
 // handleNonStreamingRequest processes non-streaming requests
 func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Request, anthReq *AnthropicRequest, provider, originalModel, mappedModel string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
-	var anthResp *AnthropicResponse
-	var err error
-
-	// Route to appropriate provider
-	switch provider {
-	case constants.ProviderOpenAI:
-		openAIResp, openAIErr := s.forwardToOpenAI(ctx, anthReq)
-		if openAIErr != nil {
-			err = openAIErr
-		} else {
-			anthResp = s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel)
-		}
-
-	case constants.ProviderGoogle:
-		googleResp, googleErr := s.forwardToGoogle(ctx, anthReq)
-		if googleErr != nil {
-			err = googleErr
-		} else {
-			anthResp = s.converter.ConvertGoogleToAnthropic(googleResp, originalModel)
-		}
-
-	case constants.ProviderArgo:
-		// Check if tools are requested
-		if len(anthReq.Tools) > 0 {
-			log.Warnf("Tools requested but not supported by Argo provider, falling back to non-streaming")
-			// Could return an error here if strict tool support is required
-		}
-
-		argoResp, argoErr := s.forwardToArgo(ctx, anthReq)
-		if argoErr != nil {
-			err = argoErr
-		} else {
-			anthResp = s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq)
-			// Log tool calls from response if present
-			for _, block := range anthResp.Content {
-				if block.Type == "tool_use" {
-					if inputJSON, err := json.Marshal(block.Input); err == nil {
-						log.Debugf("Tool call from response: %s: %s", block.Name, string(inputJSON))
-					}
-				}
-			}
-		}
-
-	case constants.ProviderAnthropic:
-		anthResp, err = s.forwardToAnthropic(ctx, anthReq)
-
-	default:
-		err = fmt.Errorf("route request: %w", fmt.Errorf("unknown provider: %s", provider))
-	}
-
+	anthResp, err := s.forwardAnthropicRequest(ctx, anthReq, provider, originalModel)
 	if err != nil {
 		s.sendProviderErrorAsAnthropic(ctx, w, provider, err)
 		return
@@ -222,13 +229,7 @@ func (s *Server) handleNonStreamingRequest(w http.ResponseWriter, r *http.Reques
 	anthResp.Model = originalModel
 
 	// Log tool calls if present
-	for _, block := range anthResp.Content {
-		if block.Type == "tool_use" {
-			if inputJSON, err := json.Marshal(block.Input); err == nil {
-				log.Infof("Tool call: %s: %s", block.Name, string(inputJSON))
-			}
-		}
-	}
+	logToolUseBlocks(ctx, anthResp.Content, true)
 
 	// Log the complete response before sending (only if debug enabled)
 	logger.DebugJSON(log, "Sending Anthropic response", anthResp)

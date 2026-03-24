@@ -459,6 +459,32 @@ func TestContentUnionMarshalFails(t *testing.T) {
 	})
 }
 
+func TestConvertToolsTypedDefaultsEmptySchema(t *testing.T) {
+	tools := []ToolDefinition{
+		{
+			Name:        "run",
+			Description: "Run a command",
+		},
+	}
+
+	openAITools := ConvertToolsToOpenAITyped(tools)
+	anthropicTools := ConvertToolsToAnthropicTyped(tools)
+	googleTools := ConvertToolsToGoogleTyped(tools)
+
+	want := `{"type":"object","properties":{}}`
+
+	if got := string(openAITools[0].Function.Parameters); got != want {
+		t.Fatalf("OpenAI schema = %s, want %s", got, want)
+	}
+	if got := string(anthropicTools[0].InputSchema); got != want {
+		t.Fatalf("Anthropic schema = %s, want %s", got, want)
+	}
+
+	if got := string(googleTools[0].FunctionDeclarations[0].Parameters); got != want {
+		t.Fatalf("Google schema = %s, want %s", got, want)
+	}
+}
+
 // stringPtr helper function for string pointers
 func stringPtr(s string) *string {
 	return &s

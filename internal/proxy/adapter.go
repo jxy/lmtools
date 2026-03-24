@@ -247,70 +247,24 @@ func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 	}
 
 	// Convert Anthropic messages to typed Anthropic messages first
-	anthropicTypedMessages := make([]core.AnthropicMessage, len(req.Messages))
-	for i, msg := range req.Messages {
-		anthropicTypedMessages[i] = core.AnthropicMessage{
+	typed.Messages = make([]core.TypedMessage, 0, len(req.Messages))
+	for _, msg := range req.Messages {
+		typedMsg := core.TypedMessage{
 			Role: string(msg.Role),
 		}
 
-		// Parse content from json.RawMessage
-		var content interface{}
 		if len(msg.Content) > 0 {
-			if err := json.Unmarshal(msg.Content, &content); err == nil {
-				// Convert to AnthropicContentUnion
-				switch c := content.(type) {
-				case string:
-					anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
-						Text:     &c,
-						Contents: nil,
-					}
-				case []interface{}:
-					// Convert to []core.AnthropicContent
-					contents := make([]core.AnthropicContent, 0, len(c))
-					for _, item := range c {
-						if m, ok := item.(map[string]interface{}); ok {
-							ac := core.AnthropicContent{}
-							if t, ok := m["type"].(string); ok {
-								ac.Type = t
-							}
-							if text, ok := m["text"].(string); ok {
-								ac.Text = text
-							}
-							// Add more field conversions as needed
-							contents = append(contents, ac)
-						}
-					}
-					anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
-						Text:     nil,
-						Contents: contents,
-					}
-				default:
-					emptyStr := ""
-					anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
-						Text:     &emptyStr,
-						Contents: nil,
-					}
+			text, blocks, err := parseAnthropicMessageContent(msg.Content)
+			if err == nil {
+				if text != nil && *text != "" {
+					typedMsg.Blocks = []core.Block{core.TextBlock{Text: *text}}
+				} else if len(blocks) > 0 {
+					typedMsg.Blocks = AnthropicBlocksToCore(blocks)
 				}
-			} else {
-				// If unmarshal fails, treat as empty content
-				emptyStr := ""
-				anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
-					Text:     &emptyStr,
-					Contents: nil,
-				}
-			}
-		} else {
-			// Empty content
-			emptyStr := ""
-			anthropicTypedMessages[i].Content = core.AnthropicContentUnion{
-				Text:     &emptyStr,
-				Contents: nil,
 			}
 		}
+		typed.Messages = append(typed.Messages, typedMsg)
 	}
-
-	// Convert messages using typed function
-	typed.Messages = core.FromAnthropicTyped(anthropicTypedMessages)
 
 	// Convert tools
 	if len(req.Tools) > 0 {

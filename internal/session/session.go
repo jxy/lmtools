@@ -502,30 +502,12 @@ func DeleteNode(nodePath string) error {
 
 // saveSystemMessage saves the system prompt as message 0000
 func saveSystemMessage(session *Session, systemPrompt string) error {
-	// Write content file
-	contentPath := filepath.Join(session.Path, "0000.txt")
-	if err := os.WriteFile(contentPath, []byte(systemPrompt), constants.FilePerm); err != nil {
-		return errors.WrapError("write system content", err)
-	}
-
-	// Write metadata file
-	metadata := MessageMetadata{
-		Role:      "system",
+	return writeMessage(session.Path, "0000", Message{
+		ID:        "0000",
+		Role:      core.RoleSystem,
+		Content:   systemPrompt,
 		Timestamp: time.Now(),
-		Model:     nil,
-	}
-
-	metadataPath := filepath.Join(session.Path, "0000.json")
-	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return errors.WrapError("marshal system metadata", err)
-	}
-
-	if err := os.WriteFile(metadataPath, metadataBytes, constants.FilePerm); err != nil {
-		return errors.WrapError("write system metadata", err)
-	}
-
-	return nil
+	})
 }
 
 // GetSystemMessage reads the system message from a session if it exists

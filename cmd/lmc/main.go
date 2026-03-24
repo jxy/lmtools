@@ -519,18 +519,17 @@ func persistAssistantOnly(ctx context.Context, out string, sess *session.Session
 	// Save assistant response to session if enabled (but NOT when there are tool calls - HandleToolExecution will do it)
 	if sess != nil && out != "" {
 		logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(out), cfg.StreamChat)
-		// Save assistant response without tool calls
-		result, err := session.SaveAssistantResponseWithTools(ctx, sess, out, nil, model)
+		store := session.NewStore(sess, logger.From(ctx))
+		previousPath := sess.Path
+		path, messageID, err := store.SaveAssistant(ctx, out, nil, model)
 		if err != nil {
 			// Log error but don't fail the request
 			notifier.Warnf("Warning: failed to save response to session: %v", err)
-		} else if result.Path != sess.Path {
-			// Update session path if a sibling was created
-			sess.Path = result.Path
+		} else if path != previousPath {
 			notifier.Infof("Response saved to sibling branch %s as message %s",
-				session.GetSessionID(result.Path), result.MessageID)
+				session.GetSessionID(path), messageID)
 		} else {
-			logger.From(ctx).Debugf("Response saved to session %s as message %s", session.GetSessionID(result.Path), result.MessageID)
+			logger.From(ctx).Debugf("Response saved to session %s as message %s", session.GetSessionID(path), messageID)
 		}
 	} else {
 		logger.From(ctx).Debugf("Not saving response | Session: %v | Output length: %d", sess != nil, len(out))

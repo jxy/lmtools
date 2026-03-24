@@ -103,37 +103,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Process non-streaming request through existing pipeline
-	var anthResp *AnthropicResponse
-
-	switch provider {
-	case constants.ProviderAnthropic:
-		anthResp, err = s.forwardToAnthropic(ctx, anthReq)
-	case constants.ProviderGoogle:
-		googleResp, googleErr := s.forwardToGoogle(ctx, anthReq)
-		if googleErr != nil {
-			err = googleErr
-		} else {
-			anthResp = s.converter.ConvertGoogleToAnthropic(googleResp, originalModel)
-		}
-	case constants.ProviderArgo:
-		argoResp, argoErr := s.forwardToArgo(ctx, anthReq)
-		if argoErr != nil {
-			err = argoErr
-		} else {
-			anthResp = s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq)
-			// Log tool calls from response if present
-			for _, block := range anthResp.Content {
-				if block.Type == "tool_use" {
-					if inputJSON, err := json.Marshal(block.Input); err == nil {
-						log.Debugf("Tool call from response: %s: %s", block.Name, string(inputJSON))
-					}
-				}
-			}
-		}
-	default:
-		err = fmt.Errorf("unsupported provider: %s", provider)
-	}
-
+	anthResp, err := s.forwardAnthropicRequest(ctx, anthReq, provider, originalModel)
 	if err != nil {
 		s.sendProviderErrorAsOpenAI(ctx, w, provider, err)
 		return

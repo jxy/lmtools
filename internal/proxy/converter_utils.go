@@ -72,6 +72,79 @@ func generateResponseID() string {
 	return generateUUID("msg_")
 }
 
+func unmarshalAnthropicBlocks(raw json.RawMessage) ([]AnthropicContentBlock, error) {
+	var blocks []AnthropicContentBlock
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		return blocks, nil
+	}
+
+	var rawBlocks []json.RawMessage
+	if err := json.Unmarshal(raw, &rawBlocks); err != nil {
+		return nil, err
+	}
+
+	blocks = make([]AnthropicContentBlock, 0, len(rawBlocks))
+	for _, item := range rawBlocks {
+		var block AnthropicContentBlock
+		if err := json.Unmarshal(item, &block); err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, nil
+}
+
+func parseAnthropicMessageContent(raw json.RawMessage) (*string, []AnthropicContentBlock, error) {
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		return &str, nil, nil
+	}
+
+	if blocks, err := unmarshalAnthropicBlocks(raw); err == nil {
+		return nil, blocks, nil
+	}
+
+	var block AnthropicContentBlock
+	if err := json.Unmarshal(raw, &block); err == nil {
+		return nil, []AnthropicContentBlock{block}, nil
+	}
+
+	return nil, nil, fmt.Errorf("unsupported anthropic message content format")
+}
+
+func openAIContentUnionToInterface(contentUnion core.OpenAIContentUnion) interface{} {
+	if len(contentUnion.Contents) > 0 {
+		contentArray := make([]interface{}, len(contentUnion.Contents))
+		for i, c := range contentUnion.Contents {
+			contentArray[i] = c.ToMap()
+		}
+		return contentArray
+	}
+	if contentUnion.Text != nil {
+		return *contentUnion.Text
+	}
+	return nil
+}
+
+func typedOpenAIToolCallsToProxy(toolCalls []core.OpenAIToolCall) []ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+
+	proxyCalls := make([]ToolCall, len(toolCalls))
+	for i, tc := range toolCalls {
+		proxyCalls[i] = ToolCall{
+			ID:   tc.ID,
+			Type: tc.Type,
+			Function: FunctionCall{
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			},
+		}
+	}
+	return proxyCalls
+}
+
 // AnthropicBlocksToCore converts Anthropic content blocks to core.Block slice
 // This is the centralized converter to avoid duplication across the codebase
 func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
