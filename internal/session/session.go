@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	stdErrors "errors"
 	"fmt"
 	"lmtools/internal/constants"
@@ -467,8 +466,7 @@ func DeleteNode(nodePath string) error {
 		}
 
 		// Check if the message files exist
-		metaPath := filepath.Join(dir, msgID+".json")
-		if _, err := os.Stat(metaPath); err != nil {
+		if _, err := os.Stat(buildMessageFilePaths(dir, msgID).JSONPath); err != nil {
 			return errors.WrapError("delete node", fmt.Errorf("node not found: %s", nodePath))
 		}
 	}
@@ -517,20 +515,20 @@ func GetSystemMessage(sessionPath string) (*string, error) {
 		sessionPath = filepath.Join(GetSessionsDir(), sessionPath)
 	}
 
-	// Check if system message files exist
-	contentPath := filepath.Join(sessionPath, "0000.txt")
-	metadataPath := filepath.Join(sessionPath, "0000.json")
+	paths := buildMessageFilePaths(sessionPath, "0000")
+	if _, err := os.Stat(paths.JSONPath); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, errors.WrapError("stat system message", err)
+	}
 
-	// Check metadata file exists and has system role
-	if metaBytes, err := os.ReadFile(metadataPath); err == nil {
-		var metadata MessageMetadata
-		if err := json.Unmarshal(metaBytes, &metadata); err == nil && metadata.Role == core.RoleSystem {
-			// Read the content
-			if content, err := os.ReadFile(contentPath); err == nil {
-				systemMsg := string(content)
-				return &systemMsg, nil
-			}
-		}
+	msg, err := readMessage(sessionPath, "0000")
+	if err != nil {
+		return nil, errors.WrapError("read system message", err)
+	}
+	if msg.Role == core.RoleSystem {
+		systemMsg := msg.Content
+		return &systemMsg, nil
 	}
 
 	// No system message found
@@ -596,6 +594,8 @@ func ForkSessionWithSystemMessage(ctx context.Context, originalPath string, newS
 		}
 	}
 
+	mc := newMessageCommitter(newSession.Path)
+
 	// Copy non-system messages to the new session
 	for _, msg := range messages {
 		// Skip system messages from the original session
@@ -613,21 +613,17 @@ func ForkSessionWithSystemMessage(ctx context.Context, originalPath string, newS
 		logger.From(ctx).Debugf("Processing message %s (role=%s) from path %s", msg.ID, msg.Role, originalMsgPath)
 
 		if originalMsgPath != "" {
-			// Check if this message has a tool file in its actual location
-			toolPath := filepath.Join(originalMsgPath, msg.ID+".tools.json")
-			if _, err := os.Stat(toolPath); err == nil {
-				// Use LoadToolInteraction to properly load tool data
-				ti, err := LoadToolInteraction(originalMsgPath, msg.ID)
-				if err != nil {
-					// Log error but continue - missing tool data shouldn't fail the fork
-					logger.From(ctx).Debugf("Failed to load tool interaction for message %s: %v", msg.ID, err)
-				} else if ti != nil {
-					toolInteraction = ti
-					logger.From(ctx).Debugf("Loaded tool interaction for message %s: %d calls, %d results",
-						msg.ID, len(ti.Calls), len(ti.Results))
-				}
+			// Use LoadToolInteraction to properly load tool data
+			ti, err := LoadToolInteraction(originalMsgPath, msg.ID)
+			if err != nil {
+				// Log error but continue - missing tool data shouldn't fail the fork
+				logger.From(ctx).Debugf("Failed to load tool interaction for message %s: %v", msg.ID, err)
+			} else if ti != nil {
+				toolInteraction = ti
+				logger.From(ctx).Debugf("Loaded tool interaction for message %s: %d calls, %d results",
+					msg.ID, len(ti.Calls), len(ti.Results))
 			} else {
-				logger.From(ctx).Debugf("No tool file found for message %s at %s", msg.ID, toolPath)
+				logger.From(ctx).Debugf("No tool file found for message %s at %s", msg.ID, buildMessageFilePaths(originalMsgPath, msg.ID).ToolsPath)
 			}
 		}
 
@@ -640,14 +636,12 @@ func ForkSessionWithSystemMessage(ctx context.Context, originalPath string, newS
 		}
 
 		// Stage the message files
-		staged, err := stageMessageFiles(newSession.Path, newMsg, toolInteraction)
+		staged, err := mc.Stage(newMsg, toolInteraction)
 		if err != nil {
 			os.RemoveAll(newSession.Path)
 			return nil, errors.WrapError("stage message", err)
 		}
 
-		// Use messageCommitter to place the message files atomically
-		mc := newMessageCommitter(newSession.Path)
 		newMsgID, needSibling, _, err := mc.Commit(ctx, staged)
 		staged.Close() // Clean up staging files immediately
 

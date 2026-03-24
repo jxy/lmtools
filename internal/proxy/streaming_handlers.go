@@ -235,33 +235,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 // Since Argo doesn't support streaming with tools, we call the non-streaming endpoint
 // and simulate streaming while sending pings to keep the connection alive
 func (s *Server) streamFromArgoWithPings(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
-	log := logger.From(ctx)
-
-	// Send message_start before sending any pings while waiting for Argo
-	if err := handler.SendMessageStart(); err != nil {
-		return err
-	}
-
-	// Forward to Argo's non-streaming endpoint while sending pings
-	log.Debugf("Waiting for Argo response with pings every %v", pingInterval)
-	argoResp, err := s.waitForArgoResponseWithPings(ctx, anthReq, handler, pingInterval)
-	if err != nil {
-		return err
-	}
-
-	// Convert to Anthropic format
-	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
-
-	// Update model in handler
-	handler.UpdateModel(anthResp.Model)
-
-	// Stream the content (simulate streaming by chunking the response)
-	if err := s.streamArgoResponseContent(ctx, anthResp, handler); err != nil {
-		return err
-	}
-
-	// Use the new FinishStream helper for consistent completion
-	return handler.FinishStream(anthResp.StopReason, anthResp.Usage)
+	return s.simulateStreamingFromArgoWithInterval(ctx, anthReq, handler, pingInterval)
 }
 
 // streamFromAnthropic handles streaming from Anthropic API
@@ -487,101 +461,44 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 
 // streamArgoResponseContent streams the content from an Argo response
 func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *AnthropicResponse, handler *AnthropicStreamHandler) error {
-	// Stream each content block
-	for i, block := range anthResp.Content {
-		switch block.Type {
-		case "text":
-			if err := s.streamTextBlock(block.Text, i, handler); err != nil {
-				return err
-			}
-
-		case "tool_use":
-			if err := s.streamToolBlock(ctx, block, i, handler); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+	return streamSimulatedContentBlocks(ctx, anthResp.Content, anthropicSimulatedContentEmitter{
+		ctx:     ctx,
+		handler: handler,
+	})
 }
 
 // streamTextBlock streams a text content block
 func (s *Server) streamTextBlock(content string, blockIndex int, handler *AnthropicStreamHandler) error {
-	// Send content block start event
-	if err := handler.SendContentBlockStart(blockIndex, "text"); err != nil {
+	emitter := anthropicSimulatedContentEmitter{
+		ctx:     handler.ctx,
+		handler: handler,
+	}
+	if err := emitter.StartTextBlock(blockIndex, content); err != nil {
 		return err
 	}
-
-	// Determine chunk size based on content length
-	chunkSize := constants.DefaultTextChunkSize
-	if len(content) > 1000 {
-		chunkSize = constants.DefaultTextChunkSize * 2 // Larger chunks for longer content
-	}
-
-	// Use ContentSplitter for UTF-8 aware text chunking
-	splitter := NewContentSplitter(handler.ctx, TextMode, chunkSize)
-	chunks := splitter.Split(content)
-
-	// Stream each chunk
-	for _, chunk := range chunks {
-		// Send as content_block_delta event
-		if err := handler.SendTextDelta(chunk); err != nil {
-			return err
-		}
-	}
-
-	// Send content block stop event
-	if err := handler.SendContentBlockStop(blockIndex); err != nil {
+	if err := emitSimulatedTextChunks(handler.ctx, content, func(chunk string) error {
+		return emitter.WriteTextChunk(blockIndex, chunk)
+	}); err != nil {
 		return err
 	}
-
-	return nil
+	return emitter.EndTextBlock(blockIndex, content)
 }
 
 // streamToolBlock streams a tool use content block
 func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
-	log := logger.From(ctx)
-
-	// Send tool use start event with empty input field
-	if err := handler.SendToolUseStart(blockIndex, block.ID, block.Name); err != nil {
+	emitter := anthropicSimulatedContentEmitter{
+		ctx:     ctx,
+		handler: handler,
+	}
+	if err := emitter.StartToolBlock(blockIndex, block); err != nil {
 		return err
 	}
-
-	// Send initial empty partial_json delta (Anthropic format requirement)
-	if err := handler.SendToolInputDelta(blockIndex, ""); err != nil {
+	if err := emitSimulatedToolInputChunks(ctx, block.Input, func(chunk string) error {
+		return emitter.WriteToolInputChunk(blockIndex, chunk)
+	}); err != nil {
 		return err
 	}
-
-	// Stream the input JSON in chunks
-	inputJSON, err := json.Marshal(block.Input)
-	if err != nil {
-		return err
-	}
-	inputStr := string(inputJSON)
-	chunkSize := constants.DefaultJSONChunkSize
-
-	// Use ContentSplitter for JSON-aware chunking to respect UTF-8 and escape boundaries
-	splitter := NewContentSplitter(ctx, JSONMode, chunkSize)
-	chunks := splitter.Split(inputStr)
-
-	// Stream each chunk
-	for _, chunk := range chunks {
-		if err := handler.SendToolInputDelta(blockIndex, chunk); err != nil {
-			return err
-		}
-	}
-
-	// Send tool use stop event
-	if err := handler.SendContentBlockStop(blockIndex); err != nil {
-		return err
-	}
-
-	// Log the full tool use block details
-	if log.IsDebugEnabled() {
-		toolJSON, _ := json.Marshal(block)
-		log.Debugf("Streamed tool use block: %s", string(toolJSON))
-	}
-	return nil
+	return emitter.EndToolBlock(blockIndex, block)
 }
 
 // simulateStreamingFromArgoWithInterval simulates streaming with a specific interval
@@ -786,8 +703,6 @@ func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicReq
 
 // simulateOpenAIStreamFromArgo simulates OpenAI streaming when Argo has tools
 func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
-	log := logger.From(ctx)
-
 	// Get non-streaming response from Argo
 	argoResp, err := s.forwardToArgo(ctx, anthReq)
 	if err != nil {
@@ -798,54 +713,17 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 
 	// Log tool calls from response if present
-	for _, block := range anthResp.Content {
-		if block.Type == "tool_use" {
-			if inputJSON, err := json.Marshal(block.Input); err == nil {
-				log.Debugf("Tool call from response: %s: %s", block.Name, string(inputJSON))
-			}
-		}
-	}
+	logToolUseBlocks(ctx, anthResp.Content, false)
 
 	// Send initial assistant delta
 	if err := writer.WriteInitialAssistantDelta(); err != nil {
 		return err
 	}
 
-	// Stream each content block
-	for i, block := range anthResp.Content {
-		switch block.Type {
-		case "text":
-			// Determine chunk size based on content length (same logic as streamTextBlock)
-			chunkSize := constants.DefaultTextChunkSize
-			if len(block.Text) > 1000 {
-				chunkSize = constants.DefaultTextChunkSize * 2 // Larger chunks for longer content
-			}
-
-			// Use ContentSplitter for UTF-8 aware chunking to prevent character splitting
-			splitter := NewContentSplitter(ctx, TextMode, chunkSize)
-			chunks := splitter.Split(block.Text)
-			for _, chunk := range chunks {
-				if err := writer.WriteContent(chunk); err != nil {
-					return err
-				}
-			}
-
-		case "tool_use":
-			// Send initial tool call with ID, name, and empty arguments
-			if err := writer.WriteToolCallIntro(i, block.ID, block.Name); err != nil {
-				return err
-			}
-
-			// Stream arguments in incremental deltas per OpenAI spec
-			args, _ := json.Marshal(block.Input)
-			argStr := string(args)
-			splitter := NewContentSplitter(ctx, JSONMode, 64)
-			for _, part := range splitter.Split(argStr) {
-				if err := writer.WriteToolArguments(i, part); err != nil {
-					return err
-				}
-			}
-		}
+	if err := streamSimulatedContentBlocks(ctx, anthResp.Content, openAISimulatedContentEmitter{
+		writer: writer,
+	}); err != nil {
+		return err
 	}
 
 	// Usage Streaming Implementation:
@@ -866,16 +744,6 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 	// Map stop reason to finish reason
 	finishReason := MapStopReasonToOpenAIFinishReason(anthResp.StopReason)
 
-	// Prepare usage if available
-	var usage *OpenAIUsage
-	if anthResp.Usage != nil {
-		usage = &OpenAIUsage{
-			PromptTokens:     anthResp.Usage.InputTokens,
-			CompletionTokens: anthResp.Usage.OutputTokens,
-			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
-		}
-	}
-
 	// Write finish sequence: final chunk with finish_reason, optional usage, then [DONE]
-	return writer.WriteFinish(finishReason, usage)
+	return writer.WriteFinish(finishReason, AnthropicUsageToOpenAI(anthResp.Usage))
 }

@@ -22,6 +22,17 @@ func NewStore(session *Session, log core.Logger) *Store {
 	}
 }
 
+func (s *Store) finalizeSave(result SaveResult, logFormat string) (string, string, error) {
+	if result.Path != s.session.Path {
+		s.session.Path = result.Path
+		if s.log != nil {
+			s.log.Debugf(logFormat, GetSessionID(result.Path), result.MessageID)
+		}
+	}
+
+	return result.Path, result.MessageID, nil
+}
+
 // SaveAssistant saves an assistant message with optional tool calls
 func (s *Store) SaveAssistant(ctx context.Context, text string, calls []core.ToolCall, model string) (string, string, error) {
 	if s.session == nil {
@@ -33,16 +44,7 @@ func (s *Store) SaveAssistant(ctx context.Context, text string, calls []core.Too
 		return "", "", err
 	}
 
-	// Update internal session path if it changed
-	if result.Path != s.session.Path {
-		s.session.Path = result.Path
-		if s.log != nil {
-			s.log.Debugf("Response saved to sibling branch %s as message %s",
-				GetSessionID(result.Path), result.MessageID)
-		}
-	}
-
-	return result.Path, result.MessageID, nil
+	return s.finalizeSave(result, "Response saved to sibling branch %s as message %s")
 }
 
 // SaveToolResults saves tool execution results with optional additional text
@@ -56,16 +58,7 @@ func (s *Store) SaveToolResults(ctx context.Context, results []core.ToolResult, 
 		return "", "", err
 	}
 
-	// Update internal session path if it changed
-	if result.Path != s.session.Path {
-		s.session.Path = result.Path
-		if s.log != nil {
-			s.log.Debugf("Tool results saved to sibling branch %s as message %s",
-				GetSessionID(result.Path), result.MessageID)
-		}
-	}
-
-	return result.Path, result.MessageID, nil
+	return s.finalizeSave(result, "Tool results saved to sibling branch %s as message %s")
 }
 
 // UpdatePath updates the current session path

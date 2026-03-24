@@ -388,11 +388,7 @@ func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json
 
 		// Store usage for later emission with finish_reason
 		if event.Usage != nil {
-			c.lastUsage = &OpenAIUsage{
-				PromptTokens:     event.Usage.InputTokens,
-				CompletionTokens: event.Usage.OutputTokens,
-				TotalTokens:      event.Usage.InputTokens + event.Usage.OutputTokens,
-			}
+			c.lastUsage = AnthropicUsageToOpenAI(event.Usage)
 		}
 
 	case EventMessageStop:

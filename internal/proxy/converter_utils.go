@@ -126,6 +126,291 @@ func openAIContentUnionToInterface(contentUnion core.OpenAIContentUnion) interfa
 	return nil
 }
 
+func anthropicContentUnionToRawMessage(contentUnion core.AnthropicContentUnion) (json.RawMessage, error) {
+	if contentUnion.Text != nil {
+		contentJSON, err := json.Marshal(*contentUnion.Text)
+		if err != nil {
+			return nil, err
+		}
+		return json.RawMessage(contentJSON), nil
+	}
+
+	if len(contentUnion.Contents) > 0 {
+		contentArray := make([]interface{}, len(contentUnion.Contents))
+		for i, c := range contentUnion.Contents {
+			contentArray[i] = c.ToMap()
+		}
+		contentJSON, err := json.Marshal(contentArray)
+		if err != nil {
+			return nil, err
+		}
+		return json.RawMessage(contentJSON), nil
+	}
+
+	return json.RawMessage(`""`), nil
+}
+
+func typedOpenAIMessagesToProxy(messages []core.OpenAIMessage) []OpenAIMessage {
+	proxyMessages := make([]OpenAIMessage, 0, len(messages))
+	for _, msg := range messages {
+		content := openAIContentUnionToInterface(msg.Content)
+		if msg.Role == string(core.RoleAssistant) && len(msg.ToolCalls) > 0 && len(msg.Content.Contents) == 0 {
+			// Preserve existing proxy behavior: assistant tool-call messages with
+			// text-only content are emitted with nil content.
+			content = nil
+		}
+		proxyMessages = append(proxyMessages, OpenAIMessage{
+			Role:       core.Role(msg.Role),
+			Content:    content,
+			Name:       msg.Name,
+			ToolCalls:  typedOpenAIToolCallsToProxy(msg.ToolCalls),
+			ToolCallID: msg.ToolCallID,
+		})
+	}
+	return proxyMessages
+}
+
+func typedAnthropicMessagesToProxy(messages []core.AnthropicMessage) ([]AnthropicMessage, error) {
+	proxyMessages := make([]AnthropicMessage, 0, len(messages))
+	for _, msg := range messages {
+		content, err := anthropicContentUnionToRawMessage(msg.Content)
+		if err != nil {
+			return nil, err
+		}
+		proxyMessages = append(proxyMessages, AnthropicMessage{
+			Role:    core.Role(msg.Role),
+			Content: content,
+		})
+	}
+	return proxyMessages, nil
+}
+
+func toolDefinitionsToOpenAITools(tools []core.ToolDefinition) []OpenAITool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	openAITools := make([]OpenAITool, 0, len(tools))
+	for _, tool := range tools {
+		parameters := filterSchemaMetadata(tool.InputSchema)
+		paramsMap, _ := parameters.(map[string]interface{})
+		openAITools = append(openAITools, OpenAITool{
+			Type: "function",
+			Function: OpenAIFunc{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  paramsMap,
+			},
+		})
+	}
+	return openAITools
+}
+
+func toolDefinitionsToAnthropicTools(tools []core.ToolDefinition) []AnthropicTool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	anthropicTools := make([]AnthropicTool, 0, len(tools))
+	for _, tool := range tools {
+		anthropicTools = append(anthropicTools, AnthropicTool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+		})
+	}
+	return anthropicTools
+}
+
+func toolChoiceToOpenAI(choice *core.ToolChoice) interface{} {
+	if choice == nil {
+		return nil
+	}
+
+	switch choice.Type {
+	case "any", "auto", "none":
+		return choice.Type
+	case "tool":
+		if choice.Name != "" {
+			return map[string]interface{}{
+				"type": "function",
+				"function": map[string]string{
+					"name": choice.Name,
+				},
+			}
+		}
+	}
+
+	return nil
+}
+
+func toolChoiceToAnthropic(choice *core.ToolChoice) *AnthropicToolChoice {
+	if choice == nil {
+		return nil
+	}
+
+	return &AnthropicToolChoice{
+		Type: choice.Type,
+		Name: choice.Name,
+	}
+}
+
+func openAIContentToTypedUnion(content interface{}) core.OpenAIContentUnion {
+	switch value := content.(type) {
+	case string:
+		return core.OpenAIContentUnion{
+			Text:     &value,
+			Contents: nil,
+		}
+	case []interface{}:
+		return core.OpenAIContentUnion{
+			Contents: openAIContentItemsToTyped(value),
+		}
+	case []map[string]interface{}:
+		items := make([]interface{}, len(value))
+		for i, item := range value {
+			items[i] = item
+		}
+		return core.OpenAIContentUnion{
+			Contents: openAIContentItemsToTyped(items),
+		}
+	default:
+		return core.OpenAIContentUnion{}
+	}
+}
+
+func openAIContentItemsToTyped(items []interface{}) []core.OpenAIContent {
+	contents := make([]core.OpenAIContent, 0, len(items))
+	for _, item := range items {
+		contentMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		contentType, _ := contentMap["type"].(string)
+		switch contentType {
+		case "text":
+			contents = append(contents, core.OpenAIContent{
+				Type: "text",
+				Text: core.GetString(contentMap, "text"),
+			})
+		case "image_url":
+			imageURLMap, ok := contentMap["image_url"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			contents = append(contents, core.OpenAIContent{
+				Type: "image_url",
+				ImageURL: &core.OpenAIImageURL{
+					URL:    core.GetString(imageURLMap, "url"),
+					Detail: defaultString(core.GetString(imageURLMap, "detail"), "auto"),
+				},
+			})
+		case "input_audio":
+			audioMap, ok := contentMap["input_audio"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			audioData := &core.AudioData{
+				ID:       core.GetString(audioMap, "id"),
+				Format:   core.GetString(audioMap, "format"),
+				Data:     core.GetString(audioMap, "data"),
+				URL:      core.GetString(audioMap, "url"),
+				Duration: core.GetInt(audioMap, "duration"),
+			}
+			if audioData.Format == "" && audioData.Data != "" {
+				audioData.Format = "wav"
+			}
+			contents = append(contents, core.OpenAIContent{
+				Type:       "input_audio",
+				InputAudio: audioData,
+			})
+		case "file":
+			fileMap, ok := contentMap["file"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			contents = append(contents, core.OpenAIContent{
+				Type: "file",
+				File: &core.FileData{
+					FileID:   core.GetString(fileMap, "file_id"),
+					Name:     core.GetString(fileMap, "name"),
+					MimeType: core.GetString(fileMap, "mime_type"),
+					Data:     core.GetString(fileMap, "data"),
+					URL:      core.GetString(fileMap, "url"),
+					Size:     core.GetInt64(fileMap, "size"),
+				},
+			})
+		}
+	}
+	return contents
+}
+
+func openAIToolCallsToTyped(toolCalls []ToolCall) []core.OpenAIToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+
+	typedCalls := make([]core.OpenAIToolCall, len(toolCalls))
+	for i, tc := range toolCalls {
+		typedCalls[i] = core.OpenAIToolCall{
+			ID:   tc.ID,
+			Type: tc.Type,
+			Function: core.OpenAIFunctionCall{
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			},
+		}
+	}
+	return typedCalls
+}
+
+func openAIToolChoiceToTyped(toolChoice interface{}) *core.ToolChoice {
+	if toolChoice == nil {
+		return nil
+	}
+
+	switch value := toolChoice.(type) {
+	case string:
+		if value == "auto" || value == "none" {
+			return &core.ToolChoice{Type: value}
+		}
+	case map[string]interface{}:
+		if value["type"] != "function" {
+			return nil
+		}
+		switch function := value["function"].(type) {
+		case map[string]interface{}:
+			name, ok := function["name"].(string)
+			if !ok {
+				return nil
+			}
+			return &core.ToolChoice{
+				Type: "tool",
+				Name: name,
+			}
+		case map[string]string:
+			name, ok := function["name"]
+			if !ok {
+				return nil
+			}
+			return &core.ToolChoice{
+				Type: "tool",
+				Name: name,
+			}
+		}
+	}
+
+	return nil
+}
+
+func defaultString(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 func typedOpenAIToolCallsToProxy(toolCalls []core.OpenAIToolCall) []ToolCall {
 	if len(toolCalls) == 0 {
 		return nil

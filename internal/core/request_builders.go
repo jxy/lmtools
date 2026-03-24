@@ -10,6 +10,136 @@ import (
 	"strings"
 )
 
+type chatRequestPayload struct {
+	Provider   string
+	Model      string
+	Messages   []TypedMessage
+	System     string
+	Tools      interface{}
+	ToolChoice interface{}
+	Stream     bool
+}
+
+func newChatRequestPayload(provider, model string, typedMessages []TypedMessage, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) chatRequestPayload {
+	payload := chatRequestPayload{
+		Provider: provider,
+		Model:    model,
+		Messages: typedMessages,
+		System:   system,
+		Stream:   stream,
+	}
+
+	if provider == constants.ProviderAnthropic || provider == constants.ProviderGoogle {
+		inlineSystem, rest := splitSystem(typedMessages)
+		if payload.System == "" {
+			payload.System = inlineSystem
+		}
+		payload.Messages = rest
+	}
+
+	if len(toolDefs) > 0 {
+		converted := ConvertToolsForProvider(model, toolDefs, toolChoice)
+		payload.Tools = converted.Tools
+		payload.ToolChoice = converted.ToolChoice
+	}
+
+	return payload
+}
+
+func (p chatRequestPayload) requestMap() map[string]interface{} {
+	switch p.Provider {
+	case constants.ProviderAnthropic:
+		reqMap := map[string]interface{}{
+			"model":    p.Model,
+			"messages": marshalTypedMessagesForProvider(constants.ProviderAnthropic, p.Messages, false),
+			"stream":   p.Stream,
+		}
+		if p.System != "" {
+			reqMap["system"] = p.System
+		}
+		addToolFields(reqMap, p)
+		return reqMap
+
+	case constants.ProviderGoogle:
+		reqMap := map[string]interface{}{
+			"contents": marshalTypedMessagesForProvider(constants.ProviderGoogle, p.Messages, false),
+		}
+		if p.System != "" {
+			reqMap["systemInstruction"] = googleSystemInstruction(p.System)
+		}
+		if p.Tools != nil {
+			reqMap["tools"] = p.Tools
+			reqMap["toolConfig"] = googleAutoToolConfig()
+		}
+		return reqMap
+
+	case constants.ProviderOpenAI:
+		fallthrough
+	default:
+		reqMap := map[string]interface{}{
+			"model":    p.Model,
+			"messages": marshalTypedMessagesForProvider(constants.ProviderOpenAI, p.Messages, false),
+			"stream":   p.Stream,
+		}
+		addToolFields(reqMap, p)
+		return reqMap
+	}
+}
+
+func addToolFields(reqMap map[string]interface{}, payload chatRequestPayload) {
+	if payload.Tools != nil {
+		reqMap["tools"] = payload.Tools
+	}
+	if payload.ToolChoice != nil {
+		reqMap["tool_choice"] = payload.ToolChoice
+	}
+}
+
+func googleSystemInstruction(system string) map[string]interface{} {
+	return map[string]interface{}{
+		"parts": []map[string]string{
+			{"text": system},
+		},
+	}
+}
+
+func googleAutoToolConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"functionCallConfig": map[string]interface{}{
+			"mode": "AUTO",
+		},
+	}
+}
+
+func resolveProviderChatURL(cfg RequestConfig, provider, model string, stream bool) string {
+	url := cfg.GetProviderURL()
+
+	switch provider {
+	case constants.ProviderAnthropic:
+		if url == "" {
+			url = "https://api.anthropic.com/v1"
+		}
+		return strings.TrimRight(url, "/") + "/messages"
+
+	case constants.ProviderGoogle:
+		if url == "" {
+			url = "https://generativelanguage.googleapis.com/v1beta"
+		}
+		if stream {
+			return fmt.Sprintf("%s/models/%s:streamGenerateContent", strings.TrimRight(url, "/"), model)
+		}
+		return fmt.Sprintf("%s/models/%s:generateContent", strings.TrimRight(url, "/"), model)
+
+	case constants.ProviderOpenAI:
+		fallthrough
+	default:
+		if url == "" {
+			url = "https://api.openai.com/v1"
+		}
+		return strings.TrimRight(url, "/") + "/chat/completions"
+	}
+}
+
 func marshalTypedMessagesForProvider(provider string, messages []TypedMessage, keepGoogleSystem bool) []interface{} {
 	switch provider {
 	case constants.ProviderAnthropic:
@@ -75,132 +205,39 @@ func buildProviderRequest(cfg RequestConfig, url string, body []byte, provider s
 }
 
 // buildOpenAIToolAwareRequest builds an OpenAI-compatible request with tool support
-func buildOpenAIToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Build OpenAI request with tool support
-	reqMap := map[string]interface{}{
-		"model":    model,
-		"messages": marshalTypedMessagesForProvider(constants.ProviderOpenAI, typedMessages, false),
-		"stream":   stream,
-	}
+func buildOpenAIToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	payload := newChatRequestPayload(constants.ProviderOpenAI, model, typedMessages, "", toolDefs, toolChoice, stream)
 
-	// Add tools if enabled
-	if len(toolDefs) > 0 {
-		// Use typed definitions and convert them
-		converted := ConvertToolsForProvider(model, toolDefs, nil)
-		if converted.Tools != nil {
-			reqMap["tools"] = converted.Tools
-		}
-		if converted.ToolChoice != nil {
-			reqMap["tool_choice"] = converted.ToolChoice
-		}
-	}
-
-	body, err := json.Marshal(reqMap)
+	body, err := json.Marshal(payload.requestMap())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal OpenAI request: %w", err)
 	}
 
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://api.openai.com/v1"
-	}
-	url = strings.TrimRight(url, "/") + "/chat/completions"
-
-	return buildProviderRequest(cfg, url, body, constants.ProviderOpenAI, stream)
+	return buildProviderRequest(cfg, resolveProviderChatURL(cfg, constants.ProviderOpenAI, model, stream), body, constants.ProviderOpenAI, stream)
 }
 
 // buildAnthropicToolAwareRequest builds an Anthropic-compatible request with tool support
-func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Build Anthropic request with tool support
-	reqMap := map[string]interface{}{
-		"model":    model,
-		"messages": marshalTypedMessagesForProvider(constants.ProviderAnthropic, typedMessages, false),
-		"stream":   stream,
-	}
+func buildAnthropicToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	payload := newChatRequestPayload(constants.ProviderAnthropic, model, typedMessages, system, toolDefs, toolChoice, stream)
 
-	// Add system message if present
-	if system != "" {
-		reqMap["system"] = system
-	}
-
-	// Add tools if enabled
-	if len(toolDefs) > 0 {
-		// Use typed definitions and convert them
-		converted := ConvertToolsForProvider(model, toolDefs, nil)
-		if converted.Tools != nil {
-			reqMap["tools"] = converted.Tools
-		}
-		if converted.ToolChoice != nil {
-			reqMap["tool_choice"] = converted.ToolChoice
-		}
-	}
-
-	body, err := json.Marshal(reqMap)
+	body, err := json.Marshal(payload.requestMap())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal Anthropic request: %w", err)
 	}
 
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://api.anthropic.com/v1"
-	}
-	url = strings.TrimRight(url, "/") + "/messages"
-
-	return buildProviderRequest(cfg, url, body, constants.ProviderAnthropic, stream)
+	return buildProviderRequest(cfg, resolveProviderChatURL(cfg, constants.ProviderAnthropic, model, stream), body, constants.ProviderAnthropic, stream)
 }
 
 // buildGoogleToolAwareRequest builds a Google-compatible request with tool support
-func buildGoogleToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, _ *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	// Build Google request - note: Google has different structure
-	reqMap := map[string]interface{}{
-		"contents": marshalTypedMessagesForProvider(constants.ProviderGoogle, typedMessages, false),
-	}
+func buildGoogleToolAwareRequest(cfg RequestConfig, typedMessages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	payload := newChatRequestPayload(constants.ProviderGoogle, model, typedMessages, cfg.GetEffectiveSystem(), toolDefs, toolChoice, stream)
 
-	// Add system instruction if provided
-	system := cfg.GetEffectiveSystem()
-	if system != "" {
-		reqMap["systemInstruction"] = map[string]interface{}{
-			"parts": []map[string]string{
-				{"text": system},
-			},
-		}
-	}
-
-	// Add tools if enabled using ConvertToolsForProvider
-	if len(toolDefs) > 0 {
-		// Use ConvertToolsForProvider to get properly formatted Google tools
-		converted := ConvertToolsForProvider(model, toolDefs, nil)
-		if converted.Tools != nil {
-			// converted.Tools contains []GoogleTool which already has the right structure
-			reqMap["tools"] = converted.Tools
-		}
-
-		// Enable function calling
-		reqMap["toolConfig"] = map[string]interface{}{
-			"functionCallConfig": map[string]interface{}{
-				"mode": "AUTO",
-			},
-		}
-	}
-
-	body, err := json.Marshal(reqMap)
+	body, err := json.Marshal(payload.requestMap())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal Google request: %w", err)
 	}
 
-	url := cfg.GetProviderURL()
-	if url == "" {
-		url = "https://generativelanguage.googleapis.com/v1beta"
-	}
-
-	// Use streaming or non-streaming endpoint based on config
-	if stream {
-		url = fmt.Sprintf("%s/models/%s:streamGenerateContent", strings.TrimRight(url, "/"), model)
-	} else {
-		url = fmt.Sprintf("%s/models/%s:generateContent", strings.TrimRight(url, "/"), model)
-	}
-
-	return buildProviderRequest(cfg, url, body, constants.ProviderGoogle, stream)
+	return buildProviderRequest(cfg, resolveProviderChatURL(cfg, constants.ProviderGoogle, model, stream), body, constants.ProviderGoogle, stream)
 }
 
 // buildChatRequestFromTyped builds a unified chat request from typed messages
@@ -223,12 +260,11 @@ func buildChatRequestFromTyped(cfg RequestConfig, typedMessages []TypedMessage, 
 	case constants.ProviderOpenAI:
 		return buildOpenAIToolAwareRequest(cfg, typedMessages, model, toolDefs, nil, stream)
 	case constants.ProviderAnthropic:
-		// Extract system from messages for Anthropic
-		sys, msgs := splitSystem(typedMessages)
+		sys, _ := splitSystem(typedMessages)
 		if sys == "" {
-			sys = system // Use passed system if no message system
+			sys = system
 		}
-		return buildAnthropicToolAwareRequest(cfg, msgs, model, sys, toolDefs, nil, stream)
+		return buildAnthropicToolAwareRequest(cfg, typedMessages, model, sys, toolDefs, nil, stream)
 	case constants.ProviderGoogle:
 		return buildGoogleToolAwareRequest(cfg, typedMessages, model, toolDefs, nil, stream)
 	default:

@@ -203,6 +203,49 @@ func TestOpenAIRequestJSON_ToolChoiceFunction(t *testing.T) {
 	}
 }
 
+func TestOpenAIRequestJSON_ToolChoiceFunctionBuilder(t *testing.T) {
+	cfg, apiKeyFile, err := createTestConfig("openai", "gpt-4", true)
+	if err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+	defer os.Remove(apiKeyFile)
+
+	messages := []TypedMessage{
+		NewTextMessage("user", "What's the weather?"),
+	}
+	tools := createTestTools()
+	toolChoice := &ToolChoice{
+		Type: "tool",
+		Name: "get_weather",
+	}
+
+	req, _, err := buildOpenAIToolAwareRequest(cfg, messages, "gpt-4", tools, toolChoice, false)
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	jsonData, err := extractJSONBody(req)
+	if err != nil {
+		t.Fatalf("Failed to extract JSON: %v", err)
+	}
+
+	toolChoiceObj, ok := jsonData["tool_choice"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool_choice should be object for specific function, got %T: %+v",
+			jsonData["tool_choice"], jsonData["tool_choice"])
+	}
+	if toolChoiceObj["type"] != "function" {
+		t.Errorf("tool_choice.type should be 'function', got %v", toolChoiceObj["type"])
+	}
+	functionObj, ok := toolChoiceObj["function"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool_choice.function should exist and be an object, got %T", toolChoiceObj["function"])
+	}
+	if functionObj["name"] != "get_weather" {
+		t.Errorf("tool_choice.function.name should be 'get_weather', got %v", functionObj["name"])
+	}
+}
+
 func TestOpenAIRequestJSON_NoTools(t *testing.T) {
 	cfg, apiKeyFile, err := createTestConfig("openai", "gpt-4", false)
 	if err != nil {
@@ -383,6 +426,43 @@ func TestAnthropicRequestJSON_SystemMessage(t *testing.T) {
 		if msgMap["role"] == "system" {
 			t.Error("System message should not be in messages array for Anthropic")
 		}
+	}
+}
+
+func TestAnthropicRequestJSON_InlineSystemMessage(t *testing.T) {
+	cfg, apiKeyFile, err := createTestConfig("anthropic", "claude-3-opus", false)
+	if err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+	defer os.Remove(apiKeyFile)
+
+	messages := []TypedMessage{
+		NewTextMessage("system", "You are a helpful assistant"),
+		NewTextMessage("user", "Hello"),
+	}
+
+	req, _, err := buildAnthropicToolAwareRequest(cfg, messages, "claude-3-opus", "", nil, nil, false)
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	jsonData, err := extractJSONBody(req)
+	if err != nil {
+		t.Fatalf("Failed to extract JSON: %v", err)
+	}
+
+	if system, ok := jsonData["system"].(string); !ok {
+		t.Errorf("system should be top-level string field, got %T", jsonData["system"])
+	} else if system != "You are a helpful assistant" {
+		t.Errorf("system content mismatch: %s", system)
+	}
+
+	msgs := jsonData["messages"].([]interface{})
+	if len(msgs) != 1 {
+		t.Fatalf("Expected 1 non-system message, got %d", len(msgs))
+	}
+	if role := msgs[0].(map[string]interface{})["role"]; role == "system" {
+		t.Error("System message should not remain in messages array for Anthropic")
 	}
 }
 
@@ -592,6 +672,51 @@ func TestGoogleRequestJSON_SystemInstruction(t *testing.T) {
 		if part["text"] != "You are a helpful assistant" {
 			t.Errorf("System instruction text mismatch: %v", part["text"])
 		}
+	}
+}
+
+func TestGoogleRequestJSON_InlineSystemInstruction(t *testing.T) {
+	cfg, apiKeyFile, err := createTestConfig("google", "gemini-pro", false)
+	if err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+	defer os.Remove(apiKeyFile)
+	cfg.system = ""
+
+	messages := []TypedMessage{
+		NewTextMessage("system", "You are a helpful assistant"),
+		NewTextMessage("user", "Hello"),
+	}
+
+	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	jsonData, err := extractJSONBody(req)
+	if err != nil {
+		t.Fatalf("Failed to extract JSON: %v", err)
+	}
+
+	if sysInst, ok := jsonData["systemInstruction"].(map[string]interface{}); !ok {
+		t.Errorf("systemInstruction should be object, got %T", jsonData["systemInstruction"])
+	} else {
+		parts, ok := sysInst["parts"].([]interface{})
+		if !ok {
+			t.Fatalf("systemInstruction should have parts array, got %T", sysInst["parts"])
+		}
+		part := parts[0].(map[string]interface{})
+		if part["text"] != "You are a helpful assistant" {
+			t.Errorf("System instruction text mismatch: %v", part["text"])
+		}
+	}
+
+	contents := jsonData["contents"].([]interface{})
+	if len(contents) != 1 {
+		t.Fatalf("Expected 1 non-system content message, got %d", len(contents))
+	}
+	if role := contents[0].(map[string]interface{})["role"]; role == "system" {
+		t.Error("System message should not remain inline for Google")
 	}
 }
 

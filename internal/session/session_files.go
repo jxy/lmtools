@@ -34,24 +34,109 @@ func buildMessageMetadata(msg Message) MessageMetadata {
 	return metadata
 }
 
+func marshalMessageMetadata(msg Message) ([]byte, error) {
+	metaData, err := json.MarshalIndent(buildMessageMetadata(msg), "", "  ")
+	if err != nil {
+		return nil, errors.WrapError("marshal metadata", err)
+	}
+	return metaData, nil
+}
+
+func hasToolInteraction(toolInteraction *core.ToolInteraction) bool {
+	return toolInteraction != nil && (len(toolInteraction.Calls) > 0 || len(toolInteraction.Results) > 0)
+}
+
+func marshalToolInteraction(toolInteraction *core.ToolInteraction) ([]byte, error) {
+	if !hasToolInteraction(toolInteraction) {
+		return nil, nil
+	}
+
+	toolData, err := json.MarshalIndent(toolInteraction, "", "  ")
+	if err != nil {
+		return nil, errors.WrapError("marshal tool interaction", err)
+	}
+	return toolData, nil
+}
+
+type messageFileSet struct {
+	Content  []byte
+	Metadata []byte
+	Tools    []byte
+}
+
+func buildMessageFileSet(msg Message, toolInteraction *core.ToolInteraction) (*messageFileSet, error) {
+	metaData, err := marshalMessageMetadata(msg)
+	if err != nil {
+		return nil, err
+	}
+
+	toolData, err := marshalToolInteraction(toolInteraction)
+	if err != nil {
+		return nil, err
+	}
+
+	return &messageFileSet{
+		Content:  []byte(msg.Content),
+		Metadata: metaData,
+		Tools:    toolData,
+	}, nil
+}
+
+type messageFilePaths struct {
+	TxtPath   string
+	JSONPath  string
+	ToolsPath string
+}
+
+func buildMessageFilePaths(sessionPath, msgID string) messageFilePaths {
+	basePath := filepath.Join(sessionPath, msgID)
+	return messageFilePaths{
+		TxtPath:   basePath + ".txt",
+		JSONPath:  basePath + ".json",
+		ToolsPath: basePath + ".tools.json",
+	}
+}
+
+func writeStagedTempFile(dir, pattern string, data []byte) (string, error) {
+	tmpFile, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+
+	defer func() {
+		if tmpFile != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		return "", err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", err
+	}
+	tmpFile = nil
+
+	return tmpPath, nil
+}
+
 // writeMessage atomically writes a message to disk
 func writeMessage(sessionPath, msgID string, msg Message) error {
-	// Write content file
-	contentPath := filepath.Join(sessionPath, msgID+".txt")
-	if err := writeFileAtomic(contentPath, []byte(msg.Content)); err != nil {
+	fileSet, err := buildMessageFileSet(msg, nil)
+	if err != nil {
+		return err
+	}
+
+	paths := buildMessageFilePaths(sessionPath, msgID)
+	if err := writeFileAtomic(paths.TxtPath, fileSet.Content); err != nil {
 		return errors.WrapError("write message content", err)
 	}
 
-	// Write metadata file
-	metaPath := filepath.Join(sessionPath, msgID+".json")
-	metaData, err := json.MarshalIndent(buildMessageMetadata(msg), "", "  ")
-	if err != nil {
-		return errors.WrapError("marshal metadata", err)
-	}
-
-	if err := writeFileAtomic(metaPath, metaData); err != nil {
+	if err := writeFileAtomic(paths.JSONPath, fileSet.Metadata); err != nil {
 		// Try to clean up content file
-		os.Remove(contentPath)
+		os.Remove(paths.TxtPath)
 		return errors.WrapError("write metadata", err)
 	}
 
@@ -62,9 +147,10 @@ func writeMessage(sessionPath, msgID string, msg Message) error {
 // Invariant: A message exists if and only if its .json exists.
 // .txt may be missing (e.g., tool-only messages), .tools.json is optional.
 func readMessage(sessionPath, msgID string) (*Message, error) {
+	paths := buildMessageFilePaths(sessionPath, msgID)
+
 	// Read metadata first (always required)
-	metaPath := filepath.Join(sessionPath, msgID+".json")
-	metaBytes, err := os.ReadFile(metaPath)
+	metaBytes, err := os.ReadFile(paths.JSONPath)
 	if err != nil {
 		return nil, errors.WrapError("read metadata", err)
 	}
@@ -76,9 +162,8 @@ func readMessage(sessionPath, msgID string) (*Message, error) {
 
 	// Read content if it exists (some messages like tool results might not have text)
 	var content string
-	contentPath := filepath.Join(sessionPath, msgID+".txt")
-	if _, err := os.Stat(contentPath); err == nil {
-		contentBytes, err := os.ReadFile(contentPath)
+	if _, err := os.Stat(paths.TxtPath); err == nil {
+		contentBytes, err := os.ReadFile(paths.TxtPath)
 		if err != nil {
 			return nil, errors.WrapError("read content", err)
 		}
@@ -272,18 +357,16 @@ func deleteMessageAndDescendants(dirPath string, msgNum int) error {
 
 		if int(num) >= msgNum {
 			// Delete message files
-			contentPath := filepath.Join(dirPath, msgID+".txt")
-			metaPath := filepath.Join(dirPath, msgID+".json")
-			toolsPath := filepath.Join(dirPath, msgID+".tools.json")
+			paths := buildMessageFilePaths(dirPath, msgID)
 
 			// Delete content file (ignore if doesn't exist)
-			_ = os.Remove(contentPath)
+			_ = os.Remove(paths.TxtPath)
 
 			// Delete tools file (ignore if doesn't exist)
-			_ = os.Remove(toolsPath)
+			_ = os.Remove(paths.ToolsPath)
 
 			// Delete metadata file last to maintain atomicity invariant
-			if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
+			if err := os.Remove(paths.JSONPath); err != nil && !os.IsNotExist(err) {
 				return errors.WrapError("delete metadata file", err)
 			}
 		}
@@ -487,82 +570,49 @@ func (s *MessageStaging) Close() {
 // stageMessageFiles creates temporary files for atomic message placement
 func stageMessageFiles(sessionPath string, msg Message, toolInteraction *core.ToolInteraction) (*MessageStaging, error) {
 	staging := &MessageStaging{}
+	fileSet, err := buildMessageFileSet(msg, toolInteraction)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create temp files in session directory
 	dir := sessionPath
 
 	// Stage text content file
-	if msg.Content != "" {
-		tmpTxt, err := os.CreateTemp(dir, ".tmp-*.txt")
+	if len(fileSet.Content) > 0 {
+		staging.TxtPath, err = writeStagedTempFile(dir, ".tmp-*.txt", fileSet.Content)
 		if err != nil {
-			return nil, errors.WrapError("create temp txt file", err)
-		}
-		staging.TxtPath = tmpTxt.Name()
-
-		if _, err := tmpTxt.WriteString(msg.Content); err != nil {
-			tmpTxt.Close()
 			staging.Close()
-			return nil, errors.WrapError("write content", err)
-		}
-		if err := tmpTxt.Close(); err != nil {
-			staging.Close()
-			return nil, errors.WrapError("close temp txt file", err)
+			return nil, errors.WrapError("stage content", err)
 		}
 	}
 
 	// Stage JSON metadata file
-	tmpJson, err := os.CreateTemp(dir, ".tmp-*.json")
+	staging.JsonPath, err = writeStagedTempFile(dir, ".tmp-*.json", fileSet.Metadata)
 	if err != nil {
 		staging.Close()
-		return nil, errors.WrapError("create temp json file", err)
-	}
-	staging.JsonPath = tmpJson.Name()
-
-	metaData, err := json.MarshalIndent(buildMessageMetadata(msg), "", "  ")
-	if err != nil {
-		tmpJson.Close()
-		staging.Close()
-		return nil, errors.WrapError("marshal metadata", err)
-	}
-
-	if _, err := tmpJson.Write(metaData); err != nil {
-		tmpJson.Close()
-		staging.Close()
-		return nil, errors.WrapError("write metadata", err)
-	}
-	if err := tmpJson.Close(); err != nil {
-		staging.Close()
-		return nil, errors.WrapError("close temp json file", err)
+		return nil, errors.WrapError("stage metadata", err)
 	}
 
 	// Stage tools file if present
-	if toolInteraction != nil && (len(toolInteraction.Calls) > 0 || len(toolInteraction.Results) > 0) {
-		tmpTools, err := os.CreateTemp(dir, ".tmp-*.tools.json")
+	if len(fileSet.Tools) > 0 {
+		staging.ToolsPath, err = writeStagedTempFile(dir, ".tmp-*.tools.json", fileSet.Tools)
 		if err != nil {
 			staging.Close()
-			return nil, errors.WrapError("create temp tools file", err)
-		}
-		staging.ToolsPath = tmpTools.Name()
-
-		toolData, err := json.MarshalIndent(toolInteraction, "", "  ")
-		if err != nil {
-			tmpTools.Close()
-			staging.Close()
-			return nil, errors.WrapError("marshal tool interaction", err)
-		}
-
-		if _, err := tmpTools.Write(toolData); err != nil {
-			tmpTools.Close()
-			staging.Close()
-			return nil, errors.WrapError("write tool data", err)
-		}
-		if err := tmpTools.Close(); err != nil {
-			staging.Close()
-			return nil, errors.WrapError("close temp tools file", err)
+			return nil, errors.WrapError("stage tool interaction", err)
 		}
 	}
 
 	return staging, nil
+}
+
+func buildCommitTriplet(sessionPath, msgID string, staging *MessageStaging) []filePair {
+	paths := buildMessageFilePaths(sessionPath, msgID)
+	return []filePair{
+		{Tmp: staging.TxtPath, Final: paths.TxtPath},     // 1. Message content
+		{Tmp: staging.ToolsPath, Final: paths.ToolsPath}, // 2. Tool data (if any)
+		{Tmp: staging.JsonPath, Final: paths.JSONPath},   // 3. Metadata (atomic commit point)
+	}
 }
 
 // messageCommitter encapsulates the atomic commit logic for session messages
@@ -623,13 +673,10 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 			return errors.WrapError("get next message ID", err)
 		}
 
-		// Prepare final paths
-		finalTxtPath := filepath.Join(mc.sessionPath, msgID+".txt")
-		finalJsonPath := filepath.Join(mc.sessionPath, msgID+".json")
-		finalToolsPath := filepath.Join(mc.sessionPath, msgID+".tools.json")
+		paths := buildMessageFilePaths(mc.sessionPath, msgID)
 
 		// Check if a complete message already exists
-		if fileExists(finalJsonPath) {
+		if fileExists(paths.JSONPath) {
 			// Conflict detected - message exists
 			needSibling = true
 			conflictMsgID = msgID
@@ -638,13 +685,7 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 
 		// No conflict - use commitFiles helper for atomic operation
 		// Prepare commit triplet in order: content, tools (optional), metadata (commit point)
-		commitTriplet := []filePair{
-			{Tmp: staging.TxtPath, Final: finalTxtPath},     // 1. Message content
-			{Tmp: staging.ToolsPath, Final: finalToolsPath}, // 2. Tool data (if any)
-			{Tmp: staging.JsonPath, Final: finalJsonPath},   // 3. Metadata (atomic commit point)
-		}
-
-		commitResult, err := commitFiles(ctx, commitTriplet)
+		commitResult, err := commitFiles(ctx, buildCommitTriplet(mc.sessionPath, msgID, staging))
 		if err != nil {
 			return errors.WrapError("commit message files", err)
 		}

@@ -7,7 +7,6 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -48,7 +47,7 @@ func SaveToolResults(ctx context.Context, sess *Session, results []core.ToolResu
 
 // LoadToolInteraction loads tool calls or results from a .tools.json file
 func LoadToolInteraction(sessionPath, msgID string) (*core.ToolInteraction, error) {
-	toolPath := filepath.Join(sessionPath, msgID+".tools.json")
+	toolPath := buildMessageFilePaths(sessionPath, msgID).ToolsPath
 
 	// Check if file exists
 	if _, err := os.Stat(toolPath); os.IsNotExist(err) {
@@ -70,15 +69,14 @@ func LoadToolInteraction(sessionPath, msgID string) (*core.ToolInteraction, erro
 
 // SaveToolInteraction saves tool interaction data to a .tools.json file
 func SaveToolInteraction(sessionPath, msgID string, interaction *core.ToolInteraction) error {
-	if interaction == nil || (len(interaction.Calls) == 0 && len(interaction.Results) == 0) {
+	if !hasToolInteraction(interaction) {
 		return nil // Nothing to save
 	}
 
-	toolPath := filepath.Join(sessionPath, msgID+".tools.json")
-
-	toolData, err := json.MarshalIndent(interaction, "", "  ")
+	toolPath := buildMessageFilePaths(sessionPath, msgID).ToolsPath
+	toolData, err := marshalToolInteraction(interaction)
 	if err != nil {
-		return errors.WrapError("marshal tool interaction", err)
+		return err
 	}
 
 	if err := writeFileAtomic(toolPath, toolData); err != nil {

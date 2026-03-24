@@ -12,13 +12,9 @@ import (
 
 // parseOpenAIRequest reads and validates an OpenAI API request.
 func (s *Server) parseOpenAIRequest(r *http.Request) (*OpenAIRequest, error) {
-	body, err := s.readRequestBody(r)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read request body: %w", err)
-	}
 	var req OpenAIRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("invalid JSON in request body")
+	if err := s.decodeEndpointRequest(r, &req); err != nil {
+		return nil, err
 	}
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("messages array cannot be empty")
@@ -28,61 +24,52 @@ func (s *Server) parseOpenAIRequest(r *http.Request) (*OpenAIRequest, error) {
 
 // handleOpenAIChatCompletions handles the OpenAI chat completions endpoint
 func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Request) {
+	var openAIReq *OpenAIRequest
+	info, route, ok := s.handlePOSTEndpoint(
+		w,
+		r,
+		"OpenAI chat completions endpoint",
+		func(r *http.Request) (*endpointRequestInfo, error) {
+			req, err := s.parseOpenAIRequest(r)
+			if err != nil {
+				return nil, err
+			}
+			openAIReq = req
+			return &endpointRequestInfo{
+				Model:        req.Model,
+				Stream:       req.Stream,
+				MessageCount: len(req.Messages),
+				ToolCount:    len(req.Tools),
+				Payload:      req,
+				Tools:        req.Tools,
+			}, nil
+		},
+		endpointErrorHandlers{
+			MethodNotAllowed: func() {
+				s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
+			},
+			BadRequest: func(message string) {
+				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "", http.StatusBadRequest)
+			},
+			ConfigError: func(message string) {
+				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "configuration_error", http.StatusInternalServerError)
+			},
+			AuthError: func(message string) {
+				s.sendOpenAIError(w, ErrTypeAuthentication, message, "unauthorized", http.StatusUnauthorized)
+			},
+		},
+	)
+	if !ok {
+		return
+	}
+
 	ctx := r.Context()
 	log := logger.From(ctx)
-
-	// Log endpoint access
-	log.Infof("%s %s | OpenAI chat completions endpoint", r.Method, r.URL.Path)
-
-	if r.Method != http.MethodPost {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Parse and validate request
-	openAIReq, err := s.parseOpenAIRequest(r)
-	if err != nil {
-		log.Errorf("Failed to parse request: %s", err)
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
-
-	// Log request
-	log.Debugf("Request received: model=%s, streaming=%v, messages=%d", openAIReq.Model, openAIReq.Stream, len(openAIReq.Messages))
-	if openAIReq.Stream {
-		logger.DebugJSON(log, "Streaming request details", openAIReq)
-	} else {
-		logger.DebugJSON(log, "Request details", openAIReq)
-	}
-
-	// Log tool information if present
-	if len(openAIReq.Tools) > 0 {
-		logger.DebugJSON(log, "Tool information", openAIReq.Tools)
-	}
-
-	// Map model to provider
-	originalModel := openAIReq.Model
-	mappedModel := s.mapper.MapModel(openAIReq.Model)
-	provider := s.config.Provider // Provider always comes from config
-	if provider == "" {
-		log.Errorf("No provider configured")
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, "No provider configured", "configuration_error", http.StatusInternalServerError)
-		return
-	}
-
-	// Check if provider has required credentials
-	if hasCredentials, diagnostic := s.hasCredentials(provider); !hasCredentials {
-		log.Errorf("No credentials configured for provider %s: %s", provider, diagnostic)
-		s.sendOpenAIError(w, ErrTypeAuthentication, diagnostic, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	openAIReq.Model = mappedModel
-	log.Infof("Model routing: %s -> provider=%s, mapped=%s", originalModel, provider, mappedModel)
+	openAIReq.Model = route.MappedModel
 
 	// If provider is OpenAI, do a direct pass-through
-	if provider == constants.ProviderOpenAI {
-		s.forwardOpenAIDirectly(w, r, openAIReq, originalModel)
+	if route.Provider == constants.ProviderOpenAI {
+		s.forwardOpenAIDirectly(w, r, openAIReq, route.OriginalModel)
 		return
 	}
 
@@ -96,21 +83,21 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Handle streaming vs non-streaming
-	if openAIReq.Stream {
+	if info.Stream {
 		// Handle streaming for OpenAI format
-		s.handleOpenAIStreamingRequest(w, r, openAIReq, anthReq, provider, originalModel)
+		s.handleOpenAIStreamingRequest(w, r, openAIReq, anthReq, route.Provider, route.OriginalModel)
 		return
 	}
 
 	// Process non-streaming request through existing pipeline
-	anthResp, err := s.forwardAnthropicRequest(ctx, anthReq, provider, originalModel)
+	anthResp, err := s.forwardAnthropicRequest(ctx, anthReq, route.Provider, route.OriginalModel)
 	if err != nil {
-		s.sendProviderErrorAsOpenAI(ctx, w, provider, err)
+		s.sendProviderErrorAsOpenAI(ctx, w, route.Provider, err)
 		return
 	}
 
 	// Convert Anthropic response back to OpenAI format
-	openAIResp := s.converter.ConvertAnthropicResponseToOpenAI(anthResp, originalModel)
+	openAIResp := s.converter.ConvertAnthropicResponseToOpenAI(anthResp, route.OriginalModel)
 
 	// Log the complete OpenAI response before sending (only if debug enabled)
 	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
