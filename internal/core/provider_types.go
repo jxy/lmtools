@@ -216,6 +216,8 @@ func (c *AnthropicContentUnion) UnmarshalJSON(data []byte) error {
 type AnthropicContent struct {
 	Type       string                `json:"type"` // "text", "image", "tool_use", "tool_result", etc.
 	Text       string                `json:"text,omitempty"`
+	Thinking   string                `json:"thinking,omitempty"`
+	Signature  string                `json:"signature,omitempty"`
 	Source     *AnthropicImageSource `json:"source,omitempty"`
 	ID         string                `json:"id,omitempty"`          // For tool_use
 	Name       string                `json:"name,omitempty"`        // For tool_use
@@ -233,6 +235,14 @@ func (c AnthropicContent) ToMap() map[string]interface{} {
 
 	if c.Text != "" {
 		m["text"] = c.Text
+	}
+
+	if c.Thinking != "" {
+		m["thinking"] = c.Thinking
+	}
+
+	if c.Signature != "" {
+		m["signature"] = c.Signature
 	}
 
 	if c.Source != nil {

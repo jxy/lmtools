@@ -40,17 +40,11 @@ func extractFirstSessionID(output string) string {
 	return ""
 }
 
-// getLmcBinary returns the lmc binary path for e2e tests.
-// It prefers a prebuilt binary at ../../bin/lmc, otherwise builds a test binary.
+// getLmcBinary returns the path to a temporary lmc binary built from the
+// current cmd/lmc sources. E2E tests should exercise the code under test
+// rather than a potentially stale ../../bin/lmc from a previous build.
 func getLmcBinary(t *testing.T) string {
 	t.Helper()
-	prebuiltPath := "../../bin/lmc"
-	if st, err := os.Stat(prebuiltPath); err == nil && !st.IsDir() {
-		abs, err := filepath.Abs(prebuiltPath)
-		if err == nil {
-			return abs
-		}
-	}
 
 	tmpDir := t.TempDir()
 	bin := filepath.Join(tmpDir, "lmc.test")

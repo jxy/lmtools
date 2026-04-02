@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"lmtools/internal/constants"
 	"lmtools/internal/retry"
 	"net/http"
 	"strings"
@@ -59,7 +58,7 @@ type ToolExecutionConfig struct {
 // This reduces parameter sprawl and makes the API cleaner
 type ToolContext struct {
 	Ctx          context.Context
-	Cfg          RequestConfig
+	Cfg          ChatRequestConfig
 	Logger       Logger
 	Notifier     Notifier
 	Approver     Approver
@@ -89,7 +88,7 @@ type ToolUI interface {
 // toolRunner encapsulates all dependencies needed for tool execution
 type toolRunner struct {
 	Ctx        context.Context
-	Cfg        RequestConfig
+	Cfg        ChatRequestConfig
 	Logger     Logger
 	Notifier   Notifier
 	Approver   Approver
@@ -278,7 +277,7 @@ func BuildTruncationNotes(results []ToolResult, toolCalls []ToolCall) string {
 }
 
 // BuildAndSendFollowupRequest builds and sends a follow-up request after tool execution
-func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestConfig, execCfg ToolExecutionConfig,
+func BuildAndSendFollowupRequest(ctx context.Context, cfg ChatRequestConfig, execCfg ToolExecutionConfig,
 	model string, toolDefs []ToolDefinition,
 	getMessagesWithTools func(string) ([]TypedMessage, error),
 	logger Logger,
@@ -326,15 +325,11 @@ func extractSystemMessage(typedMessages []TypedMessage) string {
 //
 // Current policy:
 // - Direct Google provider: SUPPORTS tools
-// - Google models via Argo: DOES NOT support tools (Argo limitation)
+// - Google models via Argo: SUPPORT tools
 // - All other providers: SUPPORT tools
 func ValidateToolSupport(provider, model string) error {
-	// Google models accessed through Argo do not support tool calls (current limitation)
-	if provider == constants.ProviderArgo && model != "" {
-		if DetermineArgoModelProvider(model) == constants.ProviderGoogle {
-			return fmt.Errorf("tool execution not supported for Google models via Argo (model: %s)", model)
-		}
-	}
-	// All other combinations support tools (including direct Google provider)
+	// All current provider/model combinations support tools.
+	_ = provider
+	_ = model
 	return nil
 }

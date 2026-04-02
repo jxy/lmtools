@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 // MockNotifier implements the Notifier interface for testing
@@ -248,10 +247,7 @@ data: [DONE]
 			}
 
 			// Create a mock config
-			cfg := &streamTestRequestConfig{
-				provider:   tt.provider,
-				streamChat: true,
-			}
+			cfg := newStreamTestRequestConfig(tt.provider, true, false, "")
 
 			// Handle the response
 			ctx := context.Background()
@@ -363,10 +359,7 @@ data: [DONE]
 			}
 
 			// Create config
-			cfg := &streamTestRequestConfig{
-				provider:   tt.provider,
-				streamChat: true,
-			}
+			cfg := newStreamTestRequestConfig(tt.provider, true, false, "")
 
 			// Handle response
 			ctx := context.Background()
@@ -462,10 +455,7 @@ data: [DONE]
 			}
 
 			// Create config
-			cfg := &streamTestRequestConfig{
-				provider:   tt.provider,
-				streamChat: true,
-			}
+			cfg := newStreamTestRequestConfig(tt.provider, true, false, "")
 
 			// Handle response
 			ctx := context.Background()
@@ -485,36 +475,14 @@ data: [DONE]
 	}
 }
 
-// streamTestRequestConfig implements RequestConfig for testing
-type streamTestRequestConfig struct {
-	provider   string
-	model      string
-	streamChat bool
-	embed      bool
-	system     string
+func newStreamTestRequestConfig(provider string, streamChat bool, embed bool, system string) *TestRequestConfig {
+	cfg := NewTestRequestConfig()
+	cfg.Provider = provider
+	cfg.Model = ""
+	cfg.System = system
+	cfg.ProviderURL = "http://test.example.com"
+	cfg.IsStreamChatMode = streamChat
+	cfg.IsEmbedMode = embed
+	cfg.IsToolEnabledFlag = false
+	return cfg
 }
-
-func (m *streamTestRequestConfig) GetProvider() string           { return m.provider }
-func (m *streamTestRequestConfig) GetModel() string              { return m.model }
-func (m *streamTestRequestConfig) GetSystem() string             { return m.system }
-func (m *streamTestRequestConfig) GetEffectiveSystem() string    { return m.system }
-func (m *streamTestRequestConfig) IsSystemExplicitlySet() bool   { return m.system != "" }
-func (m *streamTestRequestConfig) GetAPIKey() string             { return "test-key" }
-func (m *streamTestRequestConfig) GetAPIKeyFile() string         { return "" }
-func (m *streamTestRequestConfig) GetProviderURL() string        { return "http://test.example.com" }
-func (m *streamTestRequestConfig) IsEmbed() bool                 { return m.embed }
-func (m *streamTestRequestConfig) IsStreamChat() bool            { return m.streamChat }
-func (m *streamTestRequestConfig) IsToolEnabled() bool           { return false }
-func (m *streamTestRequestConfig) GetToolTimeout() time.Duration { return 30 * time.Second }
-func (m *streamTestRequestConfig) GetToolWhitelist() string      { return "" }
-func (m *streamTestRequestConfig) GetToolBlacklist() string      { return "" }
-func (m *streamTestRequestConfig) GetToolAutoApprove() bool      { return false }
-func (m *streamTestRequestConfig) GetToolNonInteractive() bool   { return false }
-func (m *streamTestRequestConfig) GetMaxToolRounds() int         { return 5 }
-func (m *streamTestRequestConfig) GetMaxToolParallel() int       { return 4 }
-func (m *streamTestRequestConfig) GetToolMaxOutputBytes() int    { return 1024 * 1024 } // 1MB default
-func (m *streamTestRequestConfig) GetEnv() string                { return "test" }
-func (m *streamTestRequestConfig) GetUser() string               { return "test-user" }
-func (m *streamTestRequestConfig) GetTimeout() time.Duration     { return 30 * time.Second }
-func (m *streamTestRequestConfig) GetResume() string             { return "" }
-func (m *streamTestRequestConfig) GetBranch() string             { return "" }

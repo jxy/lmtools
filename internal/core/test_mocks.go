@@ -26,7 +26,12 @@ type TestRequestConfig struct {
 	ToolWhitelist       string
 	ToolBlacklist       string
 	ToolAutoApprove     bool
+	ToolNonInteractive  bool
 	MaxToolRounds       int
+	MaxToolParallel     int
+	ToolMaxOutputBytes  int
+	Resume              string
+	Branch              string
 }
 
 // Implement RequestConfig interface
@@ -56,17 +61,29 @@ func (c *TestRequestConfig) GetToolTimeout() time.Duration {
 func (c *TestRequestConfig) GetToolWhitelist() string    { return c.ToolWhitelist }
 func (c *TestRequestConfig) GetToolBlacklist() string    { return c.ToolBlacklist }
 func (c *TestRequestConfig) GetToolAutoApprove() bool    { return c.ToolAutoApprove }
-func (c *TestRequestConfig) GetToolNonInteractive() bool { return false }
+func (c *TestRequestConfig) GetToolNonInteractive() bool { return c.ToolNonInteractive }
 func (c *TestRequestConfig) GetMaxToolRounds() int {
 	if c.MaxToolRounds > 0 {
 		return c.MaxToolRounds
 	}
 	return 32
 }
-func (c *TestRequestConfig) GetMaxToolParallel() int    { return 4 }
-func (c *TestRequestConfig) GetToolMaxOutputBytes() int { return 1024 * 1024 } // 1MB default
-func (c *TestRequestConfig) GetResume() string          { return "" }
-func (c *TestRequestConfig) GetBranch() string          { return "" }
+
+func (c *TestRequestConfig) GetMaxToolParallel() int {
+	if c.MaxToolParallel > 0 {
+		return c.MaxToolParallel
+	}
+	return 4
+}
+
+func (c *TestRequestConfig) GetToolMaxOutputBytes() int {
+	if c.ToolMaxOutputBytes > 0 {
+		return c.ToolMaxOutputBytes
+	}
+	return 1024 * 1024 // 1MB default
+}
+func (c *TestRequestConfig) GetResume() string { return c.Resume }
+func (c *TestRequestConfig) GetBranch() string { return c.Branch }
 
 // NewTestRequestConfig creates a TestRequestConfig with default values
 func NewTestRequestConfig() *TestRequestConfig {

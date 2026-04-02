@@ -185,74 +185,154 @@ func typedAnthropicMessagesToProxy(messages []core.AnthropicMessage) ([]Anthropi
 	return proxyMessages, nil
 }
 
-func toolDefinitionsToOpenAITools(tools []core.ToolDefinition) []OpenAITool {
-	if len(tools) == 0 {
-		return nil
-	}
+func typedGoogleMessagesToProxy(messages []core.GoogleMessage) []GoogleContent {
+	proxyMessages := make([]GoogleContent, 0, len(messages))
+	for _, msg := range messages {
+		parts := make([]GooglePart, 0, len(msg.Parts))
+		for _, part := range msg.Parts {
+			proxyPart := GooglePart{
+				Text: part.Text,
+			}
 
-	openAITools := make([]OpenAITool, 0, len(tools))
-	for _, tool := range tools {
-		parameters := filterSchemaMetadata(tool.InputSchema)
-		paramsMap, _ := parameters.(map[string]interface{})
-		openAITools = append(openAITools, OpenAITool{
-			Type: "function",
-			Function: OpenAIFunc{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  paramsMap,
-			},
+			if part.FunctionCall != nil {
+				proxyPart.FunctionCall = &GoogleFunctionCall{
+					Name: part.FunctionCall.Name,
+					Args: rawJSONToMap(part.FunctionCall.Args),
+				}
+			}
+
+			if part.FunctionResponse != nil {
+				response := map[string]interface{}{
+					"content": part.FunctionResponse.Response.Content,
+				}
+				if part.FunctionResponse.Response.Error {
+					response["error"] = true
+				}
+				proxyPart.FunctionResp = &GoogleFunctionResp{
+					Name:     part.FunctionResponse.Name,
+					Response: response,
+				}
+			}
+
+			if part.InlineData != nil {
+				proxyPart.InlineData = &GoogleInlineData{
+					MimeType: part.InlineData.MimeType,
+					Data:     part.InlineData.Data,
+				}
+			}
+
+			parts = append(parts, proxyPart)
+		}
+
+		proxyMessages = append(proxyMessages, GoogleContent{
+			Role:  msg.Role,
+			Parts: parts,
 		})
 	}
-	return openAITools
+
+	return proxyMessages
 }
 
-func toolDefinitionsToAnthropicTools(tools []core.ToolDefinition) []AnthropicTool {
-	if len(tools) == 0 {
-		return nil
-	}
+func typedMessagesToArgoOpenAI(messages []core.TypedMessage) []ArgoMessage {
+	argoMessages := make([]ArgoMessage, 0, len(messages))
+	for _, msg := range messages {
+		var filteredBlocks []core.Block
+		var toolResultMessages []ArgoMessage
 
-	anthropicTools := make([]AnthropicTool, 0, len(tools))
-	for _, tool := range tools {
-		anthropicTools = append(anthropicTools, AnthropicTool{
-			Name:        tool.Name,
-			Description: tool.Description,
-			InputSchema: tool.InputSchema,
-		})
-	}
-	return anthropicTools
-}
-
-func toolChoiceToOpenAI(choice *core.ToolChoice) interface{} {
-	if choice == nil {
-		return nil
-	}
-
-	switch choice.Type {
-	case "any", "auto", "none":
-		return choice.Type
-	case "tool":
-		if choice.Name != "" {
-			return map[string]interface{}{
-				"type": "function",
-				"function": map[string]string{
-					"name": choice.Name,
-				},
+		for _, block := range msg.Blocks {
+			switch b := block.(type) {
+			case core.ToolResultBlock:
+				toolResultMessages = append(toolResultMessages, ArgoMessage{
+					Role:       "tool",
+					ToolCallID: b.ToolUseID,
+					Content:    b.Content,
+				})
+			case core.ThinkingBlock:
+				continue
+			default:
+				filteredBlocks = append(filteredBlocks, block)
 			}
 		}
+
+		argoMessages = append(argoMessages, toolResultMessages...)
+
+		if len(filteredBlocks) == 0 {
+			continue
+		}
+
+		contentUnion, toolCalls := core.ConvertBlocksToOpenAIContentTyped(filteredBlocks)
+		content := openAIContentUnionToInterface(contentUnion)
+		if msg.Role == string(core.RoleAssistant) && len(toolCalls) > 0 && content == nil {
+			content = ""
+		}
+
+		argoMessages = append(argoMessages, ArgoMessage{
+			Role:      msg.Role,
+			Content:   content,
+			ToolCalls: typedOpenAIToolCallsToProxy(toolCalls),
+		})
+	}
+
+	return argoMessages
+}
+
+func typedMessagesToArgoAnthropic(messages []core.TypedMessage) ([]ArgoMessage, error) {
+	anthropicMessages, err := typedAnthropicMessagesToProxy(core.ToAnthropicTyped(messages))
+	if err != nil {
+		return nil, err
+	}
+
+	argoMessages := make([]ArgoMessage, 0, len(anthropicMessages))
+	for _, msg := range anthropicMessages {
+		text, blocks, err := parseAnthropicMessageContent(msg.Content)
+		if err == nil && text != nil {
+			argoMessages = append(argoMessages, ArgoMessage{
+				Role:    string(msg.Role),
+				Content: *text,
+			})
+			continue
+		}
+		if err == nil {
+			argoMessages = append(argoMessages, ArgoMessage{
+				Role:    string(msg.Role),
+				Content: blocks,
+			})
+			continue
+		}
+
+		argoMessages = append(argoMessages, ArgoMessage{
+			Role:    string(msg.Role),
+			Content: string(msg.Content),
+		})
+	}
+
+	return argoMessages, nil
+}
+
+func rawJSONToMap(raw json.RawMessage) map[string]interface{} {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var value map[string]interface{}
+	if err := json.Unmarshal(raw, &value); err == nil {
+		return value
 	}
 
 	return nil
 }
 
-func toolChoiceToAnthropic(choice *core.ToolChoice) *AnthropicToolChoice {
-	if choice == nil {
+func rawJSONToInterface(raw json.RawMessage) interface{} {
+	if len(raw) == 0 {
 		return nil
 	}
 
-	return &AnthropicToolChoice{
-		Type: choice.Type,
-		Name: choice.Name,
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err == nil {
+		return value
 	}
+
+	return nil
 }
 
 func openAIContentToTypedUnion(content interface{}) core.OpenAIContentUnion {
@@ -431,61 +511,21 @@ func typedOpenAIToolCallsToProxy(toolCalls []core.OpenAIToolCall) []ToolCall {
 }
 
 // AnthropicBlocksToCore converts Anthropic content blocks to core.Block slice
-// This is the centralized converter to avoid duplication across the codebase
 func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
-	coreBlocks := make([]core.Block, 0, len(blocks))
+	if len(blocks) == 0 {
+		return nil
+	}
 
+	coreBlocks := make([]core.Block, 0, len(blocks))
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
-			if block.Text != "" {
-				coreBlocks = append(coreBlocks, core.TextBlock{Text: block.Text})
-			}
-
-		case "image":
-			if block.Source != nil {
-				if url, ok := block.Source["url"].(string); ok {
-					detail := "auto"
-					if d, ok := block.Source["detail"].(string); ok {
-						detail = d
-					}
-					coreBlocks = append(coreBlocks, core.ImageBlock{URL: url, Detail: detail})
-				}
-			}
-
-		case "input_audio", "audio":
-			if block.InputAudio != nil {
-				audioBlock := core.AudioBlock{}
-
-				// Check for 'id' field first (standard format)
-				if id, ok := block.InputAudio["id"].(string); ok && id != "" {
-					audioBlock.ID = id
-				}
-
-				// Check for data and format fields
-				if data, ok := block.InputAudio["data"].(string); ok && data != "" {
-					audioBlock.Data = data
-				}
-				if format, ok := block.InputAudio["format"].(string); ok && format != "" {
-					audioBlock.Format = format
-				}
-
-				// Only add if we have at least ID or data
-				if audioBlock.ID != "" || audioBlock.Data != "" {
-					coreBlocks = append(coreBlocks, audioBlock)
-				}
-			}
-
-		case "file":
-			if block.File != nil {
-				if fileID, ok := block.File["file_id"].(string); ok && fileID != "" {
-					coreBlocks = append(coreBlocks, core.FileBlock{FileID: fileID})
-				} else if name, ok := block.File["name"].(string); ok && name != "" {
-					// Use name as FileID if file_id is not present
-					coreBlocks = append(coreBlocks, core.FileBlock{FileID: name})
-				}
-			}
-
+			coreBlocks = append(coreBlocks, core.TextBlock{Text: block.Text})
+		case "thinking":
+			coreBlocks = append(coreBlocks, core.ThinkingBlock{
+				Thinking:  block.Thinking,
+				Signature: block.Signature,
+			})
 		case "tool_use":
 			inputJSON, err := json.Marshal(block.Input)
 			if err != nil {
@@ -497,23 +537,33 @@ func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
 				Name:  block.Name,
 				Input: inputJSON,
 			})
-
 		case "tool_result":
-			// Extract content from json.RawMessage
-			var content string
-			if err := json.Unmarshal(block.Content, &content); err != nil {
-				content = string(block.Content)
-			}
 			coreBlocks = append(coreBlocks, core.ToolResultBlock{
 				ToolUseID: block.ToolUseID,
-				Content:   content,
-				IsError:   false,
+				Content:   proxyToolResultContent(block.Content),
+				IsError:   block.IsError,
 			})
-
-		case "thinking":
-			// Thinking blocks are not supported in OpenAI format, skip them
-			// They are logged at DEBUG level by the caller if needed
-			continue
+		case "image":
+			if block.Source != nil {
+				coreBlocks = append(coreBlocks, core.ImageBlock{
+					URL:    core.GetString(block.Source, "url"),
+					Detail: "auto",
+				})
+			}
+		case "audio", "input_audio":
+			if block.InputAudio != nil {
+				coreBlocks = append(coreBlocks, core.AudioBlock{
+					ID:       core.GetString(block.InputAudio, "id"),
+					Data:     core.GetString(block.InputAudio, "data"),
+					Format:   core.GetString(block.InputAudio, "format"),
+					URL:      core.GetString(block.InputAudio, "url"),
+					Duration: core.GetInt(block.InputAudio, "duration"),
+				})
+			}
+		case "file":
+			coreBlocks = append(coreBlocks, core.FileBlock{
+				FileID: core.GetString(block.File, "file_id"),
+			})
 		}
 	}
 
@@ -522,86 +572,127 @@ func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
 
 // CoreBlocksToAnthropic converts core.Block slice to Anthropic content blocks
 func CoreBlocksToAnthropic(blocks []core.Block) []AnthropicContentBlock {
-	anthBlocks := make([]AnthropicContentBlock, 0, len(blocks))
+	if len(blocks) == 0 {
+		return nil
+	}
 
-	for _, block := range blocks {
-		switch b := block.(type) {
-		case core.TextBlock:
-			anthBlocks = append(anthBlocks, AnthropicContentBlock{
+	typed := core.ToAnthropicTyped([]core.TypedMessage{
+		{
+			Role:   string(core.RoleAssistant),
+			Blocks: blocks,
+		},
+	})
+	if len(typed) == 0 {
+		return nil
+	}
+
+	union := typed[0].Content
+	if union.Text != nil {
+		return []AnthropicContentBlock{
+			{
 				Type: "text",
-				Text: b.Text,
-			})
-
-		case core.ImageBlock:
-			anthBlocks = append(anthBlocks, AnthropicContentBlock{
-				Type: "image",
-				Source: map[string]interface{}{
-					"type":   "url",
-					"url":    b.URL,
-					"detail": b.Detail,
-				},
-			})
-
-		case core.AudioBlock:
-			// Reconstruct audio block based on available data
-			audioMap := make(map[string]interface{})
-
-			// If we have data and format, include them
-			if b.Data != "" {
-				audioMap["data"] = b.Data
-				if b.Format != "" {
-					audioMap["format"] = b.Format
-				} else {
-					audioMap["format"] = "wav" // Default format
-				}
-			} else if b.ID != "" {
-				// Otherwise use ID if available
-				audioMap["id"] = b.ID
-			}
-
-			if len(audioMap) > 0 {
-				anthBlocks = append(anthBlocks, AnthropicContentBlock{
-					Type:       "input_audio",
-					InputAudio: audioMap,
-				})
-			}
-
-		case core.FileBlock:
-			anthBlocks = append(anthBlocks, AnthropicContentBlock{
-				Type: "file",
-				File: map[string]interface{}{
-					"file_id": b.FileID,
-				},
-			})
-
-		case core.ToolUseBlock:
-			var input map[string]interface{}
-			if len(b.Input) > 0 {
-				if err := json.Unmarshal(b.Input, &input); err != nil {
-					logger.GetLogger().Warnf("Failed to unmarshal tool_use input for tool %s: %v", b.Name, err)
-					// Leave input as nil on error
-				}
-			}
-			anthBlocks = append(anthBlocks, AnthropicContentBlock{
-				Type:  "tool_use",
-				ID:    b.ID,
-				Name:  b.Name,
-				Input: input,
-			})
-
-		case core.ToolResultBlock:
-			content, err := json.Marshal(b.Content)
-			if err != nil {
-				logger.GetLogger().Warnf("Failed to marshal tool_result content: %v", err)
-				content = []byte("\"error marshaling content\"")
-			}
-			anthBlocks = append(anthBlocks, AnthropicContentBlock{
-				Type:      "tool_result",
-				ToolUseID: b.ToolUseID,
-				Content:   json.RawMessage(content),
-			})
+				Text: *union.Text,
+			},
 		}
 	}
 
-	return anthBlocks
+	return coreAnthropicContentsToProxyBlocks(union.Contents)
+}
+
+func coreAnthropicContentsToProxyBlocks(contents []core.AnthropicContent) []AnthropicContentBlock {
+	blocks := make([]AnthropicContentBlock, 0, len(contents))
+	for _, content := range contents {
+		block := AnthropicContentBlock{
+			Type:      content.Type,
+			Text:      content.Text,
+			Thinking:  content.Thinking,
+			Signature: content.Signature,
+			ID:        content.ID,
+			Name:      content.Name,
+			ToolUseID: content.ToolUseID,
+			IsError:   content.IsError,
+		}
+
+		if content.Source != nil {
+			block.Source = map[string]interface{}{
+				"type": content.Source.Type,
+			}
+			if content.Source.URL != "" {
+				block.Source["url"] = content.Source.URL
+			}
+			if content.Source.MediaType != "" {
+				block.Source["media_type"] = content.Source.MediaType
+			}
+			if content.Source.Data != "" {
+				block.Source["data"] = content.Source.Data
+			}
+		}
+		if len(content.Input) > 0 {
+			if err := json.Unmarshal(content.Input, &block.Input); err != nil {
+				logger.GetLogger().Warnf("Failed to unmarshal tool_use input for tool %s: %v", content.Name, err)
+			}
+		}
+		if content.Type == "tool_result" {
+			contentJSON, err := json.Marshal(content.Content)
+			if err != nil {
+				logger.GetLogger().Warnf("Failed to marshal tool_result content: %v", err)
+				contentJSON = []byte("\"error marshaling content\"")
+			}
+			block.Content = json.RawMessage(contentJSON)
+		}
+		if content.InputAudio != nil {
+			block.InputAudio = map[string]interface{}{}
+			if content.InputAudio.ID != "" {
+				block.InputAudio["id"] = content.InputAudio.ID
+			}
+			if content.InputAudio.Data != "" {
+				block.InputAudio["data"] = content.InputAudio.Data
+			}
+			if content.InputAudio.Format != "" {
+				block.InputAudio["format"] = content.InputAudio.Format
+			}
+			if content.InputAudio.URL != "" {
+				block.InputAudio["url"] = content.InputAudio.URL
+			}
+			if content.InputAudio.Duration > 0 {
+				block.InputAudio["duration"] = content.InputAudio.Duration
+			}
+		}
+		if content.File != nil {
+			block.File = map[string]interface{}{}
+			if content.File.FileID != "" {
+				block.File["file_id"] = content.File.FileID
+			}
+			if content.File.Name != "" {
+				block.File["name"] = content.File.Name
+			}
+			if content.File.MimeType != "" {
+				block.File["mime_type"] = content.File.MimeType
+			}
+			if content.File.Data != "" {
+				block.File["data"] = content.File.Data
+			}
+			if content.File.URL != "" {
+				block.File["url"] = content.File.URL
+			}
+			if content.File.Size > 0 {
+				block.File["size"] = content.File.Size
+			}
+		}
+
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
+func proxyToolResultContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var content string
+	if err := json.Unmarshal(raw, &content); err == nil {
+		return content
+	}
+	return string(raw)
 }

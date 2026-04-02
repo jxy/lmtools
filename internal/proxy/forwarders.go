@@ -1,9 +1,7 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"lmtools/internal/auth"
@@ -22,9 +20,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 
 	var openAIResp OpenAIResponse
 	err = s.doJSON(ctx, s.endpoints.OpenAI, openAIReq, func(req *http.Request) {
-		if key := s.config.OpenAIAPIKey; key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
+		_ = auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.OpenAIAPIKey)
 	}, &openAIResp, "OpenAI")
 	if err != nil {
 		return nil, err
@@ -49,12 +45,9 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 
 	var googleResp GoogleResponse
 	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
-		// Apply API key
-		if key := s.config.GoogleAPIKey; key != "" {
-			if err := auth.ApplyGoogleAPIKey(req, key); err != nil {
-				// Note: We can't return the error directly here, but the request will fail later
-				logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
-			}
+		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.GoogleAPIKey); err != nil {
+			// Note: We can't return the error directly here, but the request will fail later.
+			logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
 		}
 	}, &googleResp, "Google")
 	if err != nil {
@@ -85,10 +78,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
 	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
-		req.Header.Set("anthropic-version", "2023-06-01")
-		if key := s.config.AnthropicAPIKey; key != "" {
-			req.Header.Set("x-api-key", key)
-		}
+		_ = auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
 	}, &anthResp, "Anthropic")
 	if err != nil {
 		return nil, err
@@ -108,34 +98,23 @@ func (s *Server) forwardToArgoStream(ctx context.Context, anthReq *AnthropicRequ
 		return nil, fmt.Errorf("convert to Argo format: %w", err)
 	}
 
-	// Marshal request
-	reqBody, err := json.Marshal(argoReq)
-	if err != nil {
-		return nil, fmt.Errorf("marshal Argo request: %w", err)
-	}
-
-	// Create HTTP request - use streamchat endpoint
-	req, err := http.NewRequestWithContext(ctx, "POST", s.endpoints.GetArgoURL("streamchat"), bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("create Argo stream request: %w", err)
-	}
-
-	// Add headers
-	req.Header.Set("Content-Type", "application/json")
-
 	// Log request if debug enabled
 	logger.DebugJSON(log, "Outgoing Argo Streaming Request", argoReq)
 
-	// Send request
-	resp, err := s.client.Do(ctx, req, constants.ProviderArgo)
+	resp, err := s.sendStreamingJSONRequest(
+		ctx,
+		constants.ProviderArgo,
+		"Argo stream",
+		s.endpoints.GetArgoURL("streamchat"),
+		argoReq,
+		nil,
+		nil,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("send Argo stream request: %w", err)
+		return nil, err
 	}
 
-	// Check status
-	if resp.StatusCode != http.StatusOK {
-		// HandleStreamingError reads the body but doesn't close it
-		err := s.HandleStreamingError(ctx, constants.ProviderArgo, resp)
+	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
 		resp.Body.Close() // Ensure body is closed after reading
 		return nil, err
 	}

@@ -8,8 +8,8 @@ import (
 
 // NOTE: Tool support for Google provider:
 // - Direct Google provider (using Google API directly): SUPPORTS tools
-// - Google models via Argo provider: DOES NOT support tools (current limitation)
-// This file implements tool parsing for direct Google provider usage.
+// - Google models via Argo provider: SUPPORT tool-shaped responses routed through Google format
+// This file implements Google-format tool parsing.
 
 // googleToolCallCounter is used to generate unique IDs for Google tool calls
 var googleToolCallCounter uint64
@@ -21,7 +21,7 @@ func generateGoogleToolCallID() string {
 }
 
 // parseGoogleResponseWithTools parses Google responses that may contain tool calls
-// This is used when connecting directly to Google API, not through Argo
+// This parses Google-format responses for both direct Google usage and Argo-routed Google models.
 func parseGoogleResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
 	if isEmbed {
 		// Google AI doesn't support embeddings through this interface

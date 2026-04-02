@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	"strings"
 	"time"
 )
 
@@ -52,42 +51,14 @@ func (c *Config) ApplyDynamicModelDefaults() {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
-	// Normalize provider name once at validation
-	c.Provider = strings.ToLower(c.Provider)
-
-	// Validate preferred provider
-	validProviders := []string{constants.ProviderOpenAI, constants.ProviderGoogle, constants.ProviderAnthropic, constants.ProviderArgo}
-	valid := false
-	for _, p := range validProviders {
-		if c.Provider == p {
-			valid = true
-			break
-		}
-	}
-	if !valid {
+	c.Provider = constants.NormalizeProvider(c.Provider)
+	if !constants.IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid -provider: %s, must be one of: %s",
-			c.Provider, strings.Join(validProviders, ", "))
+			c.Provider, constants.JoinedProviders())
 	}
 
-	// Check if required credentials are present based on the selected provider
-	// With the unified -api-key-file flag, we only need the key for the selected provider
-	switch c.Provider {
-	case constants.ProviderOpenAI:
-		if c.OpenAIAPIKey == "" && c.ProviderURL == "" {
-			return fmt.Errorf("-api-key-file is required when -provider is 'openai' (unless using -provider-url)")
-		}
-	case constants.ProviderGoogle:
-		if c.GoogleAPIKey == "" && c.ProviderURL == "" {
-			return fmt.Errorf("-api-key-file is required when -provider is 'google' (unless using -provider-url)")
-		}
-	case constants.ProviderAnthropic:
-		if c.AnthropicAPIKey == "" && c.ProviderURL == "" {
-			return fmt.Errorf("-api-key-file is required when -provider is 'anthropic' (unless using -provider-url)")
-		}
-	case constants.ProviderArgo:
-		if c.ArgoUser == "" {
-			return fmt.Errorf("-argo-user is required when -provider is 'argo'")
-		}
+	if ok, _ := evaluateProviderCredentials(c.Provider, newProviderCredentialState(c)); !ok {
+		return fmt.Errorf("%s", providerValidationError(c.Provider))
 	}
 
 	return nil

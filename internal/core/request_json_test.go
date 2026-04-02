@@ -33,7 +33,7 @@ func extractJSONBody(req *http.Request) (map[string]interface{}, error) {
 }
 
 // Helper to create test config with API key
-func createTestConfig(provider, model string, enableTool bool) (*testRequestConfig, string, error) {
+func createTestConfig(provider, model string, enableTool bool) (*TestRequestConfig, string, error) {
 	// Create a temporary API key file
 	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
 	if err != nil {
@@ -45,13 +45,13 @@ func createTestConfig(provider, model string, enableTool bool) (*testRequestConf
 	}
 	apiKeyFile.Close()
 
-	cfg := &testRequestConfig{
-		user:       "testuser",
-		model:      model,
-		system:     "Test system prompt",
-		apiKeyFile: apiKeyFile.Name(),
-		provider:   provider,
-		enableTool: enableTool,
+	cfg := &TestRequestConfig{
+		User:              "testuser",
+		Model:             model,
+		System:            "Test system prompt",
+		APIKeyFile:        apiKeyFile.Name(),
+		Provider:          provider,
+		IsToolEnabledFlag: enableTool,
 	}
 
 	return cfg, apiKeyFile.Name(), nil
@@ -77,6 +77,14 @@ func createTestTools() []ToolDefinition {
 	}
 }
 
+func buildProviderTestRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	return buildChatRequestFromTyped(cfg, messages, model, system, toolDefs, toolChoice, stream)
+}
+
+func buildGoogleTestRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	return buildChatRequestFromTyped(cfg, messages, model, configuredSystemPrompt(cfg), toolDefs, toolChoice, stream)
+}
+
 // ============================================================================
 // OpenAI JSON Format Tests
 // ============================================================================
@@ -94,7 +102,7 @@ func TestOpenAIRequestJSON_ToolChoiceString(t *testing.T) {
 	tools := createTestTools()
 
 	// Build request with tools (should default to "auto")
-	req, _, err := buildOpenAIToolAwareRequest(cfg, messages, "gpt-4", tools, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "gpt-4", "", tools, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -219,7 +227,7 @@ func TestOpenAIRequestJSON_ToolChoiceFunctionBuilder(t *testing.T) {
 		Name: "get_weather",
 	}
 
-	req, _, err := buildOpenAIToolAwareRequest(cfg, messages, "gpt-4", tools, toolChoice, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "gpt-4", "", tools, toolChoice, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -258,7 +266,7 @@ func TestOpenAIRequestJSON_NoTools(t *testing.T) {
 	}
 
 	// Build request without tools
-	req, _, err := buildOpenAIToolAwareRequest(cfg, messages, "gpt-4", nil, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "gpt-4", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -296,7 +304,7 @@ func TestOpenAIRequestJSON_MultimodalContent(t *testing.T) {
 		},
 	}
 
-	req, _, err := buildOpenAIToolAwareRequest(cfg, messages, "gpt-4-vision", nil, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "gpt-4-vision", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -357,7 +365,7 @@ func TestAnthropicRequestJSON_ToolChoice(t *testing.T) {
 	}
 	tools := createTestTools()
 
-	req, _, err := buildAnthropicToolAwareRequest(cfg, messages, "claude-3-opus", "You are helpful", tools, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "claude-3-opus", "You are helpful", tools, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -402,7 +410,7 @@ func TestAnthropicRequestJSON_SystemMessage(t *testing.T) {
 		NewTextMessage("user", "Hello"),
 	}
 
-	req, _, err := buildAnthropicToolAwareRequest(cfg, messages, "claude-3-opus", "You are a helpful assistant", nil, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "claude-3-opus", "You are a helpful assistant", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -441,7 +449,7 @@ func TestAnthropicRequestJSON_InlineSystemMessage(t *testing.T) {
 		NewTextMessage("user", "Hello"),
 	}
 
-	req, _, err := buildAnthropicToolAwareRequest(cfg, messages, "claude-3-opus", "", nil, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "claude-3-opus", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -485,7 +493,7 @@ func TestAnthropicRequestJSON_ContentBlocks(t *testing.T) {
 		},
 	}
 
-	req, _, err := buildAnthropicToolAwareRequest(cfg, messages, "claude-3-opus", "", nil, nil, false)
+	req, _, err := buildProviderTestRequest(cfg, messages, "claude-3-opus", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -546,7 +554,7 @@ func TestGoogleRequestJSON_NoToolChoice(t *testing.T) {
 	}
 	tools := createTestTools()
 
-	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", tools, nil, false)
+	req, _, err := buildGoogleTestRequest(cfg, messages, "gemini-pro", tools, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -590,7 +598,7 @@ func TestGoogleRequestJSON_PartsStructure(t *testing.T) {
 		NewTextMessage("assistant", "I'm doing well, thank you!"),
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleTestRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -641,13 +649,13 @@ func TestGoogleRequestJSON_SystemInstruction(t *testing.T) {
 	}
 	defer os.Remove(apiKeyFile)
 
-	cfg.system = "You are a helpful assistant"
+	cfg.System = "You are a helpful assistant"
 
 	messages := []TypedMessage{
 		NewTextMessage("user", "Hello"),
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleTestRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -681,14 +689,14 @@ func TestGoogleRequestJSON_InlineSystemInstruction(t *testing.T) {
 		t.Fatalf("Failed to create test config: %v", err)
 	}
 	defer os.Remove(apiKeyFile)
-	cfg.system = ""
+	cfg.System = ""
 
 	messages := []TypedMessage{
 		NewTextMessage("system", "You are a helpful assistant"),
 		NewTextMessage("user", "Hello"),
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleTestRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -743,7 +751,7 @@ func TestGoogleRequestJSON_FunctionCalls(t *testing.T) {
 		},
 	}
 
-	req, _, err := buildGoogleToolAwareRequest(cfg, messages, "gemini-pro", nil, nil, false)
+	req, _, err := buildGoogleTestRequest(cfg, messages, "gemini-pro", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}

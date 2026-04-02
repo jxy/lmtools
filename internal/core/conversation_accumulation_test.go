@@ -111,14 +111,13 @@ func TestBuildArgoRequestWithAccumulatedMessages(t *testing.T) {
 
 	// Tool definitions are now passed directly to request builders
 
-	cfg := &testRequestConfigWithTools{
-		model:      "gpt5",
-		provider:   "argo",
-		system:     "Test system",
-		enableTool: true,
-	}
+	cfg := newArgoToolTestConfig()
+	cfg.Model = "gpt5"
+	cfg.Provider = "argo"
+	cfg.System = "Test system"
+	cfg.IsToolEnabledFlag = true
 
-	req, body, err := BuildToolResultRequest(cfg, cfg.model, "", nil, typedMessages)
+	req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -175,15 +174,14 @@ func TestNoDuplicateMessagesInBuildFunctions(t *testing.T) {
 	// Tool definitions are now passed directly to request builders
 
 	// Build request with additional tool results
-	cfg := &testRequestConfigWithTools{
-		provider:   "argo",
-		env:        "test",
-		model:      "gpt5",
-		system:     "System prompt",
-		enableTool: true,
-	}
+	cfg := newArgoToolTestConfig()
+	cfg.Provider = "argo"
+	cfg.Env = "test"
+	cfg.Model = "gpt5"
+	cfg.System = "System prompt"
+	cfg.IsToolEnabledFlag = true
 
-	req, body, err := BuildToolResultRequest(cfg, cfg.model, "", nil, typedMessages)
+	req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

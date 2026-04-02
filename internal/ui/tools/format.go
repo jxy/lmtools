@@ -37,8 +37,8 @@ func FormatToolCall(notifier core.Notifier, call core.ToolCall) {
 	}
 }
 
-// FormatToolResult formats and displays a tool result after execution
-func FormatToolResult(notifier core.Notifier, cfg core.RequestConfig, result core.ToolResult) {
+// FormatToolResult formats and displays a tool result after execution.
+func FormatToolResult(notifier core.Notifier, cfg core.ToolConfig, result core.ToolResult) {
 	if result.Error != "" {
 		// Use centralized error explanation
 		explanation := errors.ExplainToolError(result.Code, result.Error, cfg.GetToolWhitelist())
@@ -80,8 +80,8 @@ func FormatToolCalls(notifier core.Notifier, calls []core.ToolCall) {
 	notifier.Infof(">>> Executing...")
 }
 
-// FormatToolResults formats multiple tool results after execution
-func FormatToolResults(notifier core.Notifier, cfg core.RequestConfig, results []core.ToolResult) {
+// FormatToolResults formats multiple tool results after execution.
+func FormatToolResults(notifier core.Notifier, cfg core.ToolConfig, results []core.ToolResult) {
 	for _, result := range results {
 		FormatToolResult(notifier, cfg, result)
 	}

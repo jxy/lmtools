@@ -2,12 +2,67 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/providers"
 )
 
+type typedRenderContext struct {
+	Model string
+	TopK  *int
+	User  string
+}
+
+type (
+	typedRequestRenderer func(TypedRequest, typedRenderContext) (interface{}, error)
+	argoMessageRenderer  func([]core.TypedMessage) ([]ArgoMessage, error)
+)
+
+var argoMessageRenderers = map[string]argoMessageRenderer{
+	constants.ProviderOpenAI: func(messages []core.TypedMessage) ([]ArgoMessage, error) {
+		return typedMessagesToArgoOpenAI(messages), nil
+	},
+	constants.ProviderAnthropic: typedMessagesToArgoAnthropic,
+	constants.ProviderGoogle:    typedMessagesToArgoAnthropic,
+}
+
+func renderTypedRequest(provider string, typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+	capability, ok := proxyProviderCapabilityFor(provider)
+	if !ok || capability.RenderTyped == nil {
+		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+	return capability.RenderTyped(typed, ctx)
+}
+
+func argoMessageRendererForModel(model string) argoMessageRenderer {
+	provider := providers.DetermineArgoModelProvider(model)
+	if renderer, ok := argoMessageRenderers[provider]; ok {
+		return renderer
+	}
+	return argoMessageRenderers[constants.ProviderOpenAI]
+}
+
 func TypedToOpenAIRequest(typed TypedRequest, model string) (*OpenAIRequest, error) {
+	rendered, err := renderTypedRequest(constants.ProviderOpenAI, typed, typedRenderContext{Model: model})
+	if err != nil {
+		return nil, err
+	}
+	openAIReq, ok := rendered.(*OpenAIRequest)
+	if !ok {
+		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderOpenAI)
+	}
+	return openAIReq, nil
+}
+
+func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+	prepared, err := prepareTypedRequestPayload(constants.ProviderOpenAI, typed, ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	openAIReq := &OpenAIRequest{
-		Model:           model,
+		Model:           ctx.Model,
 		MaxTokens:       typed.MaxTokens,
 		Temperature:     typed.Temperature,
 		TopP:            typed.TopP,
@@ -16,54 +71,155 @@ func TypedToOpenAIRequest(typed TypedRequest, model string) (*OpenAIRequest, err
 		ReasoningEffort: typed.ReasoningEffort,
 	}
 
-	messages := typed.Messages
-	if typed.System != "" {
-		messagesWithSystem := make([]core.TypedMessage, 0, len(typed.Messages)+1)
-		messagesWithSystem = append(messagesWithSystem, core.TypedMessage{
-			Role: string(core.RoleSystem),
-			Blocks: []core.Block{
-				core.TextBlock{Text: typed.System},
-			},
-		})
-		messagesWithSystem = append(messagesWithSystem, typed.Messages...)
-		messages = messagesWithSystem
-	}
-
+	messages := core.PrependSystemMessage(prepared.Messages, prepared.System)
 	openAIReq.Messages = typedOpenAIMessagesToProxy(core.ToOpenAITyped(messages))
-	openAIReq.Tools = toolDefinitionsToOpenAITools(typed.Tools)
-	openAIReq.ToolChoice = toolChoiceToOpenAI(typed.ToolChoice)
+	openAIReq.Tools = proxyOpenAIToolsFromCore(prepared.Tools)
+	if typed.ToolChoice != nil {
+		openAIReq.ToolChoice = proxyOpenAIToolChoiceFromCore(prepared.ToolChoice)
+	}
 
 	return openAIReq, nil
 }
 
 func TypedToAnthropicRequest(typed TypedRequest, model string) (*AnthropicRequest, error) {
+	rendered, err := renderTypedRequest(constants.ProviderAnthropic, typed, typedRenderContext{Model: model})
+	if err != nil {
+		return nil, err
+	}
+	anthReq, ok := rendered.(*AnthropicRequest)
+	if !ok {
+		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderAnthropic)
+	}
+	return anthReq, nil
+}
+
+func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+	prepared, err := prepareTypedRequestPayload(constants.ProviderAnthropic, typed, ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	anthReq := &AnthropicRequest{
-		Model:         model,
-		Stream:        typed.Stream,
+		Model:         ctx.Model,
+		Stream:        prepared.Stream,
 		StopSequences: typed.Stop,
 		Temperature:   typed.Temperature,
 		TopP:          typed.TopP,
-		Tools:         toolDefinitionsToAnthropicTools(typed.Tools),
-		ToolChoice:    toolChoiceToAnthropic(typed.ToolChoice),
+		Tools:         proxyAnthropicToolsFromCore(prepared.Tools),
+	}
+	if typed.ToolChoice != nil {
+		anthReq.ToolChoice = proxyAnthropicToolChoiceFromCore(prepared.ToolChoice)
 	}
 
 	if typed.MaxTokens != nil {
 		anthReq.MaxTokens = *typed.MaxTokens
 	}
 
-	if typed.System != "" {
-		systemJSON, err := json.Marshal(typed.System)
+	if prepared.System != "" {
+		systemJSON, err := json.Marshal(prepared.System)
 		if err != nil {
 			return nil, err
 		}
 		anthReq.System = json.RawMessage(systemJSON)
 	}
 
-	messages, err := typedAnthropicMessagesToProxy(core.ToAnthropicTyped(typed.Messages))
+	messages, err := typedAnthropicMessagesToProxy(core.ToAnthropicTyped(prepared.Messages))
 	if err != nil {
 		return nil, err
 	}
 	anthReq.Messages = messages
 
 	return anthReq, nil
+}
+
+func TypedToGoogleRequest(typed TypedRequest, model string, topK *int) (*GoogleRequest, error) {
+	rendered, err := renderTypedRequest(constants.ProviderGoogle, typed, typedRenderContext{Model: model, TopK: topK})
+	if err != nil {
+		return nil, err
+	}
+	googleReq, ok := rendered.(*GoogleRequest)
+	if !ok {
+		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderGoogle)
+	}
+	return googleReq, nil
+}
+
+func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+	prepared, err := prepareTypedRequestPayload(constants.ProviderGoogle, typed, ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	googleReq := &GoogleRequest{
+		GenerationConfig: &GoogleGenerationConfig{
+			Temperature:     typed.Temperature,
+			TopP:            typed.TopP,
+			MaxOutputTokens: typed.MaxTokens,
+			StopSequences:   typed.Stop,
+		},
+	}
+
+	if ctx.TopK != nil {
+		googleReq.GenerationConfig.TopK = ctx.TopK
+	}
+
+	googleReq.Contents = make([]GoogleContent, 0, len(prepared.Messages))
+	if prepared.System != "" {
+		googleReq.SystemInstruction = &GoogleSystemInstruction{
+			Parts: []GooglePart{{Text: prepared.System}},
+		}
+	}
+	googleReq.Contents = append(googleReq.Contents, typedGoogleMessagesToProxy(core.ToGoogleTyped(prepared.Messages))...)
+
+	googleReq.Tools = proxyGoogleToolsFromCore(prepared.Tools)
+	if len(googleReq.Tools) > 0 {
+		googleReq.ToolConfig = &GoogleToolConfig{
+			FunctionCallingConfig: GoogleFunctionConfig{
+				Mode: "AUTO",
+			},
+		}
+	}
+
+	return googleReq, nil
+}
+
+func TypedToArgoRequest(typed TypedRequest, model string, user string) (*ArgoChatRequest, error) {
+	rendered, err := renderTypedRequest(constants.ProviderArgo, typed, typedRenderContext{Model: model, User: user})
+	if err != nil {
+		return nil, err
+	}
+	argoReq, ok := rendered.(*ArgoChatRequest)
+	if !ok {
+		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderArgo)
+	}
+	return argoReq, nil
+}
+
+func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+	argoReq := &ArgoChatRequest{
+		User:            ctx.User,
+		Model:           ctx.Model,
+		Temperature:     typed.Temperature,
+		TopP:            typed.TopP,
+		Stop:            typed.Stop,
+		ReasoningEffort: typed.ReasoningEffort,
+	}
+
+	typedMessages := core.PrependSystemMessage(typed.Messages, typed.System)
+	messages := make([]ArgoMessage, 0, len(typedMessages))
+	renderMessages := argoMessageRendererForModel(ctx.Model)
+	renderedMessages, err := renderMessages(typedMessages)
+	if err != nil {
+		return nil, err
+	}
+	messages = append(messages, renderedMessages...)
+	argoReq.Messages = messages
+
+	if len(typed.Tools) > 0 {
+		converted := core.ConvertToolsForProvider(ctx.Model, typed.Tools, typed.ToolChoice)
+		argoReq.Tools = converted.Tools
+		argoReq.ToolChoice = converted.ToolChoice
+	}
+
+	return argoReq, nil
 }

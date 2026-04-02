@@ -14,11 +14,11 @@ import (
 // This function is a convenience wrapper around CreateCachedMessageBuilder for one-shot use.
 // For multiple calls (e.g., in tool execution loops), use CreateCachedMessageBuilder directly.
 func BuildMessagesWithToolInteractions(ctx context.Context, sessionPath string) ([]core.TypedMessage, error) {
-	cached, err := CreateCachedMessageBuilder(ctx, sessionPath)
+	snapshot, err := newConversationSnapshot(sessionPath)
 	if err != nil {
 		return nil, err
 	}
-	return cached(sessionPath)
+	return snapshot.buildTypedMessages(ctx, sessionPath)
 }
 
 // BuildMessagesWithIndex reconstructs messages using a pre-built index
@@ -35,184 +35,94 @@ func BuildMessagesWithIndex(ctx context.Context, messages []Message, messageInde
 
 	for _, msg := range messages {
 		// Load any tool interactions for this message using the index
-		msgDir := messageIndex[msg.ID]
-		if msgDir == "" {
-			// Message not found in index - this shouldn't happen but handle gracefully
-			logger.From(ctx).Debugf("Message %s not found in index, using session path", msg.ID)
-			msgDir = sessionPath
-		}
+		msgDir := resolveIndexedMessageDir(ctx, messageIndex, msg.ID, sessionPath)
 
 		toolInteraction, err := LoadToolInteraction(msgDir, msg.ID)
 		if err != nil {
 			return nil, errors.WrapError("load tool interaction for message "+msg.ID, err)
 		}
 
-		// Build the message in TypedMessage format
-		if toolInteraction == nil {
-			// Simple message without tools
-			typedMsg := core.TypedMessage{
-				Role: string(msg.Role),
-			}
-			// Only create a text block if there's content
-			if msg.Content != "" {
-				typedMsg.Blocks = []core.Block{
-					core.TextBlock{
-						Text: msg.Content,
-					},
-				}
-			}
-			result = append(result, typedMsg)
-		} else if len(toolInteraction.Calls) > 0 {
-			// Message with tool calls - preserve original role
-			typedMsg := core.TypedMessage{
-				Role:   string(msg.Role),
-				Blocks: make([]core.Block, 0),
-			}
-
-			// Add text content if present
-			if msg.Content != "" {
-				typedMsg.Blocks = append(typedMsg.Blocks, core.TextBlock{
-					Text: msg.Content,
-				})
-			}
-
-			// Add tool calls
-			for _, call := range toolInteraction.Calls {
-				typedMsg.Blocks = append(typedMsg.Blocks, core.ToolUseBlock{
-					ID:    call.ID,
-					Name:  call.Name,
-					Input: call.Args,
-				})
-			}
-			result = append(result, typedMsg)
-		} else if len(toolInteraction.Results) > 0 {
-			// Message with tool results - preserve original role
-			typedMsg := core.TypedMessage{
-				Role:   string(msg.Role),
-				Blocks: make([]core.Block, 0),
-			}
-
-			// Add any additional text (e.g., truncation notes)
-			if msg.Content != "" {
-				typedMsg.Blocks = append(typedMsg.Blocks, core.TextBlock{
-					Text: msg.Content,
-				})
-			}
-
-			// Add tool results
-			for _, res := range toolInteraction.Results {
-				block := core.ToolResultBlock{
-					ToolUseID: res.ID,
-					Content:   res.Output,
-				}
-
-				// Add error flag if present
-				if res.Error != "" {
-					block.IsError = true
-					block.Content = res.Error
-				}
-
-				typedMsg.Blocks = append(typedMsg.Blocks, block)
-			}
-			result = append(result, typedMsg)
-		} else {
-			// Message with empty tool interaction (shouldn't happen but handle gracefully)
-			typedMsg := core.TypedMessage{
-				Role: string(msg.Role),
-			}
-			if msg.Content != "" {
-				typedMsg.Blocks = []core.Block{
-					core.TextBlock{
-						Text: msg.Content,
-					},
-				}
-			}
-			result = append(result, typedMsg)
-		}
+		result = append(result, buildTypedMessage(msg, toolInteraction))
 	}
 
 	return result, nil
 }
 
+func resolveIndexedMessageDir(ctx context.Context, messageIndex map[string]string, messageID, fallbackPath string) string {
+	msgDir := messageIndex[messageID]
+	if msgDir == "" {
+		logger.From(ctx).Debugf("Message %s not found in index, using session path", messageID)
+		return fallbackPath
+	}
+	return msgDir
+}
+
+func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction) core.TypedMessage {
+	typedMsg := core.TypedMessage{
+		Role:   string(msg.Role),
+		Blocks: make([]core.Block, 0),
+	}
+
+	if msg.Content != "" {
+		typedMsg.Blocks = append(typedMsg.Blocks, core.TextBlock{
+			Text: msg.Content,
+		})
+	}
+
+	if toolInteraction == nil {
+		return typedMsg
+	}
+
+	for _, call := range toolInteraction.Calls {
+		typedMsg.Blocks = append(typedMsg.Blocks, core.ToolUseBlock{
+			ID:    call.ID,
+			Name:  call.Name,
+			Input: call.Args,
+		})
+	}
+
+	for _, res := range toolInteraction.Results {
+		block := core.ToolResultBlock{
+			ToolUseID: res.ID,
+			Content:   res.Output,
+		}
+		if res.Error != "" {
+			block.IsError = true
+			block.Content = res.Error
+		}
+		typedMsg.Blocks = append(typedMsg.Blocks, block)
+	}
+
+	return typedMsg
+}
+
 // CheckForPendingToolCalls checks if the last message in a session has tool calls
 // without corresponding results, indicating pending tool execution
 func CheckForPendingToolCalls(ctx context.Context, sessionPath string) ([]core.ToolCall, error) {
-	messages, err := GetLineage(sessionPath)
+	snapshot, err := newConversationSnapshot(sessionPath)
 	if err != nil {
-		return nil, errors.WrapError("get lineage", err)
+		return nil, err
 	}
 
-	if len(messages) == 0 {
-		return nil, nil
-	}
-
-	// Check the last message
-	lastMsg := messages[len(messages)-1]
-	logger.From(ctx).Debugf("CheckForPendingToolCalls: last message in %s is %s role=%s",
-		GetSessionID(sessionPath), lastMsg.ID, lastMsg.Role)
-
-	// Only assistant messages can have tool calls
-	if lastMsg.Role != core.RoleAssistant {
-		return nil, nil
-	}
-
-	// Build message index to find the directory containing the last message
-	messageIndex, err := indexMessageDirectories(sessionPath)
+	calls, err := snapshot.pendingToolCalls(ctx, sessionPath)
 	if err != nil {
-		return nil, errors.WrapError("index message directories", err)
+		return nil, err
 	}
-
-	msgDir := messageIndex[lastMsg.ID]
-	if msgDir == "" {
-		// Message not found in index - this shouldn't happen but handle gracefully
-		logger.From(ctx).Debugf("Message %s not found in index, using session path", lastMsg.ID)
-		msgDir = sessionPath
+	if len(calls) > 0 {
+		logger.From(ctx).Debugf("CheckForPendingToolCalls: found %d pending tool call(s) in %s", len(calls), GetSessionID(sessionPath))
 	}
-
-	toolInteraction, err := LoadToolInteraction(msgDir, lastMsg.ID)
-	if err != nil {
-		return nil, errors.WrapError("load tool interaction", err)
-	}
-
-	// If there are tool calls, they're pending (no subsequent user message with results)
-	if toolInteraction != nil && len(toolInteraction.Calls) > 0 {
-		return toolInteraction.Calls, nil
-	}
-
-	return nil, nil
+	return calls, nil
 }
 
 // CreateCachedMessageBuilder creates a message builder function that caches the message index
 // This is useful for tool execution loops to avoid rebuilding the index on each round
 func CreateCachedMessageBuilder(ctx context.Context, sessionPath string) (func(string) ([]core.TypedMessage, error), error) {
-	// Build the index once
-	messageIndex, err := indexMessageDirectories(sessionPath)
+	snapshot, err := newConversationSnapshot(sessionPath)
 	if err != nil {
-		return nil, errors.WrapError("index message directories", err)
+		return nil, err
 	}
 
-	// Return a closure that uses the cached index
 	return func(path string) ([]core.TypedMessage, error) {
-		// Get the basic message lineage
-		messages, err := GetLineage(path)
-		if err != nil {
-			return nil, errors.WrapError("get lineage", err)
-		}
-
-		// If the path changed (e.g., after forking), update the index for new messages only
-		if path != sessionPath {
-			// Index any new messages in the new path
-			newIndex, err := indexMessageDirectories(path)
-			if err != nil {
-				return nil, errors.WrapError("index new message directories", err)
-			}
-			// Merge new entries into the existing index
-			for k, v := range newIndex {
-				messageIndex[k] = v
-			}
-			sessionPath = path
-		}
-
-		return BuildMessagesWithIndex(ctx, messages, messageIndex, path)
+		return snapshot.buildTypedMessages(ctx, path)
 	}, nil
 }

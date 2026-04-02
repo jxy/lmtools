@@ -2,8 +2,30 @@ package core
 
 import (
 	"encoding/json"
+	"lmtools/internal/prompts"
 	"testing"
 )
+
+func TestConfiguredSystemPromptDoesNotUseDefault(t *testing.T) {
+	cfg := &TestRequestConfig{}
+
+	if got := configuredSystemPrompt(cfg); got != "" {
+		t.Fatalf("configuredSystemPrompt() = %q, want empty string", got)
+	}
+	if got := resolvedSystemPrompt(cfg, ""); got != prompts.DefaultSystemPrompt {
+		t.Fatalf("resolvedSystemPrompt() = %q, want default prompt %q", got, prompts.DefaultSystemPrompt)
+	}
+}
+
+func TestResolvedSystemPromptPrefersOverride(t *testing.T) {
+	cfg := &TestRequestConfig{
+		System: "configured prompt",
+	}
+
+	if got := resolvedSystemPrompt(cfg, "override prompt"); got != "override prompt" {
+		t.Fatalf("resolvedSystemPrompt() = %q, want override prompt", got)
+	}
+}
 
 // TestAnthropicSystemPromptNoDouplication verifies that system prompts are not duplicated for Anthropic
 func TestAnthropicSystemPromptNoDouplication(t *testing.T) {

@@ -291,10 +291,9 @@ func TestExecutePendingTools(t *testing.T) {
 
 			// Create test dependencies
 			ctx := context.Background()
-			cfg := &testRequestConfig{
-				toolEnabled: true,
-				toolTimeout: 5 * time.Second,
-			}
+			cfg := core.NewTestRequestConfig()
+			cfg.IsToolEnabledFlag = true
+			cfg.ToolTimeout = 5 * time.Second
 			logger := &MockLogger{debugEnabled: true}
 			notifier := &pendingTestNotifier{}
 			approver := &MockApprover{shouldApprove: tt.approverBehavior}
@@ -464,47 +463,6 @@ func TestCheckForPendingToolCalls(t *testing.T) {
 		})
 	}
 }
-
-// testRequestConfig implements core.RequestConfig for testing
-type testRequestConfig struct {
-	toolEnabled    bool
-	toolTimeout    time.Duration
-	toolWhitelist  string
-	toolBlacklist  string
-	autoApprove    bool
-	nonInteractive bool
-	maxParallel    int
-}
-
-func (t *testRequestConfig) GetProvider() string           { return "test" }
-func (t *testRequestConfig) GetModel() string              { return "test-model" }
-func (t *testRequestConfig) GetSystem() string             { return "" }
-func (t *testRequestConfig) GetEffectiveSystem() string    { return "" }
-func (t *testRequestConfig) IsSystemExplicitlySet() bool   { return false }
-func (t *testRequestConfig) GetAPIKey() string             { return "test-key" }
-func (t *testRequestConfig) GetAPIKeyFile() string         { return "" }
-func (t *testRequestConfig) IsEmbed() bool                 { return false }
-func (t *testRequestConfig) IsStreamChat() bool            { return false }
-func (t *testRequestConfig) IsToolEnabled() bool           { return t.toolEnabled }
-func (t *testRequestConfig) GetToolTimeout() time.Duration { return t.toolTimeout }
-func (t *testRequestConfig) GetToolWhitelist() string      { return t.toolWhitelist }
-func (t *testRequestConfig) GetToolBlacklist() string      { return t.toolBlacklist }
-func (t *testRequestConfig) GetToolAutoApprove() bool      { return t.autoApprove }
-func (t *testRequestConfig) GetToolNonInteractive() bool   { return t.nonInteractive }
-func (t *testRequestConfig) GetMaxToolRounds() int         { return 5 }
-func (t *testRequestConfig) GetMaxToolParallel() int {
-	if t.maxParallel > 0 {
-		return t.maxParallel
-	}
-	return 4
-}
-func (t *testRequestConfig) GetToolMaxOutputBytes() int { return 1024 * 1024 } // 1MB default
-func (t *testRequestConfig) GetProviderURL() string     { return "http://test.example.com" }
-func (t *testRequestConfig) GetEnv() string             { return "test" }
-func (t *testRequestConfig) GetUser() string            { return "test-user" }
-func (t *testRequestConfig) GetTimeout() time.Duration  { return 30 * time.Second }
-func (t *testRequestConfig) GetResume() string          { return "" }
-func (t *testRequestConfig) GetBranch() string          { return "" }
 
 // pendingTestNotifier implements core.Notifier for testing
 type pendingTestNotifier struct {

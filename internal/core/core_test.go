@@ -9,46 +9,22 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
-// testRequestConfig implements RequestConfig for testing
-type testRequestConfig struct {
-	user         string
-	model        string
-	system       string
-	env          string
-	provider     string
-	providerURL  string
-	apiKeyFile   string
-	isEmbed      bool
-	isStreamChat bool
-	enableTool   bool
-	stream       bool
+func newCoreTestRequestConfig() *TestRequestConfig {
+	cfg := NewTestRequestConfig()
+	cfg.User = ""
+	cfg.Model = ""
+	cfg.System = ""
+	cfg.Env = ""
+	cfg.Provider = ""
+	cfg.ProviderURL = ""
+	cfg.APIKeyFile = ""
+	cfg.IsEmbedMode = false
+	cfg.IsStreamChatMode = false
+	cfg.IsToolEnabledFlag = false
+	return cfg
 }
-
-func (c *testRequestConfig) GetUser() string               { return c.user }
-func (c *testRequestConfig) GetModel() string              { return c.model }
-func (c *testRequestConfig) GetSystem() string             { return c.system }
-func (c *testRequestConfig) IsSystemExplicitlySet() bool   { return false }
-func (c *testRequestConfig) GetEnv() string                { return c.env }
-func (c *testRequestConfig) GetProvider() string           { return c.provider }
-func (c *testRequestConfig) GetProviderURL() string        { return c.providerURL }
-func (c *testRequestConfig) GetAPIKeyFile() string         { return c.apiKeyFile }
-func (c *testRequestConfig) IsEmbed() bool                 { return c.isEmbed }
-func (c *testRequestConfig) IsStreamChat() bool            { return c.isStreamChat }
-func (c *testRequestConfig) IsToolEnabled() bool           { return c.enableTool }
-func (c *testRequestConfig) GetEffectiveSystem() string    { return c.system }
-func (c *testRequestConfig) GetToolTimeout() time.Duration { return 30 * time.Second }
-func (c *testRequestConfig) GetToolWhitelist() string      { return "" }
-func (c *testRequestConfig) GetToolBlacklist() string      { return "" }
-func (c *testRequestConfig) GetToolAutoApprove() bool      { return false }
-func (c *testRequestConfig) GetToolNonInteractive() bool   { return false }
-func (c *testRequestConfig) GetMaxToolRounds() int         { return 32 }
-func (c *testRequestConfig) GetMaxToolParallel() int       { return 4 }
-func (c *testRequestConfig) GetToolMaxOutputBytes() int    { return 1024 * 1024 }
-func (c *testRequestConfig) GetResume() string             { return "" }
-func (c *testRequestConfig) GetBranch() string             { return "" }
 
 // TestBuildOpenAIToolResultRequest tests the OpenAI tool result request builder
 func TestBuildOpenAIToolResultRequest(t *testing.T) {
@@ -64,13 +40,12 @@ func TestBuildOpenAIToolResultRequest(t *testing.T) {
 	apiKeyFile.Close()
 
 	// Test configuration
-	cfg := &testRequestConfig{
-		user:       "testuser",
-		model:      "gpt-5",
-		system:     "Test system prompt",
-		apiKeyFile: apiKeyFile.Name(),
-		provider:   "openai",
-	}
+	cfg := newCoreTestRequestConfig()
+	cfg.User = "testuser"
+	cfg.Model = "gpt-5"
+	cfg.System = "Test system prompt"
+	cfg.APIKeyFile = apiKeyFile.Name()
+	cfg.Provider = "openai"
 
 	// Test tool results are now embedded in typedMessages
 
@@ -218,13 +193,12 @@ func TestBuildAnthropicToolResultRequest(t *testing.T) {
 	apiKeyFile.Close()
 
 	// Test configuration
-	cfg := &testRequestConfig{
-		user:       "testuser",
-		model:      "claude-opus-4-1-20250805",
-		provider:   "anthropic",
-		system:     "Test system prompt",
-		apiKeyFile: apiKeyFile.Name(),
-	}
+	cfg := newCoreTestRequestConfig()
+	cfg.User = "testuser"
+	cfg.Model = "claude-opus-4-1-20250805"
+	cfg.Provider = "anthropic"
+	cfg.System = "Test system prompt"
+	cfg.APIKeyFile = apiKeyFile.Name()
 
 	// Test tool results are now embedded in typedMessages
 
@@ -358,17 +332,16 @@ func TestBuildToolResultRequestNoCacheError(t *testing.T) {
 	// Clear any existing cache
 	// ClearRequestCache() - removed
 
-	cfg := &testRequestConfig{
-		user:  "testuser",
-		model: "gpt-5",
-	}
+	cfg := newCoreTestRequestConfig()
+	cfg.User = "testuser"
+	cfg.Model = "gpt-5"
 
 	// Test each provider
 	providers := []string{"openai", "anthropic", "argo"}
 	for _, provider := range providers {
 		t.Run(provider, func(t *testing.T) {
 			// Override provider method for test
-			cfg.providerURL = "" // This would normally come from GetProvider()
+			cfg.ProviderURL = "" // This would normally come from GetProvider()
 
 			// Create a nil conversation to test error handling
 			_, _, err := BuildToolResultRequest(cfg, "test-model", "", nil, nil)
@@ -397,14 +370,13 @@ func TestBuildGoogleToolResultRequest(t *testing.T) {
 	}
 	apiKeyFile.Close()
 
-	cfg := &testRequestConfig{
-		user:        "testuser",
-		model:       "gemini-2.5-pro",
-		apiKeyFile:  apiKeyFile.Name(),
-		providerURL: "https://generativelanguage.googleapis.com",
-		system:      "Test system prompt",
-		provider:    "google",
-	}
+	cfg := newCoreTestRequestConfig()
+	cfg.User = "testuser"
+	cfg.Model = "gemini-2.5-pro"
+	cfg.APIKeyFile = apiKeyFile.Name()
+	cfg.ProviderURL = "https://generativelanguage.googleapis.com"
+	cfg.System = "Test system prompt"
+	cfg.Provider = "google"
 
 	// Create typed messages to simulate the conversation including tool results
 	typedMessages := []TypedMessage{
@@ -548,10 +520,9 @@ func TestStreamingFallbackAccumulation(t *testing.T) {
 	defer os.Unsetenv("LMC_LOG_DIR")
 
 	// Create request config with unknown provider
-	cfg := &testRequestConfig{
-		provider:     "unknown-provider",
-		isStreamChat: true,
-	}
+	cfg := newCoreTestRequestConfig()
+	cfg.Provider = "unknown-provider"
+	cfg.IsStreamChatMode = true
 
 	// Create HTTP response
 	resp, err := http.Get(ts.URL)
@@ -878,10 +849,8 @@ func TestHandleResponseWithToolCalls(t *testing.T) {
 			defer ts.Close()
 
 			// Create request config
-			cfg := &testRequestConfig{
-				provider: tt.provider,
-				stream:   false,
-			}
+			cfg := newCoreTestRequestConfig()
+			cfg.Provider = tt.provider
 
 			// Create HTTP response
 			resp, err := http.Get(ts.URL)
@@ -1070,11 +1039,10 @@ func TestBuildToolResultRequest(t *testing.T) {
 			}
 
 			// Create request config
-			cfg := &testRequestConfig{
-				provider:   tt.provider,
-				model:      "test-model",
-				apiKeyFile: apiKeyFile,
-			}
+			cfg := newCoreTestRequestConfig()
+			cfg.Provider = tt.provider
+			cfg.Model = "test-model"
+			cfg.APIKeyFile = apiKeyFile
 
 			// Set up conversation
 			var typedMessages []TypedMessage

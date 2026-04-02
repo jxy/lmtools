@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -75,33 +74,18 @@ func (s *Server) doJSON(
 ) error {
 	log := logger.From(ctx)
 
-	// Marshal request
-	reqData, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("marshal %s request: %w", provider, err)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
-	if err != nil {
-		return fmt.Errorf("create %s request: %w", provider, err)
-	}
-
-	// Set default content type
-	req.Header.Set("Content-Type", "application/json")
-
-	// Apply provider-specific headers
-	if headerFn != nil {
-		headerFn(req)
-	}
-
 	// Log request if debug enabled
 	logger.DebugJSON(log, fmt.Sprintf("%s request", provider), reqBody)
 
-	// Send request
-	resp, err := s.client.Do(ctx, req, provider)
+	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
+		URL:         url,
+		Provider:    provider,
+		RequestName: provider,
+		Payload:     reqBody,
+		Configure:   noErrorRequestConfigurer(headerFn),
+	})
 	if err != nil {
-		return fmt.Errorf("send %s request: %w", provider, err)
+		return err
 	}
 	defer resp.Body.Close()
 

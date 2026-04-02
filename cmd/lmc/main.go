@@ -12,6 +12,8 @@ import (
 	"lmtools/internal/errors"
 	"lmtools/internal/limitio"
 	"lmtools/internal/logger"
+	"lmtools/internal/modelcatalog"
+	"lmtools/internal/providers"
 	"lmtools/internal/retry"
 	"lmtools/internal/session"
 	"lmtools/internal/ui"
@@ -19,8 +21,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -321,26 +321,10 @@ func handleSpecialFlags(ctx context.Context, cfg *config.Config, notifier core.N
 func setupLogging(cfg config.Config, notifier core.Notifier) (string, error) {
 	logDir := logger.GetLogDir()
 	if cfg.LogDir != "" {
-		// Validate and convert to absolute path if needed
-		absLogDir, err := filepath.Abs(cfg.LogDir)
+		absLogDir, err := ensureDirectoryPath(cfg.LogDir, "log directory")
 		if err != nil {
-			return "", errors.WrapError("validate log directory", err)
+			return "", err
 		}
-
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(absLogDir, constants.DirPerm); err != nil {
-			return "", errors.WrapError("create log directory", err)
-		}
-
-		// Verify it's a directory (not a file)
-		info, err := os.Stat(absLogDir)
-		if err != nil {
-			return "", errors.WrapError("access log directory", err)
-		}
-		if !info.IsDir() {
-			return "", errors.WrapError("validate log directory", fmt.Errorf("log-dir path exists but is not a directory: %s", absLogDir))
-		}
-
 		logDir = absLogDir
 	}
 
@@ -362,36 +346,22 @@ func setupLogging(cfg config.Config, notifier core.Notifier) (string, error) {
 
 // setupSessionsConfig sets up the sessions directory and configuration
 func setupSessionsConfig(ctx context.Context, cfg config.Config) error {
+	managerCfg := session.ManagerConfig{
+		SkipFlockCheck: cfg.SkipFlockCheck,
+	}
+
 	// Set custom sessions directory if provided
 	if cfg.SessionsDir != "" {
-		// Validate and convert to absolute path if needed
-		absDir, err := filepath.Abs(cfg.SessionsDir)
+		absDir, err := ensureDirectoryPath(cfg.SessionsDir, "sessions directory")
 		if err != nil {
-			return errors.WrapError("validate sessions directory", err)
+			return err
 		}
 
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(absDir, constants.DirPerm); err != nil {
-			return errors.WrapError("create sessions directory", err)
-		}
-
-		// Verify it's a directory (not a file)
-		info, err := os.Stat(absDir)
-		if err != nil {
-			return errors.WrapError("access sessions directory", err)
-		}
-		if !info.IsDir() {
-			return errors.WrapError("validate sessions directory", fmt.Errorf("sessions-dir path exists but is not a directory: %s", absDir))
-		}
-
-		session.SetSessionsDir(absDir)
+		managerCfg.SessionsDir = absDir
 		logger.From(ctx).Infof("Using custom sessions directory: %s", absDir)
 	}
 
-	// Set skip flock check if provided
-	if cfg.SkipFlockCheck {
-		session.SetSkipFlockCheck(true)
-	}
+	session.ConfigureDefaultManager(managerCfg)
 
 	return nil
 }
@@ -426,7 +396,8 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, sess *session.Ses
 		if cfg.Embed {
 			actualModel = core.DefaultEmbedModel
 		} else {
-			actualModel = core.GetDefaultChatModel(cfg.Provider)
+			provider := providers.ResolveProvider(cfg.Provider)
+			actualModel = core.GetDefaultChatModel(provider)
 		}
 	}
 	logger.From(ctx).Infof("Starting request | Model: %s | Provider: %s", actualModel, cfg.Provider)
@@ -540,35 +511,12 @@ func persistAssistantOnly(ctx context.Context, out string, sess *session.Session
 
 // listModels queries and displays available models for the configured provider
 func listModels(ctx context.Context, cfg config.Config, logDir string) error {
-	// Determine provider
 	provider := cfg.Provider
-	if provider == "" {
-		provider = constants.ProviderArgo
-	}
+	provider = providers.ResolveProvider(provider)
 
-	// Build models endpoint URL
-	var url string
-	if cfg.ProviderURL != "" {
-		// Custom provider URL
-		url = strings.TrimRight(cfg.ProviderURL, "/") + "/models"
-	} else {
-		// Standard provider endpoints
-		switch provider {
-		case constants.ProviderArgo:
-			if cfg.ArgoEnv == "prod" {
-				url = "https://apps.inside.anl.gov/argoapi/api/v1/models/"
-			} else {
-				url = "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/"
-			}
-		case constants.ProviderOpenAI:
-			url = "https://api.openai.com/v1/models"
-		case constants.ProviderGoogle:
-			url = "https://generativelanguage.googleapis.com/v1beta/models"
-		case constants.ProviderAnthropic:
-			url = "https://api.anthropic.com/v1/models"
-		default:
-			return errors.WrapError("validate provider", fmt.Errorf("unknown provider: %s", provider))
-		}
+	url, err := providers.ResolveModelsURL(provider, cfg.ProviderURL, cfg.ArgoEnv)
+	if err != nil {
+		return errors.WrapError("validate provider", err)
 	}
 
 	// Create HTTP request
@@ -578,7 +526,7 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 	}
 
 	// Add authentication headers if needed
-	if provider != constants.ProviderArgo && cfg.ProviderURL == "" {
+	if providers.RequiresAPIKey(provider) && cfg.ProviderURL == "" {
 		// Standard non-Argo providers need API key
 		if cfg.APIKeyFile == "" {
 			return errors.WrapError("validate config", fmt.Errorf("-api-key-file is required for %s provider when listing models", provider))
@@ -589,14 +537,11 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 			return errors.WrapError("read API key", err)
 		}
 
-		// Use centralized header setting
-		auth.SetProviderHeaders(req, provider, apiKey)
-
-		// Handle Google's special case (API key in URL)
-		if provider == constants.ProviderGoogle {
-			if err := auth.ApplyGoogleAPIKey(req, apiKey); err != nil {
+		if err := auth.ApplyProviderCredentials(req, provider, apiKey); err != nil {
+			if provider == constants.ProviderGoogle {
 				return errors.WrapError("apply Google API key", err)
 			}
+			return errors.WrapError("apply provider credentials", err)
 		}
 	}
 
@@ -627,171 +572,57 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 		logger.From(ctx).Warnf("Failed to log models response: %v", err)
 	}
 
-	// Parse and display models based on provider
-	switch provider {
-	case constants.ProviderArgo:
-		return displayArgoModels(data)
-	case constants.ProviderOpenAI:
-		return displayOpenAIModels(data)
-	case constants.ProviderGoogle:
-		return displayGoogleModels(data)
-	case constants.ProviderAnthropic:
-		return displayAnthropicModels(data)
-	default:
-		// For custom providers, just display raw JSON
-		fmt.Println(string(data))
-		return nil
-	}
-}
-
-// Provider-specific model display functions
-func displayArgoModels(data []byte) error {
-	// Try to parse as array first (old format)
-	var models []string
-	if err := json.Unmarshal(data, &models); err == nil {
-		sort.Strings(models)
-		fmt.Println("Available Argo models:")
-		for _, model := range models {
-			fmt.Printf("  %s\n", model)
-		}
-		return nil
-	}
-
-	// Try to parse as object with models field
-	var response struct {
-		Models []string `json:"models"`
-	}
-	if err := json.Unmarshal(data, &response); err == nil && len(response.Models) > 0 {
-		sort.Strings(response.Models)
-		fmt.Println("Available Argo models:")
-		for _, model := range response.Models {
-			fmt.Printf("  %s\n", model)
-		}
-		return nil
-	}
-
-	// Try to parse as object with data field containing model objects
-	var objectResponse struct {
-		Data []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"data"`
-		Models []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(data, &objectResponse); err == nil {
-		if len(objectResponse.Data) > 0 {
-			sort.Slice(objectResponse.Data, func(i, j int) bool {
-				return objectResponse.Data[i].ID < objectResponse.Data[j].ID
-			})
-			fmt.Println("Available Argo models:")
-			for _, model := range objectResponse.Data {
-				if model.Name != "" {
-					fmt.Printf("  %s (%s)\n", model.ID, model.Name)
-				} else {
-					fmt.Printf("  %s\n", model.ID)
-				}
+	items, err := parseModelsForDisplay(provider, data)
+	if err != nil {
+		if cfg.ProviderURL != "" {
+			if _, ok := providers.InfoFor(provider); !ok {
+				fmt.Println(string(data))
+				return nil
 			}
-			return nil
 		}
-		if len(objectResponse.Models) > 0 {
-			sort.Slice(objectResponse.Models, func(i, j int) bool {
-				return objectResponse.Models[i].ID < objectResponse.Models[j].ID
-			})
-			fmt.Println("Available Argo models:")
-			for _, model := range objectResponse.Models {
-				if model.Name != "" {
-					fmt.Printf("  %s (%s)\n", model.ID, model.Name)
-				} else {
-					fmt.Printf("  %s\n", model.ID)
-				}
-			}
-			return nil
-		}
+		return errors.WrapError("parse models response", err)
 	}
 
-	return errors.WrapError("parse Argo models response", stdErrors.New("unable to parse Argo models response - check logs for raw response"))
-}
-
-func displayOpenAIModels(data []byte) error {
-	var response struct {
-		Data []struct {
-			ID      string `json:"id"`
-			Created int64  `json:"created"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(data, &response); err != nil {
-		return errors.WrapError("parse OpenAI models", err)
-	}
-
-	// Sort models by ID
-	sort.Slice(response.Data, func(i, j int) bool {
-		return response.Data[i].ID < response.Data[j].ID
-	})
-
-	fmt.Println("Available OpenAI models:")
-	for _, model := range response.Data {
-		fmt.Printf("  %s\n", model.ID)
-	}
+	displayModels(provider, items)
 	return nil
 }
 
-func displayGoogleModels(data []byte) error {
-	var response struct {
-		Models []struct {
-			Name             string   `json:"name"`
-			DisplayName      string   `json:"displayName"`
-			SupportedMethods []string `json:"supportedGenerationMethods"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(data, &response); err != nil {
-		return errors.WrapError("parse Google models", err)
+func parseModelsForDisplay(provider string, data []byte) ([]modelcatalog.Item, error) {
+	if _, ok := providers.InfoFor(provider); ok {
+		return modelcatalog.Parse(provider, data)
 	}
 
-	// Sort by model ID (extracted from name)
-	sort.Slice(response.Models, func(i, j int) bool {
-		idI := strings.TrimPrefix(response.Models[i].Name, "models/")
-		idJ := strings.TrimPrefix(response.Models[j].Name, "models/")
-		return idI < idJ
-	})
-
-	fmt.Println("Available Google models:")
-	for _, model := range response.Models {
-		// Extract model ID from name (format: models/model-id)
-		modelID := strings.TrimPrefix(model.Name, "models/")
-		fmt.Printf("  %s (%s)\n", modelID, model.DisplayName)
+	parsers := []func([]byte) ([]modelcatalog.Item, error){
+		modelcatalog.ParseOpenAI,
+		modelcatalog.ParseAnthropic,
+		modelcatalog.ParseGoogle,
+		modelcatalog.ParseArgo,
 	}
-	return nil
+	for _, parse := range parsers {
+		if items, err := parse(data); err == nil {
+			return items, nil
+		}
+	}
+
+	return nil, fmt.Errorf("unable to parse models response for provider %s", provider)
 }
 
-func displayAnthropicModels(data []byte) error {
-	var response struct {
-		Data []struct {
-			ID          string `json:"id"`
-			DisplayName string `json:"display_name"`
-			Created     string `json:"created_at"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(data, &response); err != nil {
-		return errors.WrapError("parse Anthropic models", err)
+func displayModels(provider string, items []modelcatalog.Item) {
+	modelcatalog.Sort(items)
+
+	name := provider
+	if info, ok := providers.InfoFor(provider); ok {
+		name = info.DisplayName
 	}
 
-	// Sort models by ID
-	sort.Slice(response.Data, func(i, j int) bool {
-		return response.Data[i].ID < response.Data[j].ID
-	})
-
-	fmt.Println("Available Anthropic models:")
-	for _, model := range response.Data {
+	fmt.Printf("Available %s models:\n", name)
+	for _, model := range items {
 		if model.DisplayName != "" {
 			fmt.Printf("  %s (%s)\n", model.ID, model.DisplayName)
-		} else {
-			fmt.Printf("  %s\n", model.ID)
+			continue
 		}
+		fmt.Printf("  %s\n", model.ID)
 	}
-	return nil
 }
 
 func getOperationName(cfg *config.Config) string {

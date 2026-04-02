@@ -1,12 +1,12 @@
-package core
+package providers
 
 import (
 	"lmtools/internal/constants"
 	"strings"
 )
 
-// argoModelProviders maps model prefixes to their provider formats
-// This is the single source of truth for model-to-provider mapping
+// argoModelProviders maps model prefixes to their provider-native message/tool formats.
+// This is static provider metadata and is shared by both core and proxy.
 var argoModelProviders = map[string]string{
 	"gpt":    constants.ProviderOpenAI,
 	"o1":     constants.ProviderOpenAI,
@@ -15,18 +15,14 @@ var argoModelProviders = map[string]string{
 	"claude": constants.ProviderAnthropic,
 }
 
-// DetermineArgoModelProvider determines the underlying provider for an Argo model
-// This is the centralized function that should be used across the codebase
+// DetermineArgoModelProvider reports which provider format an Argo model should use.
+// Unknown models intentionally default to OpenAI-style formatting.
 func DetermineArgoModelProvider(model string) string {
 	modelLower := strings.ToLower(model)
-
-	// Check known prefixes
 	for prefix, provider := range argoModelProviders {
 		if strings.HasPrefix(modelLower, prefix) {
 			return provider
 		}
 	}
-
-	// Default to OpenAI format for unknown models
 	return constants.ProviderOpenAI
 }

@@ -117,8 +117,8 @@ type commandArgs struct {
 	Timeout int
 }
 
-// NewExecutor creates a new tool executor
-func NewExecutor(cfg RequestConfig, log ExecLogger, notifier Notifier, approver Approver) (*Executor, error) {
+// NewExecutor creates a new tool executor.
+func NewExecutor(cfg ToolConfig, log ExecLogger, notifier Notifier, approver Approver) (*Executor, error) {
 	e := &Executor{
 		defaultTimeout: cfg.GetToolTimeout(),
 		autoApprove:    cfg.GetToolAutoApprove(),

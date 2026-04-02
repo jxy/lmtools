@@ -35,6 +35,15 @@ type ToolResultBlock struct {
 
 func (ToolResultBlock) isBlock() {}
 
+// ThinkingBlock represents Anthropic reasoning content that must be preserved
+// for providers that support it, while being dropped by providers that do not.
+type ThinkingBlock struct {
+	Thinking  string
+	Signature string
+}
+
+func (ThinkingBlock) isBlock() {}
+
 // ImageBlock represents an image content block
 type ImageBlock struct {
 	URL    string

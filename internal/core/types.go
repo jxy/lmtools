@@ -18,17 +18,33 @@ const (
 )
 
 // RequestConfig interface defines the contract for request configuration
-type RequestConfig interface {
+type UserConfig interface {
 	GetUser() string
+}
+
+type ModelConfig interface {
 	GetModel() string
+}
+
+type SystemConfig interface {
+	GetSystem() string
 	GetEffectiveSystem() string
 	IsSystemExplicitlySet() bool
-	GetEnv() string
-	IsEmbed() bool
-	IsStreamChat() bool
+}
+
+type ProviderConfig interface {
 	GetProvider() string
 	GetProviderURL() string
 	GetAPIKeyFile() string
+	GetEnv() string
+}
+
+type StreamModeConfig interface {
+	IsEmbed() bool
+	IsStreamChat() bool
+}
+
+type ToolConfig interface {
 	IsToolEnabled() bool
 	GetToolTimeout() time.Duration
 	GetToolWhitelist() string
@@ -38,8 +54,37 @@ type RequestConfig interface {
 	GetMaxToolRounds() int
 	GetMaxToolParallel() int
 	GetToolMaxOutputBytes() int
+}
+
+type SessionResumeConfig interface {
 	GetResume() string
 	GetBranch() string
+}
+
+type ChatRequestConfig interface {
+	UserConfig
+	ModelConfig
+	SystemConfig
+	ProviderConfig
+	StreamModeConfig
+	ToolConfig
+}
+
+type EmbedRequestConfig interface {
+	UserConfig
+	ModelConfig
+	ProviderConfig
+	StreamModeConfig
+}
+
+type ResponseConfig interface {
+	ProviderConfig
+	StreamModeConfig
+}
+
+type RequestConfig interface {
+	ChatRequestConfig
+	SessionResumeConfig
 }
 
 // Logger interface for logging operations

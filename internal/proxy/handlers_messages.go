@@ -153,42 +153,21 @@ func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info
 }
 
 func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *AnthropicRequest, provider, originalModel string) (*AnthropicResponse, error) {
-	log := logger.From(ctx)
-
-	switch provider {
-	case constants.ProviderOpenAI:
-		openAIResp, err := s.forwardToOpenAI(ctx, anthReq)
-		if err != nil {
-			return nil, err
-		}
-		return s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel), nil
-
-	case constants.ProviderGoogle:
-		googleResp, err := s.forwardToGoogle(ctx, anthReq)
-		if err != nil {
-			return nil, err
-		}
-		return s.converter.ConvertGoogleToAnthropic(googleResp, originalModel), nil
-
-	case constants.ProviderArgo:
-		if len(anthReq.Tools) > 0 {
-			log.Warnf("Tools requested but not supported by Argo provider, falling back to non-streaming")
-		}
-
-		argoResp, err := s.forwardToArgo(ctx, anthReq)
-		if err != nil {
-			return nil, err
-		}
-		anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq)
-		logToolUseBlocks(ctx, anthResp.Content, false)
-		return anthResp, nil
-
-	case constants.ProviderAnthropic:
-		return s.forwardToAnthropic(ctx, anthReq)
-
-	default:
-		return nil, fmt.Errorf("route request: %w", fmt.Errorf("unknown provider: %s", provider))
+	if provider == constants.ProviderArgo && len(anthReq.Tools) > 0 {
+		logger.From(ctx).Warnf("Tools requested but not supported by Argo provider, falling back to non-streaming")
 	}
+
+	capability, ok := proxyProviderCapabilityFor(provider)
+	if !ok {
+		return nil, fmt.Errorf("unknown provider: %s", provider)
+	}
+
+	forward, err := capability.requireAnthropicResponseForwarder(s)
+	if err != nil {
+		return nil, err
+	}
+
+	return forward(ctx, anthReq, originalModel)
 }
 
 // handleNonStreamingRequest processes non-streaming requests
@@ -228,18 +207,16 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Route to appropriate streaming provider
-	switch provider {
-	case constants.ProviderOpenAI:
-		err = s.streamFromOpenAI(ctx, anthReq, handler)
-	case constants.ProviderGoogle:
-		err = s.streamFromGoogle(ctx, anthReq, handler)
-	case constants.ProviderArgo:
-		err = s.streamFromArgo(ctx, anthReq, handler)
-	case constants.ProviderAnthropic:
-		err = s.streamFromAnthropic(ctx, anthReq, handler)
-	default:
-		err = fmt.Errorf("stream request: %w", fmt.Errorf("unknown provider: %s", provider))
+	capability, ok := proxyProviderCapabilityFor(provider)
+	if !ok {
+		err = fmt.Errorf("unknown provider: %s", provider)
+	} else {
+		forward, lookupErr := capability.requireAnthropicStreamForwarder(s)
+		if lookupErr != nil {
+			err = lookupErr
+		} else {
+			err = forward(ctx, anthReq, handler)
+		}
 	}
 
 	if err != nil {

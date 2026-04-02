@@ -3,9 +3,8 @@ package proxy
 import (
 	"fmt"
 	"lmtools/internal/constants"
-	"lmtools/internal/core"
+	"lmtools/internal/providers"
 	"net/url"
-	"strings"
 )
 
 // Endpoints holds all computed API endpoint URLs for a provider.
@@ -53,22 +52,28 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 		}
 	}
 
-	endpoints := &Endpoints{Provider: provider}
+	resolved, err := providers.ResolveEndpoints(provider, cfg.ProviderURL, cfg.ArgoEnv)
+	if err != nil {
+		return nil, err
+	}
 
-	// Initialize only the endpoints for the selected provider
+	endpoints := &Endpoints{Provider: provider}
 	switch provider {
 	case constants.ProviderOpenAI:
-		if err := endpoints.initOpenAI(cfg); err != nil {
-			return nil, err
-		}
+		endpoints.OpenAI = resolved.Chat
+		endpoints.OpenAIModels = resolved.Models
 	case constants.ProviderGoogle:
-		endpoints.initGoogle(cfg)
+		endpoints.Google = resolved.Base
+		endpoints.GoogleModels = resolved.Models
 	case constants.ProviderAnthropic:
-		endpoints.initAnthropic(cfg)
+		endpoints.Anthropic = resolved.Chat
+		endpoints.AnthropicModels = resolved.Models
 	case constants.ProviderArgo:
-		if err := endpoints.initArgo(cfg); err != nil {
-			return nil, err
-		}
+		endpoints.ArgoBase = resolved.Base
+		endpoints.ArgoChat = resolved.Chat
+		endpoints.ArgoStreamChat = resolved.Stream
+		endpoints.ArgoEmbed = resolved.Embed
+		endpoints.ArgoModels = resolved.Models
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -86,95 +91,6 @@ func validateProviderURL(providerURL, provider string) error {
 		return fmt.Errorf("%s ProviderURL must use http or https scheme", provider)
 	}
 	return nil
-}
-
-// initOpenAI initializes OpenAI endpoints.
-func (e *Endpoints) initOpenAI(cfg *Config) error {
-	// Use ProviderURL or default
-	base := cfg.ProviderURL
-	if base == "" {
-		base = "https://api.openai.com/v1"
-	}
-
-	// Check if URL already ends with chat/completions
-	if strings.HasSuffix(strings.TrimRight(base, "/"), "/chat/completions") {
-		e.OpenAI = strings.TrimRight(base, "/")
-		modelsBase := strings.TrimSuffix(e.OpenAI, "/chat/completions")
-		e.OpenAIModels = modelsBase + "/models"
-		return nil
-	}
-
-	chatURL, err := buildProviderURL(base, "chat/completions")
-	if err != nil {
-		return fmt.Errorf("invalid OpenAI ProviderURL: %w", err)
-	}
-	e.OpenAI = chatURL
-
-	modelsURL, err := buildProviderURL(base, "models")
-	if err != nil {
-		return fmt.Errorf("invalid OpenAI ProviderURL for models: %w", err)
-	}
-	e.OpenAIModels = modelsURL
-	return nil
-}
-
-// initGoogle initializes Google endpoints.
-func (e *Endpoints) initGoogle(cfg *Config) {
-	// Use ProviderURL or default
-	base := cfg.ProviderURL
-	if base == "" {
-		base = "https://generativelanguage.googleapis.com/v1beta/models"
-	}
-
-	e.Google = base
-	base = strings.TrimRight(base, "/")
-	if !strings.HasSuffix(base, "/v1beta/models") {
-		e.GoogleModels = base + "/v1beta/models"
-	} else {
-		e.GoogleModels = base
-	}
-}
-
-// initAnthropic initializes Anthropic endpoints.
-func (e *Endpoints) initAnthropic(cfg *Config) {
-	// Use ProviderURL or default
-	base := cfg.ProviderURL
-	if base == "" {
-		base = "https://api.anthropic.com/v1/messages"
-	}
-
-	e.Anthropic = base
-	// Derive models URL from base
-	modelsBase := strings.TrimSuffix(base, "/messages")
-	modelsBase = strings.TrimRight(modelsBase, "/")
-	e.AnthropicModels = modelsBase + "/models"
-}
-
-// initArgo initializes Argo endpoints using the argoEndpoints helper.
-func (e *Endpoints) initArgo(cfg *Config) error {
-	baseURL := getArgoBaseURL(cfg)
-	eps, err := newArgoEndpoints(baseURL)
-	if err != nil {
-		return err
-	}
-	e.ArgoBase = eps.resource
-	e.ArgoChat = eps.chat
-	e.ArgoStreamChat = eps.stream
-	e.ArgoEmbed = eps.embed
-	e.ArgoModels = eps.models
-	return nil
-}
-
-// getArgoBaseURL returns the base URL for Argo.
-// Priority: ProviderURL > ArgoEnv > default (dev)
-func getArgoBaseURL(cfg *Config) string {
-	if cfg.ProviderURL != "" {
-		return cfg.ProviderURL
-	}
-	if cfg.ArgoEnv == "prod" {
-		return core.ArgoProdURL
-	}
-	return core.ArgoDevURL
 }
 
 // GetArgoURL returns the appropriate Argo URL for the given endpoint type.

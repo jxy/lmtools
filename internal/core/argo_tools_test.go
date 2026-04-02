@@ -3,47 +3,25 @@ package core
 import (
 	"encoding/json"
 	"lmtools/internal/constants"
+	"lmtools/internal/providers"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
-// testRequestConfigWithTools extends testRequestConfig to add tools support
-type testRequestConfigWithTools struct {
-	provider   string
-	model      string
-	system     string
-	enableTool bool
-	user       string
-	env        string
+func newArgoToolTestConfig() *TestRequestConfig {
+	cfg := NewTestRequestConfig()
+	cfg.User = ""
+	cfg.Provider = ""
+	cfg.Model = ""
+	cfg.System = ""
+	cfg.Env = ""
+	cfg.ProviderURL = "http://test.example.com"
+	cfg.IsStreamChatMode = false
+	cfg.IsEmbedMode = false
+	cfg.IsToolEnabledFlag = false
+	return cfg
 }
-
-func (t *testRequestConfigWithTools) GetUser() string               { return t.user }
-func (t *testRequestConfigWithTools) GetProvider() string           { return t.provider }
-func (t *testRequestConfigWithTools) GetModel() string              { return t.model }
-func (t *testRequestConfigWithTools) GetSystem() string             { return t.system }
-func (t *testRequestConfigWithTools) IsSystemExplicitlySet() bool   { return false }
-func (t *testRequestConfigWithTools) GetInput() string              { return "" }
-func (t *testRequestConfigWithTools) IsStreamChat() bool            { return false }
-func (t *testRequestConfigWithTools) IsEmbed() bool                 { return false }
-func (t *testRequestConfigWithTools) GetEnv() string                { return t.env }
-func (t *testRequestConfigWithTools) GetMaxTokens() int             { return 0 }
-func (t *testRequestConfigWithTools) GetAPIKey() string             { return "test-api-key" }
-func (t *testRequestConfigWithTools) GetAPIKeyFile() string         { return "" }
-func (t *testRequestConfigWithTools) GetProviderURL() string        { return "http://test.example.com" }
-func (t *testRequestConfigWithTools) IsToolEnabled() bool           { return t.enableTool }
-func (t *testRequestConfigWithTools) GetEffectiveSystem() string    { return t.system }
-func (t *testRequestConfigWithTools) GetToolWhitelist() string      { return "" }
-func (t *testRequestConfigWithTools) GetToolBlacklist() string      { return "" }
-func (t *testRequestConfigWithTools) GetToolAutoApprove() bool      { return false }
-func (t *testRequestConfigWithTools) GetToolNonInteractive() bool   { return false }
-func (t *testRequestConfigWithTools) GetToolTimeout() time.Duration { return 30 * time.Second }
-func (t *testRequestConfigWithTools) GetMaxToolRounds() int         { return 32 }
-func (t *testRequestConfigWithTools) GetMaxToolParallel() int       { return 4 }
-func (t *testRequestConfigWithTools) GetToolMaxOutputBytes() int    { return 1024 * 1024 }
-func (t *testRequestConfigWithTools) GetResume() string             { return "" }
-func (t *testRequestConfigWithTools) GetBranch() string             { return "" }
 
 func TestBuildArgoChatRequestWithTools(t *testing.T) {
 	// Create a sample tools file content
@@ -281,17 +259,21 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create test config
-			cfg := &testRequestConfigWithTools{
-				user:       "testuser",
-				model:      tt.model,
-				provider:   tt.provider,
-				system:     "You are a helpful assistant",
-				enableTool: true,
-			}
+			cfg := newArgoToolTestConfig()
+			cfg.User = "testuser"
+			cfg.Model = tt.model
+			cfg.Provider = tt.provider
+			cfg.System = "You are a helpful assistant"
+			cfg.IsToolEnabledFlag = true
 
 			// Build the request
 			messages := []TypedMessage{NewTextMessage("user", "Test message")}
-			httpReq, body, err := buildArgoChatRequestTyped(cfg, messages, false)
+			httpReq, body, err := BuildChatRequest(cfg, messages, ChatBuildOptions{
+				ModelOverride:  tt.model,
+				SystemOverride: cfg.System,
+				ToolDefs:       GetBuiltinUniversalCommandTool(),
+				Stream:         false,
+			})
 			if err != nil {
 				t.Fatalf("Failed to build request: %v", err)
 			}
@@ -358,7 +340,7 @@ func TestConvertToolsForProvider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
 			// Test determineArgoModelProvider
-			provider := DetermineArgoModelProvider(tt.model)
+			provider := providers.DetermineArgoModelProvider(tt.model)
 			if provider != tt.expectedProvider {
 				t.Errorf("Expected provider=%s for model=%s, got %s", tt.expectedProvider, tt.model, provider)
 			}
@@ -475,11 +457,10 @@ func TestBuildToolResultRequestForArgo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &testRequestConfigWithTools{
-				model:    tt.model,
-				provider: tt.provider,
-				system:   "Test system",
-			}
+			cfg := newArgoToolTestConfig()
+			cfg.Model = tt.model
+			cfg.Provider = tt.provider
+			cfg.System = "Test system"
 
 			// Tool definitions and system are now passed directly to request builders
 
@@ -698,13 +679,12 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 	}
 
 	// Test configuration
-	cfg := &testRequestConfigWithTools{
-		user:       "testuser",
-		model:      "claudesonnet4",
-		system:     "Test system prompt",
-		env:        "dev",
-		enableTool: true,
-	}
+	cfg := newArgoToolTestConfig()
+	cfg.User = "testuser"
+	cfg.Model = "claudesonnet4"
+	cfg.System = "Test system prompt"
+	cfg.Env = "dev"
+	cfg.IsToolEnabledFlag = true
 
 	// Test tool results are now embedded in typedMessages
 	additionalText := "Note: Some outputs were truncated"
@@ -969,14 +949,13 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Update model in config
-			testCfg := &testRequestConfigWithTools{
-				user:       cfg.user,
-				model:      tt.model,
-				system:     cfg.system,
-				env:        cfg.env,
-				enableTool: true,
-				provider:   "argo",
-			}
+			testCfg := newArgoToolTestConfig()
+			testCfg.User = cfg.User
+			testCfg.Model = tt.model
+			testCfg.System = cfg.System
+			testCfg.Env = cfg.Env
+			testCfg.IsToolEnabledFlag = true
+			testCfg.Provider = "argo"
 
 			// Set up request cache for the test
 			// originalMessages are no longer needed with the simplified ToolConversation
@@ -989,7 +968,7 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 			var typedMessages []TypedMessage
 
 			// Start with system message and initial user message
-			typedMessages = append(typedMessages, NewTextMessage("system", cfg.system))
+			typedMessages = append(typedMessages, NewTextMessage("system", cfg.System))
 			typedMessages = append(typedMessages, NewTextMessage("user", "Initial request"))
 
 			if strings.HasPrefix(strings.ToLower(tt.model), "gpt") || strings.HasPrefix(strings.ToLower(tt.model), "o3") || strings.HasPrefix(strings.ToLower(tt.model), "o1") {
@@ -1122,21 +1101,20 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 
 func TestBuildArgoToolResultRequestWithoutTools(t *testing.T) {
 	// Test configuration without tools file
-	cfg := &testRequestConfigWithTools{
-		user:       "testuser",
-		model:      "claudesonnet4",
-		system:     "Test system prompt",
-		env:        "dev",
-		enableTool: false, // No tools enabled
-	}
+	cfg := newArgoToolTestConfig()
+	cfg.User = "testuser"
+	cfg.Model = "claudesonnet4"
+	cfg.System = "Test system prompt"
+	cfg.Env = "dev"
+	cfg.IsToolEnabledFlag = false // No tools enabled
 
 	// Create typed messages for the test
 	typedMessages := []TypedMessage{
-		NewTextMessage("system", cfg.system),
+		NewTextMessage("system", cfg.System),
 		NewTextMessage("user", "Test message"),
 	}
 
-	req, body, err := BuildToolResultRequest(cfg, cfg.model, cfg.system, nil, typedMessages)
+	req, body, err := BuildToolResultRequest(cfg, cfg.Model, cfg.System, nil, typedMessages)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

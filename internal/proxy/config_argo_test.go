@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"lmtools/internal/constants"
+	"lmtools/internal/providers"
 	"strings"
 	"testing"
 )
@@ -317,7 +318,7 @@ func TestTrailingSlashAlwaysPresent(t *testing.T) {
 	}
 }
 
-// TestNewArgoEndpoints tests the argoEndpoints struct directly
+// TestNewArgoEndpoints tests shared Argo endpoint normalization directly.
 func TestNewArgoEndpoints(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -410,7 +411,7 @@ func TestNewArgoEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eps, err := newArgoEndpoints(tt.base)
+			eps, err := providers.BuildArgoEndpoints(tt.base)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -421,37 +422,37 @@ func TestNewArgoEndpoints(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if eps.baseAPI != tt.wantBaseAPI {
-				t.Errorf("baseAPI mismatch\ngot:  %s\nwant: %s", eps.baseAPI, tt.wantBaseAPI)
+			if eps.BaseAPI != tt.wantBaseAPI {
+				t.Errorf("baseAPI mismatch\ngot:  %s\nwant: %s", eps.BaseAPI, tt.wantBaseAPI)
 			}
-			if eps.resource != tt.wantResource {
-				t.Errorf("resource mismatch\ngot:  %s\nwant: %s", eps.resource, tt.wantResource)
+			if eps.Resource != tt.wantResource {
+				t.Errorf("resource mismatch\ngot:  %s\nwant: %s", eps.Resource, tt.wantResource)
 			}
-			if eps.chat != tt.wantChat {
-				t.Errorf("chat mismatch\ngot:  %s\nwant: %s", eps.chat, tt.wantChat)
+			if eps.Chat != tt.wantChat {
+				t.Errorf("chat mismatch\ngot:  %s\nwant: %s", eps.Chat, tt.wantChat)
 			}
-			if eps.stream != tt.wantStream {
-				t.Errorf("stream mismatch\ngot:  %s\nwant: %s", eps.stream, tt.wantStream)
+			if eps.Stream != tt.wantStream {
+				t.Errorf("stream mismatch\ngot:  %s\nwant: %s", eps.Stream, tt.wantStream)
 			}
-			if eps.embed != tt.wantEmbed {
-				t.Errorf("embed mismatch\ngot:  %s\nwant: %s", eps.embed, tt.wantEmbed)
+			if eps.Embed != tt.wantEmbed {
+				t.Errorf("embed mismatch\ngot:  %s\nwant: %s", eps.Embed, tt.wantEmbed)
 			}
-			if eps.models != tt.wantModels {
-				t.Errorf("models mismatch\ngot:  %s\nwant: %s", eps.models, tt.wantModels)
+			if eps.Models != tt.wantModels {
+				t.Errorf("models mismatch\ngot:  %s\nwant: %s", eps.Models, tt.wantModels)
 			}
 
 			// Verify all action endpoints have trailing slash (Argo requirement)
-			if !strings.HasSuffix(eps.chat, "/") {
-				t.Errorf("chat URL missing trailing slash: %s", eps.chat)
+			if !strings.HasSuffix(eps.Chat, "/") {
+				t.Errorf("chat URL missing trailing slash: %s", eps.Chat)
 			}
-			if !strings.HasSuffix(eps.stream, "/") {
-				t.Errorf("stream URL missing trailing slash: %s", eps.stream)
+			if !strings.HasSuffix(eps.Stream, "/") {
+				t.Errorf("stream URL missing trailing slash: %s", eps.Stream)
 			}
-			if !strings.HasSuffix(eps.embed, "/") {
-				t.Errorf("embed URL missing trailing slash: %s", eps.embed)
+			if !strings.HasSuffix(eps.Embed, "/") {
+				t.Errorf("embed URL missing trailing slash: %s", eps.Embed)
 			}
-			if !strings.HasSuffix(eps.models, "/") {
-				t.Errorf("models URL missing trailing slash: %s", eps.models)
+			if !strings.HasSuffix(eps.Models, "/") {
+				t.Errorf("models URL missing trailing slash: %s", eps.Models)
 			}
 		})
 	}

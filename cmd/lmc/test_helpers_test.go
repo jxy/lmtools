@@ -19,9 +19,7 @@ import (
 
 var (
 	cachedLmcBinary string
-	cachedTmpDir    string
 	buildOnce       sync.Once
-	cleanupOnce     sync.Once
 	buildErr        error
 )
 
@@ -49,31 +47,18 @@ func WithTempLogDir(t *testing.T) LmcCommandOption {
 	}
 }
 
-// getLmcBinary returns the path to the lmc binary for testing.
-// It first checks for a pre-built binary at ../../bin/lmc.
-// If not found, it builds the binary once and caches the path.
+// getLmcBinary returns the path to a temporary lmc binary built from the
+// current cmd/lmc sources. Integration tests must exercise the code under test
+// rather than a potentially stale ../../bin/lmc from a previous build.
 func getLmcBinary(t *testing.T) string {
 	t.Helper()
 
 	buildOnce.Do(func() {
-		// First, check if pre-built binary exists
-		prebuiltPath := "../../bin/lmc"
-		if _, err := os.Stat(prebuiltPath); err == nil {
-			// Use absolute path to avoid issues with working directory changes
-			absPath, err := filepath.Abs(prebuiltPath)
-			if err == nil {
-				cachedLmcBinary = absPath
-				return
-			}
-		}
-
-		// Fall back to building a test binary
 		tmpDir, err := os.MkdirTemp("", "lmc-test-*")
 		if err != nil {
 			buildErr = err
 			return
 		}
-		cachedTmpDir = tmpDir
 
 		lmcBin := filepath.Join(tmpDir, "lmc.test")
 
@@ -91,20 +76,6 @@ func getLmcBinary(t *testing.T) string {
 
 	if buildErr != nil {
 		t.Fatalf("Failed to get lmc binary: %v", buildErr)
-	}
-
-	// Register cleanup on first use
-	if cachedTmpDir != "" {
-		t.Cleanup(func() {
-			// Only clean up if this is the last test using the binary
-			// This is handled by the test framework - cleanup runs after all tests complete
-			cleanupOnce.Do(func() {
-				if cachedTmpDir != "" {
-					os.RemoveAll(cachedTmpDir)
-					cachedTmpDir = ""
-				}
-			})
-		})
 	}
 
 	return cachedLmcBinary

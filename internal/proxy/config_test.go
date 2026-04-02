@@ -101,7 +101,7 @@ func TestProviderURLOverride(t *testing.T) {
 			preferredProvider: constants.ProviderGoogle,
 			providerURL:       "https://custom-google.com/v1beta",
 			expectedOpenAI:    "", // Only selected provider URLs are initialized
-			expectedGoogle:    "https://custom-google.com/v1beta",
+			expectedGoogle:    "https://custom-google.com/v1beta/models",
 			expectedArgoBase:  "", // Not set for non-Argo providers
 		},
 		{
@@ -186,6 +186,12 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 			name:        "Google provider with API key",
 			provider:    constants.ProviderGoogle,
 			googleKey:   "test-key",
+			expectError: false,
+		},
+		{
+			name:        "Google provider with custom URL (no key needed)",
+			provider:    constants.ProviderGoogle,
+			providerURL: "http://localhost:11434/v1beta",
 			expectError: false,
 		},
 		{

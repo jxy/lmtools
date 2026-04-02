@@ -25,10 +25,10 @@ func WithTestSessionDir(t *testing.T, fn func(sessionsDir string)) {
 	testSessionsDir := filepath.Join(tmpDir, "sessions")
 
 	// Override the sessions directory for testing
-	oldDir := sessionsBaseDir
-	sessionsBaseDir = testSessionsDir
+	oldDir := GetSessionsDir()
+	SetSessionsDir(testSessionsDir)
 	t.Cleanup(func() {
-		sessionsBaseDir = oldDir
+		SetSessionsDir(oldDir)
 	})
 
 	if err := os.MkdirAll(testSessionsDir, 0o750); err != nil {

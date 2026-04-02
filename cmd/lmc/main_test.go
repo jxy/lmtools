@@ -2,6 +2,7 @@ package main
 
 import (
 	"lmtools/internal/config"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"os"
 	"testing"
@@ -147,7 +148,11 @@ func TestGetActualModel(t *testing.T) {
 				if tt.cfg.Embed {
 					actual = core.DefaultEmbedModel
 				} else {
-					actual = core.GetDefaultChatModel(tt.cfg.Provider)
+					provider := tt.cfg.Provider
+					if provider == "" {
+						provider = constants.ProviderArgo
+					}
+					actual = core.GetDefaultChatModel(provider)
 				}
 			}
 			if actual != tt.expected {

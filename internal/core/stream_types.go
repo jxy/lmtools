@@ -142,55 +142,30 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			return "", toolCalls, true, nil
 		}
 
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content   string `json:"content"`
-					ToolCalls []struct {
-						Index    int    `json:"index"`
-						ID       string `json:"id"`
-						Function struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
-					} `json:"tool_calls"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		parsed, err := ParseOpenAIStreamChunk([]byte(data))
+		if err != nil {
 			// Return error to be logged
 			return "", nil, false, err
 		}
 
-		if len(chunk.Choices) > 0 {
-			delta := chunk.Choices[0].Delta
-
-			// Handle tool calls
-			for _, tc := range delta.ToolCalls {
-				// Get or create partial tool call
-				if _, exists := s.partialToolCalls[tc.Index]; !exists {
-					s.partialToolCalls[tc.Index] = &ToolCall{}
-				}
-				partial := s.partialToolCalls[tc.Index]
-
-				// Update fields if present
-				if tc.ID != "" {
-					partial.ID = tc.ID
-				}
-				if tc.Function.Name != "" {
-					partial.Name = tc.Function.Name
-				}
-				if tc.Function.Arguments != "" {
-					// Append arguments (they come in chunks)
-					currentArgs := string(partial.Args)
-					partial.Args = json.RawMessage(currentArgs + tc.Function.Arguments)
-				}
+		for _, tc := range parsed.ToolCalls {
+			if _, exists := s.partialToolCalls[tc.Index]; !exists {
+				s.partialToolCalls[tc.Index] = &ToolCall{}
 			}
-
-			// Return text content
-			return delta.Content, nil, false, nil
+			partial := s.partialToolCalls[tc.Index]
+			if tc.ID != "" {
+				partial.ID = tc.ID
+			}
+			if tc.Name != "" {
+				partial.Name = tc.Name
+			}
+			if tc.Arguments != "" {
+				currentArgs := string(partial.Args)
+				partial.Args = json.RawMessage(currentArgs + tc.Arguments)
+			}
 		}
+
+		return parsed.Content, nil, false, nil
 	}
 
 	return "", nil, false, nil
@@ -207,22 +182,8 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 	if strings.HasPrefix(line, "data: ") {
 		data := strings.TrimPrefix(line, "data: ")
 
-		// Google sends complete JSON objects
-		var resp struct {
-			Candidates []struct {
-				Content struct {
-					Parts []struct {
-						Text         string `json:"text"`
-						FunctionCall *struct {
-							Name string                 `json:"name"`
-							Args map[string]interface{} `json:"args"`
-						} `json:"functionCall"`
-					} `json:"parts"`
-				} `json:"content"`
-			} `json:"candidates"`
-		}
-
-		if err := json.Unmarshal([]byte(data), &resp); err != nil {
+		parsed, err := ParseGoogleStreamChunk([]byte(data))
+		if err != nil {
 			// Return error to be logged
 			return "", nil, false, err
 		}
@@ -230,22 +191,19 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 		var textContent string
 		var newToolCalls []ToolCall
 
-		// Process all parts
-		for _, candidate := range resp.Candidates {
-			for _, part := range candidate.Content.Parts {
-				if part.Text != "" {
-					textContent += part.Text
-				}
-				if part.FunctionCall != nil {
-					// Convert args to JSON
-					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-					newToolCalls = append(newToolCalls, ToolCall{
-						ID:   s.generateToolCallID(), // Google doesn't provide IDs
-						Name: part.FunctionCall.Name,
-						Args: argsJSON,
-					})
-				}
+		for _, text := range parsed.TextParts {
+			textContent += text
+		}
+		for _, functionCall := range parsed.FunctionCalls {
+			args := functionCall.Args
+			if len(args) == 0 {
+				args = json.RawMessage("{}")
 			}
+			newToolCalls = append(newToolCalls, ToolCall{
+				ID:   s.generateToolCallID(), // Google doesn't provide IDs
+				Name: functionCall.Name,
+				Args: args,
+			})
 		}
 
 		return textContent, newToolCalls, false, nil

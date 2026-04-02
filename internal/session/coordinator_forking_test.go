@@ -1,81 +1,15 @@
 package session
 
 import (
-	"context"
 	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 	"testing"
 	"time"
 )
 
-// mockConfigForForkTest implements RequestConfig for testing fork logic
-type mockConfigForForkTest struct {
-	resume              string
-	systemPrompt        string
-	systemExplicitlySet bool
-	enableTool          bool
-}
-
-func (m *mockConfigForForkTest) GetUser() string             { return "testuser" }
-func (m *mockConfigForForkTest) GetModel() string            { return "test-model" }
-func (m *mockConfigForForkTest) GetSystem() string           { return m.systemPrompt }
-func (m *mockConfigForForkTest) IsSystemExplicitlySet() bool { return m.systemExplicitlySet }
-func (m *mockConfigForForkTest) GetEffectiveSystem() string {
-	// Mimic the real GetEffectiveSystem logic
-	if m.enableTool && !m.systemExplicitlySet {
-		return prompts.ToolSystemPrompt
-	}
-	return m.systemPrompt
-}
-func (m *mockConfigForForkTest) GetEnv() string                { return "test" }
-func (m *mockConfigForForkTest) IsEmbed() bool                 { return false }
-func (m *mockConfigForForkTest) IsStreamChat() bool            { return false }
-func (m *mockConfigForForkTest) GetProvider() string           { return "test" }
-func (m *mockConfigForForkTest) GetProviderURL() string        { return "http://test" }
-func (m *mockConfigForForkTest) GetAPIKeyFile() string         { return "" }
-func (m *mockConfigForForkTest) IsToolEnabled() bool           { return m.enableTool }
-func (m *mockConfigForForkTest) GetToolTimeout() time.Duration { return 30 * time.Second }
-func (m *mockConfigForForkTest) GetToolWhitelist() string      { return "" }
-func (m *mockConfigForForkTest) GetToolBlacklist() string      { return "" }
-func (m *mockConfigForForkTest) GetToolAutoApprove() bool      { return false }
-func (m *mockConfigForForkTest) GetToolNonInteractive() bool   { return false }
-func (m *mockConfigForForkTest) GetMaxToolRounds() int         { return 10 }
-func (m *mockConfigForForkTest) GetMaxToolParallel() int       { return 4 }
-func (m *mockConfigForForkTest) GetToolMaxOutputBytes() int    { return 1048576 }
-func (m *mockConfigForForkTest) GetResume() string             { return m.resume }
-func (m *mockConfigForForkTest) GetBranch() string             { return "" }
-
-// mockNotifierForForkTest tracks fork notifications
-type mockNotifierForForkTest struct {
-	forked   bool
-	messages []string
-}
-
-func (m *mockNotifierForForkTest) Infof(format string, args ...interface{}) {
-	msg := format
-	if len(args) > 0 {
-		// Simple handling for our test case
-		if containsStr(format, "Forked session") {
-			m.forked = true
-		}
-	}
-	m.messages = append(m.messages, msg)
-}
-func (m *mockNotifierForForkTest) Debugf(format string, args ...interface{})  {}
-func (m *mockNotifierForForkTest) Warnf(format string, args ...interface{})   {}
-func (m *mockNotifierForForkTest) Errorf(format string, args ...interface{})  {}
-func (m *mockNotifierForForkTest) Promptf(format string, args ...interface{}) {}
-
 // TestCoordinatorForkingLogic tests all scenarios of the session forking logic
 func TestCoordinatorForkingLogic(t *testing.T) {
-	// Setup test environment
-	tempDir := t.TempDir()
-	SetSessionsDir(tempDir)
-	SetSkipFlockCheck(true)
-	defer SetSessionsDir("")
-	defer SetSkipFlockCheck(false)
-
-	ctx := context.Background()
+	ctx := setupCoordinatorTestEnv(t)
 	var log core.Logger // nil logger for testing
 
 	// Test Case 1: System prompt specified on command line
@@ -100,12 +34,11 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Resume with different explicit prompt
-			cfg := &mockConfigForForkTest{
-				resume:              sessionID,
-				systemPrompt:        "New different prompt",
-				systemExplicitlySet: true,
-			}
-			notifier := &mockNotifierForForkTest{}
+			cfg := newTestCoordinatorConfig()
+			cfg.Resume = sessionID
+			cfg.System = "New different prompt"
+			cfg.SystemExplicitlySet = true
+			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
 			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -118,7 +51,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			if newSessionID == sessionID {
 				t.Error("Expected fork but session was not forked")
 			}
-			if !notifier.forked {
+			if !infoMessagesContain(notifier, "Forked session") {
 				t.Error("Expected fork notification")
 			}
 
@@ -153,12 +86,11 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Resume with same explicit prompt
-			cfg := &mockConfigForForkTest{
-				resume:              sessionID,
-				systemPrompt:        customPrompt,
-				systemExplicitlySet: true,
-			}
-			notifier := &mockNotifierForForkTest{}
+			cfg := newTestCoordinatorConfig()
+			cfg.Resume = sessionID
+			cfg.System = customPrompt
+			cfg.SystemExplicitlySet = true
+			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
 			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -171,7 +103,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			if newSessionID != sessionID {
 				t.Errorf("Should not fork when prompts match. Original: %s, New: %s", sessionID, newSessionID)
 			}
-			if notifier.forked {
+			if infoMessagesContain(notifier, "Forked session") {
 				t.Error("Should not have fork notification")
 			}
 		})
@@ -199,13 +131,12 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Resume with tools enabled (no explicit system prompt)
-			cfg := &mockConfigForForkTest{
-				resume:              sessionID,
-				systemPrompt:        prompts.DefaultSystemPrompt, // This is what the config would return
-				systemExplicitlySet: false,
-				enableTool:          true,
-			}
-			notifier := &mockNotifierForForkTest{}
+			cfg := newTestCoordinatorConfig()
+			cfg.Resume = sessionID
+			cfg.System = prompts.DefaultSystemPrompt
+			cfg.IsToolEnabledFlag = true
+			cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
+			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
 			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -218,7 +149,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			if newSessionID == sessionID {
 				t.Error("Expected fork when upgrading from default non-tool to tool prompt")
 			}
-			if !notifier.forked {
+			if !infoMessagesContain(notifier, "Forked session") {
 				t.Error("Expected fork notification")
 			}
 
@@ -252,13 +183,10 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Resume without tools
-			cfg := &mockConfigForForkTest{
-				resume:              sessionID,
-				systemPrompt:        prompts.DefaultSystemPrompt,
-				systemExplicitlySet: false,
-				enableTool:          false,
-			}
-			notifier := &mockNotifierForForkTest{}
+			cfg := newTestCoordinatorConfig()
+			cfg.Resume = sessionID
+			cfg.System = prompts.DefaultSystemPrompt
+			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
 			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -271,7 +199,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			if newSessionID != sessionID {
 				t.Errorf("Should not fork. Original: %s, New: %s", sessionID, newSessionID)
 			}
-			if notifier.forked {
+			if infoMessagesContain(notifier, "Forked session") {
 				t.Error("Should not have fork notification")
 			}
 		})
@@ -303,13 +231,14 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 				}
 
 				t.Run(testName, func(t *testing.T) {
-					cfg := &mockConfigForForkTest{
-						resume:              sessionID,
-						systemPrompt:        prompts.DefaultSystemPrompt,
-						systemExplicitlySet: false,
-						enableTool:          enableTool,
+					cfg := newTestCoordinatorConfig()
+					cfg.Resume = sessionID
+					cfg.System = prompts.DefaultSystemPrompt
+					cfg.IsToolEnabledFlag = enableTool
+					if enableTool {
+						cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
 					}
-					notifier := &mockNotifierForForkTest{}
+					notifier := core.NewTestNotifier()
 
 					coordinator := NewCoordinator(cfg, notifier)
 					result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -322,7 +251,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					if newSessionID != sessionID {
 						t.Errorf("Should not fork with tool prompt. Original: %s, New: %s", sessionID, newSessionID)
 					}
-					if notifier.forked {
+					if infoMessagesContain(notifier, "Forked session") {
 						t.Error("Should not have fork notification")
 					}
 				})
@@ -357,13 +286,14 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 				}
 
 				t.Run(testName, func(t *testing.T) {
-					cfg := &mockConfigForForkTest{
-						resume:              sessionID,
-						systemPrompt:        prompts.DefaultSystemPrompt,
-						systemExplicitlySet: false,
-						enableTool:          enableTool,
+					cfg := newTestCoordinatorConfig()
+					cfg.Resume = sessionID
+					cfg.System = prompts.DefaultSystemPrompt
+					cfg.IsToolEnabledFlag = enableTool
+					if enableTool {
+						cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
 					}
-					notifier := &mockNotifierForForkTest{}
+					notifier := core.NewTestNotifier()
 
 					coordinator := NewCoordinator(cfg, notifier)
 					result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -376,7 +306,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					if newSessionID != sessionID {
 						t.Errorf("Should not fork with custom prompt. Original: %s, New: %s", sessionID, newSessionID)
 					}
-					if notifier.forked {
+					if infoMessagesContain(notifier, "Forked session") {
 						t.Error("Should not have fork notification")
 					}
 
@@ -412,13 +342,12 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Resume with tools
-			cfg := &mockConfigForForkTest{
-				resume:              sessionID,
-				systemPrompt:        prompts.DefaultSystemPrompt,
-				systemExplicitlySet: false,
-				enableTool:          true,
-			}
-			notifier := &mockNotifierForForkTest{}
+			cfg := newTestCoordinatorConfig()
+			cfg.Resume = sessionID
+			cfg.System = prompts.DefaultSystemPrompt
+			cfg.IsToolEnabledFlag = true
+			cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
+			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
 			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -431,7 +360,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			if newSessionID == sessionID {
 				t.Error("Expected fork when adding tool prompt to session without prompt")
 			}
-			if !notifier.forked {
+			if !infoMessagesContain(notifier, "Forked session") {
 				t.Error("Expected fork notification")
 			}
 
@@ -465,13 +394,10 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Resume without tools
-			cfg := &mockConfigForForkTest{
-				resume:              sessionID,
-				systemPrompt:        prompts.DefaultSystemPrompt,
-				systemExplicitlySet: false,
-				enableTool:          false,
-			}
-			notifier := &mockNotifierForForkTest{}
+			cfg := newTestCoordinatorConfig()
+			cfg.Resume = sessionID
+			cfg.System = prompts.DefaultSystemPrompt
+			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
 			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -484,7 +410,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			if newSessionID != sessionID {
 				t.Errorf("Should not fork. Original: %s, New: %s", sessionID, newSessionID)
 			}
-			if notifier.forked {
+			if infoMessagesContain(notifier, "Forked session") {
 				t.Error("Should not have fork notification")
 			}
 		})
@@ -493,24 +419,15 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 
 // TestCoordinatorForkingEdgeCases tests edge cases and error conditions
 func TestCoordinatorForkingEdgeCases(t *testing.T) {
-	// Setup test environment
-	tempDir := t.TempDir()
-	SetSessionsDir(tempDir)
-	SetSkipFlockCheck(true)
-	defer SetSessionsDir("")
-	defer SetSkipFlockCheck(false)
-
-	ctx := context.Background()
+	ctx := setupCoordinatorTestEnv(t)
 	var log core.Logger
 
 	t.Run("NoResumeFlag_ShouldNotCheckForking", func(t *testing.T) {
 		// Create new session (no resume)
-		cfg := &mockConfigForForkTest{
-			resume:              "", // No resume
-			systemPrompt:        "Test prompt",
-			systemExplicitlySet: true,
-		}
-		notifier := &mockNotifierForForkTest{}
+		cfg := newTestCoordinatorConfig()
+		cfg.System = "Test prompt"
+		cfg.SystemExplicitlySet = true
+		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
 		result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -519,7 +436,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		}
 
 		// Should create new session, not fork
-		if notifier.forked {
+		if infoMessagesContain(notifier, "Forked session") {
 			t.Error("Should not have fork notification when creating new session")
 		}
 
@@ -542,12 +459,12 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		sessionID := GetSessionID(sess.Path)
 
 		// Resume with explicitly set empty prompt
-		cfg := &mockConfigForForkTest{
-			resume:              sessionID,
-			systemPrompt:        "", // Empty prompt
-			systemExplicitlySet: true,
-		}
-		notifier := &mockNotifierForForkTest{}
+		cfg := newTestCoordinatorConfig()
+		cfg.Resume = sessionID
+		cfg.System = ""
+		cfg.SystemExplicitlySet = true
+		cfg.EffectiveSystemOverride = stringPtr("")
+		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
 		result, err := coordinator.PrepareSession(ctx, "test", false, nil)
@@ -560,7 +477,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		if newSessionID == sessionID {
 			t.Error("Expected fork when explicitly setting empty prompt")
 		}
-		if !notifier.forked {
+		if !infoMessagesContain(notifier, "Forked session") {
 			t.Error("Expected fork notification")
 		}
 

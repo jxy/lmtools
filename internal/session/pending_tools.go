@@ -16,7 +16,7 @@ import (
 //
 // The hasPendingTools return value indicates whether pending tools existed, NOT whether they executed successfully.
 // This is used by callers to determine if empty input is acceptable (when continuing tool execution).
-func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.RequestConfig, log core.Logger, notifier core.Notifier, approver core.Approver) (hasPendingTools bool, err error) {
+func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.ToolConfig, log core.Logger, notifier core.Notifier, approver core.Approver) (hasPendingTools bool, err error) {
 	pendingTools, err := CheckForPendingToolCalls(ctx, sess.Path)
 	if err != nil {
 		// Log the error but continue - this is non-critical

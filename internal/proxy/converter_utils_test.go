@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"lmtools/internal/core"
 	"regexp"
 	"strings"
 	"testing"
@@ -233,6 +234,62 @@ func TestParseAnthropicMessageContent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnthropicBlocksToCorePreservesToolResultError(t *testing.T) {
+	blocks := []AnthropicContentBlock{
+		{
+			Type:      "tool_result",
+			ToolUseID: "tool-1",
+			Content:   json.RawMessage(`"command failed"`),
+			IsError:   true,
+		},
+	}
+
+	converted := AnthropicBlocksToCore(blocks)
+	if len(converted) != 1 {
+		t.Fatalf("len(converted) = %d, want 1", len(converted))
+	}
+
+	result, ok := converted[0].(core.ToolResultBlock)
+	if !ok {
+		t.Fatalf("converted[0] type = %T, want core.ToolResultBlock", converted[0])
+	}
+	if !result.IsError {
+		t.Fatal("ToolResultBlock.IsError = false, want true")
+	}
+	if result.Content != "command failed" {
+		t.Fatalf("ToolResultBlock.Content = %q, want %q", result.Content, "command failed")
+	}
+}
+
+func TestCoreBlocksToAnthropicPreservesToolResultError(t *testing.T) {
+	blocks := []core.Block{
+		core.ToolResultBlock{
+			ToolUseID: "tool-1",
+			Content:   "command failed",
+			IsError:   true,
+		},
+	}
+
+	converted := CoreBlocksToAnthropic(blocks)
+	if len(converted) != 1 {
+		t.Fatalf("len(converted) = %d, want 1", len(converted))
+	}
+	if !converted[0].IsError {
+		t.Fatal("AnthropicContentBlock.IsError = false, want true")
+	}
+	if converted[0].ToolUseID != "tool-1" {
+		t.Fatalf("ToolUseID = %q, want %q", converted[0].ToolUseID, "tool-1")
+	}
+
+	var content string
+	if err := json.Unmarshal(converted[0].Content, &content); err != nil {
+		t.Fatalf("tool result content unmarshal error = %v", err)
+	}
+	if content != "command failed" {
+		t.Fatalf("tool result content = %q, want %q", content, "command failed")
 	}
 }
 

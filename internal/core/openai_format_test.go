@@ -153,10 +153,10 @@ func TestParseArgoResponseWithOpenAIFormat(t *testing.T) {
 
 func TestBuildArgoToolResultRequestOpenAIFormat(t *testing.T) {
 	// Set up test config
-	cfg := &testRequestConfig{
-		user:  "testuser",
-		model: "gpt5",
-		env:   "dev",
+	cfg := &TestRequestConfig{
+		User:  "testuser",
+		Model: "gpt5",
+		Env:   "dev",
 	}
 
 	// Test tool results are now embedded in typedMessages
@@ -284,10 +284,10 @@ func TestBuildArgoToolResultRequestOpenAIFormat(t *testing.T) {
 
 func TestBuildArgoToolResultRequestAnthropicFormat(t *testing.T) {
 	// Set up test config for Claude model
-	cfg := &testRequestConfig{
-		user:  "testuser",
-		model: "claudesonnet4",
-		env:   "dev",
+	cfg := &TestRequestConfig{
+		User:  "testuser",
+		Model: "claudesonnet4",
+		Env:   "dev",
 	}
 
 	// Test tool results are now embedded in typedMessages
