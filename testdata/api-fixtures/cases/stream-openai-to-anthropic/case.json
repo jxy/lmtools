@@ -1,0 +1,12 @@
+{
+  "id": "stream-openai-to-anthropic",
+  "description": "OpenAI upstream stream projected to Anthropic events",
+  "kinds": [
+    "stream"
+  ],
+  "stream_source": "openai",
+  "stream_target": "anthropic",
+  "models": {
+    "openai": "gpt-5.4-nano"
+  }
+}

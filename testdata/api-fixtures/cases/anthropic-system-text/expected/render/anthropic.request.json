@@ -1,0 +1,12 @@
+{
+  "max_tokens": 128,
+  "messages": [
+    {
+      "content": "Hello there",
+      "role": "user"
+    }
+  ],
+  "model": "claude-haiku-4-5",
+  "system": "Be concise.\nNo markdown.",
+  "temperature": 0.1
+}

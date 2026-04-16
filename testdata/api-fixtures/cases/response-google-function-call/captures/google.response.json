@@ -1,0 +1,24 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Checking weather"
+          },
+          {
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "location": "Chicago"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ]
+}

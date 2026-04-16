@@ -784,6 +784,9 @@ func TestGoogleRequestJSON_FunctionCalls(t *testing.T) {
 			t.Errorf("Location should be 'Paris', got %v", args["location"])
 		}
 	}
+	if got := funcCallPart["thoughtSignature"]; got != GoogleDummyThoughtSignature {
+		t.Errorf("thoughtSignature should be %q, got %v", GoogleDummyThoughtSignature, got)
+	}
 }
 
 // ============================================================================

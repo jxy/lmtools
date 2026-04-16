@@ -134,29 +134,38 @@ func (e anthropicSimulatedContentEmitter) EndToolBlock(index int, block Anthropi
 }
 
 type openAISimulatedContentEmitter struct {
-	writer *OpenAIStreamWriter
+	writer  *OpenAIStreamWriter
+	started bool
 }
 
-func (e openAISimulatedContentEmitter) StartTextBlock(_ int, _ string) error {
-	return nil
+func (e *openAISimulatedContentEmitter) StartTextBlock(_ int, _ string) error {
+	if e.started {
+		return nil
+	}
+	e.started = true
+	return e.writer.WriteInitialAssistantTextDelta()
 }
 
-func (e openAISimulatedContentEmitter) WriteTextChunk(_ int, chunk string) error {
+func (e *openAISimulatedContentEmitter) WriteTextChunk(_ int, chunk string) error {
 	return e.writer.WriteContent(chunk)
 }
 
-func (e openAISimulatedContentEmitter) EndTextBlock(_ int, _ string) error {
+func (e *openAISimulatedContentEmitter) EndTextBlock(_ int, _ string) error {
 	return nil
 }
 
-func (e openAISimulatedContentEmitter) StartToolBlock(index int, block AnthropicContentBlock) error {
-	return e.writer.WriteToolCallIntro(index, block.ID, block.Name)
+func (e *openAISimulatedContentEmitter) StartToolBlock(index int, block AnthropicContentBlock) error {
+	if e.started {
+		return e.writer.WriteToolCallIntro(index, block.ID, block.Name)
+	}
+	e.started = true
+	return e.writer.WriteInitialAssistantToolCallDelta(index, block.ID, block.Name)
 }
 
-func (e openAISimulatedContentEmitter) WriteToolInputChunk(index int, chunk string) error {
+func (e *openAISimulatedContentEmitter) WriteToolInputChunk(index int, chunk string) error {
 	return e.writer.WriteToolArguments(index, chunk)
 }
 
-func (e openAISimulatedContentEmitter) EndToolBlock(_ int, _ AnthropicContentBlock) error {
+func (e *openAISimulatedContentEmitter) EndToolBlock(_ int, _ AnthropicContentBlock) error {
 	return nil
 }

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: all build test test-unit test-integration test-e2e test-all coverage lint lint-fix clean dev check help
+.PHONY: all build test test-unit test-integration test-e2e test-all coverage lint lint-fix clean dev check verify-fixtures verify-fixtures-refresh help
 
 # Default target
 all: lint test build
@@ -57,6 +57,14 @@ dev: lint test build
 # Quick check before commit
 check: lint-fix test
 
+# Verify checked-in API fixture corpus and targeted fixture tests
+verify-fixtures:
+	bash ./scripts/api_fixtures_verify.sh
+
+# Refresh live captures, then fail if fixture diffs need review
+verify-fixtures-refresh:
+	bash ./scripts/api_fixtures_verify.sh --refresh
+
 # Help message
 help:
 	@echo "Available targets:"
@@ -73,4 +81,6 @@ help:
 	@echo "  make clean           - Remove build artifacts"
 	@echo "  make dev             - Full development cycle (lint, test, build)"
 	@echo "  make check           - Quick check before commit (lint-fix, test)"
+	@echo "  make verify-fixtures - Verify the API fixture corpus and targeted fixture tests"
+	@echo "  make verify-fixtures-refresh - Refresh fixture captures and fail if diffs need review"
 	@echo "  make help            - Show this help message"

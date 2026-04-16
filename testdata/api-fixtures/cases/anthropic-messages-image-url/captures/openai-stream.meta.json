@@ -1,0 +1,85 @@
+{
+  "case_id": "anthropic-messages-image-url",
+  "target": "openai-stream",
+  "url": "https://api.openai.com/v1/chat/completions",
+  "status_code": 200,
+  "content_type": "text/event-stream; charset=utf-8",
+  "captured_at": "2026-04-16T13:08:49-05:00",
+  "response_headers": {
+    "Access-Control-Expose-Headers": [
+      "X-Request-ID"
+    ],
+    "Alt-Svc": [
+      "h3=\":443\"; ma=86400"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9ed5232fd821c8d4-ORD"
+    ],
+    "Content-Type": [
+      "text/event-stream; charset=utf-8"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:08:49 GMT"
+    ],
+    "Openai-Organization": [
+      "user-luppstbuzesizhcpyp8mf8vl"
+    ],
+    "Openai-Processing-Ms": [
+      "728"
+    ],
+    "Openai-Project": [
+      "proj_LOtYBLbKh37UwfhEcM1rrSEn"
+    ],
+    "Openai-Version": [
+      "2020-10-01"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "__cf_bm=xRz0QbjmMSTjlvYWi9jvnrAE29dcBXwmlN7Ysyx1sgE-1776362928.61622-1.0.1.1-4L1GTQx6AGhU3iN29PHPoL.x6jGuTUvhOsX5XW.LnHEAIbjphZQScBM3.bZ.4kP5W2sCfq7FDNl8X.QPBcv1Ii78Ix074s1t1BKeIK90K5I5sJq7_7yKwBPCwJPfSLhq; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 16 Apr 2026 18:38:49 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Openai-Proxy-Wasm": [
+      "v0.1"
+    ],
+    "X-Ratelimit-Limit-Input-Images": [
+      "50000"
+    ],
+    "X-Ratelimit-Limit-Requests": [
+      "5000"
+    ],
+    "X-Ratelimit-Limit-Tokens": [
+      "4000000"
+    ],
+    "X-Ratelimit-Remaining-Input-Images": [
+      "49999"
+    ],
+    "X-Ratelimit-Remaining-Requests": [
+      "4999"
+    ],
+    "X-Ratelimit-Remaining-Tokens": [
+      "3999226"
+    ],
+    "X-Ratelimit-Reset-Input-Images": [
+      "1ms"
+    ],
+    "X-Ratelimit-Reset-Requests": [
+      "12ms"
+    ],
+    "X-Ratelimit-Reset-Tokens": [
+      "11ms"
+    ],
+    "X-Request-Id": [
+      "req_2c6c146ce415475ea26c144aba494f98"
+    ]
+  }
+}

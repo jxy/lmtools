@@ -99,7 +99,7 @@ func TestResolveChatURL(t *testing.T) {
 			providerURL: "https://example.test/v1beta",
 			model:       "gemini-2.5-pro",
 			stream:      true,
-			want:        "https://example.test/v1beta/models/gemini-2.5-pro:streamGenerateContent",
+			want:        "https://example.test/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse",
 		},
 		{
 			name:     "argo custom env keeps direct base",

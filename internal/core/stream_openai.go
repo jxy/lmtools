@@ -8,6 +8,7 @@ import (
 )
 
 // handleOpenAIStreamWithTools handles OpenAI streaming responses with tool support
-func handleOpenAIStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (string, []ToolCall, error) {
-	return RunStream(ctx, body, logFile, out, notifier, NewOpenAIStreamState(), constants.ProviderOpenAI)
+func handleOpenAIStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (Response, error) {
+	text, toolCalls, err := RunStream(ctx, body, logFile, out, notifier, NewOpenAIStreamState(), constants.ProviderOpenAI)
+	return Response{Text: text, ToolCalls: toolCalls}, err
 }

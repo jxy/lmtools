@@ -23,10 +23,11 @@ type GoogleContent struct {
 
 // GooglePart represents a part of content.
 type GooglePart struct {
-	Text         string              `json:"text,omitempty"`
-	InlineData   *GoogleInlineData   `json:"inlineData,omitempty"`
-	FunctionCall *GoogleFunctionCall `json:"functionCall,omitempty"`
-	FunctionResp *GoogleFunctionResp `json:"functionResponse,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	InlineData       *GoogleInlineData   `json:"inlineData,omitempty"`
+	FunctionCall     *GoogleFunctionCall `json:"functionCall,omitempty"`
+	FunctionResp     *GoogleFunctionResp `json:"functionResponse,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 }
 
 // GoogleInlineData represents inline data (e.g., images).

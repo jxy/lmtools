@@ -799,6 +799,7 @@ func TestE2EErrorHandling(t *testing.T) {
 		{
 			name: "Missing required fields",
 			request: map[string]interface{}{
+				"model":    "claude-3-haiku-20240307",
 				"messages": []interface{}{},
 			},
 			endpoint:   "/v1/messages",

@@ -1,0 +1,42 @@
+{
+  "case_id": "openai-tool-followup",
+  "target": "google-stream",
+  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:streamGenerateContent?alt=sse",
+  "status_code": 200,
+  "content_type": "text/event-stream",
+  "captured_at": "2026-04-16T13:54:35-05:00",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+    ],
+    "Content-Disposition": [
+      "attachment"
+    ],
+    "Content-Type": [
+      "text/event-stream"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:54:34 GMT"
+    ],
+    "Server": [
+      "scaffolding on HTTPServer2"
+    ],
+    "Server-Timing": [
+      "gfet4t7; dur=621"
+    ],
+    "Vary": [
+      "Origin",
+      "X-Origin",
+      "Referer"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Frame-Options": [
+      "SAMEORIGIN"
+    ],
+    "X-Xss-Protection": [
+      "0"
+    ]
+  }
+}

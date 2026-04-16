@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "anthropic-messages-basic-text",
+      "description": "Anthropic Messages API basic text request and response",
+      "kinds": [
+        "request",
+        "response"
+      ]
+    },
+    {
+      "id": "anthropic-messages-multi-turn",
+      "description": "Anthropic Messages API multi-turn conversation request and response",
+      "kinds": [
+        "request",
+        "response"
+      ]
+    },
+    {
+      "id": "anthropic-messages-prefill",
+      "description": "Anthropic Messages API assistant prefill request and response",
+      "kinds": [
+        "request",
+        "response"
+      ]
+    },
+    {
+      "id": "anthropic-messages-image-url",
+      "description": "Anthropic Messages API image URL request and response",
+      "kinds": [
+        "request",
+        "response"
+      ]
+    },
+    {
+      "id": "openai-chat-audio-input",
+      "description": "OpenAI chat completions request with input_audio content",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "anthropic-system-text",
+      "description": "Anthropic ingress with structured system prompt and simple text message",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-tool-followup",
+      "description": "OpenAI ingress with assistant tool call and tool follow-up message",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "response-openai-tool-call",
+      "description": "OpenAI response with text and function tool call",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-anthropic-tool-use",
+      "description": "Anthropic response with text and tool_use block",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-google-function-call",
+      "description": "Google response with text and functionCall part",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-argo-embedded-tool-call",
+      "description": "Argo response with embedded tool call recovered from content",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "stream-openai-to-anthropic",
+      "description": "OpenAI upstream stream projected to Anthropic events",
+      "kinds": [
+        "stream"
+      ]
+    },
+    {
+      "id": "stream-anthropic-to-openai",
+      "description": "Anthropic upstream stream projected to OpenAI chunks",
+      "kinds": [
+        "stream"
+      ]
+    }
+  ]
+}

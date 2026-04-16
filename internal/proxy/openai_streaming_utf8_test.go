@@ -134,12 +134,17 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 					if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 						if choice, ok := choices[0].(map[string]interface{}); ok {
 							if delta, ok := choice["delta"].(map[string]interface{}); ok {
-								// Accept content either as a non-empty string OR as null on first delta
+								// Accept content either as a non-empty string, an empty string on text-start
+								// streams, or null on tool-first streams.
 								if contentVal, hasContent := delta["content"]; hasContent {
 									if contentStr, ok := contentVal.(string); ok && contentStr != "" {
 										chunks = append(chunks, contentStr)
 										if !utf8.ValidString(contentStr) {
 											t.Errorf("Chunk contains invalid UTF-8: %q (bytes: %v)", contentStr, []byte(contentStr))
+										}
+									} else if contentStr, ok := contentVal.(string); ok && contentStr == "" {
+										if role, ok := delta["role"].(string); ok && role == "assistant" {
+											sawInitialAssistant = true
 										}
 									} else if contentVal == nil {
 										if role, ok := delta["role"].(string); ok && role == "assistant" {
@@ -174,7 +179,7 @@ func TestSimulateOpenAIStreamFromArgoUTF8(t *testing.T) {
 				t.Errorf("Reconstructed text doesn't match original\nGot:  %q\nWant: %q", reconstructed, tt.response)
 			}
 			if !sawInitialAssistant {
-				t.Error("Did not see initial assistant delta with content:null")
+				t.Error("Did not see initial assistant delta with empty-string or null content")
 			}
 			if !sawFinalStop {
 				t.Error("Did not see final finish_reason=stop")
@@ -291,10 +296,13 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 			if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if delta, ok := choice["delta"].(map[string]interface{}); ok {
-						// First delta: role assistant with content:null
+						// First delta may be role assistant with content:"" for text-start streams
+						// or content:null for tool-first streams.
 						if role, ok := delta["role"].(string); ok && role == "assistant" {
 							if _, hasContent := delta["content"]; hasContent {
-								if delta["content"] == nil {
+								if contentStr, ok := delta["content"].(string); ok && contentStr == "" {
+									sawInitialAssistant = true
+								} else if delta["content"] == nil {
 									sawInitialAssistant = true
 								}
 							}
@@ -350,7 +358,7 @@ func TestSimulateOpenAIStreamFromArgoWithTools(t *testing.T) {
 		t.Error("Tool call was not found in the stream")
 	}
 	if !sawInitialAssistant {
-		t.Error("Did not see initial assistant delta with content:null")
+		t.Error("Did not see initial assistant delta with empty-string or null content")
 	}
 	if !sawInitialEmpty {
 		t.Error("Did not see initial empty arguments chunk for tool call")

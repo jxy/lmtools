@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-tool-call",
+  "description": "OpenAI response with text and function tool call",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai"
+}

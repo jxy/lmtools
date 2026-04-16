@@ -81,8 +81,57 @@ func (w *OpenAIStreamWriter) WriteChunk(chunk *OpenAIStreamChunk) error {
 
 // WriteInitialAssistantDelta writes the initial assistant role delta.
 func (w *OpenAIStreamWriter) WriteInitialAssistantDelta() error {
-	role := "assistant"
-	return w.WriteDelta("", &role, nil)
+	return w.WriteInitialAssistantTextDelta()
+}
+
+// WriteInitialAssistantTextDelta writes the initial assistant role delta for a text stream.
+func (w *OpenAIStreamWriter) WriteInitialAssistantTextDelta() error {
+	role := core.Role("assistant")
+	empty := ""
+	delta := OpenAIDelta{
+		Role:    &role,
+		Content: &empty,
+	}
+	chunk := &OpenAIStreamChunk{
+		Choices: []OpenAIStreamDelta{
+			{
+				Index:        0,
+				Delta:        delta,
+				FinishReason: nil,
+			},
+		},
+	}
+	return w.WriteChunk(chunk)
+}
+
+// WriteInitialAssistantToolCallDelta writes the initial assistant delta for a tool-call stream.
+func (w *OpenAIStreamWriter) WriteInitialAssistantToolCallDelta(index int, id, name string) error {
+	role := core.Role("assistant")
+	delta := OpenAIDelta{
+		Role:        &role,
+		ContentNull: true,
+		ToolCalls: []ToolCallDelta{
+			{
+				Index: index,
+				ID:    id,
+				Type:  "function",
+				Function: &FunctionCallDelta{
+					Name:      name,
+					Arguments: "",
+				},
+			},
+		},
+	}
+	chunk := &OpenAIStreamChunk{
+		Choices: []OpenAIStreamDelta{
+			{
+				Index:        0,
+				Delta:        delta,
+				FinishReason: nil,
+			},
+		},
+	}
+	return w.WriteChunk(chunk)
 }
 
 // WriteDelta writes a delta update.

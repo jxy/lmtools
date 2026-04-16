@@ -1,0 +1,27 @@
+[
+  {
+    "delta": {
+      "content": "",
+      "role": "assistant"
+    }
+  },
+  {
+    "delta": {
+      "content": "Hello"
+    }
+  },
+  {
+    "delta": {},
+    "finish_reason": "stop"
+  },
+  {
+    "usage": {
+      "completion_tokens": 2,
+      "prompt_tokens": 4,
+      "total_tokens": 6
+    }
+  },
+  {
+    "done": true
+  }
+]

@@ -5,6 +5,21 @@ import (
 	"fmt"
 )
 
+func normalizeOpenAIToolArguments(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err == nil {
+		if json.Valid([]byte(encoded)) {
+			return json.RawMessage(encoded)
+		}
+	}
+
+	return raw
+}
+
 // parseOpenAIResponseWithTools parses OpenAI responses that may contain tool calls
 func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
 	if isEmbed {
@@ -71,7 +86,7 @@ func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall
 		toolCalls = append(toolCalls, ToolCall{
 			ID:   tc.ID,
 			Name: tc.Function.Name,
-			Args: tc.Function.Arguments,
+			Args: normalizeOpenAIToolArguments(tc.Function.Arguments),
 		})
 	}
 

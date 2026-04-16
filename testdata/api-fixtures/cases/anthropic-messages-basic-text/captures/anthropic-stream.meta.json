@@ -1,0 +1,88 @@
+{
+  "case_id": "anthropic-messages-basic-text",
+  "target": "anthropic-stream",
+  "url": "https://api.anthropic.com/v1/messages",
+  "status_code": 200,
+  "content_type": "text/event-stream; charset=utf-8",
+  "captured_at": "2026-04-16T13:03:22-05:00",
+  "response_headers": {
+    "Anthropic-Organization-Id": [
+      "ff99ea6f-4abc-487d-b0a5-070732273637"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Limit": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Remaining": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Reset": [
+      "2026-04-16T18:03:21Z"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Limit": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Remaining": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Reset": [
+      "2026-04-16T18:03:21Z"
+    ],
+    "Anthropic-Ratelimit-Requests-Limit": [
+      "1000"
+    ],
+    "Anthropic-Ratelimit-Requests-Remaining": [
+      "999"
+    ],
+    "Anthropic-Ratelimit-Requests-Reset": [
+      "2026-04-16T18:03:21Z"
+    ],
+    "Anthropic-Ratelimit-Tokens-Limit": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Remaining": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Reset": [
+      "2026-04-16T18:03:21Z"
+    ],
+    "Cache-Control": [
+      "no-cache"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9ed51b32c8af52dc-ORD"
+    ],
+    "Content-Security-Policy": [
+      "default-src 'none'; frame-ancestors 'none'"
+    ],
+    "Content-Type": [
+      "text/event-stream; charset=utf-8"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:03:22 GMT"
+    ],
+    "Request-Id": [
+      "req_011Ca7tbqEqGqTTSaHwaArjC"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Server-Timing": [
+      "x-originResponse;dur=791"
+    ],
+    "Set-Cookie": [
+      "_cfuvid=jDsmGKdzhJtl0L1YDT.wPhfNoGXLPFl2loU_uhsL.KA-1776362601.4063938-1.0.1.1-0CcPoU7GbJK8m5Xk9rU4KD8cFkjnnbD3L7W67zHZiR0; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Envoy-Upstream-Service-Time": [
+      "788"
+    ],
+    "X-Robots-Tag": [
+      "none"
+    ]
+  }
+}

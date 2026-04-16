@@ -11,16 +11,18 @@ type Block interface {
 
 // TextBlock represents a text content block
 type TextBlock struct {
-	Text string
+	Text             string
+	ThoughtSignature string
 }
 
 func (TextBlock) isBlock() {}
 
 // ToolUseBlock represents a tool use request block
 type ToolUseBlock struct {
-	ID    string
-	Name  string
-	Input json.RawMessage
+	ID               string
+	Name             string
+	Input            json.RawMessage
+	ThoughtSignature string
 }
 
 func (ToolUseBlock) isBlock() {}

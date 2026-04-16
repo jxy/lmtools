@@ -1,0 +1,31 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Hello, Claude"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "Hello!"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Can you describe LLMs to me?"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  }
+}

@@ -1,0 +1,27 @@
+LLMs (Large Language Models) are AI systems trained on vast amounts of text data to understand and generate human-like language. Here's a breakdown:
+
+## What they are:
+- Neural networks with billions of parameters that learn patterns in language
+- "Large" refers to both their size and the massive datasets they're trained on
+- Examples include GPT-4, Claude (that's me!), PaLM, and LLaMA
+
+## How they work:
+- **Training**: They learn by predicting the next word in sequences of text, processing millions of documents
+- **Architecture**: Most use transformer architecture, which helps them understand context and relationships between words
+- **Inference**: When you ask a question, they generate responses word-by-word based on patterns they've learned
+
+## What they can do:
+- Answer questions and explain concepts
+- Write various types of content
+- Translate languages
+- Summarize texts
+- Code and debug programs
+- Engage in conversations
+
+## Limitations:
+- No real-time information (knowledge has a cutoff date)
+- Can generate plausible-sounding but incorrect information
+- Lack true understanding - they work with patterns, not genuine comprehension
+- May exhibit biases from their training data
+
+Think of LLMs as extremely sophisticated pattern-matching systems that have "read" much of the internet and learned to mimic human communication remarkably well.

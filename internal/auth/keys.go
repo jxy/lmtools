@@ -86,37 +86,17 @@ func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 		// Always set version header for Anthropic
 		req.Header.Set("anthropic-version", "2023-06-01")
 	case constants.ProviderGoogle:
-		// Google uses API key in URL, not headers
+		if apiKey != "" {
+			req.Header.Set("x-goog-api-key", apiKey)
+		}
 	case constants.ProviderArgo:
 		// Argo doesn't use API key headers
 	}
 }
 
 // ApplyProviderCredentials applies provider-specific authentication details.
-// It centralizes Google's URL-based API key handling while preserving the
-// header-based behavior for other providers.
 func ApplyProviderCredentials(req *http.Request, provider string, apiKey string) error {
 	SetProviderHeaders(req, provider, apiKey)
-	if provider == constants.ProviderGoogle && apiKey != "" {
-		return ApplyGoogleAPIKey(req, apiKey)
-	}
-	return nil
-}
-
-// ApplyGoogleAPIKey adds the Google API key to the request URL as a query parameter
-// This centralizes Google's API key handling which requires the key in the URL
-func ApplyGoogleAPIKey(req *http.Request, apiKey string) error {
-	if apiKey == "" {
-		return errors.WrapError("validate API key", stdErrors.New("google API key is empty"))
-	}
-
-	// Parse the current URL to modify query parameters
-	u := *req.URL
-	q := u.Query()
-	q.Set("key", apiKey)
-	u.RawQuery = q.Encode()
-	req.URL = &u
-
 	return nil
 }
 

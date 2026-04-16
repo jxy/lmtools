@@ -186,6 +186,89 @@ func TestProviderSpecChatRequestBehavior(t *testing.T) {
 	}
 }
 
+func TestProviderSpecStreamingRequestBehavior(t *testing.T) {
+	tests := []struct {
+		name        string
+		provider    string
+		model       string
+		providerURL string
+		verify      func(*testing.T, *http.Request, map[string]interface{})
+	}{
+		{
+			name:        "openai enables stream flag on same endpoint",
+			provider:    "openai",
+			model:       "gpt-5",
+			providerURL: "https://api.openai.com/v1",
+			verify: func(t *testing.T, req *http.Request, payload map[string]interface{}) {
+				if got := req.URL.String(); got != "https://api.openai.com/v1/chat/completions" {
+					t.Fatalf("URL = %q", got)
+				}
+				if got := req.Header.Get("Accept"); got != "text/event-stream" {
+					t.Fatalf("Accept = %q, want text/event-stream", got)
+				}
+				if payload["stream"] != true {
+					t.Fatalf("stream = %v, want true", payload["stream"])
+				}
+			},
+		},
+		{
+			name:        "anthropic enables stream flag on messages endpoint",
+			provider:    "anthropic",
+			model:       "claude-opus-4-1-20250805",
+			providerURL: "https://api.anthropic.com/v1",
+			verify: func(t *testing.T, req *http.Request, payload map[string]interface{}) {
+				if got := req.URL.String(); got != "https://api.anthropic.com/v1/messages" {
+					t.Fatalf("URL = %q", got)
+				}
+				if got := req.Header.Get("Accept"); got != "text/event-stream" {
+					t.Fatalf("Accept = %q, want text/event-stream", got)
+				}
+				if payload["stream"] != true {
+					t.Fatalf("stream = %v, want true", payload["stream"])
+				}
+			},
+		},
+		{
+			name:        "google uses stream endpoint without body stream flag",
+			provider:    "google",
+			model:       "gemini-2.5-pro",
+			providerURL: "https://generativelanguage.googleapis.com/v1beta",
+			verify: func(t *testing.T, req *http.Request, payload map[string]interface{}) {
+				if got := req.URL.String(); got != "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse" {
+					t.Fatalf("URL = %q", got)
+				}
+				if got := req.Header.Get("Accept"); got != "text/event-stream" {
+					t.Fatalf("Accept = %q, want text/event-stream", got)
+				}
+				if _, ok := payload["stream"]; ok {
+					t.Fatalf("unexpected stream field in Google payload: %v", payload["stream"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := newProviderSpecTestConfig(tt.provider, tt.model, tt.providerURL)
+			spec, err := providerSpecForName(tt.provider)
+			if err != nil {
+				t.Fatalf("providerSpecForName(%q) error = %v", tt.provider, err)
+			}
+			buildChat, err := spec.requireChatBuilder()
+			if err != nil {
+				t.Fatalf("requireChatBuilder() error = %v", err)
+			}
+
+			req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, tt.model, "", nil, nil, true)
+			if err != nil {
+				t.Fatalf("buildChat() error = %v", err)
+			}
+
+			tt.verify(t, req, decodeRequestBody(t, body))
+		})
+	}
+}
+
 func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 	spec, err := providerSpecForName("argo")
 	if err != nil {

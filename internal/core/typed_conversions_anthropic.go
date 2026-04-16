@@ -38,13 +38,20 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 					Signature: b.Signature,
 				})
 			case ImageBlock:
+				source := &AnthropicImageSource{
+					Type: "url",
+					URL:  b.URL,
+				}
+				if mediaType, data, ok := ParseBase64DataURL(b.URL); ok {
+					source = &AnthropicImageSource{
+						Type:      "base64",
+						MediaType: mediaType,
+						Data:      data,
+					}
+				}
 				content = append(content, AnthropicContent{
-					Type: "image",
-					Source: &AnthropicImageSource{
-						Type:      "url",
-						URL:       b.URL,
-						MediaType: DetectImageMediaType(b.URL),
-					},
+					Type:   "image",
+					Source: source,
 				})
 			case AudioBlock:
 				audioContent := AnthropicContent{

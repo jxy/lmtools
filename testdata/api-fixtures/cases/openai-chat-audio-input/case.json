@@ -1,0 +1,23 @@
+{
+  "id": "openai-chat-audio-input",
+  "description": "OpenAI chat completions request with input_audio content",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai",
+  "models": {
+    "openai": "gpt-4o-audio-preview",
+    "anthropic": "claude-haiku-4-5",
+    "google": "gemini-3.1-flash-lite-preview",
+    "argo": "gpt5mini"
+  },
+  "argo_user": "fixture-user",
+  "render_targets": [
+    "openai",
+    "google"
+  ],
+  "capture_targets": [
+    "openai",
+    "google"
+  ]
+}

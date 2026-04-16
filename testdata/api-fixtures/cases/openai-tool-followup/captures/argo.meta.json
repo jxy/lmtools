@@ -1,0 +1,28 @@
+{
+  "case_id": "openai-tool-followup",
+  "target": "argo",
+  "url": "https://apps.inside.anl.gov/argoapi/api/v1/resource/chat/",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-16T13:14:45-05:00",
+  "response_headers": {
+    "Connection": [
+      "keep-alive"
+    ],
+    "Content-Length": [
+      "198"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:14:45 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains"
+    ],
+    "Vary": [
+      "Accept-Encoding"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "user": "fixture-user",
+  "model": "claudeopus4",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg"
+          }
+        },
+        {
+          "type": "text",
+          "text": "What is in the above image?"
+        }
+      ]
+    }
+  ]
+}

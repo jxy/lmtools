@@ -2,12 +2,28 @@ package providers
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
 func BuildGoogleModelURL(baseURL, model, action string) (string, error) {
 	modelPath := fmt.Sprintf("%s:%s", model, action)
-	return BuildProviderURL(baseURL, modelPath)
+	built, err := BuildProviderURL(baseURL, modelPath)
+	if err != nil {
+		return "", err
+	}
+	if action != "streamGenerateContent" {
+		return built, nil
+	}
+
+	u, err := url.Parse(built)
+	if err != nil {
+		return "", err
+	}
+	query := u.Query()
+	query.Set("alt", "sse")
+	u.RawQuery = query.Encode()
+	return u.String(), nil
 }
 
 func GoogleURLs(base string) (string, string) {

@@ -1,0 +1,49 @@
+[
+  {
+    "event": "message_start",
+    "model": "gpt-5.4-nano",
+    "role": "assistant"
+  },
+  {
+    "block_type": "text",
+    "event": "content_block_start",
+    "index": 0
+  },
+  {
+    "delta_type": "text_delta",
+    "event": "content_block_delta",
+    "index": 0,
+    "text": "Hello"
+  },
+  {
+    "event": "content_block_stop",
+    "index": 0
+  },
+  {
+    "block_type": "tool_use",
+    "event": "content_block_start",
+    "index": 1,
+    "name": "sum"
+  },
+  {
+    "delta_type": "input_json_delta",
+    "event": "content_block_delta",
+    "index": 1,
+    "partial_json": "{\"a\":1}"
+  },
+  {
+    "event": "content_block_stop",
+    "index": 1
+  },
+  {
+    "event": "message_delta",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 3
+    }
+  },
+  {
+    "event": "message_stop"
+  }
+]

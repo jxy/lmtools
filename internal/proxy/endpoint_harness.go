@@ -1,11 +1,15 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"lmtools/internal/logger"
 	"net/http"
+	"strings"
 )
 
 type endpointRequestInfo struct {
@@ -35,10 +39,54 @@ func (s *Server) decodeEndpointRequest(r *http.Request, dst interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
-	if err := json.Unmarshal(body, dst); err != nil {
-		return fmt.Errorf("invalid JSON in request body")
+	if err := decodeStrictJSON(body, dst); err != nil {
+		return err
 	}
 	return nil
+}
+
+func decodeStrictJSON(body []byte, dst interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		return normalizeJSONDecodeError(err)
+	}
+
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("invalid JSON in request body: unexpected trailing data")
+		}
+		return normalizeJSONDecodeError(err)
+	}
+
+	return nil
+}
+
+func normalizeJSONDecodeError(err error) error {
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return fmt.Errorf("invalid JSON in request body")
+	}
+
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		if typeErr.Field != "" {
+			return fmt.Errorf("invalid JSON in request body: wrong type for field %q", typeErr.Field)
+		}
+		return fmt.Errorf("invalid JSON in request body: wrong value type")
+	}
+
+	if strings.HasPrefix(err.Error(), "json: unknown field ") {
+		return fmt.Errorf("invalid JSON in request body: %s", strings.TrimPrefix(err.Error(), "json: "))
+	}
+
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("invalid JSON in request body")
+	}
+
+	return fmt.Errorf("invalid JSON in request body: %v", err)
 }
 
 func logEndpointRequest(ctx context.Context, info endpointRequestInfo) {

@@ -1,0 +1,21 @@
+{
+  "id": "msg_fixture",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Checking weather"
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_1",
+      "name": "get_weather",
+      "input": {
+        "location": "Chicago"
+      }
+    }
+  ],
+  "model": "claude-haiku-4-5",
+  "stop_reason": "tool_use"
+}

@@ -63,9 +63,12 @@ func TestGoogleStreamParser_SharedStateTransitions(t *testing.T) {
 	}
 
 	stream := strings.Join([]string{
-		`{"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4},"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}`,
-		`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"weather"}}}]}}]}`,
-		`{"candidates":[{"finishReason":"MAX_TOKENS"}]}`,
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4},"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}`,
+		"",
+		`data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"weather"}}}]}}]}`,
+		"",
+		`data: {"candidates":[{"finishReason":"MAX_TOKENS"}]}`,
+		"",
 	}, "\n")
 
 	parser := NewGoogleStreamParser(handler)
@@ -86,5 +89,94 @@ func TestGoogleStreamParser_SharedStateTransitions(t *testing.T) {
 	}
 	if !strings.Contains(body, `"stop_reason":"max_tokens"`) {
 		t.Fatalf("expected stop_reason max_tokens, body=%s", body)
+	}
+}
+
+func TestGoogleStreamParser_FinishChunkStillEmitsText(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gemini-1.5-pro", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4},"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}`,
+		"",
+	}, "\n")
+
+	parser := NewGoogleStreamParser(handler)
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"text":"Hello"`) {
+		t.Fatalf("expected finish chunk text to be emitted, body=%s", body)
+	}
+	if !strings.Contains(body, `"stop_reason":"end_turn"`) {
+		t.Fatalf("expected stop_reason end_turn, body=%s", body)
+	}
+}
+
+func TestConvertGoogleStreamToOpenAI_SSE(t *testing.T) {
+	recorder := newFlushableRecorder()
+	writer, err := NewOpenAIStreamWriter(recorder, "gpt-5.4-nano", context.Background())
+	if err != nil {
+		t.Fatalf("NewOpenAIStreamWriter() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4,"totalTokenCount":11},"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}`,
+		"",
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":12},"candidates":[{"finishReason":"STOP"}]}`,
+		"",
+	}, "\n")
+
+	server := &Server{}
+	if err := server.convertGoogleStreamToOpenAI(context.Background(), strings.NewReader(stream), writer); err != nil {
+		t.Fatalf("convertGoogleStreamToOpenAI() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"role":"assistant"`) {
+		t.Fatalf("expected assistant role delta, body=%s", body)
+	}
+	if !strings.Contains(body, `"content":"Hi"`) {
+		t.Fatalf("expected content delta, body=%s", body)
+	}
+	if !strings.Contains(body, `"finish_reason":"stop"`) {
+		t.Fatalf("expected finish_reason stop, body=%s", body)
+	}
+	if !strings.Contains(body, `data: [DONE]`) {
+		t.Fatalf("expected [DONE], body=%s", body)
+	}
+}
+
+func TestConvertGoogleStreamToOpenAI_SSE_FinishChunkCarriesText(t *testing.T) {
+	recorder := newFlushableRecorder()
+	writer, err := NewOpenAIStreamWriter(recorder, "gpt-5.4-nano", context.Background())
+	if err != nil {
+		t.Fatalf("NewOpenAIStreamWriter() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":12},"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}`,
+		"",
+	}, "\n")
+
+	server := &Server{}
+	if err := server.convertGoogleStreamToOpenAI(context.Background(), strings.NewReader(stream), writer); err != nil {
+		t.Fatalf("convertGoogleStreamToOpenAI() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"content":"Hi"`) {
+		t.Fatalf("expected finish chunk text to be emitted, body=%s", body)
+	}
+	if !strings.Contains(body, `"finish_reason":"stop"`) {
+		t.Fatalf("expected finish_reason stop, body=%s", body)
 	}
 }

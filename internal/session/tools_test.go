@@ -173,6 +173,109 @@ func TestSaveToolResults(t *testing.T) {
 	})
 }
 
+func TestSaveAssistantResponseWithThoughtSignature(t *testing.T) {
+	WithTestSessionDir(t, func(sessionsDir string) {
+		sess := &Session{
+			Path: filepath.Join(sessionsDir, "test-session"),
+		}
+		if err := os.MkdirAll(sess.Path, constants.DirPerm); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := SaveAssistantResponseWithMetadata(
+			context.Background(),
+			sess,
+			"Hello from Gemini.",
+			nil,
+			"gemini-3.1-flash-lite-preview",
+			"sig-text-123",
+		)
+		if err != nil {
+			t.Fatalf("SaveAssistantResponseWithMetadata() error = %v", err)
+		}
+
+		metaPath := filepath.Join(sess.Path, result.MessageID+".json")
+		metaData, err := os.ReadFile(metaPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%q) error = %v", metaPath, err)
+		}
+
+		var metadata MessageMetadata
+		if err := json.Unmarshal(metaData, &metadata); err != nil {
+			t.Fatalf("json.Unmarshal() error = %v", err)
+		}
+		if metadata.ThoughtSignature == nil {
+			t.Fatal("metadata thought_signature = nil, want non-nil")
+		}
+		if got := *metadata.ThoughtSignature; got != "sig-text-123" {
+			t.Fatalf("metadata thought_signature = %q, want %q", got, "sig-text-123")
+		}
+
+		typedMessages, err := BuildMessagesWithToolInteractions(context.Background(), sess.Path)
+		if err != nil {
+			t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+		}
+		if len(typedMessages) != 1 {
+			t.Fatalf("len(typedMessages) = %d, want 1", len(typedMessages))
+		}
+		if len(typedMessages[0].Blocks) != 1 {
+			t.Fatalf("len(blocks) = %d, want 1", len(typedMessages[0].Blocks))
+		}
+
+		textBlock, ok := typedMessages[0].Blocks[0].(core.TextBlock)
+		if !ok {
+			t.Fatalf("block type = %T, want core.TextBlock", typedMessages[0].Blocks[0])
+		}
+		if got := textBlock.ThoughtSignature; got != "sig-text-123" {
+			t.Fatalf("TextBlock.ThoughtSignature = %q, want %q", got, "sig-text-123")
+		}
+	})
+}
+
+func TestBuildMessagesWithThoughtSignatureOnlyMessage(t *testing.T) {
+	WithTestSessionDir(t, func(sessionsDir string) {
+		sess := &Session{
+			Path: filepath.Join(sessionsDir, "test-session"),
+		}
+		if err := os.MkdirAll(sess.Path, constants.DirPerm); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := SaveAssistantResponseWithMetadata(
+			context.Background(),
+			sess,
+			"",
+			nil,
+			"gemini-3.1-flash-lite-preview",
+			"sig-only-456",
+		); err != nil {
+			t.Fatalf("SaveAssistantResponseWithMetadata() error = %v", err)
+		}
+
+		typedMessages, err := BuildMessagesWithToolInteractions(context.Background(), sess.Path)
+		if err != nil {
+			t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+		}
+		if len(typedMessages) != 1 {
+			t.Fatalf("len(typedMessages) = %d, want 1", len(typedMessages))
+		}
+		if len(typedMessages[0].Blocks) != 1 {
+			t.Fatalf("len(blocks) = %d, want 1", len(typedMessages[0].Blocks))
+		}
+
+		textBlock, ok := typedMessages[0].Blocks[0].(core.TextBlock)
+		if !ok {
+			t.Fatalf("block type = %T, want core.TextBlock", typedMessages[0].Blocks[0])
+		}
+		if got := textBlock.Text; got != "" {
+			t.Fatalf("TextBlock.Text = %q, want empty string", got)
+		}
+		if got := textBlock.ThoughtSignature; got != "sig-only-456" {
+			t.Fatalf("TextBlock.ThoughtSignature = %q, want %q", got, "sig-only-456")
+		}
+	})
+}
+
 func TestSaveAssistantResponseTextOnly(t *testing.T) {
 	WithTestSessionDir(t, func(sessionsDir string) {
 		// Create a test session

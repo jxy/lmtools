@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/providers"
+	"strings"
 )
 
 type typedRenderContext struct {
@@ -63,12 +64,16 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (int
 
 	openAIReq := &OpenAIRequest{
 		Model:           ctx.Model,
-		MaxTokens:       typed.MaxTokens,
 		Temperature:     typed.Temperature,
 		TopP:            typed.TopP,
 		Stream:          typed.Stream,
 		Stop:            typed.Stop,
 		ReasoningEffort: typed.ReasoningEffort,
+	}
+	if openAIModelUsesMaxCompletionTokens(ctx.Model) {
+		openAIReq.MaxCompletionTokens = typed.MaxTokens
+	} else {
+		openAIReq.MaxTokens = typed.MaxTokens
 	}
 
 	messages := core.PrependSystemMessage(prepared.Messages, prepared.System)
@@ -79,6 +84,14 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (int
 	}
 
 	return openAIReq, nil
+}
+
+func openAIModelUsesMaxCompletionTokens(model string) bool {
+	modelLower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(modelLower, "gpt-5") ||
+		strings.HasPrefix(modelLower, "o1") ||
+		strings.HasPrefix(modelLower, "o3") ||
+		strings.HasPrefix(modelLower, "o4")
 }
 
 func TypedToAnthropicRequest(typed TypedRequest, model string) (*AnthropicRequest, error) {
@@ -104,8 +117,10 @@ func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (
 		Stream:        prepared.Stream,
 		StopSequences: typed.Stop,
 		Temperature:   typed.Temperature,
-		TopP:          typed.TopP,
 		Tools:         proxyAnthropicToolsFromCore(prepared.Tools),
+	}
+	if typed.Temperature == nil {
+		anthReq.TopP = typed.TopP
 	}
 	if typed.ToolChoice != nil {
 		anthReq.ToolChoice = proxyAnthropicToolChoiceFromCore(prepared.ToolChoice)
@@ -196,6 +211,14 @@ func TypedToArgoRequest(typed TypedRequest, model string, user string) (*ArgoCha
 }
 
 func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+	for _, message := range typed.Messages {
+		for _, block := range message.Blocks {
+			if _, ok := block.(core.AudioBlock); ok {
+				return nil, fmt.Errorf("argo provider does not support audio input blocks")
+			}
+		}
+	}
+
 	argoReq := &ArgoChatRequest{
 		User:            ctx.User,
 		Model:           ctx.Model,

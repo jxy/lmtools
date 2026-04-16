@@ -1,0 +1,6 @@
+data: {"candidates": [{"content": {"parts": [{"text": "The weather"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 120,"candidatesTokenCount": 2,"totalTokenCount": 122,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 120}]},"modelVersion": "gemini-3.1-flash-lite-preview","responseId": "ajDhaafPO5Wr1MkPuZiTyAQ"}
+
+data: {"candidates": [{"content": {"parts": [{"text": " in Chicago is currently 18°C and cloudy."}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 120,"candidatesTokenCount": 14,"totalTokenCount": 134,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 120}]},"modelVersion": "gemini-3.1-flash-lite-preview","responseId": "ajDhaafPO5Wr1MkPuZiTyAQ"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "","thoughtSignature": "EjQKMgEMOdbHulMBCO7rXEUx1hLJe/RJv6E4qDMkGCMViBxkBWToVRfw+PYBna+5VqityBtu"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 120,"candidatesTokenCount": 14,"totalTokenCount": 134,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 120}]},"modelVersion": "gemini-3.1-flash-lite-preview","responseId": "ajDhaafPO5Wr1MkPuZiTyAQ"}
+

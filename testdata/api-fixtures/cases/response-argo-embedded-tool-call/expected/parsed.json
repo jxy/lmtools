@@ -1,0 +1,4 @@
+{
+  "text": "Now let me read the file:{'type': 'tool_use', 'id': 'toolu_1', 'name': 'Read', 'input': {'file_path': '/tmp/example.txt'}}",
+  "tool_calls": []
+}

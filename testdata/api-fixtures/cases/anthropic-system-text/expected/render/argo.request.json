@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "content": "Be concise.\nNo markdown.",
+      "role": "system"
+    },
+    {
+      "content": "Hello there",
+      "role": "user"
+    }
+  ],
+  "model": "gpt5mini",
+  "temperature": 0.1,
+  "top_p": 0.8,
+  "user": "fixture-user"
+}

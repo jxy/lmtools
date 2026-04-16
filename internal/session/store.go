@@ -35,11 +35,17 @@ func (s *Store) finalizeSave(result SaveResult, logFormat string) (string, strin
 
 // SaveAssistant saves an assistant message with optional tool calls
 func (s *Store) SaveAssistant(ctx context.Context, text string, calls []core.ToolCall, model string) (string, string, error) {
+	return s.SaveAssistantWithThoughtSignature(ctx, text, calls, model, "")
+}
+
+// SaveAssistantWithThoughtSignature saves an assistant message with optional
+// Google thought signature metadata.
+func (s *Store) SaveAssistantWithThoughtSignature(ctx context.Context, text string, calls []core.ToolCall, model string, thoughtSignature string) (string, string, error) {
 	if s.session == nil {
 		return "", "", fmt.Errorf("session is nil")
 	}
 
-	result, err := SaveAssistantResponseWithTools(ctx, s.session, strings.TrimSpace(text), calls, model)
+	result, err := SaveAssistantResponseWithMetadata(ctx, s.session, strings.TrimSpace(text), calls, model, thoughtSignature)
 	if err != nil {
 		return "", "", err
 	}

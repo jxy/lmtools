@@ -173,7 +173,8 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 
 // GoogleStreamState tracks current part and tool calls for Google streaming
 type GoogleStreamState struct {
-	nextID uint64
+	nextID                   uint64
+	lastTextThoughtSignature string
 }
 
 // ParseLine implements StreamState for Google SSE format
@@ -194,15 +195,19 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 		for _, text := range parsed.TextParts {
 			textContent += text
 		}
+		if parsed.LastTextThoughtSignature != "" {
+			s.lastTextThoughtSignature = parsed.LastTextThoughtSignature
+		}
 		for _, functionCall := range parsed.FunctionCalls {
 			args := functionCall.Args
 			if len(args) == 0 {
 				args = json.RawMessage("{}")
 			}
 			newToolCalls = append(newToolCalls, ToolCall{
-				ID:   s.generateToolCallID(), // Google doesn't provide IDs
-				Name: functionCall.Name,
-				Args: args,
+				ID:               s.generateToolCallID(), // Google doesn't provide IDs
+				Name:             functionCall.Name,
+				Args:             args,
+				ThoughtSignature: functionCall.ThoughtSignature,
 			})
 		}
 

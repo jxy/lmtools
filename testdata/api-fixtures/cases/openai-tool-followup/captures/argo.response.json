@@ -1,0 +1,15 @@
+{
+  "response": {
+    "content": "",
+    "tool_calls": [
+      {
+        "function": {
+          "arguments": "{\"location\":\"Chicago\",\"unit\":\"fahrenheit\"}",
+          "name": "get_weather"
+        },
+        "id": "call_OHZpJyuO7kc0UbHIZz1eGvJ3",
+        "type": "function"
+      }
+    ]
+  }
+}

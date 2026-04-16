@@ -111,14 +111,18 @@ func NewMockGoogle(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Mock Google: %s %s", r.Method, r.URL.Path)
 
-		// Check API key in URL
-		if !strings.Contains(r.URL.String(), "key=") {
+		// Check API key in header
+		if r.Header.Get("x-goog-api-key") == "" {
 			http.Error(w, "Missing API key", http.StatusUnauthorized)
 			return
 		}
 
 		// Handle streaming
 		if strings.Contains(r.URL.Path, "streamGenerateContent") {
+			if got := r.URL.Query().Get("alt"); got != "sse" {
+				http.Error(w, "Missing alt=sse", http.StatusBadRequest)
+				return
+			}
 			setSSEHeaders(w)
 			w.WriteHeader(http.StatusOK)
 

@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "[Image: https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg]"
+        },
+        {
+          "text": "What is in the above image?"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  }
+}

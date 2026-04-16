@@ -95,7 +95,8 @@ func TestOpenAIStreamingJSONUnicodeEscape(t *testing.T) {
 		if err := json.Unmarshal([]byte(data), &obj); err != nil {
 			continue
 		}
-		// OpenAI SSE: first delta has role assistant + content:null, then tool argument fragments
+		// OpenAI SSE text-start streams begin with role assistant + content:"";
+		// tool-first streams use content:null.
 		choices, _ := obj["choices"].([]interface{})
 		if len(choices) == 0 {
 			continue
@@ -104,7 +105,9 @@ func TestOpenAIStreamingJSONUnicodeEscape(t *testing.T) {
 		delta, _ := choice["delta"].(map[string]interface{})
 		if role, ok := delta["role"].(string); ok && role == "assistant" {
 			if _, hasContent := delta["content"]; hasContent {
-				if delta["content"] == nil {
+				if contentStr, ok := delta["content"].(string); ok && contentStr == "" {
+					sawInitialAssistant = true
+				} else if delta["content"] == nil {
 					sawInitialAssistant = true
 				}
 			}
@@ -128,7 +131,7 @@ func TestOpenAIStreamingJSONUnicodeEscape(t *testing.T) {
 
 	// Expect initial empty, then full JSON object concatenated
 	if !sawInitialAssistant {
-		t.Fatal("Did not see initial assistant delta with content:null")
+		t.Fatal("Did not see initial assistant delta with empty-string or null content")
 	}
 	if !sawInitialEmpty {
 		t.Fatal("Did not see initial empty arguments chunk")

@@ -252,7 +252,7 @@ func (c AnthropicContent) ToMap() map[string]interface{} {
 		if c.Source.URL != "" {
 			sourceMap["url"] = c.Source.URL
 		}
-		if c.Source.MediaType != "" {
+		if c.Source.Type == "base64" && c.Source.MediaType != "" {
 			sourceMap["media_type"] = c.Source.MediaType
 		}
 		if c.Source.Data != "" {
@@ -334,14 +334,22 @@ type GooglePart struct {
 	FunctionCall     *GoogleFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *GoogleFunctionResponse `json:"functionResponse,omitempty"`
 	InlineData       *GoogleInlineData       `json:"inlineData,omitempty"`
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
 }
+
+// GoogleDummyThoughtSignature is the documented placeholder used when replaying
+// foreign/custom function-call traces into Gemini 3 without a real signature.
+const GoogleDummyThoughtSignature = "context_engineering_is_the_way_to_go"
 
 // ToMap converts GooglePart to map[string]interface{} for request marshaling
 func (p GooglePart) ToMap() map[string]interface{} {
 	m := map[string]interface{}{}
 
-	if p.Text != "" {
+	if p.Text != "" || (p.ThoughtSignature != "" && p.FunctionCall == nil && p.FunctionResponse == nil && p.InlineData == nil) {
 		m["text"] = p.Text
+	}
+	if p.ThoughtSignature != "" {
+		m["thoughtSignature"] = p.ThoughtSignature
 	}
 
 	if p.FunctionCall != nil {

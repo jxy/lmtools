@@ -12,6 +12,14 @@ Requires Go 1.21+
 make build   # builds ./bin/lmc and ./bin/apiproxy
 ```
 
+For the shared API request/response fixture corpus used by proxy tests:
+
+```bash
+make verify-fixtures
+```
+
+This validates the checked-in fixture files and runs targeted fixture-driven tests.
+
 ## Quick Start
 
 - Chat (streaming) via Argo
@@ -391,11 +399,12 @@ curl -X GET http://localhost:8082/v1/models
 
 ### Test
 
-A test script is available to verify the proxy is working correctly:
+Use the Go test targets and fixture verification workflow instead of ad hoc shell test scripts:
 
 ```bash
-# Run the test script (requires proxy to be running on port 8082)
-./scripts/test_apiproxy.sh
+make test
+make test-e2e
+make verify-fixtures
 ```
 
 ### Model mapping

@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "Hello! How can I help you today?"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 4,"candidatesTokenCount": 9,"totalTokenCount": 13,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 4}]},"modelVersion": "gemini-3.1-flash-lite-preview","responseId": "YzDhadmFJ6me1MkPlOHvmAc"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "","thoughtSignature": "EjQKMgEMOdbH+3ydoBUHA0w3cgEcjyeLbxo9f7P2AVki61BYhDE2cF1uwvlNts5BgoKP5xAl"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 4,"candidatesTokenCount": 9,"totalTokenCount": 13,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 4}]},"modelVersion": "gemini-3.1-flash-lite-preview","responseId": "YzDhadmFJ6me1MkPlOHvmAc"}
+

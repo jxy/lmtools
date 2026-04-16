@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Transcribe this audio:"
+        },
+        {
+          "text": "[Audio content (data)]"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 256
+  }
+}

@@ -430,8 +430,11 @@ func TestBuildGoogleToolResultRequest(t *testing.T) {
 	if !strings.Contains(req.URL.String(), "/models/gemini-2.5-pro:generateContent") {
 		t.Errorf("Expected URL to contain model endpoint, got %s", req.URL.String())
 	}
-	if !strings.Contains(req.URL.String(), "key=test-api-key") {
-		t.Errorf("Expected URL to contain API key parameter, got %s", req.URL.String())
+	if strings.Contains(req.URL.String(), "key=test-api-key") {
+		t.Errorf("Expected URL to omit API key parameter, got %s", req.URL.String())
+	}
+	if got := req.Header.Get("x-goog-api-key"); got != "test-api-key" {
+		t.Errorf("Expected x-goog-api-key header 'test-api-key', got %q", got)
 	}
 
 	// Parse and verify request body

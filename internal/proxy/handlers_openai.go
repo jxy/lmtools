@@ -16,8 +16,8 @@ func (s *Server) parseOpenAIRequest(r *http.Request) (*OpenAIRequest, error) {
 	if err := s.decodeEndpointRequest(r, &req); err != nil {
 		return nil, err
 	}
-	if len(req.Messages) == 0 {
-		return nil, fmt.Errorf("messages array cannot be empty")
+	if err := validateParsedOpenAIRequest(&req); err != nil {
+		return nil, err
 	}
 	return &req, nil
 }
@@ -65,6 +65,12 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 
 	ctx := r.Context()
 	log := logger.From(ctx)
+
+	if err := validateOpenAIRequestForProvider(openAIReq, route.Provider); err != nil {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		return
+	}
+
 	openAIReq.Model = route.MappedModel
 
 	// If provider is OpenAI, do a direct pass-through

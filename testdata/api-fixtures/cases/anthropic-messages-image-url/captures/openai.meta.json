@@ -1,0 +1,85 @@
+{
+  "case_id": "anthropic-messages-image-url",
+  "target": "openai",
+  "url": "https://api.openai.com/v1/chat/completions",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-16T13:08:48-05:00",
+  "response_headers": {
+    "Access-Control-Expose-Headers": [
+      "X-Request-ID"
+    ],
+    "Alt-Svc": [
+      "h3=\":443\"; ma=86400"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9ed523250aa1c8d4-ORD"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:08:48 GMT"
+    ],
+    "Openai-Organization": [
+      "user-luppstbuzesizhcpyp8mf8vl"
+    ],
+    "Openai-Processing-Ms": [
+      "1384"
+    ],
+    "Openai-Project": [
+      "proj_LOtYBLbKh37UwfhEcM1rrSEn"
+    ],
+    "Openai-Version": [
+      "2020-10-01"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "__cf_bm=ybiUcpYZ.aKZZkyPGnMQpjduTIgg0O9Gw1NmexLZI_w-1776362926.889609-1.0.1.1-ZsA_7w47MSw.pk0_eOgpA.EyK9Q6pG2Xnq6JxI9AHbEOehKSAGwHT.9R_k1gcAozVUtme2u4dChlG.dkYDKOd.aqXoSa3aD_Ky81iw.X6Mp6baOhhPGumYc9Sb1FLhe0; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 16 Apr 2026 18:38:48 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Openai-Proxy-Wasm": [
+      "v0.1"
+    ],
+    "X-Ratelimit-Limit-Input-Images": [
+      "50000"
+    ],
+    "X-Ratelimit-Limit-Requests": [
+      "5000"
+    ],
+    "X-Ratelimit-Limit-Tokens": [
+      "4000000"
+    ],
+    "X-Ratelimit-Remaining-Input-Images": [
+      "49999"
+    ],
+    "X-Ratelimit-Remaining-Requests": [
+      "4999"
+    ],
+    "X-Ratelimit-Remaining-Tokens": [
+      "3999226"
+    ],
+    "X-Ratelimit-Reset-Input-Images": [
+      "1ms"
+    ],
+    "X-Ratelimit-Reset-Requests": [
+      "12ms"
+    ],
+    "X-Ratelimit-Reset-Tokens": [
+      "11ms"
+    ],
+    "X-Request-Id": [
+      "req_ce0e30fd04b944379661822ad0ddd4fa"
+    ]
+  }
+}

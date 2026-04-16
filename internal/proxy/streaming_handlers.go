@@ -544,38 +544,28 @@ func (s *Server) streamOpenAIFromGoogle(ctx context.Context, anthReq *AnthropicR
 		return err
 	}
 
-	// Send initial assistant delta
-	if err := writer.WriteInitialAssistantDelta(); err != nil {
-		return err
-	}
-
 	return s.convertGoogleStreamToOpenAI(ctx, resp.Body, writer)
 }
 
-// convertGoogleStreamToOpenAI converts a Google JSON stream to OpenAI format.
-// This function handles the JSON decoding and format conversion, keeping HTTP concerns
+// convertGoogleStreamToOpenAI converts a Google SSE stream to OpenAI format.
+// This function handles the SSE parsing and format conversion, keeping HTTP concerns
 // in the caller (streamOpenAIFromGoogle).
 func (s *Server) convertGoogleStreamToOpenAI(ctx context.Context, body io.Reader, writer *OpenAIStreamWriter) error {
 	// Create converter
 	converter := NewOpenAIStreamConverter(writer, ctx)
 
-	// Parse Google stream
-	decoder := json.NewDecoder(body)
-	for {
+	if err := consumeSSEStream(body, func(_ string, data json.RawMessage) error {
 		var chunk map[string]interface{}
-		if err := decoder.Decode(&chunk); err != nil {
-			if err == io.EOF {
-				break
-			}
-			if handleErr := handleStreamError(ctx, nil, "GoogleToOpenAIDecoder", err); handleErr != nil {
-				return handleErr
-			}
-			continue // Recoverable error - skip bad chunk
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return handleStreamError(ctx, nil, "GoogleToOpenAIChunk", err)
 		}
-
-		// Convert to OpenAI format
 		if err := converter.HandleGoogleChunk(chunk); err != nil {
 			return handleStreamError(ctx, writer, "GoogleToOpenAIConverter", err)
+		}
+		return nil
+	}); err != nil {
+		if handleErr := handleStreamError(ctx, nil, "GoogleToOpenAISSEScanner", err); handleErr != nil {
+			return handleErr
 		}
 	}
 
@@ -607,11 +597,6 @@ func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicReq
 
 	// Create converter
 	converter := NewOpenAIStreamConverter(writer, ctx)
-
-	// Send initial assistant delta
-	if err := writer.WriteInitialAssistantDelta(); err != nil {
-		return err
-	}
 
 	// Read the entire stream into memory first with size limit
 	// This is necessary because ContentSplitter works on complete strings
@@ -649,12 +634,7 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 	// Log tool calls from response if present
 	logToolUseBlocks(ctx, anthResp.Content, false)
 
-	// Send initial assistant delta
-	if err := writer.WriteInitialAssistantDelta(); err != nil {
-		return err
-	}
-
-	if err := streamSimulatedContentBlocks(ctx, anthResp.Content, openAISimulatedContentEmitter{
+	if err := streamSimulatedContentBlocks(ctx, anthResp.Content, &openAISimulatedContentEmitter{
 		writer: writer,
 	}); err != nil {
 		return err

@@ -1,5 +1,10 @@
 package core
 
+import (
+	"fmt"
+	"lmtools/internal/constants"
+)
+
 // PreparedRequestPayload captures the provider-normalized inputs required to
 // render a provider-specific request.
 type PreparedRequestPayload struct {
@@ -17,6 +22,9 @@ type PreparedRequestPayload struct {
 func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (PreparedRequestPayload, error) {
 	spec, err := requireProviderRequestSpec(provider)
 	if err != nil {
+		return PreparedRequestPayload{}, err
+	}
+	if err := validateMessagesForProvider(provider, typedMessages); err != nil {
 		return PreparedRequestPayload{}, err
 	}
 
@@ -43,6 +51,23 @@ func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage,
 	}
 
 	return payload, nil
+}
+
+func validateMessagesForProvider(provider string, typedMessages []TypedMessage) error {
+	normalized := constants.NormalizeProvider(provider)
+	if normalized != constants.ProviderAnthropic && normalized != constants.ProviderArgo {
+		return nil
+	}
+
+	for _, message := range typedMessages {
+		for _, block := range message.Blocks {
+			if _, ok := block.(AudioBlock); ok {
+				return fmt.Errorf("%s provider does not support audio input blocks", normalized)
+			}
+		}
+	}
+
+	return nil
 }
 
 // PrependSystemMessage adds a system message ahead of the provided messages

@@ -1,0 +1,67 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "content": "Weather in Chicago?",
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Checking."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_weather_1",
+          "name": "get_weather",
+          "input": {
+            "location": "Chicago",
+            "unit": "celsius"
+          }
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_weather_1",
+          "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "claude-haiku-4-5",
+  "temperature": 0.2,
+  "tool_choice": {
+    "type": "tool",
+    "name": "get_weather"
+  },
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Get weather for a location",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "celsius",
+              "fahrenheit"
+            ]
+          }
+        },
+        "required": [
+          "location"
+        ]
+      }
+    }
+  ]
+}

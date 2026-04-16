@@ -16,6 +16,20 @@ func (s *Server) parseAnthropicRequest(r *http.Request) (*AnthropicRequest, erro
 	if err := s.decodeEndpointRequest(r, &req); err != nil {
 		return nil, err
 	}
+	if err := validateParsedAnthropicRequest(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+// parseAnthropicTokenCountRequest reads and validates an Anthropic token-count request.
+// Unlike /v1/messages, this endpoint allows model-less requests so we can still provide
+// an estimated count from the request structure alone.
+func (s *Server) parseAnthropicTokenCountRequest(r *http.Request) (*AnthropicTokenCountRequest, error) {
+	var req AnthropicTokenCountRequest
+	if err := s.decodeEndpointRequest(r, &req); err != nil {
+		return nil, err
+	}
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("messages array cannot be empty")
 	}
@@ -63,6 +77,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateAnthropicRequestForProvider(anthReq, route.Provider); err != nil {
+		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	anthReq.Model = route.MappedModel
 
 	// Route based on streaming preference
@@ -86,7 +105,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	log := logger.From(ctx)
 
 	// Parse and validate request
-	req, err := s.parseAnthropicRequest(r)
+	req, err := s.parseAnthropicTokenCountRequest(r)
 	if err != nil {
 		log.Errorf("Failed to parse count tokens request: %s", err)
 		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
@@ -104,15 +123,20 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		// For count_tokens, we can provide an estimate even for unknown providers
 		log.Warnf("No provider configured, using estimation")
 		provider = "estimation"
-	} else {
+	} else if req.Model != "" {
 		req.Model = mappedModel
 	}
 
 	log.Infof("Token counting: model=%s, provider=%s", req.Model, provider)
 
-	// For now, provide a simple estimation
-	// This could be enhanced with provider-specific token counting
-	inputTokens := EstimateRequestTokens(req)
+	// For now, provide a simple estimation.
+	// This could be enhanced with provider-specific token counting.
+	inputTokens := EstimateRequestTokens(&AnthropicRequest{
+		Model:    req.Model,
+		System:   req.System,
+		Messages: req.Messages,
+		Tools:    req.Tools,
+	})
 
 	// Create response - use a simple map for now
 	resp := map[string]interface{}{

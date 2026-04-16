@@ -1,0 +1,42 @@
+{
+  "case_id": "openai-chat-audio-input",
+  "target": "google",
+  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent",
+  "status_code": 200,
+  "content_type": "application/json; charset=UTF-8",
+  "captured_at": "2026-04-16T13:54:24-05:00",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+    ],
+    "Content-Type": [
+      "application/json; charset=UTF-8"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:54:24 GMT"
+    ],
+    "Server": [
+      "scaffolding on HTTPServer2"
+    ],
+    "Server-Timing": [
+      "gfet4t7; dur=726"
+    ],
+    "Vary": [
+      "Origin",
+      "X-Origin",
+      "Referer"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Frame-Options": [
+      "SAMEORIGIN"
+    ],
+    "X-Gemini-Service-Tier": [
+      "standard"
+    ],
+    "X-Xss-Protection": [
+      "0"
+    ]
+  }
+}

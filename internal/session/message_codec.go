@@ -10,9 +10,10 @@ import (
 
 // MessageMetadata represents the JSON metadata for a message.
 type MessageMetadata struct {
-	Role      core.Role `json:"role"`
-	Timestamp time.Time `json:"timestamp"`
-	Model     *string   `json:"model"`
+	Role             core.Role `json:"role"`
+	Timestamp        time.Time `json:"timestamp"`
+	Model            *string   `json:"model"`
+	ThoughtSignature *string   `json:"thought_signature,omitempty"`
 }
 
 func buildMessageMetadata(msg Message) MessageMetadata {
@@ -22,6 +23,9 @@ func buildMessageMetadata(msg Message) MessageMetadata {
 	}
 	if msg.Model != "" {
 		metadata.Model = &msg.Model
+	}
+	if msg.ThoughtSignature != "" {
+		metadata.ThoughtSignature = &msg.ThoughtSignature
 	}
 	return metadata
 }
@@ -131,6 +135,9 @@ func readMessage(sessionPath, msgID string) (*Message, error) {
 
 	if metadata.Model != nil {
 		msg.Model = *metadata.Model
+	}
+	if metadata.ThoughtSignature != nil {
+		msg.ThoughtSignature = *metadata.ThoughtSignature
 	}
 
 	return msg, nil

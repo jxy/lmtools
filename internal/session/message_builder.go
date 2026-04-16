@@ -63,9 +63,10 @@ func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction) core.
 		Blocks: make([]core.Block, 0),
 	}
 
-	if msg.Content != "" {
+	if msg.Content != "" || msg.ThoughtSignature != "" {
 		typedMsg.Blocks = append(typedMsg.Blocks, core.TextBlock{
-			Text: msg.Content,
+			Text:             msg.Content,
+			ThoughtSignature: msg.ThoughtSignature,
 		})
 	}
 
@@ -75,9 +76,10 @@ func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction) core.
 
 	for _, call := range toolInteraction.Calls {
 		typedMsg.Blocks = append(typedMsg.Blocks, core.ToolUseBlock{
-			ID:    call.ID,
-			Name:  call.Name,
-			Input: call.Args,
+			ID:               call.ID,
+			Name:             call.Name,
+			Input:            call.Args,
+			ThoughtSignature: call.ThoughtSignature,
 		})
 	}
 

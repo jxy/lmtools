@@ -1,0 +1,27 @@
+{
+  "id": "anthropic-messages-image-url",
+  "description": "Anthropic Messages API image URL request and response",
+  "kinds": [
+    "request",
+    "response"
+  ],
+  "provider": "anthropic",
+  "ingress_family": "anthropic",
+  "models": {
+    "openai": "gpt-5.4-nano",
+    "anthropic": "claude-haiku-4-5",
+    "google": "gemini-3.1-flash-lite-preview",
+    "argo": "claudeopus4"
+  },
+  "argo_user": "fixture-user",
+  "capture_targets": [
+    "openai",
+    "openai-stream",
+    "anthropic",
+    "anthropic-stream",
+    "google",
+    "google-stream",
+    "argo",
+    "argo-stream"
+  ]
+}

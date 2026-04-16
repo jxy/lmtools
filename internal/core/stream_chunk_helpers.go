@@ -82,16 +82,18 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 
 // ParsedGoogleFunctionCall captures a normalized Google streamed function call.
 type ParsedGoogleFunctionCall struct {
-	Name string
-	Args json.RawMessage
+	Name             string
+	Args             json.RawMessage
+	ThoughtSignature string
 }
 
 // ParsedGoogleStreamChunk is the normalized shape of a Google stream chunk.
 type ParsedGoogleStreamChunk struct {
-	Usage         ParsedStreamUsage
-	FinishReason  string
-	TextParts     []string
-	FunctionCalls []ParsedGoogleFunctionCall
+	Usage                    ParsedStreamUsage
+	FinishReason             string
+	TextParts                []string
+	LastTextThoughtSignature string
+	FunctionCalls            []ParsedGoogleFunctionCall
 }
 
 // ParseGoogleStreamChunk decodes the common fields used by both core and proxy stream parsers.
@@ -105,8 +107,9 @@ func ParseGoogleStreamChunk(data []byte) (ParsedGoogleStreamChunk, error) {
 			FinishReason string `json:"finishReason"`
 			Content      struct {
 				Parts []struct {
-					Text         string `json:"text"`
-					FunctionCall *struct {
+					Text             string `json:"text"`
+					ThoughtSignature string `json:"thoughtSignature"`
+					FunctionCall     *struct {
 						Name string          `json:"name"`
 						Args json.RawMessage `json:"args"`
 					} `json:"functionCall"`
@@ -140,10 +143,14 @@ func ParseGoogleStreamChunk(data []byte) (ParsedGoogleStreamChunk, error) {
 		if part.Text != "" {
 			parsed.TextParts = append(parsed.TextParts, part.Text)
 		}
+		if part.ThoughtSignature != "" && part.FunctionCall == nil {
+			parsed.LastTextThoughtSignature = part.ThoughtSignature
+		}
 		if part.FunctionCall != nil {
 			parsed.FunctionCalls = append(parsed.FunctionCalls, ParsedGoogleFunctionCall{
-				Name: part.FunctionCall.Name,
-				Args: part.FunctionCall.Args,
+				Name:             part.FunctionCall.Name,
+				Args:             part.FunctionCall.Args,
+				ThoughtSignature: part.ThoughtSignature,
 			})
 		}
 	}

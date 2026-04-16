@@ -1,0 +1,27 @@
+{
+  "max_tokens": 64,
+  "messages": [
+    {
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "What is latin for Ant? (A) Apoidea, (B) Rhopalocera, (C) Formicidae"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "The answer is ("
+        }
+      ]
+    }
+  ],
+  "stop": [
+    ")"
+  ],
+  "stream": false
+}

@@ -19,6 +19,9 @@ type argoChatRequestPlan struct {
 }
 
 func buildArgoChatRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	if err := validateMessagesForProvider(constants.ProviderArgo, messages); err != nil {
+		return nil, nil, err
+	}
 	plan, err := newArgoChatRequestPlan(cfg, messages, model, system, toolDefs, toolChoice, stream)
 	if err != nil {
 		return nil, nil, err

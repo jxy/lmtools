@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "The weather in Chicago is currently 18°C and cloudy.",
+            "thoughtSignature": "EjQKMgEMOdbHx23IPUzyf/d2HY6DUTylpH5GR7nj9ltgV7nsB6TnGpq37zMeBqKR2YkcstLX"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-3.1-flash-lite-preview",
+  "responseId": "YTDhaYKFFP-B1MkPqZ-R0Aw",
+  "usageMetadata": {
+    "candidatesTokenCount": 14,
+    "promptTokenCount": 120,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 120
+      }
+    ],
+    "totalTokenCount": 134
+  }
+}

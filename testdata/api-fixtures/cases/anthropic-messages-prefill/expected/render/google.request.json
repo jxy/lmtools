@@ -1,0 +1,26 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "What is latin for Ant? (A) Apoidea, (B) Rhopalocera, (C) Formicidae"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "The answer is ("
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 64,
+    "stopSequences": [
+      ")"
+    ]
+  }
+}

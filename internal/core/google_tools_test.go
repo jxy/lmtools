@@ -232,6 +232,9 @@ func TestGoogleToolExecutionFlow(t *testing.T) {
 		partMap := part.(map[string]interface{})
 		if _, ok := partMap["functionCall"]; ok {
 			foundFunctionCall = true
+			if got := partMap["thoughtSignature"]; got != GoogleDummyThoughtSignature {
+				t.Fatalf("thoughtSignature = %v, want %q", got, GoogleDummyThoughtSignature)
+			}
 			break
 		}
 	}

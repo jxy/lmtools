@@ -1,0 +1,22 @@
+{
+  "model": "gpt-5.4-nano",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "What is in the above image?"
+        }
+      ]
+    }
+  ],
+  "max_completion_tokens": 1024
+}

@@ -1,0 +1,8 @@
+{
+  "id": "response-anthropic-tool-use",
+  "description": "Anthropic response with text and tool_use block",
+  "kinds": [
+    "response"
+  ],
+  "provider": "anthropic"
+}

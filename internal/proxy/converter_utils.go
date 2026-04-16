@@ -191,7 +191,8 @@ func typedGoogleMessagesToProxy(messages []core.GoogleMessage) []GoogleContent {
 		parts := make([]GooglePart, 0, len(msg.Parts))
 		for _, part := range msg.Parts {
 			proxyPart := GooglePart{
-				Text: part.Text,
+				Text:             part.Text,
+				ThoughtSignature: part.ThoughtSignature,
 			}
 
 			if part.FunctionCall != nil {
@@ -620,7 +621,7 @@ func coreAnthropicContentsToProxyBlocks(contents []core.AnthropicContent) []Anth
 			if content.Source.URL != "" {
 				block.Source["url"] = content.Source.URL
 			}
-			if content.Source.MediaType != "" {
+			if content.Source.Type == "base64" && content.Source.MediaType != "" {
 				block.Source["media_type"] = content.Source.MediaType
 			}
 			if content.Source.Data != "" {

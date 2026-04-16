@@ -14,8 +14,8 @@ import (
 type (
 	providerChatBuilder    func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error)
 	providerEmbedBuilder   func(cfg EmbedRequestConfig, input string) (*http.Request, []byte, error)
-	providerStreamHandler  func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (string, []ToolCall, error)
-	providerResponseParser func(data []byte, isEmbed bool) (string, []ToolCall, error)
+	providerStreamHandler  func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (Response, error)
+	providerResponseParser func(data []byte, isEmbed bool) (Response, error)
 	providerToolConverter  func(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools
 )
 
@@ -39,7 +39,7 @@ func openAIProviderSpec() providerSpec {
 		},
 		BuildEmbed:     buildOpenAIEmbedRequest,
 		HandleStream:   handleOpenAIStreamWithTools,
-		ParseResponse:  parseOpenAIResponseWithTools,
+		ParseResponse:  parseOpenAIResponse,
 		ConvertTools:   convertOpenAITools,
 		RequestMap:     openAIRequestMap,
 		ResolveChatURL: openAIChatURL,
@@ -54,7 +54,7 @@ func anthropicProviderSpec() providerSpec {
 			return buildToolAwareRequest(cfg, constants.ProviderAnthropic, typedMessages, model, system, toolDefs, toolChoice, stream)
 		},
 		HandleStream:   handleAnthropicStreamWithTools,
-		ParseResponse:  parseAnthropicResponseWithTools,
+		ParseResponse:  parseAnthropicResponse,
 		ConvertTools:   convertAnthropicTools,
 		RequestMap:     anthropicRequestMap,
 		ResolveChatURL: anthropicChatURL,
@@ -69,7 +69,7 @@ func googleProviderSpec() providerSpec {
 			return buildToolAwareRequest(cfg, constants.ProviderGoogle, typedMessages, model, system, toolDefs, toolChoice, stream)
 		},
 		HandleStream:   handleGoogleStreamWithTools,
-		ParseResponse:  parseGoogleResponseWithTools,
+		ParseResponse:  parseGoogleResponseDetailed,
 		ConvertTools:   convertGoogleTools,
 		RequestMap:     googleRequestMap,
 		ResolveChatURL: googleChatURL,
@@ -84,10 +84,10 @@ func argoProviderSpec() providerSpec {
 			return buildArgoChatRequest(cfg, typedMessages, model, system, toolDefs, toolChoice, stream)
 		},
 		BuildEmbed: buildArgoEmbedRequest,
-		HandleStream: func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, _ Notifier) (string, []ToolCall, error) {
+		HandleStream: func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, _ Notifier) (Response, error) {
 			return handleArgoStream(ctx, body, logFile, out)
 		},
-		ParseResponse: parseArgoResponseWithTools,
+		ParseResponse: parseArgoResponse,
 	}
 }
 
@@ -162,8 +162,7 @@ func (spec providerSpec) parseResponseData(data []byte, isEmbed bool) (Response,
 	if spec.ParseResponse == nil {
 		return Response{}, fmt.Errorf("unsupported provider: %s", spec.Provider)
 	}
-	text, toolCalls, err := spec.ParseResponse(data, isEmbed)
-	return Response{Text: text, ToolCalls: toolCalls}, err
+	return spec.ParseResponse(data, isEmbed)
 }
 
 func (spec providerSpec) handleStreamResponse(ctx context.Context, body io.ReadCloser, logger Logger, notifier Notifier) (Response, error) {
@@ -178,8 +177,7 @@ func (spec providerSpec) handleStreamResponse(ctx context.Context, body io.ReadC
 	}()
 
 	if spec.HandleStream != nil {
-		text, toolCalls, err := spec.HandleStream(ctx, body, f, os.Stdout, notifier)
-		return Response{Text: text, ToolCalls: toolCalls}, err
+		return spec.HandleStream(ctx, body, f, os.Stdout, notifier)
 	}
 
 	var buf bytes.Buffer

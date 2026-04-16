@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "It appears that you haven't attached or uploaded the audio file yet. \n\nPlease **upload the audio file** (or provide a link to it if it is hosted online), and I will be happy to transcribe it for you.",
+            "thoughtSignature": "EjQKMgEMOdbHeWqRqZ5HmRl8JjAQDcDk/FHuECWSpHgAARUv3831oz0UvdpYAOh+3PwWLwLU"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-3.1-flash-lite-preview",
+  "responseId": "YDDhafj7BeKj1MkPj5KgkQc",
+  "usageMetadata": {
+    "candidatesTokenCount": 48,
+    "promptTokenCount": 12,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 12
+      }
+    ],
+    "totalTokenCount": 60
+  }
+}

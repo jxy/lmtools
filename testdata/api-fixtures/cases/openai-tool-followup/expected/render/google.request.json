@@ -1,0 +1,81 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Weather in Chicago?"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "Checking."
+        },
+        {
+          "functionCall": {
+            "name": "get_weather",
+            "args": {
+              "location": "Chicago",
+              "unit": "celsius"
+            }
+          },
+          "thoughtSignature": "context_engineering_is_the_way_to_go"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "call_weather_1",
+            "response": {
+              "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 256,
+    "temperature": 0.2,
+    "topP": 0.9
+  },
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "AUTO"
+    }
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "get_weather",
+          "description": "Get weather for a location",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "location": {
+                "type": "STRING"
+              },
+              "unit": {
+                "type": "STRING",
+                "enum": [
+                  "celsius",
+                  "fahrenheit"
+                ]
+              }
+            },
+            "required": [
+              "location"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

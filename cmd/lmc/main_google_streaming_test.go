@@ -29,10 +29,15 @@ func TestGoogleStreamingMode(t *testing.T) {
 			return
 		}
 
-		// Verify API key in query
-		if r.URL.Query().Get("key") == "" {
-			t.Error("Missing API key in query")
+		// Verify API key in header and SSE mode in query
+		if r.Header.Get("x-goog-api-key") == "" {
+			t.Error("Missing x-goog-api-key header")
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if got := r.URL.Query().Get("alt"); got != "sse" {
+			t.Errorf("Expected alt=sse, got %q", got)
+			http.Error(w, "Bad request", http.StatusBadRequest)
 			return
 		}
 

@@ -1,0 +1,22 @@
+{
+  "model": "gpt-4o-audio-preview",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Transcribe this audio:"
+        },
+        {
+          "type": "input_audio",
+          "input_audio": {
+            "$fixture_file": "fixtures/tone.wav",
+            "format": "wav"
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 256
+}

@@ -1,0 +1,76 @@
+{
+  "case_id": "anthropic-messages-prefill",
+  "target": "openai",
+  "url": "https://api.openai.com/v1/chat/completions",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-16T13:06:47-05:00",
+  "response_headers": {
+    "Access-Control-Expose-Headers": [
+      "X-Request-ID"
+    ],
+    "Alt-Svc": [
+      "h3=\":443\"; ma=86400"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9ed520366eaa1e95-ORD"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:06:47 GMT"
+    ],
+    "Openai-Organization": [
+      "user-luppstbuzesizhcpyp8mf8vl"
+    ],
+    "Openai-Processing-Ms": [
+      "665"
+    ],
+    "Openai-Project": [
+      "proj_LOtYBLbKh37UwfhEcM1rrSEn"
+    ],
+    "Openai-Version": [
+      "2020-10-01"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "__cf_bm=VDn5euJfeQyc4wdjVKvEIMG4IJ0drKDfBH99jh2RfTo-1776362806.7827392-1.0.1.1-dKBfVgzeNS4.Q3Vq6BCVY_439jllkPVADKvHaiWWmjCRiDAbcMB8pv01cAdy1BxAbCgcPLY7Eyax4fqHdaxP64IdV_Kf2gUnmvHvRdCarmYXwZUC7HvDa0kpJjDMQ1yU; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 16 Apr 2026 18:36:47 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Openai-Proxy-Wasm": [
+      "v0.1"
+    ],
+    "X-Ratelimit-Limit-Requests": [
+      "5000"
+    ],
+    "X-Ratelimit-Limit-Tokens": [
+      "4000000"
+    ],
+    "X-Ratelimit-Remaining-Requests": [
+      "4999"
+    ],
+    "X-Ratelimit-Remaining-Tokens": [
+      "3999976"
+    ],
+    "X-Ratelimit-Reset-Requests": [
+      "12ms"
+    ],
+    "X-Ratelimit-Reset-Tokens": [
+      "0s"
+    ],
+    "X-Request-Id": [
+      "req_d8be15e47b62474aba3bde89bffddc93"
+    ]
+  }
+}

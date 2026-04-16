@@ -1,0 +1,31 @@
+{
+  "id": "chatcmpl-fixture",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-5.4-nano",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Checking weather",
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\":\"Chicago\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 6,
+    "total_tokens": 18
+  }
+}

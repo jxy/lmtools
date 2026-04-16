@@ -117,3 +117,60 @@ func TestPrependSystemMessageKeepsLeadingSystem(t *testing.T) {
 		t.Fatalf("first block text = %q, want %q", block.Text, "already here")
 	}
 }
+
+func TestPrepareRequestPayloadAnthropicRejectsAudioBlocks(t *testing.T) {
+	_, err := PrepareRequestPayload(
+		"anthropic",
+		"claude-haiku-4-5",
+		[]TypedMessage{
+			{
+				Role: string(RoleUser),
+				Blocks: []Block{
+					TextBlock{Text: "Transcribe this"},
+					AudioBlock{Data: "base64-audio", Format: "wav"},
+				},
+			},
+		},
+		"",
+		nil,
+		nil,
+		false,
+	)
+	if err == nil {
+		t.Fatal("expected PrepareRequestPayload() to reject audio blocks for anthropic")
+	}
+	if got := err.Error(); got != "anthropic provider does not support audio input blocks" {
+		t.Fatalf("PrepareRequestPayload() error = %q, want anthropic audio rejection", got)
+	}
+}
+
+func TestPrepareRequestPayloadArgoRejectsAudioBlocks(t *testing.T) {
+	cfg := NewTestRequestConfig()
+	cfg.Provider = "argo"
+	cfg.Model = "gpt5mini"
+	cfg.Env = "http://argo.example.test"
+
+	_, _, err := buildChatRequestFromTyped(
+		cfg,
+		[]TypedMessage{
+			{
+				Role: string(RoleUser),
+				Blocks: []Block{
+					TextBlock{Text: "Transcribe this"},
+					AudioBlock{Data: "base64-audio", Format: "wav"},
+				},
+			},
+		},
+		"gpt5mini",
+		"",
+		nil,
+		nil,
+		false,
+	)
+	if err == nil {
+		t.Fatal("expected buildChatRequestFromTyped() to reject audio blocks for argo")
+	}
+	if got := err.Error(); got != "argo provider does not support audio input blocks" {
+		t.Fatalf("buildChatRequestFromTyped() error = %q, want argo audio rejection", got)
+	}
+}

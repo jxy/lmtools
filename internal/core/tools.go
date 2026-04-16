@@ -22,6 +22,7 @@ type ToolCall struct {
 	Name             string          `json:"name"`
 	Args             json.RawMessage `json:"args"`
 	AssistantContent string          `json:"assistant_content,omitempty"` // The text content from assistant alongside tool calls
+	ThoughtSignature string          `json:"thought_signature,omitempty"`
 }
 
 // ToolResult represents the result of executing a tool
@@ -123,28 +124,30 @@ func (r *toolRunner) handleToolExecution(initialResponse string, initialToolCall
 	}
 
 	rounds := 0
-	text := initialResponse
-	toolCalls := initialToolCalls
+	response := Response{
+		Text:      initialResponse,
+		ToolCalls: initialToolCalls,
+	}
 	finalText := initialResponse // Track the final text to return
 
-	for rounds < maxRounds && len(toolCalls) > 0 {
+	for rounds < maxRounds && len(response.ToolCalls) > 0 {
 		rounds++
 
 		// Save assistant's response with tool calls only on first round
 		// Subsequent rounds already saved their tool calls at the end of the previous iteration
 		if rounds == 1 {
-			if err := persistAssistantRound(r.Ctx, r.ExecCfg.Store, text, toolCalls, r.ExecCfg.ActualModel, r.Logger); err != nil {
+			if err := persistAssistantRound(r.Ctx, r.ExecCfg.Store, response, r.ExecCfg.ActualModel, r.Logger); err != nil {
 				return finalText, err
 			}
 		}
 
 		// Notify UI before executing tools
 		if r.UI != nil {
-			r.UI.BeforeExecute(toolCalls)
+			r.UI.BeforeExecute(response.ToolCalls)
 		}
 
 		// Execute tools in parallel
-		results := executor.ExecuteParallel(r.Ctx, toolCalls)
+		results := executor.ExecuteParallel(r.Ctx, response.ToolCalls)
 
 		// Notify UI after executing tools
 		if r.UI != nil {
@@ -152,7 +155,7 @@ func (r *toolRunner) handleToolExecution(initialResponse string, initialToolCall
 		}
 
 		// Save tool results
-		additionalText := BuildTruncationNotes(results, toolCalls)
+		additionalText := BuildTruncationNotes(results, response.ToolCalls)
 		if err := persistToolResultsRound(r.Ctx, r.ExecCfg.Store, results, additionalText); err != nil {
 			return finalText, err
 		}
@@ -165,28 +168,26 @@ func (r *toolRunner) handleToolExecution(initialResponse string, initialToolCall
 		// HandleResponse closes the response body - no need to close it here
 
 		// Handle the response
-		response, err := HandleResponse(r.Ctx, r.Cfg, resp, r.Logger, r.Notifier)
+		response, err = HandleResponse(r.Ctx, r.Cfg, resp, r.Logger, r.Notifier)
 		if err != nil {
 			return finalText, fmt.Errorf("failed to handle tool result response: %w", err)
 		}
-		text = response.Text
-		toolCalls = response.ToolCalls
 
 		// Update final text if we got a response
-		if text != "" {
-			finalText = text
+		if response.Text != "" {
+			finalText = response.Text
 		}
 
-		// Save response if we have content or tool calls
-		if text != "" || len(toolCalls) > 0 {
-			if err := persistAssistantRound(r.Ctx, r.ExecCfg.Store, text, toolCalls, r.ExecCfg.ActualModel, r.Logger); err != nil {
+		// Save response if we have content, tool calls, or provider metadata to preserve.
+		if response.Text != "" || len(response.ToolCalls) > 0 || response.ThoughtSignature != "" {
+			if err := persistAssistantRound(r.Ctx, r.ExecCfg.Store, response, r.ExecCfg.ActualModel, r.Logger); err != nil {
 				return finalText, err
 			}
 		}
 	}
 
 	// Check if we hit the max rounds limit
-	if rounds >= maxRounds && len(toolCalls) > 0 {
+	if rounds >= maxRounds && len(response.ToolCalls) > 0 {
 		return finalText, fmt.Errorf("reached maximum tool execution rounds (%d)", maxRounds)
 	}
 
@@ -236,12 +237,17 @@ func HandleToolExecution(tc ToolContext) ToolExecutionResult {
 }
 
 // persistAssistantRound saves an assistant message with optional tool calls
-func persistAssistantRound(ctx context.Context, store SessionStore, text string, toolCalls []ToolCall, model string, logger Logger) error {
-	if text == "" && len(toolCalls) == 0 {
+func persistAssistantRound(ctx context.Context, store SessionStore, response Response, model string, logger Logger) error {
+	if response.Text == "" && len(response.ToolCalls) == 0 && response.ThoughtSignature == "" {
 		return nil
 	}
 
-	_, _, err := store.SaveAssistant(ctx, text, toolCalls, model)
+	var err error
+	if thoughtStore, ok := store.(AssistantThoughtSignatureStore); ok {
+		_, _, err = thoughtStore.SaveAssistantWithThoughtSignature(ctx, response.Text, response.ToolCalls, model, response.ThoughtSignature)
+	} else {
+		_, _, err = store.SaveAssistant(ctx, response.Text, response.ToolCalls, model)
+	}
 	if err != nil {
 		if logger.IsDebugEnabled() {
 			logger.Debugf("Failed to save assistant response: %v", err)

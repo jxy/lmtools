@@ -1,0 +1,23 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Transcribe this audio:"
+        },
+        {
+          "type": "audio",
+          "id": "",
+          "$fixture_file": "fixtures/tone.wav",
+          "format": "wav",
+          "url": "",
+          "duration": 0
+        }
+      ]
+    }
+  ],
+  "stream": false
+}

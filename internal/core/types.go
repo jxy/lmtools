@@ -127,6 +127,12 @@ type SessionStore interface {
 	GetPath() string
 }
 
+// AssistantThoughtSignatureStore optionally extends SessionStore with provider-
+// specific assistant metadata persistence.
+type AssistantThoughtSignatureStore interface {
+	SaveAssistantWithThoughtSignature(ctx context.Context, text string, calls []ToolCall, model string, thoughtSignature string) (path, messageID string, err error)
+}
+
 // RequestBuild encapsulates the result of building an HTTP request
 // This struct replaces the multiple return values from buildHTTPRequest
 type RequestBuild struct {

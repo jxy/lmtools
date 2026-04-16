@@ -13,15 +13,22 @@ import (
 // SaveAssistantResponseWithTools saves an assistant response that may include both text and tool calls
 // This function uses proper locking via AppendMessageWithToolInteraction to ensure thread safety
 func SaveAssistantResponseWithTools(ctx context.Context, sess *Session, text string, toolCalls []core.ToolCall, model string) (SaveResult, error) {
+	return SaveAssistantResponseWithMetadata(ctx, sess, text, toolCalls, model, "")
+}
+
+// SaveAssistantResponseWithMetadata saves an assistant response that may include
+// provider-specific metadata such as Google thought signatures.
+func SaveAssistantResponseWithMetadata(ctx context.Context, sess *Session, text string, toolCalls []core.ToolCall, model string, thoughtSignature string) (SaveResult, error) {
 	if sess == nil {
 		return SaveResult{}, errors.WrapError("validate session", stdErrors.New("session is nil"))
 	}
 
 	msg := Message{
-		Role:      core.RoleAssistant,
-		Content:   text,
-		Timestamp: time.Now(),
-		Model:     model,
+		Role:             core.RoleAssistant,
+		Content:          text,
+		ThoughtSignature: thoughtSignature,
+		Timestamp:        time.Now(),
+		Model:            model,
 	}
 
 	// Use AppendMessageWithToolInteraction which handles locking properly

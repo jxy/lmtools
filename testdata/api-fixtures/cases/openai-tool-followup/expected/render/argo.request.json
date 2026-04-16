@@ -1,0 +1,64 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Weather in Chicago?"
+    },
+    {
+      "role": "assistant",
+      "content": "Checking.",
+      "tool_calls": [
+        {
+          "id": "call_weather_1",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"location\":\"Chicago\",\"unit\":\"celsius\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_weather_1",
+      "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}"
+    }
+  ],
+  "model": "gpt5mini",
+  "temperature": 0.2,
+  "tool_choice": {
+    "type": "function",
+    "function": {
+      "name": "get_weather"
+    }
+  },
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string",
+              "enum": [
+                "celsius",
+                "fahrenheit"
+              ]
+            }
+          },
+          "required": [
+            "location"
+          ]
+        }
+      }
+    }
+  ],
+  "top_p": 0.9,
+  "user": "fixture-user"
+}

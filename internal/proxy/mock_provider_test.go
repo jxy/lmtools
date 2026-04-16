@@ -213,8 +213,8 @@ func (m *MockProvider) handleOpenAI(w http.ResponseWriter, r *http.Request, body
 }
 
 func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body []byte) {
-	// Check API key in query
-	if r.URL.Query().Get("key") == "" {
+	// Check API key in header
+	if r.Header.Get("x-goog-api-key") == "" {
 		http.Error(w, "Invalid API key", http.StatusForbidden)
 		return
 	}
@@ -227,6 +227,10 @@ func (m *MockProvider) handleGoogle(w http.ResponseWriter, r *http.Request, body
 
 	// Handle streaming
 	if strings.Contains(r.URL.Path, "streamGenerateContent") {
+		if got := r.URL.Query().Get("alt"); got != "sse" {
+			http.Error(w, "Missing alt=sse", http.StatusBadRequest)
+			return
+		}
 		setSSEHeaders(w)
 		w.WriteHeader(http.StatusOK)
 

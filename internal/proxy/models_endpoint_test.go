@@ -461,10 +461,12 @@ func TestModelsEndpointAuthentication(t *testing.T) {
 			expectedValue:  "sk-ant-test456",
 		},
 		{
-			name:     "Google API Key in URL",
-			provider: constants.ProviderGoogle,
-			apiKey:   "AIzaTest789",
-			checkURL: true,
+			name:           "Google API Key in Header",
+			provider:       constants.ProviderGoogle,
+			apiKey:         "AIzaTest789",
+			checkURL:       false,
+			expectedHeader: "x-goog-api-key",
+			expectedValue:  "AIzaTest789",
 		},
 	}
 

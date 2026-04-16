@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/core"
 	"testing"
 )
 
@@ -97,6 +98,9 @@ func TestConvertAnthropicToGoogle_TypedRenderer(t *testing.T) {
 	if assistantParts[1].FunctionCall == nil {
 		t.Fatal("assistant function call should be present")
 	}
+	if got := assistantParts[1].ThoughtSignature; got != core.GoogleDummyThoughtSignature {
+		t.Fatalf("thought signature = %q, want %q", got, core.GoogleDummyThoughtSignature)
+	}
 	if assistantParts[1].FunctionCall.Name != "get_weather" {
 		t.Fatalf("function call name = %q, want %q", assistantParts[1].FunctionCall.Name, "get_weather")
 	}
@@ -123,5 +127,45 @@ func TestConvertAnthropicToGoogle_TypedRenderer(t *testing.T) {
 	}
 	if googleReq.Tools[0].FunctionDeclarations[0].Name != "get_weather" {
 		t.Fatalf("tool name = %q, want %q", googleReq.Tools[0].FunctionDeclarations[0].Name, "get_weather")
+	}
+}
+
+func TestTypedToGoogleRequest_PreservesTextThoughtSignature(t *testing.T) {
+	req, err := TypedToGoogleRequest(TypedRequest{
+		Messages: []core.TypedMessage{
+			{
+				Role: string(core.RoleUser),
+				Blocks: []core.Block{
+					core.TextBlock{Text: "Solve this."},
+				},
+			},
+			{
+				Role: string(core.RoleAssistant),
+				Blocks: []core.Block{
+					core.TextBlock{
+						Text:             "Let me think.",
+						ThoughtSignature: "sig-text-123",
+					},
+				},
+			},
+		},
+	}, "gemini-3.1-flash-lite-preview", nil)
+	if err != nil {
+		t.Fatalf("TypedToGoogleRequest() error = %v", err)
+	}
+
+	if len(req.Contents) != 2 {
+		t.Fatalf("len(Contents) = %d, want 2", len(req.Contents))
+	}
+
+	assistantParts := req.Contents[1].Parts
+	if len(assistantParts) != 1 {
+		t.Fatalf("assistant parts = %d, want 1", len(assistantParts))
+	}
+	if got := assistantParts[0].Text; got != "Let me think." {
+		t.Fatalf("assistant text = %q, want %q", got, "Let me think.")
+	}
+	if got := assistantParts[0].ThoughtSignature; got != "sig-text-123" {
+		t.Fatalf("thought signature = %q, want %q", got, "sig-text-123")
 	}
 }

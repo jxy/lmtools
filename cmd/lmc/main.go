@@ -196,7 +196,7 @@ func (rc *RequestController) finishToolExecution(result core.ToolExecutionResult
 // handleNormalResponse processes responses without tool calls
 func (rc *RequestController) handleNormalResponse(response *core.Response, sess *session.Session, model string) error {
 	// Save assistant response to session
-	if err := persistAssistantOnly(rc.ctx, response.Text, sess, rc.cfg, rc.notifier, model); err != nil {
+	if err := persistAssistantOnly(rc.ctx, *response, sess, rc.cfg, rc.notifier, model); err != nil {
 		return err
 	}
 
@@ -486,13 +486,13 @@ func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (
 }
 
 // persistAssistantOnly saves assistant response when there are no tool calls
-func persistAssistantOnly(ctx context.Context, out string, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) error {
+func persistAssistantOnly(ctx context.Context, response core.Response, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) error {
 	// Save assistant response to session if enabled (but NOT when there are tool calls - HandleToolExecution will do it)
-	if sess != nil && out != "" {
-		logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(out), cfg.StreamChat)
+	if sess != nil && (response.Text != "" || response.ThoughtSignature != "") {
+		logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(response.Text), cfg.StreamChat)
 		store := session.NewStore(sess, logger.From(ctx))
 		previousPath := sess.Path
-		path, messageID, err := store.SaveAssistant(ctx, out, nil, model)
+		path, messageID, err := store.SaveAssistantWithThoughtSignature(ctx, response.Text, nil, model, response.ThoughtSignature)
 		if err != nil {
 			// Log error but don't fail the request
 			notifier.Warnf("Warning: failed to save response to session: %v", err)
@@ -503,7 +503,7 @@ func persistAssistantOnly(ctx context.Context, out string, sess *session.Session
 			logger.From(ctx).Debugf("Response saved to session %s as message %s", session.GetSessionID(path), messageID)
 		}
 	} else {
-		logger.From(ctx).Debugf("Not saving response | Session: %v | Output length: %d", sess != nil, len(out))
+		logger.From(ctx).Debugf("Not saving response | Session: %v | Output length: %d", sess != nil, len(response.Text))
 	}
 
 	return nil

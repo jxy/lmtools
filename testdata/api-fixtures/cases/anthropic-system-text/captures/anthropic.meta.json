@@ -1,0 +1,88 @@
+{
+  "case_id": "anthropic-system-text",
+  "target": "anthropic",
+  "url": "https://api.anthropic.com/v1/messages",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-16T13:11:04-05:00",
+  "response_headers": {
+    "Anthropic-Organization-Id": [
+      "ff99ea6f-4abc-487d-b0a5-070732273637"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Limit": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Remaining": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Reset": [
+      "2026-04-16T18:11:04Z"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Limit": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Remaining": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Reset": [
+      "2026-04-16T18:11:04Z"
+    ],
+    "Anthropic-Ratelimit-Requests-Limit": [
+      "1000"
+    ],
+    "Anthropic-Ratelimit-Requests-Remaining": [
+      "999"
+    ],
+    "Anthropic-Ratelimit-Requests-Reset": [
+      "2026-04-16T18:11:04Z"
+    ],
+    "Anthropic-Ratelimit-Tokens-Limit": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Remaining": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Reset": [
+      "2026-04-16T18:11:04Z"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9ed5267b8b5e5c90-ORD"
+    ],
+    "Content-Security-Policy": [
+      "default-src 'none'; frame-ancestors 'none'"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 16 Apr 2026 18:11:04 GMT"
+    ],
+    "Request-Id": [
+      "req_011Ca7uBvCvVFQNJue1vLpQ5"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Server-Timing": [
+      "x-originResponse;dur=1235"
+    ],
+    "Set-Cookie": [
+      "_cfuvid=5Wm1qsjDLvvMPWayrHCa8U7erbNjhrUtZgq0Aa8WUwU-1776363063.6046605-1.0.1.1-gBzyT2v6cW7bseK5wqTHVZ9bHRcUBxoPOWBnt2pYGRo; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "Vary": [
+      "Accept-Encoding"
+    ],
+    "X-Envoy-Upstream-Service-Time": [
+      "1232"
+    ],
+    "X-Robots-Tag": [
+      "none"
+    ]
+  }
+}

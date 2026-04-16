@@ -1,0 +1,23 @@
+{
+  "model": "claude-haiku-4-5",
+  "max_tokens": 128,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello there"
+    }
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "Be concise."
+    },
+    {
+      "type": "text",
+      "text": "No markdown."
+    }
+  ],
+  "stream": false,
+  "temperature": 0.1,
+  "top_p": 0.8
+}

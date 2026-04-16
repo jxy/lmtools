@@ -1,0 +1,74 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Weather in Chicago?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "blocks": [
+        {
+          "text": "Checking.",
+          "type": "text"
+        },
+        {
+          "id": "call_weather_1",
+          "input": {
+            "location": "Chicago",
+            "unit": "celsius"
+          },
+          "name": "get_weather",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "blocks": [
+        {
+          "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}",
+          "is_error": false,
+          "tool_use_id": "call_weather_1",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false,
+  "temperature": 0.2,
+  "tool_choice": {
+    "name": "get_weather",
+    "type": "tool"
+  },
+  "tools": [
+    {
+      "description": "Get weather for a location",
+      "input_schema": {
+        "properties": {
+          "location": {
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "celsius",
+              "fahrenheit"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "location"
+        ],
+        "type": "object"
+      },
+      "name": "get_weather"
+    }
+  ],
+  "top_p": 0.9
+}

@@ -28,16 +28,33 @@ func NewOpenAIStreamConverter(writer *OpenAIStreamWriter, ctx context.Context) *
 	}
 }
 
+func (c *OpenAIStreamConverter) ensureTextStart() error {
+	if c.hasStarted {
+		return nil
+	}
+	if err := c.writer.WriteInitialAssistantTextDelta(); err != nil {
+		return err
+	}
+	c.hasStarted = true
+	return nil
+}
+
+func (c *OpenAIStreamConverter) writeToolCallStart(index int, toolCall *ToolCallDelta) error {
+	if !c.hasStarted {
+		if err := c.writer.WriteInitialAssistantToolCallDelta(index, toolCall.ID, toolCall.Function.Name); err != nil {
+			return err
+		}
+		c.hasStarted = true
+		return nil
+	}
+	return c.writer.WriteToolCallDelta(index, toolCall, nil, nil)
+}
+
 // HandleAnthropicEvent processes an Anthropic streaming event and converts to OpenAI format.
 func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json.RawMessage) error {
 	switch eventType {
 	case EventMessageStart:
-		if !c.hasStarted {
-			if err := c.writer.WriteInitialAssistantDelta(); err != nil {
-				return err
-			}
-			c.hasStarted = true
-		}
+		return nil
 
 	case EventContentBlockStart:
 		var event ContentBlockStartEvent
@@ -57,7 +74,7 @@ func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json
 			}
 			c.toolCallsByIndex[event.Index] = toolCall
 
-			if err := c.writer.WriteToolCallDelta(event.Index, toolCall, nil, nil); err != nil {
+			if err := c.writeToolCallStart(event.Index, toolCall); err != nil {
 				return err
 			}
 		}
@@ -70,6 +87,9 @@ func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json
 
 		switch event.Delta.Type {
 		case "text_delta":
+			if err := c.ensureTextStart(); err != nil {
+				return err
+			}
 			if err := c.writer.WriteContent(event.Delta.Text); err != nil {
 				return err
 			}
@@ -112,6 +132,11 @@ func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json
 		if finish == "" {
 			finish = "stop"
 		}
+		if !c.hasStarted {
+			if err := c.ensureTextStart(); err != nil {
+				return err
+			}
+		}
 		return c.writer.WriteFinish(finish, c.lastUsage)
 
 	case EventError:
@@ -122,9 +147,7 @@ func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json
 		return c.writer.WriteError(event.Error.Type, event.Error.Message)
 
 	case EventPing:
-		if err := c.writer.WriteDelta("", nil, nil); err != nil {
-			return err
-		}
+		return nil
 	}
 
 	return nil
@@ -146,11 +169,7 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) 
 	}
 
 	candidate := candidates[0].(map[string]interface{})
-
-	if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
-		mapped := mapGoogleFinishReason(finishReason)
-		return c.writer.WriteFinish(mapped, c.lastUsage)
-	}
+	finishReason, _ := candidate["finishReason"].(string)
 
 	if content, ok := candidate["content"].(map[string]interface{}); ok {
 		if parts, ok := content["parts"].([]interface{}); ok {
@@ -158,6 +177,9 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) 
 				partMap := part.(map[string]interface{})
 
 				if text, ok := partMap["text"].(string); ok && text != "" {
+					if err := c.ensureTextStart(); err != nil {
+						return err
+					}
 					if err := c.writer.WriteContent(text); err != nil {
 						return err
 					}
@@ -177,7 +199,7 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) 
 						},
 					}
 
-					if err := c.writer.WriteToolCallDelta(c.currentToolIndex, toolCall, nil, nil); err != nil {
+					if err := c.writeToolCallStart(c.currentToolIndex, toolCall); err != nil {
 						return err
 					}
 					c.currentToolIndex++
@@ -186,11 +208,24 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) 
 		}
 	}
 
+	if finishReason != "" {
+		mapped := mapGoogleFinishReason(finishReason)
+		if !c.hasStarted {
+			if err := c.ensureTextStart(); err != nil {
+				return err
+			}
+		}
+		return c.writer.WriteFinish(mapped, c.lastUsage)
+	}
+
 	return nil
 }
 
 // HandleArgoText processes plain text from Argo and converts to OpenAI format.
 func (c *OpenAIStreamConverter) HandleArgoText(text string) error {
+	if err := c.ensureTextStart(); err != nil {
+		return err
+	}
 	return c.writer.WriteContent(text)
 }
 
@@ -201,5 +236,10 @@ func (c *OpenAIStreamConverter) Complete(finishReason string) error {
 
 // FinishStream sends the completion sequence with optional usage information.
 func (c *OpenAIStreamConverter) FinishStream(finishReason string, usage *OpenAIUsage) error {
+	if !c.hasStarted {
+		if err := c.ensureTextStart(); err != nil {
+			return err
+		}
+	}
 	return c.writer.WriteFinish(finishReason, usage)
 }

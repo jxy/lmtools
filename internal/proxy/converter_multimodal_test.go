@@ -399,6 +399,7 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    *OpenAIRequest
+		wantErr  string
 		validate func(t *testing.T, resp *AnthropicRequest)
 	}{
 		{
@@ -459,9 +460,18 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 					t.Error("Image block missing Source field")
 				}
 				sourceMap := blocks[1].Source
-				url, ok := sourceMap["url"].(string)
-				if !ok || !strings.HasPrefix(url, "data:image/png;base64,") {
-					t.Errorf("Image URL not properly set: %v", url)
+				if sourceMap["type"] != "base64" {
+					t.Errorf("Source type = %v, want 'base64'", sourceMap["type"])
+				}
+				if sourceMap["media_type"] != "image/png" {
+					t.Errorf("media_type = %v, want 'image/png'", sourceMap["media_type"])
+				}
+				data, ok := sourceMap["data"].(string)
+				if !ok || !strings.HasPrefix(data, "iVBORw0KGgo") {
+					t.Errorf("Image data not properly set: %v", data)
+				}
+				if _, ok := sourceMap["url"]; ok {
+					t.Errorf("Expected no URL field for base64 source, got %v", sourceMap["url"])
 				}
 			},
 		},
@@ -500,6 +510,9 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 				if sourceMap["url"] != "https://example.com/image.png" {
 					t.Errorf("URL = %v, want 'https://example.com/image.png'", sourceMap["url"])
 				}
+				if _, ok := sourceMap["media_type"]; ok {
+					t.Errorf("Expected no media_type for URL image source, got %v", sourceMap["media_type"])
+				}
 			},
 		},
 		{
@@ -525,34 +538,22 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, resp *AnthropicRequest) {
-				var blocks []AnthropicContentBlock
-				if err := json.Unmarshal(resp.Messages[0].Content, &blocks); err != nil {
-					t.Fatalf("Failed to unmarshal content: %v", err)
-				}
-
-				if len(blocks) != 2 {
-					t.Fatalf("Expected 2 content blocks, got %d", len(blocks))
-				}
-
-				// Check audio block (OpenAI uses input_audio, which is preserved)
-				if blocks[1].Type != "input_audio" {
-					t.Errorf("Second block type = %s, want 'input_audio'", blocks[1].Type)
-				}
-				if blocks[1].InputAudio == nil {
-					t.Error("Audio block missing InputAudio field")
-				}
-				audioMap := blocks[1].InputAudio
-				if audioMap["data"] != "base64_audio_data" {
-					t.Errorf("Audio data = %v, want 'base64_audio_data'", audioMap["data"])
-				}
-			},
+			wantErr: "anthropic provider does not support audio input blocks",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("error = %q, want %q", err, tt.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}

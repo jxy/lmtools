@@ -26,11 +26,12 @@ func (s *Session) GetPath() string {
 
 // Message represents a single message in a conversation
 type Message struct {
-	ID        string    // Message hex ID (e.g., "0002")
-	Role      core.Role // "user" or "assistant"
-	Content   string    // Message text
-	Timestamp time.Time
-	Model     string // Model name (empty for user messages)
+	ID               string    // Message hex ID (e.g., "0002")
+	Role             core.Role // "user" or "assistant"
+	Content          string    // Message text
+	ThoughtSignature string
+	Timestamp        time.Time
+	Model            string // Model name (empty for user messages)
 }
 
 // SaveResult represents the result of a session save operation

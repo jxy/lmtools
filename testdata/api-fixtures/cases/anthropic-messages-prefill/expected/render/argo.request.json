@@ -1,0 +1,17 @@
+{
+  "user": "fixture-user",
+  "model": "claudesonnet4",
+  "stop": [
+    ")"
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is latin for Ant? (A) Apoidea, (B) Rhopalocera, (C) Formicidae"
+    },
+    {
+      "role": "assistant",
+      "content": "The answer is ("
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "response-argo-embedded-tool-call",
+  "description": "Argo response with embedded tool call recovered from content",
+  "kinds": [
+    "response"
+  ],
+  "provider": "argo"
+}

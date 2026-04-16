@@ -1,0 +1,18 @@
+{
+  "model": "gpt-5.4-nano",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, Claude"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello!"
+    },
+    {
+      "role": "user",
+      "content": "Can you describe LLMs to me?"
+    }
+  ],
+  "max_completion_tokens": 1024
+}

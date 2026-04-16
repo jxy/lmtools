@@ -1,0 +1,29 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "C"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-3.1-flash-lite-preview",
+  "responseId": "XjDhaZnIDeye1MkP0fiBoA0",
+  "usageMetadata": {
+    "candidatesTokenCount": 1,
+    "promptTokenCount": 31,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 31
+      }
+    ],
+    "totalTokenCount": 32
+  }
+}

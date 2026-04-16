@@ -1,0 +1,8 @@
+{
+  "id": "response-google-function-call",
+  "description": "Google response with text and functionCall part",
+  "kinds": [
+    "response"
+  ],
+  "provider": "google"
+}

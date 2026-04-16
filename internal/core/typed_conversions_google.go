@@ -27,10 +27,14 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 
 		googleMsg := GoogleMessage{Role: role}
 		parts := make([]GooglePart, 0, len(msg.Blocks))
+		firstFunctionCall := true
 		for _, block := range msg.Blocks {
 			switch b := block.(type) {
 			case TextBlock:
-				parts = append(parts, GooglePart{Text: b.Text})
+				parts = append(parts, GooglePart{
+					Text:             b.Text,
+					ThoughtSignature: b.ThoughtSignature,
+				})
 			case ImageBlock:
 				parts = append(parts, GooglePart{Text: "[Image: " + b.URL + "]"})
 			case AudioBlock:
@@ -45,12 +49,18 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 			case FileBlock:
 				parts = append(parts, GooglePart{Text: "[File content: " + b.FileID + "]"})
 			case ToolUseBlock:
+				thoughtSignature := b.ThoughtSignature
+				if thoughtSignature == "" && firstFunctionCall {
+					thoughtSignature = GoogleDummyThoughtSignature
+				}
 				parts = append(parts, GooglePart{
 					FunctionCall: &GoogleFunctionCall{
 						Name: b.Name,
 						Args: b.Input,
 					},
+					ThoughtSignature: thoughtSignature,
 				})
+				firstFunctionCall = false
 			case ToolResultBlock:
 				functionName := b.Name
 				if functionName == "" {

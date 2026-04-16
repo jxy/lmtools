@@ -1,0 +1,17 @@
+{
+  "model": "gpt-5.4-nano",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is latin for Ant? (A) Apoidea, (B) Rhopalocera, (C) Formicidae"
+    },
+    {
+      "role": "assistant",
+      "content": "The answer is ("
+    }
+  ],
+  "max_completion_tokens": 64,
+  "stop": [
+    ")"
+  ]
+}

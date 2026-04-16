@@ -1,0 +1,15 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Hello, Claude"
+        }
+      ]
+    }
+  ],
+  "stream": false
+}

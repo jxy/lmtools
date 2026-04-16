@@ -1,0 +1,22 @@
+{
+  "user": "fixture-user",
+  "model": "gpt5mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Transcribe this audio:"
+        },
+        {
+          "type": "input_audio",
+          "input_audio": {
+            "$fixture_file": "fixtures/tone.wav",
+            "format": "wav"
+          }
+        }
+      ]
+    }
+  ]
+}

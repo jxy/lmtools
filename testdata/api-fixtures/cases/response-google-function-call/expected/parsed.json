@@ -1,0 +1,11 @@
+{
+  "text": "Checking weather",
+  "tool_calls": [
+    {
+      "name": "get_weather",
+      "args": {
+        "location": "Chicago"
+      }
+    }
+  ]
+}

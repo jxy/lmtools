@@ -1,0 +1,24 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Hello there"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 128,
+    "temperature": 0.1,
+    "topP": 0.8
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "Be concise.\nNo markdown."
+      }
+    ]
+  }
+}

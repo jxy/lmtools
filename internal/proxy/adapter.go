@@ -35,8 +35,13 @@ type TypedRequest struct {
 
 // OpenAIRequestToTyped converts an OpenAI request to TypedRequest
 func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
+	maxTokens := req.MaxTokens
+	if maxTokens == nil && req.MaxCompletionTokens != nil {
+		maxTokens = req.MaxCompletionTokens
+	}
+
 	typed := TypedRequest{
-		MaxTokens:       req.MaxTokens,
+		MaxTokens:       maxTokens,
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
 		Stop:            req.Stop,

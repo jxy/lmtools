@@ -180,8 +180,9 @@ func buildOpenAIEmbedRequest(cfg EmbedRequestConfig, input string) (*http.Reques
 
 // Response represents a unified response structure from any provider
 type Response struct {
-	Text      string
-	ToolCalls []ToolCall
+	Text             string
+	ToolCalls        []ToolCall
+	ThoughtSignature string
 }
 
 // HandleResponse processes an HTTP response based on configuration.
@@ -523,7 +524,7 @@ scanLoop:
 
 // handleArgoStream handles Argo's plain text streaming format
 // Note: Argo doesn't support tool calls in streaming mode
-func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer) (string, []ToolCall, error) {
+func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer) (Response, error) {
 	// Body is closed by HandleResponse, not here
 
 	var accumulated strings.Builder
@@ -532,7 +533,7 @@ func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File,
 	for {
 		select {
 		case <-ctx.Done():
-			return accumulated.String(), nil, ctx.Err()
+			return Response{Text: accumulated.String()}, ctx.Err()
 		default:
 			n, err := body.Read(buffer)
 			if n > 0 {
@@ -542,10 +543,10 @@ func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File,
 				_, _ = logFile.WriteString(chunk)
 			}
 			if err == io.EOF {
-				return accumulated.String(), nil, nil
+				return Response{Text: accumulated.String()}, nil
 			}
 			if err != nil {
-				return accumulated.String(), nil, err
+				return Response{Text: accumulated.String()}, err
 			}
 		}
 	}

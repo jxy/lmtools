@@ -1,0 +1,25 @@
+{
+  "id": "anthropic-system-text",
+  "description": "Anthropic ingress with structured system prompt and simple text message",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "anthropic",
+  "models": {
+    "openai": "gpt-5.4-nano",
+    "anthropic": "claude-haiku-4-5",
+    "google": "gemini-3.1-flash-lite-preview",
+    "argo": "gpt5mini"
+  },
+  "argo_user": "fixture-user",
+  "capture_targets": [
+    "openai",
+    "openai-stream",
+    "anthropic",
+    "anthropic-stream",
+    "google",
+    "google-stream",
+    "argo",
+    "argo-stream"
+  ]
+}

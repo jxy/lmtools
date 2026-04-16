@@ -1,0 +1,10 @@
+{
+  "user": "fixture-user",
+  "model": "claudeopus4",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, Claude"
+    }
+  ]
+}

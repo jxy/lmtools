@@ -1,0 +1,33 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Hello, Claude"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Hello!"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Can you describe LLMs to me?"
+        }
+      ]
+    }
+  ],
+  "stream": false
+}

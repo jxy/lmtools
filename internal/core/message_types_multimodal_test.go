@@ -192,7 +192,7 @@ func TestGetImageMediaType(t *testing.T) {
 	}
 }
 
-// TestToAnthropicWithImageMediaType tests that ToAnthropic uses proper media type detection
+// TestToAnthropicWithImageMediaType tests Anthropic image URL request rendering.
 func TestToAnthropicWithImageMediaType(t *testing.T) {
 	messages := []TypedMessage{
 		{
@@ -204,68 +204,69 @@ func TestToAnthropicWithImageMediaType(t *testing.T) {
 		},
 	}
 
-	// Use typed conversion and convert to interface{}
 	typedMessages := ToAnthropicTyped(messages)
-	result := make([]interface{}, 0, len(typedMessages))
-	for _, msg := range typedMessages {
-		msgMap := map[string]interface{}{
-			"role": msg.Role,
-		}
-
-		// Handle content based on ContentUnion structure
-		if msg.Content.Text != nil && *msg.Content.Text != "" {
-			// Simple text content
-			msgMap["content"] = *msg.Content.Text
-		} else if len(msg.Content.Contents) > 0 {
-			// Array of content blocks
-			contentMaps := make([]map[string]interface{}, 0, len(msg.Content.Contents))
-			for _, block := range msg.Content.Contents {
-				blockMap := map[string]interface{}{
-					"type": block.Type,
-				}
-
-				// Add fields based on block type
-				switch block.Type {
-				case "text":
-					blockMap["text"] = block.Text
-				case "image":
-					if block.Source != nil {
-						blockMap["source"] = map[string]interface{}{
-							"type":       block.Source.Type,
-							"url":        block.Source.URL,
-							"media_type": block.Source.MediaType,
-						}
-					}
-				}
-
-				contentMaps = append(contentMaps, blockMap)
-			}
-			msgMap["content"] = contentMaps
-		}
-
-		result = append(result, msgMap)
-	}
+	result := MarshalAnthropicMessagesForRequest(typedMessages)
 
 	if len(result) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(result))
 	}
 
 	msg := result[0].(map[string]interface{})
-	content := msg["content"].([]map[string]interface{})
+	content := msg["content"].([]interface{})
 
 	if len(content) != 2 {
 		t.Fatalf("Expected 2 content blocks, got %d", len(content))
 	}
 
-	// Check image block has correct media type
-	imageBlock := content[1]
+	imageBlock := content[1].(map[string]interface{})
 	if imageBlock["type"] != "image" {
 		t.Errorf("Expected type 'image', got %v", imageBlock["type"])
 	}
 
 	source := imageBlock["source"].(map[string]interface{})
-	if source["media_type"] != "image/png" {
-		t.Errorf("Expected media_type 'image/png', got %v", source["media_type"])
+	if _, ok := source["media_type"]; ok {
+		t.Errorf("Expected no media_type for Anthropic URL image source, got %v", source["media_type"])
+	}
+}
+
+func TestParseBase64DataURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		wantType  string
+		wantData  string
+		wantValid bool
+	}{
+		{
+			name:      "base64 image data url",
+			raw:       "data:image/png;base64,aGVsbG8=",
+			wantType:  "image/png",
+			wantData:  "aGVsbG8=",
+			wantValid: true,
+		},
+		{
+			name:      "http url",
+			raw:       "https://example.com/image.png",
+			wantValid: false,
+		},
+		{
+			name:      "data url without base64",
+			raw:       "data:image/png,abc",
+			wantValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		mediaType, data, ok := ParseBase64DataURL(tt.raw)
+		if ok != tt.wantValid {
+			t.Fatalf("%s: ok = %v, want %v", tt.name, ok, tt.wantValid)
+		}
+		if mediaType != tt.wantType {
+			t.Fatalf("%s: mediaType = %q, want %q", tt.name, mediaType, tt.wantType)
+		}
+		if data != tt.wantData {
+			t.Fatalf("%s: data = %q, want %q", tt.name, data, tt.wantData)
+		}
 	}
 }
 

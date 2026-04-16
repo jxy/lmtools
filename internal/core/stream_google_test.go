@@ -66,3 +66,22 @@ func TestGoogleToolCallIDGeneratorConcurrency(t *testing.T) {
 		t.Errorf("Expected %d unique IDs, got %d", numGoroutines*numCallsPerGoroutine, len(seen))
 	}
 }
+
+func TestGoogleStreamStateParseLinePreservesThoughtSignature(t *testing.T) {
+	state := &GoogleStreamState{}
+	line := `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"weather"}},"thoughtSignature":"sig-123"}]}}]}`
+
+	_, calls, done, err := state.ParseLine(line)
+	if err != nil {
+		t.Fatalf("ParseLine() error = %v", err)
+	}
+	if done {
+		t.Fatal("ParseLine() done = true, want false")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("len(calls) = %d, want 1", len(calls))
+	}
+	if got := calls[0].ThoughtSignature; got != "sig-123" {
+		t.Fatalf("thought signature = %q, want %q", got, "sig-123")
+	}
+}
