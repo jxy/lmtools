@@ -1,0 +1,25 @@
+{
+  "case_id": "anthropic-messages-multi-turn",
+  "target": "argo-anthropic",
+  "url": "https://apps.inside.anl.gov/argoapi/v1/messages",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-17T11:54:14-05:00",
+  "response_headers": {
+    "Connection": [
+      "keep-alive"
+    ],
+    "Content-Length": [
+      "1769"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Fri, 17 Apr 2026 16:54:14 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains"
+    ]
+  }
+}

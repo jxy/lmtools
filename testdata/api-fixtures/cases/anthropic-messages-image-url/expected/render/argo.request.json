@@ -1,15 +1,15 @@
 {
   "user": "fixture-user",
-  "model": "claudeopus4",
+  "model": "gpt5nano",
   "messages": [
     {
       "role": "user",
       "content": [
         {
-          "type": "image",
-          "source": {
-            "type": "url",
-            "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg"
+          "type": "image_url",
+          "image_url": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg",
+            "detail": "auto"
           }
         },
         {

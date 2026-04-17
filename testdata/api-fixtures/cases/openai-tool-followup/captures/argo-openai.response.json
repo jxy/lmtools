@@ -1,0 +1,55 @@
+{
+  "choices": [
+    {
+      "content_filter_results": {},
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "annotations": [],
+        "audio": null,
+        "content": "",
+        "function_call": null,
+        "refusal": null,
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"location\":\"Chicago\",\"unit\":\"celsius\"}",
+              "name": "get_weather"
+            },
+            "id": "call_jp2WecXNyRByentaAv5TY4Tk",
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1776445703,
+  "id": "chatcmpl-DVgxzllgZuiYEkKpYI44UoHXWNBw8",
+  "model": "gpt-5-mini-2025-08-07",
+  "object": "chat.completion",
+  "prompt_filter_results": [
+    {
+      "content_filter_results": {},
+      "prompt_index": 0
+    }
+  ],
+  "service_tier": "default",
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 247,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 192,
+      "rejected_prediction_tokens": 0
+    },
+    "prompt_tokens": 184,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0
+    },
+    "total_tokens": 431
+  }
+}

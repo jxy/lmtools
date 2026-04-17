@@ -1,0 +1,28 @@
+{
+  "case_id": "openai-tool-followup",
+  "target": "argo-anthropic",
+  "url": "https://apps.inside.anl.gov/argoapi/v1/messages",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-17T11:54:18-05:00",
+  "response_headers": {
+    "Connection": [
+      "keep-alive"
+    ],
+    "Content-Length": [
+      "557"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Fri, 17 Apr 2026 16:54:18 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains"
+    ],
+    "Vary": [
+      "Accept-Encoding"
+    ]
+  }
+}

@@ -210,6 +210,58 @@ func TestVerifySuiteCheckCapturesSupportsStreamTargets(t *testing.T) {
 	}
 }
 
+func TestVerifySuiteCheckCapturesSupportsArgoHostedTargets(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "request-case")
+	if err := os.MkdirAll(filepath.Join(caseDir, "expected", "render"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(caseDir) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(caseDir, "captures"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(captures) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "request-case",
+      "description": "request case",
+      "kinds": ["request"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "request-case",
+  "description": "request case",
+  "kinds": ["request"],
+  "ingress_family": "anthropic",
+  "models": {
+    "openai": "gpt-5.4-nano",
+    "anthropic": "claude-haiku-4-5",
+    "google": "gemini-3.1-flash-lite-preview",
+    "argo": "gpt5mini"
+  },
+  "capture_targets": ["argo-openai-stream"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "ingress.json"), `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "typed.json"), `{"messages":[{"role":"user","blocks":[{"type":"text","text":"hi"}]}],"max_tokens":1,"stream":false}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "openai.request.json"), `{"model":"gpt-5.4-nano","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":1}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "anthropic.request.json"), `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "google.request.json"), `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "argo.request.json"), `{"user":"fixture-user","model":"gpt5mini","messages":[{"role":"user","content":"hi"}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "argo-openai-stream.meta.json"), `{"target":"argo-openai-stream","status_code":200}`)
+	if err := os.WriteFile(filepath.Join(caseDir, "captures", "argo-openai-stream.stream.txt"), []byte("data: [DONE]\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stream.txt) error = %v", err)
+	}
+
+	if err := VerifySuite(root, VerifyOptions{CheckCaptures: true, Target: "argo-openai-stream"}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
 func TestVerifySuiteHonorsRenderTargets(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, SuiteDirName, "cases", "request-case")
@@ -305,6 +357,67 @@ func TestReadCaseFileExpandsFixtureFileData(t *testing.T) {
 	}
 	if got, ok := inputAudio["data"].(string); !ok || got != base64.StdEncoding.EncodeToString(audioBytes) {
 		t.Fatalf("input_audio.data = %v, want expanded base64", inputAudio["data"])
+	}
+}
+
+func TestReadCaseFileExpandsFixtureFileDataURL(t *testing.T) {
+	root := t.TempDir()
+	caseID := "image-case"
+	caseDir := filepath.Join(root, SuiteDirName, "cases", caseID)
+
+	if err := os.MkdirAll(filepath.Join(caseDir, "fixtures"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(fixtures) error = %v", err)
+	}
+	imageBytes := []byte{0x89, 'P', 'N', 'G'}
+	if err := os.WriteFile(filepath.Join(caseDir, "fixtures", "sample.png"), imageBytes, 0o644); err != nil {
+		t.Fatalf("WriteFile(sample.png) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(caseDir, "ingress.json"), `{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "$fixture_file": "fixtures/sample.png",
+            "media_type": "image/png",
+            "url": "",
+            "detail": "auto"
+          }
+        }
+      ]
+    }
+  ]
+}
+`)
+
+	data, err := ReadCaseFile(root, caseID, "ingress.json")
+	if err != nil {
+		t.Fatalf("ReadCaseFile() error = %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	messages := decoded["messages"].([]interface{})
+	message := messages[0].(map[string]interface{})
+	content := message["content"].([]interface{})
+	part := content[0].(map[string]interface{})
+	imageURL := part["image_url"].(map[string]interface{})
+
+	if _, exists := imageURL[fixtureFileKey]; exists {
+		t.Fatalf("expected %s to be removed after expansion", fixtureFileKey)
+	}
+	if _, exists := imageURL["media_type"]; exists {
+		t.Fatal("expected media_type to be removed after data URL expansion")
+	}
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes)
+	if got, ok := imageURL["url"].(string); !ok || got != want {
+		t.Fatalf("image_url.url = %v, want %q", imageURL["url"], want)
 	}
 }
 

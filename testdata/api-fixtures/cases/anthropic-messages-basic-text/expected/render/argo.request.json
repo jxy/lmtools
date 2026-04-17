@@ -1,6 +1,6 @@
 {
   "user": "fixture-user",
-  "model": "claudeopus4",
+  "model": "gpt5nano",
   "messages": [
     {
       "role": "user",

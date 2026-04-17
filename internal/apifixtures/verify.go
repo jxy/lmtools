@@ -15,12 +15,6 @@ type VerifyOptions struct {
 	Target        string
 }
 
-type fixtureTarget struct {
-	ID       string
-	Provider string
-	Stream   bool
-}
-
 type fixtureCaptureMetadata struct {
 	Target     string `json:"target"`
 	StatusCode int    `json:"status_code"`
@@ -114,7 +108,7 @@ func verifyLoadedCase(root string, entry ManifestCase, meta CaseMeta, opts Verif
 	}
 
 	for _, targetID := range meta.CaptureTargets {
-		target, err := parseFixtureTarget(targetID)
+		target, err := ParseCaptureTarget(targetID)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("case %q has invalid capture target %q: %v", caseID, targetID, err))
 			continue
@@ -168,7 +162,7 @@ func verifyResponseCase(root string, meta CaseMeta, opts VerifyOptions) []string
 	caseID := meta.ID
 	problems := make([]string, 0)
 
-	target, err := parseFixtureTarget(meta.Provider)
+	target, err := ParseCaptureTarget(meta.Provider)
 	if err != nil || target.Stream {
 		problems = append(problems, fmt.Sprintf("case %q response provider must be one of openai, anthropic, google, argo", caseID))
 		return problems
@@ -184,7 +178,7 @@ func verifyStreamCase(root string, meta CaseMeta, opts VerifyOptions) []string {
 	caseID := meta.ID
 	problems := make([]string, 0)
 
-	source, err := parseFixtureTarget(meta.StreamSource + "-stream")
+	source, err := ParseCaptureTarget(meta.StreamSource + "-stream")
 	if err != nil || !source.Stream {
 		problems = append(problems, fmt.Sprintf("case %q stream_source must be one of openai, anthropic, google, argo", caseID))
 	} else {
@@ -194,7 +188,7 @@ func verifyStreamCase(root string, meta CaseMeta, opts VerifyOptions) []string {
 		}
 	}
 
-	if _, err := parseFixtureTarget(meta.StreamTarget); err != nil {
+	if _, err := ParseCaptureTarget(meta.StreamTarget); err != nil {
 		problems = append(problems, fmt.Sprintf("case %q stream_target must be one of openai, anthropic, google, argo", caseID))
 	}
 
@@ -203,7 +197,7 @@ func verifyStreamCase(root string, meta CaseMeta, opts VerifyOptions) []string {
 	return problems
 }
 
-func verifyCaptureArtifacts(root, caseID string, target fixtureTarget) []string {
+func verifyCaptureArtifacts(root, caseID string, target CaptureTarget) []string {
 	problems := make([]string, 0)
 
 	metaRel := filepath.Join("captures", target.ID+".meta.json")
@@ -248,22 +242,6 @@ func verifyJSONFile(root, caseID, rel string) []string {
 	}
 
 	return nil
-}
-
-func parseFixtureTarget(targetID string) (fixtureTarget, error) {
-	stream := strings.HasSuffix(targetID, "-stream")
-	provider := strings.TrimSuffix(targetID, "-stream")
-	for _, candidate := range fixtureProviders {
-		if provider == candidate {
-			return fixtureTarget{
-				ID:       targetID,
-				Provider: provider,
-				Stream:   stream,
-			}, nil
-		}
-	}
-
-	return fixtureTarget{}, fmt.Errorf("unsupported target %q", targetID)
 }
 
 func sameStringSet(left, right []string) bool {

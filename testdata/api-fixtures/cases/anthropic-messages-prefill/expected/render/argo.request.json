@@ -1,6 +1,6 @@
 {
   "user": "fixture-user",
-  "model": "claudesonnet4",
+  "model": "gpt5nano",
   "stop": [
     ")"
   ],

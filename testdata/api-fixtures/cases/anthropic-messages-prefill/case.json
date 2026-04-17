@@ -11,7 +11,9 @@
     "openai": "gpt-5.4-nano",
     "anthropic": "claude-haiku-4-5",
     "google": "gemini-3.1-flash-lite-preview",
-    "argo": "claudesonnet4"
+    "argo": "gpt5nano",
+    "argo-openai": "gpt5mini",
+    "argo-anthropic": "claudehaiku45"
   },
   "argo_user": "fixture-user",
   "capture_targets": [
@@ -22,6 +24,10 @@
     "google",
     "google-stream",
     "argo",
-    "argo-stream"
+    "argo-stream",
+    "argo-openai",
+    "argo-openai-stream",
+    "argo-anthropic",
+    "argo-anthropic-stream"
   ]
 }

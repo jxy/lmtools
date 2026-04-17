@@ -16,9 +16,10 @@ For the shared API request/response fixture corpus used by proxy tests:
 
 ```bash
 make verify-fixtures
+bash ./scripts/api_fixtures_compare_all.sh -target argo-openai
 ```
 
-This validates the checked-in fixture files and runs targeted fixture-driven tests.
+This validates the checked-in fixture files and runs targeted fixture-driven tests. Use the compare script for non-mutating live drift or parity checks. For `argo-openai*` and `argo-anthropic*`, compare defaults to the matching upstream baseline unless you override it with `--against`.
 
 ## Quick Start
 
@@ -405,6 +406,7 @@ Use the Go test targets and fixture verification workflow instead of ad hoc shel
 make test
 make test-e2e
 make verify-fixtures
+bash ./scripts/api_fixtures_compare.sh -case anthropic-messages-basic-text -target openai
 ```
 
 ### Model mapping

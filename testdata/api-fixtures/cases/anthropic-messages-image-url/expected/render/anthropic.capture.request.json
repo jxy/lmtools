@@ -1,0 +1,23 @@
+{
+  "model": "claude-haiku-4-5",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "$fixture_file": "fixtures/ant.jpg"
+          }
+        },
+        {
+          "type": "text",
+          "text": "What is in the above image?"
+        }
+      ]
+    }
+  ]
+}

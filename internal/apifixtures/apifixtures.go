@@ -286,11 +286,28 @@ func expandFixtureValue(caseDir string, value interface{}) (interface{}, error) 
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", fixturePath, err)
 		}
-		typed["data"] = base64.StdEncoding.EncodeToString(raw)
+		encoded := base64.StdEncoding.EncodeToString(raw)
+		mediaType := strings.TrimSpace(stringValue(typed["media_type"]))
+		if _, exists := typed["url"]; exists && mediaType != "" {
+			if mediaType == "" {
+				return nil, fmt.Errorf("%s with url requires media_type or a known file extension", fixtureFileKey)
+			}
+			typed["url"] = fmt.Sprintf("data:%s;base64,%s", mediaType, encoded)
+			delete(typed, "media_type")
+			delete(typed, fixtureFileKey)
+			return typed, nil
+		}
+
+		typed["data"] = encoded
 		delete(typed, fixtureFileKey)
 		return typed, nil
 
 	default:
 		return value, nil
 	}
+}
+
+func stringValue(value interface{}) string {
+	text, _ := value.(string)
+	return text
 }

@@ -1,0 +1,14 @@
+{
+  "max_completion_tokens": 128,
+  "messages": [
+    {
+      "content": "Be concise.\nNo markdown.",
+      "role": "system"
+    },
+    {
+      "content": "Hello there",
+      "role": "user"
+    }
+  ],
+  "model": "gpt-5.4-nano"
+}

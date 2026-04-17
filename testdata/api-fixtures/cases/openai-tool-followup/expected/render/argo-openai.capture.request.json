@@ -1,0 +1,63 @@
+{
+  "max_completion_tokens": 2048,
+  "messages": [
+    {
+      "content": "Weather in Chicago?",
+      "role": "user"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_weather_1",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"location\":\"Chicago\",\"unit\":\"celsius\"}"
+          }
+        }
+      ]
+    },
+    {
+      "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}",
+      "role": "tool",
+      "tool_call_id": "call_weather_1"
+    }
+  ],
+  "model": "gpt-5.4-nano",
+  "reasoning_effort": "none",
+  "tool_choice": {
+    "type": "function",
+    "function": {
+      "name": "get_weather"
+    }
+  },
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string",
+              "enum": [
+                "celsius",
+                "fahrenheit"
+              ]
+            }
+          },
+          "required": [
+            "location"
+          ]
+        }
+      }
+    }
+  ]
+}

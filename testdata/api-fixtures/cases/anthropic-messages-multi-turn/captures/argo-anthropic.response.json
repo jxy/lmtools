@@ -1,0 +1,28 @@
+{
+  "content": [
+    {
+      "citations": null,
+      "text": "# Large Language Models (LLMs)\n\nLLMs are AI systems trained on vast amounts of text data to predict and generate human language. Here are the key points:\n\n## How they work\n- **Training**: They learn patterns from enormous text datasets (books, websites, articles, etc.)\n- **Prediction**: They work by predicting the next word in a sequence, token by token\n- **Neural networks**: Built on deep learning architecture (specifically transformer networks)\n\n## Capabilities\n- Answer questions and explain concepts\n- Write creative content (stories, code, essays)\n- Translate between languages\n- Summarize information\n- Have conversations\n\n## Limitations\n- Don't truly \"understand\" in a human sense—they recognize patterns\n- Can hallucinate or confidently state false information\n- Have a knowledge cutoff date\n- Can reflect biases from training data\n- Limited reasoning for complex multi-step problems\n\n## Examples\n- GPT models (like me, Claude)\n- ChatGPT\n- Gemini\n- LLaMA\n\n## Why they're useful\nThey're versatile tools that can help with writing, coding, learning, brainstorming, and many other tasks—but they work best when you verify important information and use critical judgment about their outputs.\n\nIs there a specific aspect of LLMs you'd like to explore further?",
+      "type": "text"
+    }
+  ],
+  "id": "msg_vrtx_01VYkTqRu5duzGSABQ7LeKwx",
+  "model": "claude-haiku-4-5-20251001",
+  "role": "assistant",
+  "stop_details": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 27,
+    "output_tokens": 297,
+    "server_tool_use": null,
+    "service_tier": null
+  }
+}

@@ -60,10 +60,10 @@ if (( check_captures || refresh )); then
 fi
 
 if (( refresh )); then
-  go run ./cmd/apifixtures capture-all "${capture_args[@]}"
+  go run ./cmd/apifixtures -- capture-all "${capture_args[@]}"
 fi
 
-go run ./cmd/apifixtures verify "${verify_args[@]}"
+go run ./cmd/apifixtures -- verify "${verify_args[@]}"
 
 unset LMTOOLS_API_FIXTURE_CASE
 unset LMTOOLS_API_FIXTURE_PROVIDER
@@ -76,12 +76,13 @@ if [[ -n "$provider_id" ]]; then
   export LMTOOLS_API_FIXTURE_PROVIDER="$provider_id"
 fi
 
-go test -count=1 ./cmd/apifixtures ./internal/apifixtures ./internal/auth ./internal/core ./internal/proxy -run 'TestVerifySuite|TestAPIFixture|TestCaptureRequestRel|TestLoadCaptureRequestBody|TestEndpointForTarget|TestRefreshDerivedArtifacts|TestProviderSpecStreamingRequestBehavior|TestApplyProviderCredentialsGoogleUsesHeader|TestPrepareRequestPayloadArgoRejectsAudioBlocks|TestTypedToArgoRequestRejectsAudioBlocks|TestDecodeStrictJSONRejectsUnknownField|TestHandleMessagesRejectsUnsupportedMetadataForArgo|TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo'
+go test -count=1 ./cmd/apifixtures ./internal/apifixtures ./internal/auth ./internal/core ./internal/proxy -run 'TestVerifySuite|TestAPIFixture|TestCaptureRequestRel|TestLoadCaptureRequestBody|TestEndpointForTarget|TestRefreshDerivedArtifacts|TestCompare|TestProviderSpecStreamingRequestBehavior|TestApplyProviderCredentialsGoogleUsesHeader|TestPrepareRequestPayloadArgoRejectsAudioBlocks|TestTypedToArgoRequestRejectsAudioBlocks|TestDecodeStrictJSONRejectsUnknownField|TestHandleMessagesRejectsUnsupportedMetadataForArgo|TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo'
 
 if (( refresh )); then
-  if ! git diff --quiet -- testdata/api-fixtures; then
-    echo "fixture captures changed; inspect git diff -- testdata/api-fixtures" >&2
+  if ! git diff --quiet -- testdata/api-fixtures || [[ -n "$(git status --short --untracked-files=all -- testdata/api-fixtures)" ]]; then
+    echo "fixture captures changed; inspect git diff -- testdata/api-fixtures and git status --short -- testdata/api-fixtures" >&2
     git diff --stat -- testdata/api-fixtures || true
+    git status --short --untracked-files=all -- testdata/api-fixtures || true
     exit 1
   fi
 fi

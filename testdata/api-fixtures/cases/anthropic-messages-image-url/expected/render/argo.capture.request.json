@@ -1,0 +1,24 @@
+{
+  "user": "fixture-user",
+  "model": "gpt5nano",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "$fixture_file": "fixtures/ant.jpg",
+            "media_type": "image/jpeg",
+            "url": "",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "What is in the above image?"
+        }
+      ]
+    }
+  ]
+}

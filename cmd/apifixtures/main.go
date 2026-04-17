@@ -16,6 +16,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,11 +30,7 @@ const (
 	defaultArgoBase     = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
 )
 
-type targetConfig struct {
-	ID       string
-	Provider string
-	Stream   bool
-}
+type targetConfig = apifixtures.CaptureTarget
 
 type captureMetadata struct {
 	CaseID         string              `json:"case_id"`
@@ -46,26 +43,35 @@ type captureMetadata struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	command, args, ok := parseSubcommandArgs(os.Args[1:])
+	if !ok {
 		usage()
 		os.Exit(2)
 	}
 
-	switch os.Args[1] {
+	switch command {
 	case "list":
 		if err := runList(); err != nil {
 			fatal(err)
 		}
 	case "verify":
-		if err := runVerify(os.Args[2:]); err != nil {
+		if err := runVerify(args); err != nil {
+			fatal(err)
+		}
+	case "compare":
+		if err := runCompare(args); err != nil {
+			fatal(err)
+		}
+	case "compare-all":
+		if err := runCompareAll(args); err != nil {
 			fatal(err)
 		}
 	case "capture":
-		if err := runCapture(os.Args[2:]); err != nil {
+		if err := runCapture(args); err != nil {
 			fatal(err)
 		}
 	case "capture-all":
-		if err := runCaptureAll(os.Args[2:]); err != nil {
+		if err := runCaptureAll(args); err != nil {
 			fatal(err)
 		}
 	default:
@@ -74,8 +80,21 @@ func main() {
 	}
 }
 
+func parseSubcommandArgs(args []string) (string, []string, bool) {
+	if len(args) == 0 {
+		return "", nil, false
+	}
+	if args[0] == "--" {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return "", nil, false
+	}
+	return args[0], args[1:], true
+}
+
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: apifixtures <list|verify|capture|capture-all> [flags]\n")
+	fmt.Fprintf(os.Stderr, "usage: apifixtures <list|verify|compare|compare-all|capture|capture-all> [flags]\n")
 }
 
 func fatal(err error) {
@@ -103,7 +122,7 @@ func runVerify(args []string) error {
 	caseID := fs.String("case", "", "optional fixture case id")
 	checkCaptures := fs.Bool("check-captures", false, "require capture metadata and successful capture status")
 	provider := fs.String("provider", "", "optional source provider filter (anthropic|openai|google|argo)")
-	target := fs.String("target", "", "optional capture target filter (anthropic|openai|google|argo)")
+	target := fs.String("target", "", "optional capture target filter")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -143,7 +162,7 @@ func runCaptureAll(args []string) error {
 	fs := flag.NewFlagSet("capture-all", flag.ContinueOnError)
 	caseID := fs.String("case", "", "optional fixture case id")
 	targetID := fs.String("target", "", "optional capture target id")
-	provider := fs.String("provider", "", "optional source provider filter (anthropic|openai)")
+	provider := fs.String("provider", "", "optional source provider filter (anthropic|openai|google|argo)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -215,7 +234,7 @@ func captureCase(root, caseID, targetID string) error {
 		return fmt.Errorf("case %q does not support capture target %q", caseID, targetID)
 	}
 
-	body, err := loadCaptureRequestBody(root, caseID, target)
+	body, err := loadCaptureRequestBody(root, caseID, meta, target)
 	if err != nil {
 		return fmt.Errorf("read %s body for %s: %w", target.ID, caseID, err)
 	}
@@ -234,7 +253,7 @@ func captureCase(root, caseID, targetID string) error {
 		req.Header.Set(key, value)
 	}
 
-	resp, data, err := doCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, target.Provider, nil)
+	resp, data, err := doCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
 	if err != nil {
 		return err
 	}
@@ -440,7 +459,7 @@ func refreshDerivedArtifacts(root string, meta apifixtures.CaseMeta, target targ
 	if !apifixtures.StringSliceContains(meta.Kinds, "response") {
 		return nil
 	}
-	if meta.Provider != target.Provider {
+	if meta.Provider != target.ID {
 		return nil
 	}
 
@@ -456,13 +475,13 @@ func refreshDerivedArtifacts(root string, meta apifixtures.CaseMeta, target targ
 	return apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("expected", "parsed.json"), projectedBytes)
 }
 
-func loadCaptureRequestBody(root, caseID string, target targetConfig) ([]byte, error) {
+func loadCaptureRequestBody(root, caseID string, meta apifixtures.CaseMeta, target targetConfig) ([]byte, error) {
 	bodyRel := captureRequestRel(root, caseID, target)
 	body, err := apifixtures.ReadCaseFile(root, caseID, bodyRel)
 	if err != nil {
 		return nil, err
 	}
-	return prepareCaptureRequestBody(target, body)
+	return prepareCaptureRequestBody(meta, target, body)
 }
 
 func captureRequestRel(root, caseID string, target targetConfig) string {
@@ -480,14 +499,22 @@ func captureRequestRel(root, caseID string, target targetConfig) string {
 	return fmt.Sprintf("expected/render/%s.request.json", target.Provider)
 }
 
-func prepareCaptureRequestBody(target targetConfig, body []byte) ([]byte, error) {
+func prepareCaptureRequestBody(meta apifixtures.CaseMeta, target targetConfig, body []byte) ([]byte, error) {
 	var decoded map[string]interface{}
-	needsDecode := target.Stream || target.Provider == "argo"
+	needsDecode := target.Stream || isLegacyArgoTarget(target) || isArgoHostedCompatibilityTarget(target)
 	if !needsDecode {
 		return body, nil
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return nil, err
+	}
+
+	if isArgoHostedCompatibilityTarget(target) {
+		model := captureModelForTarget(meta, target)
+		if model == "" {
+			return nil, fmt.Errorf("case %s is missing a compatible model for target %s", meta.ID, target.ID)
+		}
+		decoded["model"] = model
 	}
 
 	switch target.Provider {
@@ -507,20 +534,13 @@ func prepareCaptureRequestBody(target targetConfig, body []byte) ([]byte, error)
 }
 
 func parseTarget(targetID string) (targetConfig, error) {
-	stream := strings.HasSuffix(targetID, "-stream")
-	provider := strings.TrimSuffix(targetID, "-stream")
-	switch provider {
-	case "openai", "anthropic", "google", "argo":
-		return targetConfig{ID: targetID, Provider: provider, Stream: stream}, nil
-	default:
-		return targetConfig{}, fmt.Errorf("unsupported capture target %q", targetID)
-	}
+	return apifixtures.ParseCaptureTarget(targetID)
 }
 
 func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, map[string]string, error) {
 	headers := map[string]string{}
 
-	switch target.Provider {
+	switch targetHost(target) {
 	case "openai":
 		apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 		if apiKey == "" {
@@ -566,15 +586,160 @@ func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, 
 		return url, headers, nil
 
 	case "argo":
-		base := strings.TrimRight(envOrDefault("ARGO_API_FIXTURE_BASE_URL", defaultArgoBase), "/")
-		action := "chat"
-		if target.Stream {
-			action = "streamchat"
+		endpoints, err := argoFixtureEndpoints(envOrDefault("ARGO_API_FIXTURE_BASE_URL", defaultArgoBase))
+		if err != nil {
+			return "", nil, err
 		}
-		return base + "/" + action + "/", headers, nil
+		switch target.Provider {
+		case "argo":
+			if target.Stream {
+				return endpoints.legacyStream, headers, nil
+			}
+			return endpoints.legacyChat, headers, nil
+		case "openai":
+			apiKey := strings.TrimSpace(os.Getenv("ARGO_API_KEY"))
+			if apiKey == "" {
+				return "", nil, fmt.Errorf("ARGO_API_KEY is required for target %s", target.ID)
+			}
+			headers["Authorization"] = "Bearer " + apiKey
+			if target.Stream {
+				headers["Accept"] = "text/event-stream"
+			}
+			return endpoints.openAI, headers, nil
+		case "anthropic":
+			apiKey := strings.TrimSpace(os.Getenv("ARGO_API_KEY"))
+			if apiKey == "" {
+				return "", nil, fmt.Errorf("ARGO_API_KEY is required for target %s", target.ID)
+			}
+			headers["x-api-key"] = apiKey
+			headers["anthropic-version"] = "2023-06-01"
+			if target.Stream {
+				headers["Accept"] = "text/event-stream"
+			}
+			return endpoints.anthropic, headers, nil
+		}
 	}
 
 	return "", nil, fmt.Errorf("unsupported provider %q", target.Provider)
+}
+
+type resolvedArgoFixtureEndpoints struct {
+	root         string
+	legacyChat   string
+	legacyStream string
+	openAI       string
+	anthropic    string
+}
+
+func argoFixtureEndpoints(rawBase string) (resolvedArgoFixtureEndpoints, error) {
+	root, err := argoFixtureRoot(rawBase)
+	if err != nil {
+		return resolvedArgoFixtureEndpoints{}, err
+	}
+
+	legacyChat, err := buildArgoFixtureURL(root, "api/v1/resource/chat", true)
+	if err != nil {
+		return resolvedArgoFixtureEndpoints{}, err
+	}
+	legacyStream, err := buildArgoFixtureURL(root, "api/v1/resource/streamchat", true)
+	if err != nil {
+		return resolvedArgoFixtureEndpoints{}, err
+	}
+	openAI, err := buildArgoFixtureURL(root, "v1/chat/completions", false)
+	if err != nil {
+		return resolvedArgoFixtureEndpoints{}, err
+	}
+	anthropic, err := buildArgoFixtureURL(root, "v1/messages", false)
+	if err != nil {
+		return resolvedArgoFixtureEndpoints{}, err
+	}
+
+	return resolvedArgoFixtureEndpoints{
+		root:         root,
+		legacyChat:   legacyChat,
+		legacyStream: legacyStream,
+		openAI:       openAI,
+		anthropic:    anthropic,
+	}, nil
+}
+
+func argoFixtureRoot(rawBase string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(rawBase))
+	if err != nil {
+		return "", fmt.Errorf("invalid Argo fixture base URL %q: %w", rawBase, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("unsupported Argo fixture base URL scheme %q", u.Scheme)
+	}
+
+	path := strings.TrimRight(u.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/api/v1/resource"):
+		path = strings.TrimSuffix(path, "/api/v1/resource")
+	case strings.HasSuffix(path, "/api/v1"):
+		path = strings.TrimSuffix(path, "/api/v1")
+	case strings.HasSuffix(path, "/v1/chat/completions"):
+		path = strings.TrimSuffix(path, "/v1/chat/completions")
+	case strings.HasSuffix(path, "/v1/messages"):
+		path = strings.TrimSuffix(path, "/v1/messages")
+	case strings.Contains(path, "/api/v1"):
+		path = path[:strings.Index(path, "/api/v1")]
+	case strings.Contains(path, "/v1"):
+		path = path[:strings.Index(path, "/v1")]
+	}
+
+	u.Path = path
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func buildArgoFixtureURL(root, suffix string, trailingSlash bool) (string, error) {
+	resolved, err := providers.BuildProviderURL(root, suffix)
+	if err != nil {
+		return "", err
+	}
+	if trailingSlash && !strings.HasSuffix(resolved, "/") {
+		resolved += "/"
+	}
+	return resolved, nil
+}
+
+func isLegacyArgoTarget(target targetConfig) bool {
+	return targetHost(target) == "argo" && target.Provider == "argo"
+}
+
+func isArgoHostedCompatibilityTarget(target targetConfig) bool {
+	return targetHost(target) == "argo" && target.Provider != "argo"
+}
+
+func captureModelForTarget(meta apifixtures.CaseMeta, target targetConfig) string {
+	if !isArgoHostedCompatibilityTarget(target) {
+		return ""
+	}
+
+	for _, key := range []string{target.ID, "argo-" + target.Provider} {
+		if model := strings.TrimSpace(meta.Models[key]); model != "" {
+			return model
+		}
+	}
+
+	argoModel := strings.TrimSpace(meta.Models["argo"])
+	if argoModel == "" {
+		return strings.TrimSpace(meta.Models[target.Provider])
+	}
+	if target.Provider == "anthropic" && providers.DetermineArgoModelProvider(argoModel) != "anthropic" {
+		return strings.TrimSpace(meta.Models["anthropic"])
+	}
+	return argoModel
+}
+
+func targetHost(target targetConfig) string {
+	if target.Host != "" {
+		return target.Host
+	}
+	return target.Provider
 }
 
 func envOrDefault(name, fallback string) string {

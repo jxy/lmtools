@@ -24,7 +24,7 @@
       "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}"
     }
   ],
-  "model": "gpt5mini",
+  "model": "gpt5nano",
   "temperature": 0.2,
   "tool_choice": {
     "type": "function",
