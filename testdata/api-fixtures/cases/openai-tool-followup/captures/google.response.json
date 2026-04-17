@@ -5,7 +5,7 @@
         "parts": [
           {
             "text": "The weather in Chicago is currently 18°C and cloudy.",
-            "thoughtSignature": "EjQKMgEMOdbHx23IPUzyf/d2HY6DUTylpH5GR7nj9ltgV7nsB6TnGpq37zMeBqKR2YkcstLX"
+            "thoughtSignature": "EjQKMgEMOdbHd7iG5stEkPmMXmaRV9O0XYJx2nKDhKxcRj3hcfL0YOtybHGFV1r0+VgMKs8L"
           }
         ],
         "role": "model"
@@ -15,7 +15,7 @@
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "YTDhaYKFFP-B1MkPqZ-R0Aw",
+  "responseId": "_nbiacgxs92Mxw_QgpJx",
   "usageMetadata": {
     "candidatesTokenCount": 14,
     "promptTokenCount": 120,

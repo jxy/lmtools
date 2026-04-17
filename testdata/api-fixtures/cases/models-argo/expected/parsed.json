@@ -1,0 +1,232 @@
+{
+  "models": [
+    {
+      "display_name": "Text Embedding Ada 002",
+      "id": "ada002",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "Claude Haiku 3.5",
+      "id": "claudehaiku35",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Haiku 4.5",
+      "id": "claudehaiku45",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4",
+      "id": "claudeopus4",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.1",
+      "id": "claudeopus41",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.5",
+      "id": "claudeopus45",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.6",
+      "id": "claudeopus46",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 3.5 v2",
+      "id": "claudesonnet35v2",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 3.7",
+      "id": "claudesonnet37",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 4",
+      "id": "claudesonnet4",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 4.5",
+      "id": "claudesonnet45",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 4.6",
+      "id": "claudesonnet46",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Gemini 2.5 Flash",
+      "id": "gemini25flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "display_name": "Gemini 2.5 Pro",
+      "id": "gemini25pro",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "display_name": "GPT-3.5 Turbo",
+      "id": "gpt35",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-3.5 Turbo 16K",
+      "id": "gpt35large",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4",
+      "id": "gpt4",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4.1",
+      "id": "gpt41",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4.1-mini",
+      "id": "gpt41mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4.1-nano",
+      "id": "gpt41nano",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4 32K",
+      "id": "gpt4large",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4o",
+      "id": "gpt4o",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4o Latest",
+      "id": "gpt4olatest",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-4 Turbo",
+      "id": "gpt4turbo",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-5",
+      "id": "gpt5",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-5.1",
+      "id": "gpt51",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-5.2",
+      "id": "gpt52",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-5.4",
+      "id": "gpt54",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-5-mini",
+      "id": "gpt5mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "GPT-5-nano",
+      "id": "gpt5nano",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "o1",
+      "id": "gpto1",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "o1-mini",
+      "id": "gpto1mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "o1-preview",
+      "id": "gpto1preview",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "o3",
+      "id": "gpto3",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "o3-mini",
+      "id": "gpto3mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "o4-mini",
+      "id": "gpto4mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "Text Embedding 3 Large",
+      "id": "v3large",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "display_name": "Text Embedding 3 Small",
+      "id": "v3small",
+      "object": "model",
+      "owned_by": "openai"
+    }
+  ]
+}

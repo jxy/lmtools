@@ -174,6 +174,8 @@ func SourceProvider(meta CaseMeta) string {
 
 func PrimaryEndpoint(meta CaseMeta) string {
 	switch {
+	case StringSliceContains(meta.Kinds, "models"):
+		return "/v1/models"
 	case StringSliceContains(meta.Kinds, "stream"):
 		if meta.StreamSource != "" && meta.StreamTarget != "" {
 			return meta.StreamSource + "->" + meta.StreamTarget + " stream"

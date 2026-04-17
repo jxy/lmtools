@@ -5,7 +5,7 @@
         "parts": [
           {
             "text": "Hello. How can I help you today?",
-            "thoughtSignature": "EjQKMgEMOdbHd9dzBGRz3XRzgcle327jvGqHbJT4paJArYY/VNAY5WN2K/RnRaUkONKmnJJY"
+            "thoughtSignature": "EjQKMgEMOdbH5wnksIzmxm3DEXUqVu1x49Kxkz/41Gko2deDg2y4zK8EP1Gw2UcNVNZXRUhG"
           }
         ],
         "role": "model"
@@ -15,7 +15,7 @@
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "YDDhae6kI5iZ9MoP3NO2WQ",
+  "responseId": "nXbiaanfLu7U1MkP58GFwAM",
   "usageMetadata": {
     "candidatesTokenCount": 9,
     "promptTokenCount": 10,

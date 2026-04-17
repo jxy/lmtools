@@ -12,14 +12,14 @@ Requires Go 1.21+
 make build   # builds ./bin/lmc and ./bin/apiproxy
 ```
 
-For the shared API request/response fixture corpus used by proxy tests:
+For the shared API request/response/models fixture corpus used by proxy tests:
 
 ```bash
 make verify-fixtures
 bash ./scripts/api_fixtures_compare_all.sh -target argo-openai
 ```
 
-This validates the checked-in fixture files and runs targeted fixture-driven tests. Use the compare script for non-mutating live drift or parity checks. For `argo-openai*` and `argo-anthropic*`, compare defaults to the matching upstream baseline unless you override it with `--against`.
+This validates the checked-in fixture files and runs targeted fixture-driven tests for request rendering, models parsing, response parsing, and stream translation. Use the compare script for non-mutating live drift or parity checks. For `argo-openai*` and `argo-anthropic*`, compare defaults to the matching upstream baseline unless you override it with `--against`.
 
 ## Quick Start
 

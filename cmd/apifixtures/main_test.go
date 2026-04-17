@@ -235,6 +235,44 @@ func TestRefreshDerivedArtifactsWritesParsedResponse(t *testing.T) {
 	}
 }
 
+func TestRefreshDerivedArtifactsWritesParsedModels(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", "models-openai", "expected")
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	meta := apifixtures.CaseMeta{
+		ID:       "models-openai",
+		Kinds:    []string{"models"},
+		Provider: "openai",
+	}
+	target := targetConfig{ID: "openai", Provider: "openai"}
+	data := []byte(`{
+  "object": "list",
+  "data": [
+    {
+      "id": "gpt-5",
+      "object": "model",
+      "created": 1700000000,
+      "owned_by": "openai"
+    }
+  ]
+}`)
+
+	if err := refreshDerivedArtifacts(root, meta, target, data); err != nil {
+		t.Fatalf("refreshDerivedArtifacts() error = %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(caseDir, "parsed.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(parsed.json) error = %v", err)
+	}
+	if !strings.Contains(string(got), `"gpt-5"`) || strings.Contains(string(got), `"created"`) {
+		t.Fatalf("parsed.json = %s, want deterministic model projection without created", got)
+	}
+}
+
 func TestLoadCaptureRequestBodyEnablesOpenAIStreaming(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", "fixture-case", "expected", "render")
@@ -546,6 +584,63 @@ func TestEndpointForTargetAcceptsRootOrLegacyArgoBase(t *testing.T) {
 		}
 		if got.legacyStream != "https://apps.inside.anl.gov/argoapi/api/v1/resource/streamchat/" {
 			t.Fatalf("legacyStream = %q", got.legacyStream)
+		}
+	})
+}
+
+func TestModelsEndpointForTarget(t *testing.T) {
+	t.Run("openai", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "openai-key")
+		url, headers, err := modelsEndpointForTarget(targetConfig{ID: "openai", Provider: "openai"})
+		if err != nil {
+			t.Fatalf("modelsEndpointForTarget() error = %v", err)
+		}
+		if got, want := url, "https://api.openai.com/v1/models"; got != want {
+			t.Fatalf("url = %q, want %q", got, want)
+		}
+		if got := headers["Authorization"]; got != "Bearer openai-key" {
+			t.Fatalf("Authorization = %q, want bearer OPENAI_API_KEY", got)
+		}
+	})
+
+	t.Run("anthropic", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+		url, headers, err := modelsEndpointForTarget(targetConfig{ID: "anthropic", Provider: "anthropic"})
+		if err != nil {
+			t.Fatalf("modelsEndpointForTarget() error = %v", err)
+		}
+		if got, want := url, "https://api.anthropic.com/v1/models"; got != want {
+			t.Fatalf("url = %q, want %q", got, want)
+		}
+		if got := headers["x-api-key"]; got != "anthropic-key" {
+			t.Fatalf("x-api-key = %q, want ANTHROPIC_API_KEY", got)
+		}
+	})
+
+	t.Run("google", func(t *testing.T) {
+		t.Setenv("GOOGLE_API_KEY", "google-key")
+		url, headers, err := modelsEndpointForTarget(targetConfig{ID: "google", Provider: "google"})
+		if err != nil {
+			t.Fatalf("modelsEndpointForTarget() error = %v", err)
+		}
+		if got, want := url, "https://generativelanguage.googleapis.com/v1beta/models"; got != want {
+			t.Fatalf("url = %q, want %q", got, want)
+		}
+		if got := headers["x-goog-api-key"]; got != "google-key" {
+			t.Fatalf("x-goog-api-key = %q, want GOOGLE_API_KEY", got)
+		}
+	})
+
+	t.Run("argo", func(t *testing.T) {
+		url, headers, err := modelsEndpointForTarget(targetConfig{ID: "argo", Provider: "argo"})
+		if err != nil {
+			t.Fatalf("modelsEndpointForTarget() error = %v", err)
+		}
+		if got, want := url, "https://apps.inside.anl.gov/argoapi/api/v1/models/"; got != want {
+			t.Fatalf("url = %q, want %q", got, want)
+		}
+		if len(headers) != 0 {
+			t.Fatalf("headers = %v, want none", headers)
 		}
 	})
 }

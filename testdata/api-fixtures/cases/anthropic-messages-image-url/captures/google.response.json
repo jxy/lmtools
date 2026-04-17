@@ -4,8 +4,8 @@
       "content": {
         "parts": [
           {
-            "text": "The image shows a **carpenter ant**, specifically of the species ***Camponotus flavomarginatus***.\n\nKey features visible in this photograph include:\n*   **Distinctive Coloration:** The ant has a dark, reddish-brown body with a yellowish-orange band or margin around the edge of its abdomen (gaster).\n*   **Anatomy:** It displays the classic ant body structure: a head with prominent antennae, a thorax, and a segmented abdomen.\n*   **Surface:** The ant is resting on what appears to be a textured, weathered wooden surface, which is typical habitat for many carpenter ant species that nest in wood.",
-            "thoughtSignature": "EjQKMgEMOdbHYSgFKKPvQyLwCk34HMXbFlguFsGfpPyKnIM2NJFC8yEQIfpPFg+1CCgLeJA9"
+            "text": "The image shows a species of ant, specifically ***Camponotus flavomarginatus***.\n\nThese ants are part of the *Camponotus* genus, commonly known as carpenter ants. This particular species is characterized by its distinct reddish-brown body and the yellowish-gold margins on the edges of its abdominal segments, which give it its name (*flavomarginatus* translates roughly to \"yellow-margined\").",
+            "thoughtSignature": "EjQKMgEMOdbH5yBP4ozwNrbctNitUQKF8wkn/P+LEVqJceUn3IcNwzf70hNWB9PkhC/cKy9z"
           }
         ],
         "role": "model"
@@ -15,9 +15,9 @@
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "XzDhaZWvFZOa9MoPzOjrmQ4",
+  "responseId": "MXbiadXdCvKBjMcP94LXyAc",
   "usageMetadata": {
-    "candidatesTokenCount": 134,
+    "candidatesTokenCount": 85,
     "promptTokenCount": 41,
     "promptTokensDetails": [
       {
@@ -25,6 +25,6 @@
         "tokenCount": 41
       }
     ],
-    "totalTokenCount": 175
+    "totalTokenCount": 126
   }
 }

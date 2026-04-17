@@ -2,11 +2,11 @@
   "content": [
     {
       "citations": null,
-      "text": "# Large Language Models (LLMs)\n\nLLMs are AI systems trained on vast amounts of text data to predict and generate human language. Here are the key points:\n\n## How they work\n- **Training**: They learn patterns from enormous text datasets (books, websites, articles, etc.)\n- **Prediction**: They work by predicting the next word in a sequence, token by token\n- **Neural networks**: Built on deep learning architecture (specifically transformer networks)\n\n## Capabilities\n- Answer questions and explain concepts\n- Write creative content (stories, code, essays)\n- Translate between languages\n- Summarize information\n- Have conversations\n\n## Limitations\n- Don't truly \"understand\" in a human sense—they recognize patterns\n- Can hallucinate or confidently state false information\n- Have a knowledge cutoff date\n- Can reflect biases from training data\n- Limited reasoning for complex multi-step problems\n\n## Examples\n- GPT models (like me, Claude)\n- ChatGPT\n- Gemini\n- LLaMA\n\n## Why they're useful\nThey're versatile tools that can help with writing, coding, learning, brainstorming, and many other tasks—but they work best when you verify important information and use critical judgment about their outputs.\n\nIs there a specific aspect of LLMs you'd like to explore further?",
+      "text": "# Large Language Models (LLMs)\n\nLLMs are AI systems trained on vast amounts of text data to understand and generate human language. Here's a breakdown:\n\n## How they work\n- **Training**: They learn patterns from huge datasets (billions of words) by predicting the next word in sequences\n- **Pattern recognition**: They develop understanding of grammar, facts, reasoning, and language structure\n- **Generation**: When given a prompt, they generate responses one word/token at a time based on learned patterns\n\n## Key capabilities\n- Answering questions and explaining concepts\n- Writing and creative tasks\n- Code generation and debugging\n- Translation and summarization\n- Reasoning through problems\n\n## Important limitations\n- **No true understanding**: They work from statistical patterns, not genuine comprehension\n- **Hallucinations**: They can sound confident while stating false information\n- **Knowledge cutoff**: Training data has a date limit, so they don't know recent events\n- **Reasoning limitations**: Complex logical problems can be challenging\n- **Context window**: They can only \"see\" so much text at once\n\n## Examples\nPopular LLMs include GPT-4, Claude (that's me!), Llama, and others.\n\nDoes this help? Any specific aspect you'd like me to dive deeper into?",
       "type": "text"
     }
   ],
-  "id": "msg_vrtx_01VYkTqRu5duzGSABQ7LeKwx",
+  "id": "msg_vrtx_01B1vjzCWbpQa7UfZr4KUJaj",
   "model": "claude-haiku-4-5-20251001",
   "role": "assistant",
   "stop_details": null,
@@ -21,7 +21,7 @@
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 0,
     "input_tokens": 27,
-    "output_tokens": 297,
+    "output_tokens": 280,
     "server_tool_use": null,
     "service_tier": null
   }

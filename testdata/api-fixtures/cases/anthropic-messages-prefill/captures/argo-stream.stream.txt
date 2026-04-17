@@ -1,7 +1,3 @@
-C) Formicidae.
+The correct choice is (C) Formicidae.
 
-Formicidae is the scientific family name for ants in Latin taxonomic classification.
-
-To clarify the other options:
-- (A) Apoidea refers to bees and some wasps
-- (B) Rhopalocera refers to butterflies
+Reason: Formicidae is the taxonomic family that includes all ants. (A) Apoidea refers to bees and some wasps, (B) Rhopalocera is an old term for butterflies. Note: the singular Latin word for ant is formica, while Formicidae is the family name.

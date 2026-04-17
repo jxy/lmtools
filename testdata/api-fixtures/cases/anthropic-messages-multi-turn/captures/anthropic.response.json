@@ -1,11 +1,11 @@
 {
   "content": [
     {
-      "text": "# Large Language Models (LLMs)\n\nLLMs are AI systems trained on vast amounts of text data to predict and generate human language. Here are the key aspects:\n\n## How they work\n- **Training**: They learn patterns in text by predicting the next word in a sequence (billions of times)\n- **Neural networks**: Built on deep learning architecture with many layers that process information\n- **Parameters**: Mathematical weights that encode learned knowledge (modern LLMs have billions to trillions)\n\n## Key capabilities\n- **Text generation**: Writing essays, code, creative content, etc.\n- **Question answering**: Responding to queries based on training knowledge\n- **Reasoning**: Working through multi-step problems\n- **Translation, summarization, analysis**: Various language tasks\n\n## Important limitations\n- **Training data cutoff**: Knowledge has a fixed date; they don't learn in real-time\n- **Not truly reasoning**: They're pattern-matching at scale, not thinking like humans\n- **Hallucinations**: Can confidently produce false information\n- **No genuine understanding**: They process statistics about language, not meaning itself\n- **Context window**: Can only consider a limited amount of text at once\n\n## Real-world examples\nMe (Claude), ChatGPT, Gemini, and many others\n\nIs there a particular aspect of LLMs you'd like to explore further?",
+      "text": "# Large Language Models (LLMs)\n\nLLMs are AI systems trained on vast amounts of text data to predict and generate human language. Here are the key aspects:\n\n## How they work\n- **Training**: Models learn patterns from billions of words by predicting the next word in sequences (repeatedly)\n- **Architecture**: Most modern LLMs use \"transformer\" neural networks, which excel at understanding relationships between distant words\n- **Generation**: When you give them a prompt, they generate responses one word/token at a time, based on probability distributions learned during training\n\n## Key characteristics\n- **Pattern recognition**: They've absorbed linguistic patterns, facts, reasoning styles, and knowledge from their training data\n- **No true understanding**: They operate on statistical patterns rather than genuine comprehension (though the line is philosophically fuzzy)\n- **Context window**: They can only \"see\" a limited window of text at once (though this is expanding)\n\n## Abilities \u0026 limitations\n- **Good at**: Writing, analysis, coding, answering questions, creative tasks\n- **Limitations**: Can hallucinate false information, struggle with very recent events, have inconsistent reasoning, lack true common sense\n\n## Notable examples\n- GPT-4, Claude (me), Gemini, Llama, Mistral\n\nIs there a particular aspect you'd like me to dive deeper into?",
       "type": "text"
     }
   ],
-  "id": "msg_01JuiMza7crACgp6Vfch1kx2",
+  "id": "msg_01WLCweyQyw8dw5Jyuybsb55",
   "model": "claude-haiku-4-5-20251001",
   "role": "assistant",
   "stop_details": null,
@@ -21,7 +21,7 @@
     "cache_read_input_tokens": 0,
     "inference_geo": "not_available",
     "input_tokens": 27,
-    "output_tokens": 299,
+    "output_tokens": 294,
     "service_tier": "standard"
   }
 }

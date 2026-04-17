@@ -1,0 +1,39 @@
+{
+  "case_id": "models-google",
+  "target": "google",
+  "url": "https://generativelanguage.googleapis.com/v1beta/models",
+  "status_code": 200,
+  "content_type": "application/json; charset=UTF-8",
+  "captured_at": "2026-04-17T13:08:24-05:00",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+    ],
+    "Content-Type": [
+      "application/json; charset=UTF-8"
+    ],
+    "Date": [
+      "Fri, 17 Apr 2026 18:08:24 GMT"
+    ],
+    "Server": [
+      "scaffolding on HTTPServer2"
+    ],
+    "Server-Timing": [
+      "gfet4t7; dur=77"
+    ],
+    "Vary": [
+      "Origin",
+      "X-Origin",
+      "Referer"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Frame-Options": [
+      "SAMEORIGIN"
+    ],
+    "X-Xss-Protection": [
+      "0"
+    ]
+  }
+}

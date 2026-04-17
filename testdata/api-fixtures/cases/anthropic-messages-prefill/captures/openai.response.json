@@ -5,14 +5,14 @@
       "index": 0,
       "message": {
         "annotations": [],
-        "content": "**(C) Formicidae** — this is Latin (scientific) for ants.",
+        "content": "The correct Latin for **“ant”** is **(C) Formicidae**.",
         "refusal": null,
         "role": "assistant"
       }
     }
   ],
-  "created": 1776362807,
-  "id": "chatcmpl-DVLOxviMekAtHbO6KghDuQ5xBP22W",
+  "created": 1776449029,
+  "id": "chatcmpl-DVhpdIreYVU4sQEzQdwSEu681LvT0",
   "model": "gpt-5.4-nano-2026-03-17",
   "object": "chat.completion",
   "service_tier": "default",

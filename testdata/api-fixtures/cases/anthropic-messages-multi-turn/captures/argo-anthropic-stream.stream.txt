@@ -1,0 +1,384 @@
+event: message_start
+data: {"message": {"id": "msg_vrtx_01YBcHf2ty4upsafANmg8cke", "content": [], "model": "claude-haiku-4-5-20251001", "role": "assistant", "stop_reason": null, "stop_sequence": null, "type": "message", "usage": {"cache_creation": {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0}, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "input_tokens": 27, "output_tokens": 1, "server_tool_use": null, "service_tier": null}, "stop_details": null}, "type": "message_start"}
+
+event: content_block_start
+data: {"content_block": {"citations": null, "text": "", "type": "text"}, "index": 0, "type": "content_block_start"}
+
+event: content_block_delta
+data: {"delta": {"text": "#", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " Large", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " Language Models (LLMs)", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n\nLLMs are AI", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " systems trained", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " on vast", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " amounts of text data to predict", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " and generate human-like language", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ". Here are", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " the key aspects", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ":\n\n## How", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " They", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " Work\n- **Training", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "**: Built", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " on neural", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " networks (", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "specifically", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " transform", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "ers) that learn", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " patterns from billions", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " of words", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- **Prediction", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "**: They", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " work", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " by pred", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "icting the most", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " likely next word", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " or token based on context\n- **", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "Generation**: By", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " repeatedly", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " predicting the", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " next word, they can", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " write", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " coherent essays", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ", answer", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " questions, code", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ", and more", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n\n## Key Characteristics", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- **Scale", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "**: Trained on enormous", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " datasets (hundreds", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " of billions of tokens", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ")\n- **Parameters", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "**: Contains", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " millions", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " to billions of learned", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " weights", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " that", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " capture", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " language", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " patterns\n- **Context", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " window", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "**: Can", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " only", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " \"", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "see\" a", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " limited amount", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " of previous", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " text", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " at", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " once (", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "though", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " this", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " is", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " expanding", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ")\n\n## What", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " They Can Do\n- Answer", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " questions and explain", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " concepts\n- Write creative content", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- Help with coding", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " and technical problems", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- Summar", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "ize and", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " analyze text", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- Have", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " conversations", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n\n## Important", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " Limitations\n- They", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " don't truly", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " \"understand\" in", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " a", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " human sense\u2014", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "they pattern", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "-match", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- Can", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " confid", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "ently state", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " incorrect", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " information (\"", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "hall", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "ucinations\")\n- Have knowledge", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " cutoffs and", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " can't", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " access", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " real-time information\n-", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " Reflect", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " bi", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "ases present in training", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " data", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- No", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " true reasoning", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " or common", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " sense\n\nI", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "'m", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " an", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " L", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "LM myself", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " (", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "Claude,", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " made", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " by Anthropic), so", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " I'm", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " an", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " example", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " of what", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " we", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "'re", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " discussing", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "!", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n\nAnything", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " specific about", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " LLMs you'd like to know", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " more about?", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_stop
+data: {"index": 0, "type": "content_block_stop"}
+
+event: message_delta
+data: {"delta": {"stop_reason": "end_turn", "stop_sequence": null, "stop_details": null}, "type": "message_delta", "usage": {"cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "input_tokens": 27, "output_tokens": 328, "server_tool_use": null}}
+
+event: message_stop
+data: {"type": "message_stop"}
+

@@ -105,17 +105,20 @@ func TestParseArgoModels(t *testing.T) {
 	server := NewMinimalTestServer(t, &Config{})
 
 	tests := []struct {
-		name          string
-		input         string
-		expectedCount int
-		expectedIDs   []string
-		expectError   bool
+		name           string
+		input          string
+		expectedCount  int
+		expectedIDs    []string
+		expectedOwner  string
+		expectedOwners []string
+		expectError    bool
 	}{
 		{
 			name:          "Array format",
 			input:         `["gpt-4", "gpt-3.5-turbo", "claude-3-opus"]`,
 			expectedCount: 3,
 			expectedIDs:   []string{"gpt-4", "gpt-3.5-turbo", "claude-3-opus"},
+			expectedOwner: "argo",
 			expectError:   false,
 		},
 		{
@@ -123,6 +126,7 @@ func TestParseArgoModels(t *testing.T) {
 			input:         `{"models": ["model1", "model2"]}`,
 			expectedCount: 2,
 			expectedIDs:   []string{"model1", "model2"},
+			expectedOwner: "argo",
 			expectError:   false,
 		},
 		{
@@ -135,6 +139,7 @@ func TestParseArgoModels(t *testing.T) {
 			}`,
 			expectedCount: 2,
 			expectedIDs:   []string{"model-a", "model-b"},
+			expectedOwner: "argo",
 			expectError:   false,
 		},
 		{
@@ -147,7 +152,21 @@ func TestParseArgoModels(t *testing.T) {
 			}`,
 			expectedCount: 2,
 			expectedIDs:   []string{"model-x", "model-y"},
+			expectedOwner: "argo",
 			expectError:   false,
+		},
+		{
+			name: "Live Argo format with internal_id and upstream owner",
+			input: `{
+				"data": [
+					{"id": "GPT-5-mini", "internal_id": "gpt5mini", "owned_by": "openai"},
+					{"id": "Claude Haiku 4.5", "internal_id": "claudehaiku45", "owned_by": "anthropic"}
+				]
+			}`,
+			expectedCount:  2,
+			expectedIDs:    []string{"gpt5mini", "claudehaiku45"},
+			expectedOwners: []string{"openai", "anthropic"},
+			expectError:    false,
 		},
 		{
 			name:        "Invalid JSON",
@@ -191,8 +210,12 @@ func TestParseArgoModels(t *testing.T) {
 				if models[i].Object != "model" {
 					t.Errorf("Expected object type 'model', got %q", models[i].Object)
 				}
-				if models[i].OwnedBy != "argo" {
-					t.Errorf("Expected owned_by 'argo', got %q", models[i].OwnedBy)
+				wantOwner := tt.expectedOwner
+				if i < len(tt.expectedOwners) {
+					wantOwner = tt.expectedOwners[i]
+				}
+				if models[i].OwnedBy != wantOwner {
+					t.Errorf("Expected owned_by %q, got %q", wantOwner, models[i].OwnedBy)
 				}
 			}
 		})

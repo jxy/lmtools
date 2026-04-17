@@ -1,0 +1,129 @@
+event: message_start
+data: {"message": {"id": "msg_vrtx_019URg6QnHTBCYemX4e1rbjr", "content": [], "model": "claude-haiku-4-5-20251001", "role": "assistant", "stop_reason": null, "stop_sequence": null, "type": "message", "usage": {"cache_creation": {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0}, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "input_tokens": 19, "output_tokens": 1, "server_tool_use": null, "service_tier": null}, "stop_details": null}, "type": "message_start"}
+
+event: content_block_start
+data: {"content_block": {"citations": null, "text": "", "type": "text"}, "index": 0, "type": "content_block_start"}
+
+event: content_block_delta
+data: {"delta": {"text": "The", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " image appears", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " to show a", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " very", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " small", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ", dark dot", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " or sp", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "eck against", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " a light background. It", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "'s", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " difficult to determine", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " exactly what it is due", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " to the minimal", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " detail", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " and size", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ", but it could", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " be:\n\n-", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " A dust", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " particle", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- A pixel", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " artifact", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "\n- A small mark", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " or b", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": "lemish\n- A scanning", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " or", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " image", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " compression", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " artifact\n\nIf", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " you have", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " more", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " context about where this image came", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " from or what it's", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " supposed", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " to represent", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ", I'd be happy to help identify", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " it", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": " more accurately", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_delta
+data: {"delta": {"text": ".", "type": "text_delta"}, "index": 0, "type": "content_block_delta"}
+
+event: content_block_stop
+data: {"index": 0, "type": "content_block_stop"}
+
+event: message_delta
+data: {"delta": {"stop_reason": "end_turn", "stop_sequence": null, "stop_details": null}, "type": "message_delta", "usage": {"cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "input_tokens": 19, "output_tokens": 102, "server_tool_use": null}}
+
+event: message_stop
+data: {"type": "message_stop"}
+

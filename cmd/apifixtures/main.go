@@ -10,6 +10,7 @@ import (
 	"io"
 	"lmtools/internal/apifixtures"
 	"lmtools/internal/core"
+	"lmtools/internal/modelcatalog"
 	"lmtools/internal/providers"
 	"lmtools/internal/retry"
 	"math"
@@ -191,7 +192,7 @@ func runCaptureAll(args []string) error {
 
 		targets := meta.CaptureTargets
 		if *targetID != "" {
-			if !apifixtures.StringSliceContains(meta.Kinds, "request") {
+			if !apifixtures.StringSliceContains(meta.Kinds, "request") && !apifixtures.StringSliceContains(meta.Kinds, "models") {
 				continue
 			}
 			if !apifixtures.StringSliceContains(meta.CaptureTargets, *targetID) {
@@ -211,7 +212,7 @@ func runCaptureAll(args []string) error {
 		return fmt.Errorf("case %q not found in fixture manifest", *caseID)
 	}
 	if *provider != "" && !capturedAny {
-		return fmt.Errorf("no capture-capable request fixtures found for provider %q", *provider)
+		return fmt.Errorf("no capture-capable fixtures found for provider %q", *provider)
 	}
 	if *caseID != "" && *targetID != "" && !capturedAny {
 		return fmt.Errorf("case %q does not support capture target %q", *caseID, *targetID)
@@ -234,9 +235,20 @@ func captureCase(root, caseID, targetID string) error {
 		return fmt.Errorf("case %q does not support capture target %q", caseID, targetID)
 	}
 
-	body, err := loadCaptureRequestBody(root, caseID, meta, target)
+	if apifixtures.StringSliceContains(meta.Kinds, "models") {
+		return captureModelsCase(root, meta, target)
+	}
+	if !apifixtures.StringSliceContains(meta.Kinds, "request") {
+		return fmt.Errorf("case %q is not capture-capable", caseID)
+	}
+
+	return captureRequestCase(root, meta, target)
+}
+
+func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
+	body, err := loadCaptureRequestBody(root, meta.ID, meta, target)
 	if err != nil {
-		return fmt.Errorf("read %s body for %s: %w", target.ID, caseID, err)
+		return fmt.Errorf("read %s body for %s: %w", target.ID, meta.ID, err)
 	}
 
 	url, headers, err := endpointForTarget(target, meta)
@@ -260,7 +272,7 @@ func captureCase(root, caseID, targetID string) error {
 	defer resp.Body.Close()
 
 	metaOut := captureMetadata{
-		CaseID:         caseID,
+		CaseID:         meta.ID,
 		Target:         target.ID,
 		URL:            url,
 		StatusCode:     resp.StatusCode,
@@ -269,7 +281,7 @@ func captureCase(root, caseID, targetID string) error {
 		ResponseHeader: resp.Header,
 	}
 
-	capturesDir := filepath.Join(apifixtures.CaseDir(root, caseID), "captures")
+	capturesDir := filepath.Join(apifixtures.CaseDir(root, meta.ID), "captures")
 	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
 		return err
 	}
@@ -287,7 +299,7 @@ func captureCase(root, caseID, targetID string) error {
 			return err
 		}
 	} else {
-		if err := apifixtures.CanonicalizeToFile(root, caseID, filepath.Join("captures", target.ID+".response.json"), data); err != nil {
+		if err := apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("captures", target.ID+".response.json"), data); err != nil {
 			return err
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -297,7 +309,66 @@ func captureCase(root, caseID, targetID string) error {
 		}
 	}
 
-	fmt.Printf("captured %s -> %s (%d)\n", caseID, target.ID, resp.StatusCode)
+	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
+	return nil
+}
+
+func captureModelsCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
+	if target.Stream {
+		return fmt.Errorf("models capture target %q must not be a stream target", target.ID)
+	}
+
+	url, headers, err := modelsEndpointForTarget(target)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, data, err := doCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, nil, targetHost(target), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	metaOut := captureMetadata{
+		CaseID:         meta.ID,
+		Target:         target.ID,
+		URL:            url,
+		StatusCode:     resp.StatusCode,
+		ContentType:    resp.Header.Get("Content-Type"),
+		CapturedAt:     time.Now().Format(time.RFC3339),
+		ResponseHeader: resp.Header,
+	}
+
+	capturesDir := filepath.Join(apifixtures.CaseDir(root, meta.ID), "captures")
+	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
+		return err
+	}
+
+	metaBytes, err := json.MarshalIndent(metaOut, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".meta.json"), append(metaBytes, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("captures", target.ID+".response.json"), data); err != nil {
+		return err
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := refreshDerivedArtifacts(root, meta, target, data); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
 	return nil
 }
 
@@ -455,6 +526,18 @@ func extractGoogleRetryDelay(body []byte) time.Duration {
 func refreshDerivedArtifacts(root string, meta apifixtures.CaseMeta, target targetConfig, data []byte) error {
 	if target.Stream {
 		return nil
+	}
+	if apifixtures.StringSliceContains(meta.Kinds, "models") && meta.Provider == target.Provider {
+		items, err := modelcatalog.Parse(meta.Provider, data)
+		if err != nil {
+			return fmt.Errorf("refresh parsed models for %s: %w", meta.ID, err)
+		}
+
+		projectedBytes, err := json.Marshal(modelcatalog.Project(items))
+		if err != nil {
+			return err
+		}
+		return apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("expected", "parsed.json"), projectedBytes)
 	}
 	if !apifixtures.StringSliceContains(meta.Kinds, "response") {
 		return nil
@@ -621,6 +704,43 @@ func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, 
 	}
 
 	return "", nil, fmt.Errorf("unsupported provider %q", target.Provider)
+}
+
+func modelsEndpointForTarget(target targetConfig) (string, map[string]string, error) {
+	headers := map[string]string{}
+
+	switch target.Provider {
+	case "openai":
+		apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+		if apiKey == "" {
+			return "", nil, fmt.Errorf("OPENAI_API_KEY is required for target %s", target.ID)
+		}
+		headers["Authorization"] = "Bearer " + apiKey
+		url, err := providers.ResolveModelsURL("openai", envOrDefault("OPENAI_API_FIXTURE_URL", defaultOpenAIURL), "")
+		return url, headers, err
+	case "anthropic":
+		apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+		if apiKey == "" {
+			return "", nil, fmt.Errorf("ANTHROPIC_API_KEY is required for target %s", target.ID)
+		}
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
+		url, err := providers.ResolveModelsURL("anthropic", envOrDefault("ANTHROPIC_API_FIXTURE_URL", defaultAnthropicURL), "")
+		return url, headers, err
+	case "google":
+		apiKey := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY"))
+		if apiKey == "" {
+			return "", nil, fmt.Errorf("GOOGLE_API_KEY is required for target %s", target.ID)
+		}
+		headers["x-goog-api-key"] = apiKey
+		url, err := providers.ResolveModelsURL("google", envOrDefault("GOOGLE_API_FIXTURE_URL", defaultGoogleBase), "")
+		return url, headers, err
+	case "argo":
+		url, err := providers.ResolveModelsURL("argo", envOrDefault("ARGO_API_FIXTURE_BASE_URL", defaultArgoBase), "")
+		return url, headers, err
+	default:
+		return "", nil, fmt.Errorf("models capture is not supported for provider %q", target.Provider)
+	}
 }
 
 type resolvedArgoFixtureEndpoints struct {

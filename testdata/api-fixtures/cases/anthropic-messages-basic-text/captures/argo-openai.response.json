@@ -33,7 +33,7 @@
       "message": {
         "annotations": [],
         "audio": null,
-        "content": "Hi — nice to meet you. How can I help today? I can answer questions, draft or edit text, brainstorm, summarize, tutor, debug code, make plans, or something else.",
+        "content": "Hello! How can I help you today?",
         "function_call": null,
         "refusal": null,
         "role": "assistant",
@@ -41,8 +41,8 @@
       }
     }
   ],
-  "created": 1776444795,
-  "id": "chatcmpl-DVgjLBBCTOZmvbSJr9txSYI54ToTc",
+  "created": 1776448871,
+  "id": "chatcmpl-DVhn5ktpeSX0xdPvtQobT77aUGsyi",
   "model": "gpt-5-mini-2025-08-07",
   "object": "chat.completion",
   "prompt_filter_results": [
@@ -75,11 +75,11 @@
   "service_tier": "default",
   "system_fingerprint": null,
   "usage": {
-    "completion_tokens": 113,
+    "completion_tokens": 19,
     "completion_tokens_details": {
       "accepted_prediction_tokens": 0,
       "audio_tokens": 0,
-      "reasoning_tokens": 64,
+      "reasoning_tokens": 0,
       "rejected_prediction_tokens": 0
     },
     "prompt_tokens": 9,
@@ -87,6 +87,6 @@
       "audio_tokens": 0,
       "cached_tokens": 0
     },
-    "total_tokens": 122
+    "total_tokens": 28
   }
 }

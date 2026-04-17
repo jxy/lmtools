@@ -1,0 +1,11 @@
+{
+  "id": "models-openai",
+  "description": "OpenAI v1/models response and parsed model catalog projection",
+  "kinds": [
+    "models"
+  ],
+  "provider": "openai",
+  "capture_targets": [
+    "openai"
+  ]
+}

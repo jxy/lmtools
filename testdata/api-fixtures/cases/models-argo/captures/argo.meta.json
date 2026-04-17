@@ -1,0 +1,25 @@
+{
+  "case_id": "models-argo",
+  "target": "argo",
+  "url": "https://apps.inside.anl.gov/argoapi/api/v1/models/",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-17T13:08:24-05:00",
+  "response_headers": {
+    "Connection": [
+      "keep-alive"
+    ],
+    "Content-Length": [
+      "4095"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Fri, 17 Apr 2026 18:08:24 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains"
+    ]
+  }
+}

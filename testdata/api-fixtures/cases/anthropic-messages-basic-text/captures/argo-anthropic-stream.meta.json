@@ -1,0 +1,28 @@
+{
+  "case_id": "anthropic-messages-basic-text",
+  "target": "argo-anthropic-stream",
+  "url": "https://apps.inside.anl.gov/argoapi/v1/messages",
+  "status_code": 200,
+  "content_type": "text/event-stream; charset=utf-8",
+  "captured_at": "2026-04-17T13:01:20-05:00",
+  "response_headers": {
+    "Cache-Control": [
+      "no-cache"
+    ],
+    "Connection": [
+      "keep-alive"
+    ],
+    "Content-Type": [
+      "text/event-stream; charset=utf-8"
+    ],
+    "Date": [
+      "Fri, 17 Apr 2026 18:01:17 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains"
+    ],
+    "Vary": [
+      "Accept-Encoding"
+    ]
+  }
+}

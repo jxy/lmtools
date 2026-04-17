@@ -1,0 +1,11 @@
+{
+  "id": "models-google",
+  "description": "Google models endpoint response and parsed model catalog projection",
+  "kinds": [
+    "models"
+  ],
+  "provider": "google",
+  "capture_targets": [
+    "google"
+  ]
+}

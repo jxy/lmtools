@@ -83,6 +83,34 @@
       ]
     },
     {
+      "id": "models-openai",
+      "description": "OpenAI v1/models response and parsed model catalog projection",
+      "kinds": [
+        "models"
+      ]
+    },
+    {
+      "id": "models-anthropic",
+      "description": "Anthropic v1/models response and parsed model catalog projection",
+      "kinds": [
+        "models"
+      ]
+    },
+    {
+      "id": "models-google",
+      "description": "Google models endpoint response and parsed model catalog projection",
+      "kinds": [
+        "models"
+      ]
+    },
+    {
+      "id": "models-argo",
+      "description": "Argo models endpoint response and parsed model catalog projection",
+      "kinds": [
+        "models"
+      ]
+    },
+    {
       "id": "stream-openai-to-anthropic",
       "description": "OpenAI upstream stream projected to Anthropic events",
       "kinds": [

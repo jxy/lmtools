@@ -1,0 +1,11 @@
+{
+  "id": "models-anthropic",
+  "description": "Anthropic v1/models response and parsed model catalog projection",
+  "kinds": [
+    "models"
+  ],
+  "provider": "anthropic",
+  "capture_targets": [
+    "anthropic"
+  ]
+}

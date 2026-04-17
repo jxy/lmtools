@@ -1,0 +1,64 @@
+{
+  "models": [
+    {
+      "display_name": "Claude Haiku 3",
+      "id": "claude-3-haiku-20240307",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Haiku 4.5",
+      "id": "claude-haiku-4-5-20251001",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.1",
+      "id": "claude-opus-4-1-20250805",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4",
+      "id": "claude-opus-4-20250514",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.5",
+      "id": "claude-opus-4-5-20251101",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.6",
+      "id": "claude-opus-4-6",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Opus 4.7",
+      "id": "claude-opus-4-7",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 4",
+      "id": "claude-sonnet-4-20250514",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 4.5",
+      "id": "claude-sonnet-4-5-20250929",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "display_name": "Claude Sonnet 4.6",
+      "id": "claude-sonnet-4-6",
+      "object": "model",
+      "owned_by": "anthropic"
+    }
+  ]
+}

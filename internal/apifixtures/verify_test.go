@@ -262,6 +262,86 @@ func TestVerifySuiteCheckCapturesSupportsArgoHostedTargets(t *testing.T) {
 	}
 }
 
+func TestVerifySuiteSupportsModelsCases(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "models-openai")
+	if err := os.MkdirAll(filepath.Join(caseDir, "captures"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(captures) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(caseDir, "expected"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(expected) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "models-openai",
+      "description": "OpenAI models endpoint capture",
+      "kinds": ["models"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "models-openai",
+  "description": "OpenAI models endpoint capture",
+  "kinds": ["models"],
+  "provider": "openai",
+  "capture_targets": ["openai"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai.response.json"), `{"object":"list","data":[{"id":"gpt-5","object":"model","created":1,"owned_by":"openai"}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "parsed.json"), `{"models":[{"id":"gpt-5","object":"model","owned_by":"openai"}]}`)
+
+	if err := VerifySuite(root, VerifyOptions{}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteRejectsStreamTargetForModelsCase(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "models-openai")
+	if err := os.MkdirAll(filepath.Join(caseDir, "captures"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(captures) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(caseDir, "expected"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(expected) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "models-openai",
+      "description": "OpenAI models endpoint capture",
+      "kinds": ["models"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "models-openai",
+  "description": "OpenAI models endpoint capture",
+  "kinds": ["models"],
+  "provider": "openai",
+  "capture_targets": ["openai-stream"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai.response.json"), `{"object":"list","data":[{"id":"gpt-5","object":"model","created":1,"owned_by":"openai"}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "parsed.json"), `{"models":[{"id":"gpt-5","object":"model","owned_by":"openai"}]}`)
+
+	err := VerifySuite(root, VerifyOptions{})
+	if err == nil {
+		t.Fatal("expected VerifySuite() error")
+	}
+	if !strings.Contains(err.Error(), `must not be a stream target`) {
+		t.Fatalf("error = %q, want stream target rejection", err)
+	}
+}
+
 func TestVerifySuiteHonorsRenderTargets(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, SuiteDirName, "cases", "request-case")

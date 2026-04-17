@@ -1,0 +1,11 @@
+{
+  "id": "models-argo",
+  "description": "Argo models endpoint response and parsed model catalog projection",
+  "kinds": [
+    "models"
+  ],
+  "provider": "argo",
+  "capture_targets": [
+    "argo"
+  ]
+}

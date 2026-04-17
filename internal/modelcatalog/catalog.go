@@ -17,6 +17,17 @@ type Item struct {
 	DisplayName string
 }
 
+type Projection struct {
+	Models []ProjectionItem `json:"models"`
+}
+
+type ProjectionItem struct {
+	ID          string `json:"id"`
+	Object      string `json:"object"`
+	OwnedBy     string `json:"owned_by"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
 func Parse(provider string, data []byte) ([]Item, error) {
 	switch constants.NormalizeProvider(provider) {
 	case constants.ProviderArgo:
@@ -49,28 +60,40 @@ func ParseArgo(data []byte) ([]Item, error) {
 
 	var objectResponse struct {
 		Data []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			InternalID string `json:"internal_id"`
+			OwnedBy    string `json:"owned_by"`
 		} `json:"data"`
 		Models []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			InternalID string `json:"internal_id"`
+			OwnedBy    string `json:"owned_by"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(data, &objectResponse); err == nil {
 		if len(objectResponse.Data) > 0 {
-			items := make([]namedIDModel, 0, len(objectResponse.Data))
+			items := make([]structuredModel, 0, len(objectResponse.Data))
 			for _, model := range objectResponse.Data {
-				items = append(items, namedIDModel{ID: model.ID, Name: model.Name})
+				items = append(items, structuredModel{
+					ID:          firstNonEmpty(model.InternalID, model.ID),
+					DisplayName: structuredDisplayName(model.ID, model.Name, model.InternalID),
+					OwnedBy:     firstNonEmpty(model.OwnedBy, constants.ProviderArgo),
+				})
 			}
-			return buildStructuredItems(constants.ProviderArgo, created, items), nil
+			return buildStructuredItems(created, items), nil
 		}
 		if len(objectResponse.Models) > 0 {
-			items := make([]namedIDModel, 0, len(objectResponse.Models))
+			items := make([]structuredModel, 0, len(objectResponse.Models))
 			for _, model := range objectResponse.Models {
-				items = append(items, namedIDModel{ID: model.ID, Name: model.Name})
+				items = append(items, structuredModel{
+					ID:          firstNonEmpty(model.InternalID, model.ID),
+					DisplayName: structuredDisplayName(model.ID, model.Name, model.InternalID),
+					OwnedBy:     firstNonEmpty(model.OwnedBy, constants.ProviderArgo),
+				})
 			}
-			return buildStructuredItems(constants.ProviderArgo, created, items), nil
+			return buildStructuredItems(created, items), nil
 		}
 	}
 
@@ -178,6 +201,27 @@ func Sort(items []Item) {
 	})
 }
 
+func Project(items []Item) Projection {
+	sorted := append([]Item(nil), items...)
+	Sort(sorted)
+
+	projected := make([]ProjectionItem, 0, len(sorted))
+	for _, item := range sorted {
+		object := item.Object
+		if object == "" {
+			object = "model"
+		}
+		projected = append(projected, ProjectionItem{
+			ID:          item.ID,
+			Object:      object,
+			OwnedBy:     item.OwnedBy,
+			DisplayName: item.DisplayName,
+		})
+	}
+
+	return Projection{Models: projected}
+}
+
 func buildItems(owner string, created int64, ids []string, names map[string]string) []Item {
 	items := make([]Item, 0, len(ids))
 	for _, id := range ids {
@@ -192,21 +236,42 @@ func buildItems(owner string, created int64, ids []string, names map[string]stri
 	return items
 }
 
-type namedIDModel struct {
-	ID   string
-	Name string
+type structuredModel struct {
+	ID          string
+	DisplayName string
+	OwnedBy     string
 }
 
-func buildStructuredItems(owner string, created int64, models []namedIDModel) []Item {
+func buildStructuredItems(created int64, models []structuredModel) []Item {
 	items := make([]Item, 0, len(models))
 	for _, model := range models {
 		items = append(items, Item{
 			ID:          model.ID,
 			Object:      "model",
 			Created:     created,
-			OwnedBy:     owner,
-			DisplayName: model.Name,
+			OwnedBy:     model.OwnedBy,
+			DisplayName: model.DisplayName,
 		})
 	}
 	return items
+}
+
+func structuredDisplayName(id, name, internalID string) string {
+	switch {
+	case name != "":
+		return name
+	case internalID != "" && id != internalID:
+		return id
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

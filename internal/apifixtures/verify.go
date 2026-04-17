@@ -98,6 +98,8 @@ func verifyLoadedCase(root string, entry ManifestCase, meta CaseMeta, opts Verif
 		switch kind {
 		case "request":
 			problems = append(problems, verifyRequestCase(root, meta, opts)...)
+		case "models":
+			problems = append(problems, verifyModelsCase(root, meta, opts)...)
 		case "response":
 			problems = append(problems, verifyResponseCase(root, meta, opts)...)
 		case "stream":
@@ -113,8 +115,8 @@ func verifyLoadedCase(root string, entry ManifestCase, meta CaseMeta, opts Verif
 			problems = append(problems, fmt.Sprintf("case %q has invalid capture target %q: %v", caseID, targetID, err))
 			continue
 		}
-		if !StringSliceContains(meta.Kinds, "request") {
-			problems = append(problems, fmt.Sprintf("case %q declares capture target %q but is not a request case", caseID, target.ID))
+		if !StringSliceContains(meta.Kinds, "request") && !StringSliceContains(meta.Kinds, "models") {
+			problems = append(problems, fmt.Sprintf("case %q declares capture target %q but is not capture-capable", caseID, target.ID))
 			continue
 		}
 		if opts.Target != "" && target.ID != opts.Target {
@@ -123,6 +125,42 @@ func verifyLoadedCase(root string, entry ManifestCase, meta CaseMeta, opts Verif
 
 		if opts.CheckCaptures {
 			problems = append(problems, verifyCaptureArtifacts(root, caseID, target)...)
+		}
+	}
+
+	return problems
+}
+
+func verifyModelsCase(root string, meta CaseMeta, opts VerifyOptions) []string {
+	caseID := meta.ID
+	problems := make([]string, 0)
+
+	target, err := ParseCaptureTarget(meta.Provider)
+	if err != nil || target.Stream {
+		problems = append(problems, fmt.Sprintf("case %q models provider must be one of openai, anthropic, google, argo", caseID))
+		return problems
+	}
+
+	problems = append(problems, verifyJSONFile(root, caseID, filepath.Join("captures", target.ID+".response.json"))...)
+	problems = append(problems, verifyJSONFile(root, caseID, filepath.Join("expected", "parsed.json"))...)
+
+	if len(meta.CaptureTargets) == 0 {
+		problems = append(problems, fmt.Sprintf("case %q models fixture is missing capture_targets", caseID))
+		return problems
+	}
+
+	for _, targetID := range meta.CaptureTargets {
+		captureTarget, err := ParseCaptureTarget(targetID)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("case %q has invalid capture target %q: %v", caseID, targetID, err))
+			continue
+		}
+		if captureTarget.Stream {
+			problems = append(problems, fmt.Sprintf("case %q models capture target %q must not be a stream target", caseID, targetID))
+			continue
+		}
+		if captureTarget.Provider != meta.Provider {
+			problems = append(problems, fmt.Sprintf("case %q models capture target %q must match provider %q", caseID, targetID, meta.Provider))
 		}
 	}
 

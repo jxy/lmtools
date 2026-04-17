@@ -4,10 +4,10 @@
     "tool_calls": [
       {
         "function": {
-          "arguments": "{\"location\":\"Chicago\",\"unit\":\"fahrenheit\"}",
+          "arguments": "{\"location\":\"Chicago\",\"unit\":\"celsius\"}",
           "name": "get_weather"
         },
-        "id": "call_OHZpJyuO7kc0UbHIZz1eGvJ3",
+        "id": "call_BpVoFYjf8hcafpDN5eHi1EvV",
         "type": "function"
       }
     ]

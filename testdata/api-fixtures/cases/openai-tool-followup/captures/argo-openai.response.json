@@ -18,15 +18,15 @@
               "arguments": "{\"location\":\"Chicago\",\"unit\":\"celsius\"}",
               "name": "get_weather"
             },
-            "id": "call_jp2WecXNyRByentaAv5TY4Tk",
+            "id": "call_6Cnu1pdb6L5Qa3R4yH2rV0uH",
             "type": "function"
           }
         ]
       }
     }
   ],
-  "created": 1776445703,
-  "id": "chatcmpl-DVgxzllgZuiYEkKpYI44UoHXWNBw8",
+  "created": 1776449286,
+  "id": "chatcmpl-DVhtmQw1jnUB7gJzF8mkL1zSr6QJi",
   "model": "gpt-5-mini-2025-08-07",
   "object": "chat.completion",
   "prompt_filter_results": [
@@ -38,11 +38,11 @@
   "service_tier": "default",
   "system_fingerprint": null,
   "usage": {
-    "completion_tokens": 247,
+    "completion_tokens": 291,
     "completion_tokens_details": {
       "accepted_prediction_tokens": 0,
       "audio_tokens": 0,
-      "reasoning_tokens": 192,
+      "reasoning_tokens": 256,
       "rejected_prediction_tokens": 0
     },
     "prompt_tokens": 184,
@@ -50,6 +50,6 @@
       "audio_tokens": 0,
       "cached_tokens": 0
     },
-    "total_tokens": 431
+    "total_tokens": 475
   }
 }

@@ -6,7 +6,7 @@ This directory contains the maintained shell wrappers for the checked-in API fix
 
 ### `api_fixtures_list.sh`, `api_fixtures_verify.sh`, `api_fixtures_capture.sh`, `api_fixtures_capture_all.sh`, `api_fixtures_compare.sh`, `api_fixtures_compare_all.sh`
 
-**Purpose**: Manage the shared request/response fixture corpus used by proxy rendering, parsing, and streaming tests.
+**Purpose**: Manage the shared request/response/models fixture corpus used by proxy rendering, parsing, and streaming tests.
 
 **Usage**:
 - `./api_fixtures_list.sh`
@@ -16,6 +16,7 @@ This directory contains the maintained shell wrappers for the checked-in API fix
 - `./api_fixtures_verify.sh --refresh --case anthropic-messages-basic-text --target openai-stream`
 - `./api_fixtures_verify.sh --refresh --provider anthropic --target argo`
 - `./api_fixtures_capture.sh -case openai-tool-followup -target openai`
+- `./api_fixtures_capture.sh -case models-openai -target openai`
 - `./api_fixtures_capture_all.sh`
 - `bash ./api_fixtures_compare.sh -case anthropic-messages-basic-text -target openai`
 - `bash ./api_fixtures_compare.sh -case anthropic-messages-basic-text -target argo-openai`
@@ -38,7 +39,7 @@ This directory contains the maintained shell wrappers for the checked-in API fix
 **Notes**:
 - These scripts are thin wrappers around `go run ./cmd/apifixtures ...`.
 - Prefer extending the fixture corpus for repeatable request/response coverage instead of adding ad hoc shell-based API probes.
-- `api_fixtures_verify.sh` also runs targeted Go tests for fixture-driven request/response/stream handling.
+- `api_fixtures_verify.sh` also runs targeted Go tests for fixture-driven request/models/response/stream handling.
 - `api_fixtures_compare.sh` performs non-mutating live-vs-capture drift checks by default.
 - For `argo-openai*` and `argo-anthropic*`, that default comparison baseline is
   the matching upstream capture (`openai*` or `anthropic*`) rather than a

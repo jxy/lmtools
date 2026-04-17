@@ -1,0 +1,271 @@
+{
+  "data": [
+    {
+      "created": 1776396463,
+      "id": "GPT-3.5 Turbo",
+      "internal_id": "gpt35",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-3.5 Turbo 16K",
+      "internal_id": "gpt35large",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4",
+      "internal_id": "gpt4",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4 32K",
+      "internal_id": "gpt4large",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4 Turbo",
+      "internal_id": "gpt4turbo",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4o",
+      "internal_id": "gpt4o",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "o1-preview",
+      "internal_id": "gpto1preview",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4o Latest",
+      "internal_id": "gpt4olatest",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "o1-mini",
+      "internal_id": "gpto1mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "o3-mini",
+      "internal_id": "gpto3mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "o1",
+      "internal_id": "gpto1",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "o3",
+      "internal_id": "gpto3",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "o4-mini",
+      "internal_id": "gpto4mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4.1",
+      "internal_id": "gpt41",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4.1-mini",
+      "internal_id": "gpt41mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-4.1-nano",
+      "internal_id": "gpt41nano",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-5",
+      "internal_id": "gpt5",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-5-mini",
+      "internal_id": "gpt5mini",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-5-nano",
+      "internal_id": "gpt5nano",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-5.1",
+      "internal_id": "gpt51",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-5.2",
+      "internal_id": "gpt52",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "GPT-5.4",
+      "internal_id": "gpt54",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "Gemini 2.5 Pro",
+      "internal_id": "gemini25pro",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 1776396463,
+      "id": "Gemini 2.5 Flash",
+      "internal_id": "gemini25flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Opus 4.6",
+      "internal_id": "claudeopus46",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Opus 4.5",
+      "internal_id": "claudeopus45",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Opus 4.1",
+      "internal_id": "claudeopus41",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Opus 4",
+      "internal_id": "claudeopus4",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Haiku 4.5",
+      "internal_id": "claudehaiku45",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Sonnet 4.6",
+      "internal_id": "claudesonnet46",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Sonnet 4.5",
+      "internal_id": "claudesonnet45",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Sonnet 4",
+      "internal_id": "claudesonnet4",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Sonnet 3.7",
+      "internal_id": "claudesonnet37",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Sonnet 3.5 v2",
+      "internal_id": "claudesonnet35v2",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Claude Haiku 3.5",
+      "internal_id": "claudehaiku35",
+      "object": "model",
+      "owned_by": "anthropic"
+    },
+    {
+      "created": 1776396463,
+      "id": "Text Embedding Ada 002",
+      "internal_id": "ada002",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "Text Embedding 3 Small",
+      "internal_id": "v3small",
+      "object": "model",
+      "owned_by": "openai"
+    },
+    {
+      "created": 1776396463,
+      "id": "Text Embedding 3 Large",
+      "internal_id": "v3large",
+      "object": "model",
+      "owned_by": "openai"
+    }
+  ],
+  "object": "list"
+}
