@@ -14,9 +14,6 @@ import (
 
 // TestSimulatedStreamingFormat verifies that simulated streaming matches Anthropic's format
 func TestSimulatedStreamingFormat(t *testing.T) {
-	// Add a test-specific timeout to prevent hanging
-	t.Parallel()
-
 	// Setup test server configured for Argo provider
 	argoMock := httptest.NewServer(NewMockArgo(t))
 	t.Cleanup(argoMock.Close)

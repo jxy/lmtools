@@ -33,6 +33,7 @@ type CaseMeta struct {
 	ID             string            `json:"id"`
 	Description    string            `json:"description"`
 	Kinds          []string          `json:"kinds,omitempty"`
+	Features       []string          `json:"features,omitempty"`
 	Provider       string            `json:"provider,omitempty"`
 	IngressFamily  string            `json:"ingress_family,omitempty"`
 	StreamSource   string            `json:"stream_source,omitempty"`

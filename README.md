@@ -30,7 +30,7 @@ This validates the checked-in fixture files and runs targeted fixture-driven tes
 - Run proxy → OpenAI
   ```bash
   echo "sk-..." > ~/.openai-key && chmod 600 ~/.openai-key
-  ./bin/apiproxy -openai-api-key-file "$HOME/.openai-key"
+  ./bin/apiproxy -provider openai -api-key-file "$HOME/.openai-key"
   ```
 More details: [CLAUDE.md](CLAUDE.md)
 
@@ -79,9 +79,17 @@ lmc -argo-user yourname -show 0001/0002
 # Use custom sessions directory
 echo "Test" | lmc -argo-user yourname -sessions-dir /tmp/my-sessions
 
-# Custom environment/API endpoint
-echo "Test" | lmc -argo-user yourname -argo-env prod
-echo "Test" | lmc -argo-user yourname -argo-env https://custom.example/api
+# Use the Argo dev environment
+echo "Test" | lmc -argo-user yourname -argo-dev
+
+# Use the Argo test environment
+echo "Test" | lmc -argo-user yourname -argo-test
+
+# Custom Argo API endpoint
+echo "Test" | lmc -argo-user yourname -provider-url https://custom.example/api
+
+# Force legacy Argo chat/streamchat endpoints
+echo "Test" | lmc -argo-user yourname -argo-legacy
 
 # Set system prompt
 echo "Hello" | lmc -argo-user yourname -s "You are a helpful coding assistant"
@@ -108,8 +116,8 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 ## Command-line Flags
 
 ### Required
-- `-argo-user string`: User identifier (required for Argo provider)
-- `-api-key-file string`: Path to API key file (required for non-Argo providers)
+- `-argo-user string`: User identifier for Argo (or use `-api-key-file`)
+- `-api-key-file string`: Path to API key file (required for OpenAI, Google, and Anthropic unless using `-provider-url`; also accepted for Argo)
 
 ### Model Selection
 - `-model string`: Model to use (chat mode defaults: gpt5 for Argo, gpt-5 for OpenAI, gemini-2.5-pro for Google, claude-opus-4-1-20250805 for Anthropic)
@@ -123,7 +131,6 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 ### Tool Execution
 - `-tool`: Enable built-in universal_command tool for system command execution
   - **Note**: Direct Google provider supports tool execution
-  - **Note**: Google models accessed through Argo provider do not support tool execution (Argo limitation)
 - `-tool-timeout duration`: Timeout for tool execution (default: 30s)
 - `-tool-whitelist string`: Path to whitelist file where each line is a JSON array of command parts
 - `-tool-blacklist string`: Path to blacklist file (commands always rejected)
@@ -146,7 +153,9 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 ### Provider Configuration
 - `-provider string`: Provider: argo (default), openai, google, anthropic
 - `-provider-url string`: Custom provider API endpoint
-- `-argo-env string`: Environment for Argo - "prod", "dev", or custom URL (default: "dev"). Note: Unrecognized values fall back to "prod" for safety
+- `-argo-dev`: Use the Argo dev host `https://apps-dev.inside.anl.gov` instead of the default prod host `https://apps.inside.anl.gov`
+- `-argo-test`: Use the Argo test host `https://apps-test.inside.anl.gov` instead of the default prod host `https://apps.inside.anl.gov`
+- `-argo-legacy`: Use Argo's legacy `/argoapi/api/v1/resource/chat/` and `/argoapi/api/v1/resource/streamchat/` endpoints instead of the newer OpenAI/Anthropic-compatible endpoints
 
 ### Other Options
 - `-timeout duration`: HTTP request timeout (default: 10m)
@@ -243,7 +252,7 @@ The lmtools suite includes an API proxy that translates between Anthropic's Mess
 - **Model Mapping**: Automatically maps model names between providers
 - **Multi-Provider Support**: Route requests to different providers based on configuration
 - **Streaming Support**: Real-time Server-Sent Events for all providers
-- **Token Counting**: Estimates token usage for requests
+- **Token Counting**: Uses Argo's native count-tokens support when running against Argo; other providers use proxy-side estimation
 
 For implementation details and architecture, see [CLAUDE.md](CLAUDE.md#api-proxy-architecture).
 
@@ -255,7 +264,7 @@ For implementation details and architecture, see [CLAUDE.md](CLAUDE.md#api-proxy
 - API keys for the providers you want to use:
   - OpenAI API key
   - Google AI Studio API key
-  - Argo user credentials
+  - Argo credentials (`-argo-user` or `-api-key-file`)
 
 ### Installation
 
@@ -269,9 +278,10 @@ go build -o ./bin/apiproxy ./cmd/apiproxy
 
 ### Config (essentials)
 
-- Keys: `-openai-api-key-file`, `-google-api-key-file`, `-anthropic-api-key-file`
-- Argo: `-argo-user`, `-argo-env`
-- Provider: `-provider` (openai|google|argo), `-provider-url`
+- Credentials: `-api-key-file` for OpenAI, Google, or Anthropic; `-argo-user` or `-api-key-file` for Argo
+- Argo host: prod by default, `-argo-dev` for dev, `-argo-test` for test, `-provider-url` for a custom host
+- Argo endpoint mode: native compatible endpoints by default, `-argo-legacy` for legacy `/api/v1/resource/*`
+- Provider: `-provider` (argo|anthropic|openai|google), `-provider-url`
 - Server: `-host` (default 127.0.0.1), `-port` (default 8082)
 
 ### Run
@@ -282,11 +292,11 @@ echo "sk-..." > ~/.openai-key
 echo "AIza..." > ~/.google-key
 chmod 600 ~/.openai-key ~/.google-key  # Secure the files
 
-# Start with minimal configuration (OpenAI as default provider)
-./bin/apiproxy -openai-api-key-file="$HOME/.openai-key"
+# Start with OpenAI
+./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key"
 
 # Use Google AI as provider
-./bin/apiproxy -google-api-key-file="$HOME/.google-key" -provider="google"
+./bin/apiproxy -provider="google" -api-key-file="$HOME/.google-key"
 
 # Use Argo with custom models
 ./bin/apiproxy -argo-user="username" -provider="argo" \
@@ -294,11 +304,20 @@ chmod 600 ~/.openai-key ~/.google-key  # Secure the files
 
 # Custom host and port with debug logging
 ./bin/apiproxy -host="0.0.0.0" -port="8080" -log-level="DEBUG" \
-  -openai-api-key-file="$HOME/.openai-key"
+  -provider="openai" -api-key-file="$HOME/.openai-key"
 
 # Note: By default, the server binds to 127.0.0.1 (localhost only).
 # Use -host="0.0.0.0" to allow external connections.
 ```
+
+When `-provider=argo`, routing is model-driven:
+- Models starting with `claude` use Argo's native Anthropic `/v1/messages` wire format
+- All other models use Argo's native OpenAI `/v1/chat/completions` wire format
+- `POST /v1/chat/completions` is a direct Argo OpenAI pass-through for non-Claude models; Claude models are converted to and from Anthropic messages
+
+When `-argo-legacy` is set:
+- All Argo chat traffic uses the legacy `/argoapi/api/v1/resource/chat/` and `/argoapi/api/v1/resource/streamchat/` endpoints
+- Proxy-side streaming simulation and token estimation remain in use where the legacy endpoints do not provide native support
 
 ### Endpoints
 
@@ -417,7 +436,7 @@ The proxy automatically maps model names to appropriate providers:
 | Anthropic Model | Mapped To | Provider |
 |----------------|-----------|----------|
 | *haiku* | Small model | Set by `-small-model` flag |
-| *sonnet*, *opus* | Big model | Set by `-big-model` flag |
+| *sonnet*, *opus* | Primary model | Set by `-model` flag |
 
 ### OpenAI Models
 | OpenAI Model | Behavior |
@@ -426,15 +445,13 @@ The proxy automatically maps model names to appropriate providers:
 | gpt-3.5-turbo, gpt-4-mini | Pass-through when provider=openai |
 | o1-preview, o1-mini | Pass-through when provider=openai |
 
-Model names are passed through unchanged to the Argo provider.
+Model names are passed through unchanged to the Argo provider after wire-format routing is selected.
 
 #### Argo Model Provider Detection
 
-The Argo provider automatically detects the appropriate format based on model prefix:
-- Models starting with `gpt`, `o1`, `o3` → OpenAI format
-- Models starting with `gemini` → Google format
-- Models starting with `claude` → Anthropic format
-- Unknown models → default to OpenAI format
+The Argo provider automatically detects the appropriate wire format based on model prefix:
+- Models starting with `claude` → Anthropic format (`/v1/messages`)
+- All other models → OpenAI format (`/v1/chat/completions`)
 
 ### Provider selection
 
@@ -460,11 +477,25 @@ Default small models for cost optimization:
 ### Use Argo (Default)
 
 ```bash
-# Run proxy with Argo (no API key file needed, just username)
+# Run proxy with Argo (use either -argo-user or -api-key-file)
+./bin/apiproxy \
+  -argo-user="username"
+# Uses default models: claudeopus4 for big, claudesonnet4 for small
+
+# Use Argo dev
 ./bin/apiproxy \
   -argo-user="username" \
-  -argo-env="prod"
-# Uses default models: claudeopus4 for big, claudesonnet4 for small
+  -argo-dev
+
+# Use Argo test
+./bin/apiproxy \
+  -argo-user="username" \
+  -argo-test
+
+# Use legacy Argo endpoints
+./bin/apiproxy \
+  -argo-user="username" \
+  -argo-legacy
 ```
 
 ### Use OpenAI
@@ -476,9 +507,9 @@ chmod 600 ~/.openai-key
 
 # Run proxy
 ./bin/apiproxy \
-  -openai-api-key-file="$HOME/.openai-key" \
+  -api-key-file="$HOME/.openai-key" \
   -provider="openai" \
-  -big-model="gpt-4o" \
+  -model="gpt-4o" \
   -small-model="gpt-4o-mini"
 ```
 
@@ -491,9 +522,9 @@ chmod 600 ~/.google-key
 
 # Run proxy
 ./bin/apiproxy \
-  -google-api-key-file="$HOME/.google-key" \
+  -api-key-file="$HOME/.google-key" \
   -provider="google" \
-  -big-model="gemini-2.5-pro-preview-03-25" \
+  -model="gemini-2.5-pro-preview-03-25" \
   -small-model="gemini-2.0-flash"
 ```
 
@@ -522,6 +553,7 @@ The proxy supports Server-Sent Events (SSE) streaming for real-time responses:
 - **Anthropic Format** (`/v1/messages`): Native Anthropic SSE format
 - **OpenAI Format** (`/v1/chat/completions`): Native OpenAI SSE format
 - **Automatic Conversion**: Seamlessly converts between streaming formats
+- **Argo Native Streaming**: Uses Argo's upstream SSE streams directly instead of proxy-side simulation
 - **Keep-Alive**: Automatic ping events prevent timeouts on slow responses
 
 ## Thinking Field Support
@@ -558,7 +590,7 @@ The thinking structure is automatically converted to `reasoning_effort: "high"`:
 
 ## API Proxy Limitations
 
-- Token counting is estimated, not exact
+- `POST /v1/messages/count_tokens` uses Argo's native endpoint when provider=argo and `-argo-legacy` is not set; other providers, and legacy Argo mode, use proxy-side estimation
 - Some advanced features may not be fully supported across all providers
 - Error messages from providers are passed through with minimal modification
 
@@ -577,10 +609,10 @@ Set log level for more verbose output:
 
 ```bash
 # Enable debug logging
-./bin/apiproxy -log-level="DEBUG" -openai-api-key-file="$HOME/.openai-key"
+./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key" -log-level="DEBUG"
 
 # JSON formatted logs for parsing
-./bin/apiproxy -log-format="json" -log-level="DEBUG" -openai-api-key-file="$HOME/.openai-key"
+./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key" -log-format="json" -log-level="DEBUG"
 ```
 
 ## Development

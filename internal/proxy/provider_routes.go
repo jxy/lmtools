@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"lmtools/internal/constants"
 )
 
 type (
@@ -27,13 +28,24 @@ func (s *Server) forwardAnthropicViaGoogle(ctx context.Context, anthReq *Anthrop
 }
 
 func (s *Server) forwardAnthropicViaArgo(ctx context.Context, anthReq *AnthropicRequest, originalModel string) (*AnthropicResponse, error) {
-	argoResp, err := s.forwardToArgo(ctx, anthReq)
-	if err != nil {
-		return nil, err
+	if s.useLegacyArgo() {
+		argoResp, err := s.forwardToArgo(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		return s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq), nil
 	}
-	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq)
-	logToolUseBlocks(ctx, anthResp.Content, false)
-	return anthResp, nil
+
+	switch s.argoWireProvider(anthReq.Model) {
+	case constants.ProviderAnthropic:
+		return s.forwardToArgoAnthropic(ctx, anthReq)
+	default:
+		openAIResp, err := s.forwardToArgoOpenAI(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		return s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel), nil
+	}
 }
 
 func (s *Server) forwardAnthropicViaAnthropic(ctx context.Context, anthReq *AnthropicRequest, _ string) (*AnthropicResponse, error) {

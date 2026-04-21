@@ -1,0 +1,18 @@
+{
+  "model": "claude-opus-4-7",
+  "max_tokens": 2048,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Plan a two-step check for the calculation. After the thinking block, provide a concise final answer with exactly two numbered steps."
+    }
+  ],
+  "stream": true,
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+  },
+  "output_config": {
+    "effort": "max"
+  }
+}

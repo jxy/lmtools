@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// MockServer represents a mock Argo API server for testing
+// MockServer represents a mock server for Argo legacy and Argo native compatibility endpoints.
 type MockServer struct {
 	*httptest.Server
 	mu              sync.Mutex
@@ -65,7 +65,7 @@ func WithErrorSimulation(rate float64) MockServerOption {
 	}
 }
 
-// NewMockServer creates a new mock Argo API server
+// NewMockServer creates a new mock server.
 func NewMockServer(opts ...MockServerOption) *MockServer {
 	ms := &MockServer{
 		defaultModel:    "gpt4o",
@@ -107,6 +107,8 @@ func (ms *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/embed/"):
 		ms.handleEmbed(w, r, body)
+	case strings.HasSuffix(r.URL.Path, "/messages/count_tokens"):
+		ms.handleCountTokens(w, r, body)
 	case strings.HasSuffix(r.URL.Path, "/chat/"):
 		ms.handleChat(w, r, body)
 	case strings.HasSuffix(r.URL.Path, "/streamchat/"):
@@ -122,13 +124,19 @@ func (ms *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (ms *MockServer) currentResponseFunc() func(*http.Request) (interface{}, int, error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	return ms.responseFunc
+}
+
 // handleEmbed processes embed requests
 func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body []byte) {
 	// Use custom response function if provided
-	if ms.responseFunc != nil {
+	if responseFunc := ms.currentResponseFunc(); responseFunc != nil {
 		// Restore body for custom function to read
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
-		resp, status, err := ms.responseFunc(r)
+		resp, status, err := responseFunc(r)
 		if err != nil {
 			http.Error(w, err.Error(), status)
 			return
@@ -177,13 +185,216 @@ func (ms *MockServer) handleEmbed(w http.ResponseWriter, r *http.Request, body [
 	}
 }
 
-// handleChat processes chat requests
+func extractTextContent(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		for _, block := range c {
+			blockMap, ok := block.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if blockType, _ := blockMap["type"].(string); blockType != "text" {
+				continue
+			}
+			if text, ok := blockMap["text"].(string); ok {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func mockResponseForRequest(defaultResponse, defaultModel string, reqData map[string]interface{}) (string, string) {
+	responseText := defaultResponse
+	model := defaultModel
+
+	if m, ok := reqData["model"].(string); ok {
+		model = m
+	}
+
+	messages, ok := reqData["messages"].([]interface{})
+	if !ok || len(messages) == 0 {
+		return responseText, model
+	}
+
+	lastMsg, ok := messages[len(messages)-1].(map[string]interface{})
+	if !ok {
+		return responseText, model
+	}
+
+	content := extractTextContent(lastMsg["content"])
+	switch {
+	case strings.Contains(strings.ToLower(content), "hello"):
+		responseText = "Hello! How can I help you today?"
+	case strings.Contains(strings.ToLower(content), "weather"):
+		responseText = "I don't have access to real-time weather data."
+	case strings.Contains(strings.ToLower(content), "test"):
+		responseText = "This is a test response from the mock server."
+	}
+
+	return responseText, model
+}
+
+func wordCount(text string) int {
+	return len(strings.Fields(text))
+}
+
+func isStreamRequest(path string, reqData map[string]interface{}) bool {
+	if strings.HasSuffix(path, "/streamchat/") {
+		return true
+	}
+	stream, ok := reqData["stream"].(bool)
+	return ok && stream
+}
+
+func (ms *MockServer) writeOpenAIStream(w http.ResponseWriter, responseText, model string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	chunks := []map[string]interface{}{
+		{
+			"id":      "chatcmpl-mock",
+			"object":  "chat.completion.chunk",
+			"created": time.Now().Unix(),
+			"model":   model,
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"delta": map[string]interface{}{
+						"role":    "assistant",
+						"content": responseText,
+					},
+					"finish_reason": nil,
+				},
+			},
+		},
+		{
+			"id":      "chatcmpl-mock",
+			"object":  "chat.completion.chunk",
+			"created": time.Now().Unix(),
+			"model":   model,
+			"choices": []map[string]interface{}{
+				{
+					"index":         0,
+					"delta":         map[string]interface{}{},
+					"finish_reason": "stop",
+				},
+			},
+		},
+	}
+
+	for _, chunk := range chunks {
+		encoded, err := json.Marshal(chunk)
+		if err != nil {
+			http.Error(w, "Failed to encode stream chunk", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(w, "data: %s\n\n", encoded)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+func (ms *MockServer) writeAnthropicStream(w http.ResponseWriter, responseText, model string) {
+	outputTokens := wordCount(responseText)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	events := []struct {
+		event string
+		data  map[string]interface{}
+	}{
+		{
+			event: "message_start",
+			data: map[string]interface{}{
+				"type": "message_start",
+				"message": map[string]interface{}{
+					"id":            "msg_mock",
+					"type":          "message",
+					"role":          "assistant",
+					"content":       []interface{}{},
+					"model":         model,
+					"stop_reason":   nil,
+					"stop_sequence": nil,
+					"usage": map[string]int{
+						"input_tokens":  100,
+						"output_tokens": 0,
+					},
+				},
+			},
+		},
+		{
+			event: "content_block_start",
+			data: map[string]interface{}{
+				"type":  "content_block_start",
+				"index": 0,
+				"content_block": map[string]interface{}{
+					"type": "text",
+					"text": "",
+				},
+			},
+		},
+		{
+			event: "content_block_delta",
+			data: map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": 0,
+				"delta": map[string]interface{}{
+					"type": "text_delta",
+					"text": responseText,
+				},
+			},
+		},
+		{
+			event: "content_block_stop",
+			data: map[string]interface{}{
+				"type":  "content_block_stop",
+				"index": 0,
+			},
+		},
+		{
+			event: "message_delta",
+			data: map[string]interface{}{
+				"type": "message_delta",
+				"delta": map[string]interface{}{
+					"stop_reason":   "end_turn",
+					"stop_sequence": nil,
+				},
+				"usage": map[string]int{
+					"output_tokens": outputTokens,
+				},
+			},
+		},
+		{
+			event: "message_stop",
+			data: map[string]interface{}{
+				"type": "message_stop",
+			},
+		},
+	}
+
+	for _, evt := range events {
+		encoded, err := json.Marshal(evt.data)
+		if err != nil {
+			http.Error(w, "Failed to encode stream event", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(w, "event: %s\n", evt.event)
+		fmt.Fprintf(w, "data: %s\n\n", encoded)
+	}
+}
+
+// handleChat processes chat requests.
 func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []byte) {
 	// Use custom response function if provided
-	if ms.responseFunc != nil {
+	if responseFunc := ms.currentResponseFunc(); responseFunc != nil {
 		// Restore body for custom function to read
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
-		resp, status, err := ms.responseFunc(r)
+		resp, status, err := responseFunc(r)
 		if err != nil {
 			http.Error(w, err.Error(), status)
 			return
@@ -195,55 +406,27 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 		return
 	}
 
-	// Parse request only after checking custom response function
 	var reqData map[string]interface{}
 	if err := json.Unmarshal(body, &reqData); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Generate contextual response based on last user message
-	responseText := ms.defaultResponse
-	model := ms.defaultModel
-	if m, ok := reqData["model"].(string); ok {
-		model = m
-	}
+	responseText, model := mockResponseForRequest(ms.defaultResponse, ms.defaultModel, reqData)
 
-	// Extract last message content
-	if messages, ok := reqData["messages"].([]interface{}); ok && len(messages) > 0 {
-		lastMsg := messages[len(messages)-1]
-		if msgMap, ok := lastMsg.(map[string]interface{}); ok {
-			var content string
-			// Handle both string content and content blocks
-			switch c := msgMap["content"].(type) {
-			case string:
-				content = c
-			case []interface{}:
-				// Extract text from content blocks
-				for _, block := range c {
-					if blockMap, ok := block.(map[string]interface{}); ok {
-						if blockMap["type"] == "text" {
-							if text, ok := blockMap["text"].(string); ok {
-								content = text
-								break
-							}
-						}
-					}
-				}
-			}
-
-			// Generate contextual response
-			if strings.Contains(strings.ToLower(content), "hello") {
-				responseText = "Hello! How can I help you today?"
-			} else if strings.Contains(strings.ToLower(content), "weather") {
-				responseText = "I don't have access to real-time weather data."
-			} else if strings.Contains(strings.ToLower(content), "test") {
-				responseText = "This is a test response from the mock server."
-			}
+	if isStreamRequest(r.URL.Path, reqData) {
+		switch {
+		case strings.Contains(r.URL.Path, "/v1/chat/completions"):
+			ms.writeOpenAIStream(w, responseText, model)
+		case strings.Contains(r.URL.Path, "/v1/messages"):
+			ms.writeAnthropicStream(w, responseText, model)
+		default:
+			ms.handleStreamChat(w, r, body)
 		}
+		return
 	}
 
-	// Return response in appropriate format based on endpoint
+	outputTokens := wordCount(responseText)
 	var resp map[string]interface{}
 	if strings.Contains(r.URL.Path, "/v1/chat/completions") {
 		// OpenAI format
@@ -264,8 +447,28 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 			},
 			"usage": map[string]int{
 				"prompt_tokens":     100,
-				"completion_tokens": len(strings.Fields(responseText)),
-				"total_tokens":      100 + len(strings.Fields(responseText)),
+				"completion_tokens": outputTokens,
+				"total_tokens":      100 + outputTokens,
+			},
+		}
+	} else if strings.Contains(r.URL.Path, "/v1/messages") {
+		// Anthropic format
+		resp = map[string]interface{}{
+			"id":    "msg_mock",
+			"type":  "message",
+			"role":  "assistant",
+			"model": model,
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": responseText,
+				},
+			},
+			"stop_reason":   "end_turn",
+			"stop_sequence": nil,
+			"usage": map[string]int{
+				"input_tokens":  100,
+				"output_tokens": outputTokens,
 			},
 		}
 	} else {
@@ -275,8 +478,8 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 			"model":    model,
 			"usage": map[string]int{
 				"prompt_tokens":     100,
-				"completion_tokens": len(strings.Fields(responseText)),
-				"total_tokens":      100 + len(strings.Fields(responseText)),
+				"completion_tokens": outputTokens,
+				"total_tokens":      100 + outputTokens,
 			},
 		}
 	}
@@ -290,10 +493,10 @@ func (ms *MockServer) handleChat(w http.ResponseWriter, r *http.Request, body []
 // handleStreamChat processes streaming chat requests
 func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, body []byte) {
 	// Use custom response function if provided
-	if ms.responseFunc != nil {
+	if responseFunc := ms.currentResponseFunc(); responseFunc != nil {
 		// Restore body for custom function to read
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
-		_, status, err := ms.responseFunc(r)
+		_, status, err := responseFunc(r)
 		if err != nil {
 			http.Error(w, err.Error(), status)
 			return
@@ -315,12 +518,38 @@ func (ms *MockServer) handleStreamChat(w http.ResponseWriter, r *http.Request, b
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// For Argo, stream plain text response
-	response := ms.defaultResponse
+	responseText, _ := mockResponseForRequest(ms.defaultResponse, ms.defaultModel, reqData)
 
 	// Write response as plain text
-	fmt.Fprint(w, response)
+	fmt.Fprint(w, responseText)
 	fmt.Fprintln(w) // Final newline
+}
+
+func (ms *MockServer) handleCountTokens(w http.ResponseWriter, r *http.Request, body []byte) {
+	var reqData map[string]interface{}
+	if err := json.Unmarshal(body, &reqData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	tokenCount := 0
+	if system, ok := reqData["system"].(string); ok {
+		tokenCount += wordCount(system)
+	}
+	if messages, ok := reqData["messages"].([]interface{}); ok {
+		for _, raw := range messages {
+			msgMap, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			tokenCount += wordCount(extractTextContent(msgMap["content"]))
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]int{"input_tokens": tokenCount}); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // GetRequests returns all captured requests

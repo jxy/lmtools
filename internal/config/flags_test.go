@@ -19,29 +19,66 @@ func TestParseFlagsDefaults(t *testing.T) {
 	}
 }
 
-func TestParseFlagsRequiredUser(t *testing.T) {
-	// Test that user is required if getDefaultUser returns empty
-	// We can't easily mock getDefaultUser, but we can test with empty -argo-user flag
+func TestParseFlagsArgoRequiresCredential(t *testing.T) {
 	_, err := ParseFlags([]string{"-argo-user", ""})
-	if err == nil || !strings.Contains(err.Error(), "user identifier (-argo-user) is required") {
-		t.Errorf("ParseFlags with empty user should error about required user, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "either -argo-user or -api-key-file is required for Argo provider") {
+		t.Errorf("ParseFlags with empty Argo credentials should error, got: %v", err)
 	}
 }
 
-func TestParseFlagsEnvValidation(t *testing.T) {
-	if _, err := ParseFlags([]string{"-argo-user", "testuser", "-argo-env", "foo"}); err == nil {
-		t.Errorf("ParseFlags did not error for invalid env")
-	}
-}
-
-func TestParseFlagsEnvCustomURL(t *testing.T) {
-	custom := "https://custom.example/api"
-	cfg, err := ParseFlags([]string{"-argo-user", "testuser", "-argo-env", custom})
+func TestParseFlagsArgoAcceptsAPIKeyFile(t *testing.T) {
+	cfg, err := ParseFlags([]string{"-provider", "argo", "-api-key-file", "test.key"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.ArgoEnv != custom {
-		t.Errorf("ArgoEnv = %q; want %q", cfg.ArgoEnv, custom)
+	if cfg.APIKeyFile != "test.key" {
+		t.Errorf("APIKeyFile = %q; want %q", cfg.APIKeyFile, "test.key")
+	}
+}
+
+func TestParseFlagsArgoDev(t *testing.T) {
+	cfg, err := ParseFlags([]string{"-argo-user", "testuser", "-argo-dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.ArgoDev {
+		t.Error("ArgoDev should be true")
+	}
+	if cfg.ArgoEnv != "dev" {
+		t.Errorf("ArgoEnv = %q; want %q", cfg.ArgoEnv, "dev")
+	}
+}
+
+func TestParseFlagsArgoTest(t *testing.T) {
+	cfg, err := ParseFlags([]string{"-argo-user", "testuser", "-argo-test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.ArgoTest {
+		t.Error("ArgoTest should be true")
+	}
+	if cfg.ArgoEnv != "test" {
+		t.Errorf("ArgoEnv = %q; want %q", cfg.ArgoEnv, "test")
+	}
+}
+
+func TestParseFlagsArgoDevAndTestConflict(t *testing.T) {
+	_, err := ParseFlags([]string{"-argo-user", "testuser", "-argo-dev", "-argo-test"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "-argo-dev and -argo-test cannot be used together") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestParseFlagsArgoLegacy(t *testing.T) {
+	cfg, err := ParseFlags([]string{"-argo-user", "testuser", "-argo-legacy"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.ArgoLegacy {
+		t.Error("ArgoLegacy should be true")
 	}
 }
 
@@ -76,10 +113,12 @@ func TestParseFlagsCustom(t *testing.T) {
 	want := Config{
 		Model:               "modelA",
 		StreamChat:          true,
+		ArgoDev:             false,
+		ArgoLegacy:          false,
 		ArgoUser:            "alice",
 		System:              "sys",
 		SystemExplicitlySet: true, // -s flag was provided
-		ArgoEnv:             "dev",
+		ArgoEnv:             "prod",
 		Timeout:             10 * time.Minute,
 		Retries:             3,                // Default value
 		Provider:            "argo",           // Default value

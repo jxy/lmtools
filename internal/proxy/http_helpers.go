@@ -41,12 +41,6 @@ func (s *Server) readErrorBody(resp *http.Response) ([]byte, error) {
 	return readLimitedWithKind(resp.Body, constants.MaxErrorResponseSize, "error response")
 }
 
-// readStreamingBody reads a streaming response body with the streaming size limit.
-// Use this for reading complete streaming responses that need to be buffered.
-func (s *Server) readStreamingBody(r io.Reader) ([]byte, error) {
-	return readLimitedWithKind(r, constants.MaxStreamingResponseSize, "streaming response")
-}
-
 // readRequestBody safely reads an HTTP request body with size limit
 func (s *Server) readRequestBody(r *http.Request) ([]byte, error) {
 	maxSize := s.config.MaxRequestBodySize
@@ -122,10 +116,17 @@ func (s *Server) doJSON(
 
 func (s *Server) sendJSONResponse(ctx context.Context, w http.ResponseWriter, data interface{}) error {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
+	body, err := json.Marshal(data)
+	if err != nil {
 		// Log the error but don't try to send another response
 		// as headers may already be written
 		logger.From(ctx).Errorf("Failed to encode JSON response: %v", err)
+		return err
+	}
+	body = append(body, '\n')
+	logWireBytes(ctx, "WIRE CLIENT RESPONSE BODY", body)
+	if _, err := w.Write(body); err != nil {
+		logger.From(ctx).Errorf("Failed to write JSON response: %v", err)
 		return err
 	}
 	return nil
@@ -147,5 +148,6 @@ func passthroughErrorResponse(ctx context.Context, w http.ResponseWriter, provid
 	logProviderErrorBody(ctx, provider, status, string(body))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	logWireBytes(ctx, "WIRE CLIENT RESPONSE BODY", body)
 	_, _ = w.Write(body)
 }

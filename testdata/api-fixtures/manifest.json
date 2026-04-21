@@ -48,6 +48,27 @@
       ]
     },
     {
+      "id": "anthropic-opus47-adaptive-thinking-effort",
+      "description": "Anthropic Opus 4.7 adaptive thinking with output_config effort",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "anthropic-opus47-adaptive-thinking-stream",
+      "description": "Anthropic Opus 4.7 streaming request with adaptive thinking and low max_tokens truncation",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "anthropic-opus47-adaptive-thinking-stream-complete",
+      "description": "Anthropic Opus 4.7 streaming request with adaptive thinking and enough max_tokens for a final text block",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
       "id": "openai-tool-followup",
       "description": "OpenAI ingress with assistant tool call and tool follow-up message",
       "kinds": [

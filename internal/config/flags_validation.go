@@ -7,7 +7,6 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providers"
-	"strings"
 )
 
 type explicitFlagState struct {
@@ -41,16 +40,28 @@ func applyEmbedModeDefaults(cfg *Config, explicit explicitFlagState) error {
 	return nil
 }
 
-func validateEnvironmentValue(env string) error {
-	if IsValidEnvironment(env) {
-		return nil
+func resolveArgoEnvironment(dev, test bool) string {
+	if dev {
+		return "dev"
 	}
+	if test {
+		return "test"
+	}
+	return "prod"
+}
 
-	return fmt.Errorf("invalid argo-env: %q, must be one of: %s, or a custom URL (http://... or https://...)",
-		env, strings.Join(Environments, ", "))
+func validateArgoEnvironmentFlagCombinations(cfg Config) error {
+	if cfg.ArgoDev && cfg.ArgoTest {
+		return fmt.Errorf("invalid flag combination: -argo-dev and -argo-test cannot be used together")
+	}
+	return nil
 }
 
 func validateModeFlagCombinations(cfg Config) error {
+	if err := validateArgoEnvironmentFlagCombinations(cfg); err != nil {
+		return err
+	}
+
 	if cfg.Embed && cfg.StreamChat {
 		return fmt.Errorf(prompts.ErrEmbedWithStream)
 	}

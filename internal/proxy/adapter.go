@@ -31,6 +31,8 @@ type TypedRequest struct {
 	Stop            []string
 	Stream          bool
 	ReasoningEffort string // for OpenAI o1 models
+	Thinking        *AnthropicThinking
+	OutputConfig    *AnthropicOutputConfig
 }
 
 // OpenAIRequestToTyped converts an OpenAI request to TypedRequest
@@ -105,11 +107,13 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 // AnthropicRequestToTyped converts an Anthropic request to TypedRequest
 func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 	typed := TypedRequest{
-		MaxTokens:   &req.MaxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stop:        req.StopSequences,
-		Stream:      req.Stream,
+		MaxTokens:    &req.MaxTokens,
+		Temperature:  req.Temperature,
+		TopP:         req.TopP,
+		Stop:         req.StopSequences,
+		Stream:       req.Stream,
+		Thinking:     req.Thinking,
+		OutputConfig: req.OutputConfig,
 	}
 
 	// Handle system message

@@ -1,0 +1,32 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-opus-4-7","id":"msg_01LyGydmKfPGJDTeQYamcyjP","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard","inference_geo":"global"}}       }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}              }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" The"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" user is asking me to plan a two-step check for a calculation, but they haven't provided the actual calculation. I should either ask for clarification about"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" what they're checking, or offer a general framework for verification that could work"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" across different types of calculations."}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EoAIClkIDBgCKkBhKCRhut/qVXmABwNLpJ/W/cuUezc0OIfzNnnxF/U470m0RSijgI901hMg4ZR80z+6YPqiP+yjaFXqD5ZtHCQaMg9jbGF1ZGUtb3B1cy00LTc4ABIMZCFnedeMUn36RsPaGgyPoJJIjnIizpn3xrkiMDKW7ELFXv/8xw/6WSB5LRV3du3n2OC2h0Vm72MRbD1aJlAfNpLSvIMgJxvVdu11cSrUBvc82UCL6GMBfgItujKLBbGwYTDzBV09S9n8uMq4dUa56Y+GJJXNfiJTdTY0OoMEWJAjDlK05ZwrWZY+0AbyV9wCWWtjgtwKtLLFqHbSTo6/EYc/KMOTzCbHQ3bO6kcMYbc4zy4NnIL1PY4eWhyXDk91VnJvbomsLhBQa4mnVA5PAw9V68h1jNbsOt3i51x46/t/YXGnD0fAEYr7NERiEye2Nqls1j5xSLM8rW/XX793MCIcU0rOqBTXWYSCTleYdetSoqg4SAqlCPwyTm9k2fSeapAw6sPl43QrSk4LtAJDDsn33Kzr3mHsbQS2tKHNM1NtLY+6Ntu+28sQBDm2Hks3y9oYw8wk7gz1uz1KHUzto4xXuev9uzk46jn1p15XJfg6lHUgJkqH18H+dGz8MvexJ8PNmMk/DTnxeJODW0FGTQBC1WSinbqAOpHcX6V8Z2uQXuAug1/ofWw+A1NBKSTv323s1R9LTlvmIjzvNr/oXxa6937AvjvdkxrIVFhTYXEczoF/YO044iUU35YjUox6xXbxpuDrLx8nkJlMesXSEkrmoV7wewt1Suqyev+LJhEKGWSTGVY0avM4h3Cq6BqSVausG+Jm9SPAv72kPQzNTM9Ny/ttOv8ERrA2bW4+K722FfJLJxvvisv2pRSPpf5IF3uJkXfrKixWn4LePjnyvMFZ8rvoVaJE92gah8YRqP5B95xuMy3f3VauEEEVLh6seyjPG4ZPhvMerfTRl7zgwVg/Mpahx65+8CuGmK8ECf0OFliWcFyIBK7PF3zi0hOvdI9mdRUjO03h+flw4cd3xh30XtcQUK3WQzmGLjif7xJr6qjnPwFK1Gn1HQIj5WZb9e6mvgYtlhF58r4495B9viVIYS/zSEm613fR1mKvydR9bBJcNiSc79JaAmjJZvhDswK0Z05PZpf3I+04JDIBnmUuSi19SXoOYyfRYdez0itZAyt5bh5U+iTGCcTdHVTXb8uTijxGeKPy7FFd7nHYIM3TMnYP2Gtr6zxUD9CyZg3J5ftP4sB1kaEzRuFdhvjOnBa05F3RAXeDAdzDo858EZVYHBVVWDPCguIqH/H9EXeUmW5gT+0xyHIXHVr8R9GBuyzIyk87AnDDVtgL7LhVLsxPcBgB"}               }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0        }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":256}          }
+
+event: message_stop
+data: {"type":"message_stop"  }

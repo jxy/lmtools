@@ -29,9 +29,12 @@ Provider Options:
   -provider string           Provider: argo, anthropic, openai, google (default: "argo")
   -provider-url string       Custom URL for the selected provider (overrides default)
   -api-key-file string       Path to file containing API key for the selected provider
-                            (required for non-Argo providers when not using custom URL)
-  -argo-user string          Argo user (required for Argo provider)
-  -argo-env string           Argo environment: prod, dev, or custom URL (default: "dev")
+                            (required for openai/google/anthropic unless using custom URL;
+                             also accepted for argo)
+  -argo-user string          Argo user (optional if -api-key-file is provided)
+  -argo-dev                  Use the Argo dev environment instead of prod
+  -argo-test                 Use the Argo test environment instead of prod
+  -argo-legacy               Use legacy Argo /api/v1/resource chat endpoints
 
 Model Options:
   -model string              Model to use (default varies by provider)
@@ -68,6 +71,16 @@ Examples:
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
+func resolveArgoEnvironment(dev, test bool) string {
+	if dev {
+		return "dev"
+	}
+	if test {
+		return "test"
+	}
+	return "prod"
+}
+
 func main() {
 	// Set custom usage function
 	flag.Usage = printUsage
@@ -81,7 +94,9 @@ func main() {
 
 		// Configuration
 		argoUser           string
-		argoEnv            string
+		argoDev            bool
+		argoTest           bool
+		argoLegacy         bool
 		preferredProvider  string
 		providerURL        string
 		model              string
@@ -98,12 +113,14 @@ func main() {
 	flag.IntVar(&port, "port", 8082, "Port to bind the server to")
 
 	// API Key file flag (unified)
-	flag.StringVar(&apiKeyFile, "api-key-file", "", "Path to file containing API key for the selected provider")
+	flag.StringVar(&apiKeyFile, "api-key-file", "", "Path to file containing API key for the selected provider (required for openai/google/anthropic unless using custom URL; also accepted for argo)")
 
 	// Configuration flags
-	flag.StringVar(&argoUser, "argo-user", "", "Argo user")
-	flag.StringVar(&argoEnv, "argo-env", "dev", "Argo environment")
-	flag.StringVar(&preferredProvider, "provider", constants.ProviderArgo, "Provider (openai, google, argo)")
+	flag.StringVar(&argoUser, "argo-user", "", "Argo user (or use -api-key-file)")
+	flag.BoolVar(&argoDev, "argo-dev", false, "Use the Argo dev environment instead of prod")
+	flag.BoolVar(&argoTest, "argo-test", false, "Use the Argo test environment instead of prod")
+	flag.BoolVar(&argoLegacy, "argo-legacy", false, "Use legacy Argo /api/v1/resource chat endpoints")
+	flag.StringVar(&preferredProvider, "provider", constants.ProviderArgo, "Provider (argo, anthropic, openai, google)")
 	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
 	flag.StringVar(&model, "model", "", "Model to use (default varies by provider)")
 	flag.StringVar(&smallModel, "small-model", "", "Small model to use")
@@ -116,7 +133,7 @@ func main() {
 	flag.Parse()
 
 	// Read API key from file based on provider
-	var anthropicAPIKey, openAIAPIKey, googleAPIKey string
+	var anthropicAPIKey, openAIAPIKey, googleAPIKey, argoAPIKey string
 
 	if apiKeyFile != "" {
 		apiKey, err := auth.ReadKeyFile(apiKeyFile)
@@ -134,7 +151,7 @@ func main() {
 		case constants.ProviderGoogle:
 			googleAPIKey = apiKey
 		case constants.ProviderArgo:
-			// Argo doesn't use API keys, ignore
+			argoAPIKey = apiKey
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown provider: %s\n", preferredProvider)
 			os.Exit(1)
@@ -150,8 +167,12 @@ func main() {
 		AnthropicAPIKey:    anthropicAPIKey,
 		OpenAIAPIKey:       openAIAPIKey,
 		GoogleAPIKey:       googleAPIKey,
+		ArgoAPIKey:         argoAPIKey,
 		ArgoUser:           argoUser,
-		ArgoEnv:            argoEnv,
+		ArgoDev:            argoDev,
+		ArgoTest:           argoTest,
+		ArgoLegacy:         argoLegacy,
+		ArgoEnv:            resolveArgoEnvironment(argoDev, argoTest),
 		Provider:           preferredProvider,
 		ProviderURL:        providerURL,
 		Model:              model,

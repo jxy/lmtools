@@ -61,10 +61,12 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 		Type:  "message",
 		Model: originalModel,
 		Role:  core.RoleAssistant,
-		Usage: &AnthropicUsage{
+	}
+	if resp.Usage != nil {
+		anthResp.Usage = &AnthropicUsage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
-		},
+		}
 	}
 
 	// Convert message content

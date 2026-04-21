@@ -18,7 +18,7 @@ func TestResumeSiblingSession(t *testing.T) {
 
 	// Create initial session (stdout not needed)
 	_, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 		"Initial message")
 	if err != nil {
 		t.Fatalf("Failed to create initial session: %v\nStderr: %s", err, stderr)
@@ -39,7 +39,7 @@ func TestResumeSiblingSession(t *testing.T) {
 
 	// Add another message
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 		"Second message")
 	if err != nil {
 		t.Fatalf("Failed to add second message: %v", err)
@@ -47,7 +47,7 @@ func TestResumeSiblingSession(t *testing.T) {
 
 	// Create a branch from the first message
 	_, stderr, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-branch", sessionID + "/0001", "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-branch", sessionID + "/0001", "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 		"Branch message")
 	if err != nil {
 		t.Fatalf("Failed to create branch: %v\nStderr: %s", err, stderr)
@@ -60,7 +60,7 @@ func TestResumeSiblingSession(t *testing.T) {
 	// Try to resume the sibling session - the key test is that it shouldn't
 	// try to branch again (which would fail)
 	_, stderr, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", siblingSessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", siblingSessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 		"Test message")
 
 	// The important check: it should NOT try to branch

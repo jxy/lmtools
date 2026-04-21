@@ -39,6 +39,7 @@ func (s *Server) decodeEndpointRequest(r *http.Request, dst interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
+	logWireHTTPRequest(r.Context(), "WIRE CLIENT REQUEST", r, body)
 	if err := decodeStrictJSON(body, dst); err != nil {
 		return err
 	}

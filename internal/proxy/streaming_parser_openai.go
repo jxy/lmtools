@@ -12,7 +12,9 @@ import (
 
 // OpenAIStreamParser parses OpenAI streaming responses.
 type OpenAIStreamParser struct {
-	handler *AnthropicStreamHandler
+	handler           *AnthropicStreamHandler
+	pendingStopReason string
+	finished          bool
 }
 
 // NewOpenAIStreamParser creates a new OpenAI stream parser.
@@ -34,7 +36,7 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			data := strings.TrimPrefix(line, "data: ")
 
 			if data == "[DONE]" {
-				return p.handler.Complete("end_turn")
+				return p.finishPending("end_turn")
 			}
 
 			parsed, err := core.ParseOpenAIStreamChunk([]byte(data))
@@ -58,15 +60,17 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if p.pendingStopReason != "" && !p.finished {
+		return p.finishPending(p.pendingStopReason)
+	}
+	return nil
 }
 
 func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) error {
 	updateParsedStreamUsage(p.handler, chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
-
-	if chunk.FinishReason != "" {
-		return p.handler.Complete(MapOpenAIFinishReasonToStopReason(chunk.FinishReason))
-	}
 
 	if err := emitParsedTextDelta(p.handler, chunk.Content); err != nil {
 		return err
@@ -89,5 +93,22 @@ func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) er
 		}
 	}
 
+	if chunk.FinishReason != "" {
+		p.pendingStopReason = MapOpenAIFinishReasonToStopReason(chunk.FinishReason)
+	}
+
 	return nil
+}
+
+func (p *OpenAIStreamParser) finishPending(defaultStopReason string) error {
+	if p.finished {
+		return nil
+	}
+
+	stopReason := p.pendingStopReason
+	if stopReason == "" {
+		stopReason = defaultStopReason
+	}
+	p.finished = true
+	return p.handler.Complete(stopReason)
 }

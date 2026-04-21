@@ -29,11 +29,11 @@ func TestEvaluateCredentialState(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name:     "cli argo still requires argo user",
+			name:     "cli argo accepts api key",
 			provider: constants.ProviderArgo,
-			state:    CredentialState{ProviderURL: true},
+			state:    CredentialState{APIKey: true},
 			surface:  ValidationSurfaceCLI,
-			wantMsg:  "Provider=argo: missing ArgoUser",
+			wantOK:   true,
 		},
 		{
 			name:     "proxy argo accepts provider url fallback",
@@ -68,7 +68,7 @@ func TestValidationError(t *testing.T) {
 	if got := ValidationError(constants.ProviderOpenAI, ValidationSurfaceProxy); got != "-api-key-file is required when -provider is 'openai' (unless using -provider-url)" {
 		t.Fatalf("ValidationError(openai, proxy) = %q", got)
 	}
-	if got := ValidationError(constants.ProviderArgo, ValidationSurfaceCLI); got != "user identifier (-argo-user) is required for Argo provider" {
+	if got := ValidationError(constants.ProviderArgo, ValidationSurfaceCLI); got != "either -argo-user or -api-key-file is required for Argo provider" {
 		t.Fatalf("ValidationError(argo, cli) = %q", got)
 	}
 }

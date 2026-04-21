@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"net/http"
 	"strings"
 )
@@ -78,6 +79,14 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 		s.forwardOpenAIDirectly(w, r, openAIReq, route.OriginalModel)
 		return
 	}
+	if route.Provider == constants.ProviderArgo && !s.useLegacyArgo() && providers.DetermineArgoModelProvider(route.MappedModel) == constants.ProviderOpenAI {
+		s.forwardArgoOpenAIDirectly(w, r, openAIReq, route.OriginalModel)
+		return
+	}
+	if route.Provider == constants.ProviderGoogle && !info.Stream {
+		s.forwardOpenAIToGoogle(w, r, openAIReq, route.MappedModel, route.OriginalModel)
+		return
+	}
 
 	// For other providers, convert OpenAI request to Anthropic format through TypedRequest
 	// ARCHITECTURAL NOTE: Always go through TypedRequest for conversions
@@ -112,20 +121,22 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	_ = s.sendJSONResponse(ctx, w, openAIResp)
 }
 
-func (s *Server) sendDirectOpenAIRequest(ctx context.Context, openAIReq *OpenAIRequest, stream bool) (*http.Response, error) {
+func (s *Server) sendOpenAICompatibleRequest(ctx context.Context, url, apiKey, requestName, provider string, openAIReq *OpenAIRequest, stream bool) (*http.Response, error) {
 	extraHeaders := map[string]string{}
 	if stream {
 		extraHeaders["Accept"] = "text/event-stream"
 	}
 
 	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
-		URL:          s.endpoints.OpenAI,
-		Provider:     constants.ProviderOpenAI,
-		RequestName:  "OpenAI",
+		URL:          url,
+		Provider:     provider,
+		RequestName:  requestName,
 		Payload:      openAIReq,
 		ExtraHeaders: extraHeaders,
 		Configure: func(req *http.Request) error {
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.config.OpenAIAPIKey))
+			if apiKey != "" {
+				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+			}
 			return nil
 		},
 	})
@@ -145,26 +156,24 @@ func rewriteOpenAIResponseModel(body []byte, originalModel string) (*OpenAIRespo
 }
 
 // forwardOpenAIDirectly forwards an OpenAI request directly to OpenAI
-func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
+func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
-	// Early validation: check if OpenAI URL is configured
-	if s.endpoints.OpenAI == "" {
-		log.Errorf("OpenAI URL not configured")
-		s.sendOpenAIError(w, ErrTypeServer, "OpenAI URL not configured", "configuration_error", http.StatusInternalServerError)
+	if url == "" {
+		log.Errorf("%s URL not configured", requestName)
+		s.sendOpenAIError(w, ErrTypeServer, fmt.Sprintf("%s URL not configured", requestName), "configuration_error", http.StatusInternalServerError)
 		return
 	}
 
-	// For streaming requests, we need special handling
 	if openAIReq.Stream {
-		s.forwardOpenAIStreamDirectly(w, r, openAIReq, originalModel)
+		s.forwardOpenAICompatibleStreamDirectly(w, r, openAIReq, originalModel, url, apiKey, requestName, provider)
 		return
 	}
 
-	resp, err := s.sendDirectOpenAIRequest(ctx, openAIReq, false)
+	resp, err := s.sendOpenAICompatibleRequest(ctx, url, apiKey, requestName, provider, openAIReq, false)
 	if err != nil {
-		log.Errorf("OpenAI request failed: %v", err)
+		log.Errorf("%s request failed: %v", requestName, err)
 		s.sendOpenAIError(w, ErrTypeServer, "Upstream request failed", "upstream_error", http.StatusBadGateway)
 		return
 	}
@@ -180,7 +189,7 @@ func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, o
 
 	// If error response, pass it through with consistent logging
 	if resp.StatusCode >= 400 {
-		passthroughErrorResponse(ctx, w, constants.ProviderOpenAI, resp.StatusCode, respBody)
+		passthroughErrorResponse(ctx, w, provider, resp.StatusCode, respBody)
 		return
 	}
 
@@ -194,6 +203,48 @@ func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, o
 	}
 
 	// Send response using centralized helper
+	_ = s.sendJSONResponse(ctx, w, openAIResp)
+}
+
+func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
+	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.OpenAI, s.config.OpenAIAPIKey, "OpenAI", constants.ProviderOpenAI)
+}
+
+func (s *Server) forwardArgoOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
+	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.ArgoOpenAI, s.config.ArgoAPIKey, "Argo OpenAI", constants.ProviderArgo)
+}
+
+func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, mappedModel, originalModel string) {
+	ctx := r.Context()
+	log := logger.From(ctx)
+
+	typed := OpenAIRequestToTyped(openAIReq)
+	googleReq, err := TypedToGoogleRequest(typed, mappedModel, nil)
+	if err != nil {
+		log.Errorf("Failed to convert OpenAI to Google format: %v", err)
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Failed to process request", "conversion_error", http.StatusBadRequest)
+		return
+	}
+
+	url, err := buildGoogleModelURL(s.endpoints.Google, mappedModel, "generateContent")
+	if err != nil {
+		log.Errorf("Failed to build Google URL: %v", err)
+		s.sendOpenAIError(w, ErrTypeServer, "Failed to build upstream request", "configuration_error", http.StatusInternalServerError)
+		return
+	}
+
+	var googleResp GoogleResponse
+	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
+		req.Header.Set("x-goog-api-key", s.config.GoogleAPIKey)
+	}, &googleResp, "Google")
+	if err != nil {
+		s.sendProviderErrorAsOpenAI(ctx, w, constants.ProviderGoogle, err)
+		return
+	}
+
+	anthResp := s.converter.ConvertGoogleToAnthropic(&googleResp, originalModel)
+	openAIResp := s.converter.ConvertAnthropicResponseToOpenAI(anthResp, originalModel)
+	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
 	_ = s.sendJSONResponse(ctx, w, openAIResp)
 }
 
@@ -228,14 +279,14 @@ func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// forwardOpenAIStreamDirectly forwards an OpenAI streaming request directly to OpenAI
-func (s *Server) forwardOpenAIStreamDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
+// forwardOpenAICompatibleStreamDirectly forwards an OpenAI-compatible streaming request directly upstream.
+func (s *Server) forwardOpenAICompatibleStreamDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
-	resp, err := s.sendDirectOpenAIRequest(ctx, openAIReq, true)
+	resp, err := s.sendOpenAICompatibleRequest(ctx, url, apiKey, requestName, provider, openAIReq, true)
 	if err != nil {
-		log.Errorf("OpenAI streaming request failed: %v", err)
+		log.Errorf("%s streaming request failed: %v", requestName, err)
 		s.sendOpenAIError(w, ErrTypeServer, "Upstream request failed", "upstream_error", http.StatusBadGateway)
 		return
 	}
@@ -244,7 +295,7 @@ func (s *Server) forwardOpenAIStreamDirectly(w http.ResponseWriter, r *http.Requ
 	// Check status
 	if resp.StatusCode >= 400 {
 		body, _ := s.readErrorBody(resp) // Use readErrorBody for error responses
-		passthroughErrorResponse(ctx, w, constants.ProviderOpenAI, resp.StatusCode, body)
+		passthroughErrorResponse(ctx, w, provider, resp.StatusCode, body)
 		return
 	}
 
@@ -267,7 +318,9 @@ func (s *Server) forwardOpenAIStreamDirectly(w http.ResponseWriter, r *http.Requ
 			// Check for the DONE sentinel explicitly
 			if strings.TrimSpace(line) == "data: "+OpenAIDoneMarker {
 				// Write as-is and continue
-				fmt.Fprintf(w, "%s\n\n", line)
+				payload := fmt.Sprintf("%s\n\n", line)
+				logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
+				fmt.Fprint(w, payload)
 				flusher.Flush()
 				continue
 			}
@@ -288,10 +341,14 @@ func (s *Server) forwardOpenAIStreamDirectly(w http.ResponseWriter, r *http.Requ
 			}
 
 			// Write the line with empty line after
-			fmt.Fprintf(w, "%s\n\n", line)
+			payload := fmt.Sprintf("%s\n\n", line)
+			logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
+			fmt.Fprint(w, payload)
 		} else {
 			// Non-data lines (like comments or events)
-			fmt.Fprintf(w, "%s\n", line)
+			payload := fmt.Sprintf("%s\n", line)
+			logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
+			fmt.Fprint(w, payload)
 		}
 
 		flusher.Flush()

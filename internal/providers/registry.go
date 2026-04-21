@@ -26,13 +26,13 @@ var providerDescriptors = map[string]providerDescriptor{
 		Policies: map[ValidationSurface]CredentialPolicy{
 			ValidationSurfaceCLI: {
 				AllowProviderURL:      false,
-				ValidationError:       "user identifier (-argo-user) is required for Argo provider",
-				MissingCredentialText: "Provider=argo: missing ArgoUser",
+				ValidationError:       "either -argo-user or -api-key-file is required for Argo provider",
+				MissingCredentialText: "Provider=argo: missing ArgoUser or APIKey",
 			},
 			ValidationSurfaceProxy: {
 				AllowProviderURL:      true,
-				ValidationError:       "-argo-user is required when -provider is 'argo' (unless using -provider-url)",
-				MissingCredentialText: "Provider=argo: missing ArgoUser or ProviderURL",
+				ValidationError:       "-argo-user or -api-key-file is required when -provider is 'argo' (unless using -provider-url)",
+				MissingCredentialText: "Provider=argo: missing ArgoUser, APIKey, or ProviderURL",
 			},
 		},
 		ResolveEndpoints: resolveArgoEndpoints,

@@ -22,10 +22,13 @@ type Endpoints struct {
 	Anthropic string // Anthropic messages URL
 
 	// Argo-specific endpoints
-	ArgoBase       string // Argo base resource URL
-	ArgoChat       string // Argo chat endpoint
-	ArgoStreamChat string // Argo streaming chat endpoint
-	ArgoEmbed      string // Argo embeddings endpoint
+	ArgoBase                 string // Argo base resource URL
+	ArgoChat                 string // Legacy Argo chat endpoint
+	ArgoStreamChat           string // Legacy Argo streaming chat endpoint
+	ArgoEmbed                string // Argo embeddings endpoint
+	ArgoOpenAI               string // Argo OpenAI chat/completions endpoint
+	ArgoAnthropic            string // Argo Anthropic messages endpoint
+	ArgoAnthropicCountTokens string // Argo Anthropic count_tokens endpoint
 
 	// Models endpoints (for /v1/models proxy)
 	OpenAIModels    string
@@ -73,6 +76,9 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 		endpoints.ArgoChat = resolved.Chat
 		endpoints.ArgoStreamChat = resolved.Stream
 		endpoints.ArgoEmbed = resolved.Embed
+		endpoints.ArgoOpenAI = resolved.OpenAIChat
+		endpoints.ArgoAnthropic = resolved.AnthropicMessages
+		endpoints.ArgoAnthropicCountTokens = resolved.AnthropicCountTokens
 		endpoints.ArgoModels = resolved.Models
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)

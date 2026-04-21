@@ -1,0 +1,21 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Compute 17 * 23. Return the final integer.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "output_config": {
+    "effort": "xhigh"
+  },
+  "stream": false,
+  "thinking": {
+    "type": "adaptive"
+  }
+}

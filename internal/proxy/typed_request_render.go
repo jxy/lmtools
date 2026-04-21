@@ -118,6 +118,8 @@ func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (
 		StopSequences: typed.Stop,
 		Temperature:   typed.Temperature,
 		Tools:         proxyAnthropicToolsFromCore(prepared.Tools),
+		Thinking:      typed.Thinking,
+		OutputConfig:  typed.OutputConfig,
 	}
 	if typed.Temperature == nil {
 		anthReq.TopP = typed.TopP

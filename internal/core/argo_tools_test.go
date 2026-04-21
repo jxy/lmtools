@@ -57,12 +57,14 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 		name        string
 		model       string
 		provider    string
+		endpoint    string
 		verifyTools func(t *testing.T, req map[string]interface{})
 	}{
 		{
 			name:     "GPT model should use OpenAI format",
 			model:    "gpt5",
 			provider: "argo",
+			endpoint: "/v1/chat/completions",
 			verifyTools: func(t *testing.T, req map[string]interface{}) {
 				// Tools should be in OpenAI format (wrapped with type/function)
 				// The tools might be stored as []interface{} during JSON marshaling
@@ -102,11 +104,12 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 			},
 		},
 		{
-			name:     "Gemini model should use Google format",
+			name:     "Gemini model should use OpenAI format",
 			model:    "gemini25pro",
 			provider: "argo",
+			endpoint: "/v1/chat/completions",
 			verifyTools: func(t *testing.T, req map[string]interface{}) {
-				// Tools should be in Google format with functionDeclarations
+				// Gemini models also use Argo's OpenAI-compatible wire format.
 				toolsInterface, ok := req["tools"].([]interface{})
 				if !ok {
 					t.Fatalf("Tools should be []interface{}, got %T", req["tools"])
@@ -121,55 +124,19 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 					t.Fatalf("Tool should be map[string]interface{}, got %T", toolsInterface[0])
 				}
 
-				// Check for functionDeclarations field (Google format)
-				funcDecls, ok := tool["functionDeclarations"].([]interface{})
+				if tool["type"] != "function" {
+					t.Errorf("Expected type='function', got %v", tool["type"])
+				}
+
+				function, ok := tool["function"].(map[string]interface{})
 				if !ok {
-					t.Fatalf("Expected functionDeclarations field to be an array, got %T", tool["functionDeclarations"])
+					t.Fatal("Expected function field to be a map")
 				}
-
-				if len(funcDecls) != 1 {
-					t.Fatalf("Expected 1 function declaration, got %d", len(funcDecls))
+				if function["name"] != "universal_command" {
+					t.Errorf("Expected name='universal_command', got %v", function["name"])
 				}
-
-				funcDecl, ok := funcDecls[0].(map[string]interface{})
-				if !ok {
-					t.Fatalf("Function declaration should be map[string]interface{}, got %T", funcDecls[0])
-				}
-
-				// Check function declaration structure
-				if funcDecl["name"] != "universal_command" {
-					t.Errorf("Expected name='universal_command', got %v", funcDecl["name"])
-				}
-
-				// Check parameters field exists
-				params, ok := funcDecl["parameters"].(map[string]interface{})
-				if !ok {
-					t.Fatal("Expected parameters field to be a map")
-				}
-
-				// Check that type is uppercase
-				if params["type"] != "OBJECT" {
-					t.Errorf("Expected type='OBJECT' (uppercase), got %v", params["type"])
-				}
-
-				// Check properties
-				props, ok := params["properties"].(map[string]interface{})
-				if !ok {
-					t.Fatal("Expected properties to be a map")
-				}
-
-				// Check command property has uppercase type
-				cmdProp, ok := props["command"].(map[string]interface{})
-				if !ok {
-					t.Fatal("Expected command property to be a map")
-				}
-				if cmdProp["type"] != "ARRAY" {
-					t.Errorf("Expected command type='ARRAY' (uppercase), got %v", cmdProp["type"])
-				}
-
-				// Google doesn't use tool_choice
-				if req["tool_choice"] != nil {
-					t.Errorf("Expected tool_choice=nil for Google, got %v", req["tool_choice"])
+				if req["tool_choice"] != "auto" {
+					t.Errorf("Expected tool_choice='auto', got %v", req["tool_choice"])
 				}
 			},
 		},
@@ -177,6 +144,7 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 			name:     "Claude model should use Anthropic format",
 			model:    "claude-opus-4",
 			provider: "argo",
+			endpoint: "/v1/messages",
 			verifyTools: func(t *testing.T, req map[string]interface{}) {
 				// Tools should be in Anthropic format (with input_schema)
 				toolsInterface, ok := req["tools"].([]interface{})
@@ -233,6 +201,7 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 			name:     "O3 model should use OpenAI format",
 			model:    "o3-mini",
 			provider: "argo",
+			endpoint: "/v1/chat/completions",
 			verifyTools: func(t *testing.T, req map[string]interface{}) {
 				// O3 models should use OpenAI format
 				toolsInterface, ok := req["tools"].([]interface{})
@@ -282,6 +251,9 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 			if httpReq == nil {
 				t.Fatal("Expected HTTP request to be created")
 			}
+			if !strings.HasSuffix(httpReq.URL.String(), tt.endpoint) {
+				t.Fatalf("Expected URL to end with %q, got %q", tt.endpoint, httpReq.URL.String())
+			}
 
 			// Parse the request body
 			var req map[string]interface{}
@@ -289,10 +261,6 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 				t.Fatalf("Failed to parse request body: %v", err)
 			}
 
-			// Verify basic fields
-			if req["user"] != "testuser" {
-				t.Errorf("Expected user='testuser', got %v", req["user"])
-			}
 			if req["model"] != tt.model {
 				t.Errorf("Expected model='%s', got %v", tt.model, req["model"])
 			}
@@ -330,8 +298,8 @@ func TestConvertToolsForProvider(t *testing.T) {
 		{"gpt-4", "openai"},
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
-		{"gemini25pro", "google"},
-		{"gemini-1.5-flash", "google"},
+		{"gemini25pro", "openai"},
+		{"gemini-1.5-flash", "openai"},
 		{"claude-opus-4", "anthropic"},
 		{"claude-3-haiku", "anthropic"},
 		{"unknown-model", "openai"}, // Should default to OpenAI
@@ -707,11 +675,11 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 				}
 
 				// Check basic request structure
-				if req["user"] != "testuser" {
-					t.Errorf("Expected user='testuser', got '%v'", req["user"])
-				}
 				if req["model"] != "claudesonnet4" {
 					t.Errorf("Expected model='claudesonnet4', got '%v'", req["model"])
+				}
+				if req["system"] != "Test system prompt" {
+					t.Errorf("Expected top-level system prompt, got '%v'", req["system"])
 				}
 
 				messages, ok := req["messages"].([]interface{})
@@ -742,35 +710,25 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 					}
 				}
 
-				// Should have: system, user, assistant (with tool_use), user (tool results)
-				if len(messages) != 4 {
-					t.Errorf("Expected 4 messages, got %d", len(messages))
-				}
-
-				// Check system message
-				if msg0, ok := messages[0].(map[string]interface{}); ok {
-					if msg0["role"] != "system" {
-						t.Errorf("Expected first message role='system', got '%v'", msg0["role"])
-					}
-					if msg0["content"] != "Test system prompt" {
-						t.Errorf("Expected system content='Test system prompt', got '%v'", msg0["content"])
-					}
+				// Anthropic format keeps the system prompt out-of-band.
+				if len(messages) != 3 {
+					t.Errorf("Expected 3 messages, got %d", len(messages))
 				}
 
 				// Check original user message
-				if msg1, ok := messages[1].(map[string]interface{}); ok {
-					if msg1["role"] != "user" {
-						t.Errorf("Expected second message role='user', got '%v'", msg1["role"])
+				if msg0, ok := messages[0].(map[string]interface{}); ok {
+					if msg0["role"] != "user" {
+						t.Errorf("Expected first message role='user', got '%v'", msg0["role"])
 					}
 				}
 
 				// Check assistant message with tool_use blocks
-				if msg2, ok := messages[2].(map[string]interface{}); ok {
-					if msg2["role"] != "assistant" {
-						t.Errorf("Expected third message role='assistant', got '%v'", msg2["role"])
+				if msg1, ok := messages[1].(map[string]interface{}); ok {
+					if msg1["role"] != "assistant" {
+						t.Errorf("Expected second message role='assistant', got '%v'", msg1["role"])
 					}
 					// Should have content array with tool_use blocks
-					if content, ok := msg2["content"].([]interface{}); ok {
+					if content, ok := msg1["content"].([]interface{}); ok {
 						if len(content) < 2 {
 							t.Errorf("Expected at least 2 content blocks in assistant message, got %d", len(content))
 						}
@@ -778,12 +736,12 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 				}
 
 				// Check user message with tool results
-				if msg3, ok := messages[3].(map[string]interface{}); ok {
-					if msg3["role"] != "user" {
-						t.Errorf("Expected fourth message role='user', got '%v'", msg3["role"])
+				if msg2, ok := messages[2].(map[string]interface{}); ok {
+					if msg2["role"] != "user" {
+						t.Errorf("Expected third message role='user', got '%v'", msg2["role"])
 					}
 					// Content should be an array of tool_result blocks
-					if content, ok := msg3["content"].([]interface{}); ok {
+					if content, ok := msg2["content"].([]interface{}); ok {
 						// Should have at least 2 tool results
 						if len(content) < 2 {
 							t.Errorf("Expected at least 2 tool result blocks, got %d", len(content))
@@ -821,9 +779,6 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 				}
 
 				// Check basic request structure
-				if req["user"] != "testuser" {
-					t.Errorf("Expected user='testuser', got '%v'", req["user"])
-				}
 				if req["model"] != "gpt5" {
 					t.Errorf("Expected model='gpt5', got '%v'", req["model"])
 				}
@@ -1086,8 +1041,12 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 				if req.Method != "POST" {
 					t.Errorf("Expected method='POST', got '%s'", req.Method)
 				}
-				if !strings.Contains(req.URL.String(), "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource/chat/") {
-					t.Errorf("Expected URL to contain Argo chat endpoint, got '%s'", req.URL.String())
+				expectedPath := "/v1/chat/completions"
+				if strings.HasPrefix(tt.model, "claude") {
+					expectedPath = "/v1/messages"
+				}
+				if !strings.Contains(req.URL.String(), expectedPath) {
+					t.Errorf("Expected URL to contain %s, got '%s'", expectedPath, req.URL.String())
 				}
 
 				// Validate body content

@@ -210,7 +210,7 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 			name:          "Argo provider without user",
 			provider:      constants.ProviderArgo,
 			expectError:   true,
-			errorContains: "-argo-user is required when -provider is 'argo'",
+			errorContains: "-argo-user or -api-key-file is required when -provider is 'argo'",
 		},
 		{
 			name:          "Invalid provider",
@@ -243,6 +243,38 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfigValidateArgoTestEnvironment(t *testing.T) {
+	config := &Config{
+		Provider: constants.ProviderArgo,
+		ArgoUser: "testuser",
+		ArgoTest: true,
+	}
+
+	if err := config.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if config.ArgoEnv != "test" {
+		t.Fatalf("ArgoEnv = %q, want %q", config.ArgoEnv, "test")
+	}
+}
+
+func TestConfigValidateArgoDevAndTestConflict(t *testing.T) {
+	config := &Config{
+		Provider: constants.ProviderArgo,
+		ArgoUser: "testuser",
+		ArgoDev:  true,
+		ArgoTest: true,
+	}
+
+	err := config.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "-argo-dev and -argo-test cannot be used together") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

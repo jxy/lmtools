@@ -42,6 +42,8 @@ func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage,
 			payload.System = inlineSystem
 		}
 		payload.Messages = rest
+	} else {
+		payload.Messages = PrependSystemMessage(typedMessages, payload.System)
 	}
 
 	if len(toolDefs) > 0 {

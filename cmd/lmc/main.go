@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
+	"io"
 	"lmtools/internal/auth"
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
@@ -19,6 +21,7 @@ import (
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/signal"
 	"strings"
@@ -442,6 +445,7 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, sess *session.Ses
 		// Log error but don't fail the request - logging is not critical
 		notifier.Warnf("Failed to log request: %v", err)
 	}
+	logWireHTTPRequest(ctx, req, body)
 
 	return core.RequestBuild{
 		Request:  req,
@@ -467,6 +471,7 @@ func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (
 		logURL = u.String()
 	}
 	logger.From(ctx).Infof("Sending request to %s", logURL)
+	logger.From(ctx).Debugf("WIRE BACKEND REQUEST URL:\n%s", req.URL.String())
 
 	startTime := time.Now()
 	resp, err := retryClient.Do(ctx, req, "lmc")
@@ -481,8 +486,51 @@ func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (
 
 	// Log response received
 	logger.From(ctx).Infof("Response received | Status: %d | Duration: %v", resp.StatusCode, time.Since(startTime))
+	logWireHTTPResponseHeaders(ctx, resp)
 
 	return resp, nil
+}
+
+func logWireHTTPRequest(ctx context.Context, req *http.Request, body []byte) {
+	log := logger.From(ctx)
+	if !log.IsDebugEnabled() || req == nil {
+		return
+	}
+
+	clone := req.Clone(ctx)
+	clone.Body = io.NopCloser(bytes.NewReader(body))
+	clone.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	clone.ContentLength = int64(len(body))
+
+	dump, err := httputil.DumpRequestOut(clone, true)
+	if err != nil {
+		log.Debugf("WIRE BACKEND REQUEST dump failed: %v", err)
+		return
+	}
+	log.Debugf("WIRE BACKEND REQUEST:\n%s", string(dump))
+}
+
+func logWireHTTPResponseHeaders(ctx context.Context, resp *http.Response) {
+	log := logger.From(ctx)
+	if !log.IsDebugEnabled() || resp == nil {
+		return
+	}
+
+	var buf bytes.Buffer
+	proto := resp.Proto
+	if proto == "" {
+		proto = "HTTP/1.1"
+	}
+	status := resp.Status
+	if status == "" {
+		status = fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	fmt.Fprintf(&buf, "%s %s\r\n", proto, status)
+	_ = resp.Header.Write(&buf)
+	buf.WriteString("\r\n")
+	log.Debugf("WIRE BACKEND RESPONSE HEADERS:\n%s", buf.String())
 }
 
 // persistAssistantOnly saves assistant response when there are no tool calls
@@ -514,7 +562,7 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 	provider := cfg.Provider
 	provider = providers.ResolveProvider(provider)
 
-	url, err := providers.ResolveModelsURL(provider, cfg.ProviderURL, cfg.ArgoEnv)
+	url, err := providers.ResolveModelsURLWithArgoOptions(provider, cfg.ProviderURL, cfg.GetEnv(), cfg.ArgoLegacy)
 	if err != nil {
 		return errors.WrapError("validate provider", err)
 	}

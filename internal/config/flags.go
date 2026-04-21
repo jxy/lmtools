@@ -21,10 +21,13 @@ type Config struct {
 	Model               string        // model to use
 	Embed               bool          // whether to run in embed mode
 	StreamChat          bool          // whether to use streaming chat mode
-	ArgoUser            string        // user identifier (required for Argo provider only)
+	ArgoUser            string        // user identifier for Argo provider (or use APIKeyFile)
 	System              string        // system prompt for chat
 	SystemExplicitlySet bool          // whether -s flag was explicitly provided
-	ArgoEnv             string        // environment (prod|dev|custom base URL)
+	ArgoDev             bool          // whether to use the Argo dev environment
+	ArgoTest            bool          // whether to use the Argo test environment
+	ArgoLegacy          bool          // whether to use legacy Argo chat/streamchat endpoints
+	ArgoEnv             string        // resolved environment (prod|dev|test)
 	Timeout             time.Duration // HTTP request timeout
 	Retries             int           // number of retry attempts
 	Resume              string        // session ID or path to continue
@@ -41,7 +44,7 @@ type Config struct {
 	// Provider support
 	Provider    string // provider: argo (default), openai, google, anthropic
 	ProviderURL string // custom provider API endpoint
-	APIKeyFile  string // path to API key file (required for non-Argo providers)
+	APIKeyFile  string // path to API key file (required for openai/google/anthropic; optional for argo)
 	ListModels  bool   // list available models from provider
 
 	// Tool support
@@ -74,9 +77,7 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, err
 	}
 
-	if err := validateEnvironmentValue(cfg.ArgoEnv); err != nil {
-		return cfg, err
-	}
+	cfg.ArgoEnv = resolveArgoEnvironment(cfg.ArgoDev, cfg.ArgoTest)
 
 	if err := validateModeFlagCombinations(cfg); err != nil {
 		return cfg, err
@@ -123,14 +124,16 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.IntVar(&cfg.ToolMaxOutputBytes, "tool-max-output-bytes", int(core.DefaultMaxOutputSize), "maximum output size per tool execution (default: 1MB)")
 
 	// Configuration
-	fs.StringVar(&cfg.ArgoEnv, "argo-env", "dev", "environment: prod, dev, or custom base URL")
-	fs.StringVar(&cfg.ArgoUser, "argo-user", getDefaultUser(), "user identifier (required for Argo provider)")
+	fs.BoolVar(&cfg.ArgoDev, "argo-dev", false, "use the Argo dev environment instead of prod")
+	fs.BoolVar(&cfg.ArgoTest, "argo-test", false, "use the Argo test environment instead of prod")
+	fs.BoolVar(&cfg.ArgoLegacy, "argo-legacy", false, "use legacy Argo /api/v1/resource chat endpoints")
+	fs.StringVar(&cfg.ArgoUser, "argo-user", getDefaultUser(), "user identifier for Argo provider (or use -api-key-file)")
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
 
 	// Provider support
 	fs.StringVar(&cfg.Provider, "provider", constants.ProviderArgo, "provider: argo, openai, google, anthropic")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "custom provider API endpoint")
-	fs.StringVar(&cfg.APIKeyFile, "api-key-file", "", "path to API key file (required for non-Argo providers)")
+	fs.StringVar(&cfg.APIKeyFile, "api-key-file", "", "path to API key file (required for openai/google/anthropic; optional alternative for argo)")
 	fs.BoolVar(&cfg.ListModels, "list-models", false, "list available models from provider")
 
 	// Retry configuration
@@ -211,7 +214,14 @@ func (c Config) IsSystemExplicitlySet() bool {
 }
 
 func (c Config) GetEnv() string {
+	if c.ArgoEnv == "" {
+		return resolveArgoEnvironment(c.ArgoDev, c.ArgoTest)
+	}
 	return c.ArgoEnv
+}
+
+func (c Config) IsArgoLegacy() bool {
+	return c.ArgoLegacy
 }
 
 func (c Config) IsEmbed() bool {

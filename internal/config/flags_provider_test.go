@@ -36,6 +36,12 @@ func TestProviderToolValidation(t *testing.T) {
 			wantErr: false,
 			errMsg:  "",
 		},
+		{
+			name:    "argo provider with tool flag and api key file",
+			args:    []string{"-provider", "argo", "-tool", "-api-key-file", "test.key"},
+			wantErr: false,
+			errMsg:  "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -77,6 +83,11 @@ func TestProviderValidation(t *testing.T) {
 		{
 			name:    "valid provider argo",
 			args:    []string{"-provider", "argo", "-argo-user", "test"},
+			wantErr: false,
+		},
+		{
+			name:    "valid provider argo with api key file",
+			args:    []string{"-provider", "argo", "-api-key-file", "test.key"},
 			wantErr: false,
 		},
 		{

@@ -192,209 +192,278 @@ func TestIntegrationStreaming(t *testing.T) {
 }
 
 func TestIntegrationRetry(t *testing.T) {
-	// Create a mock server that fails initially then succeeds
-	attemptCount := 0
-	retryMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify it's hitting the chat endpoint (now includes /api/v1 prefix)
-		if r.URL.Path != "/api/v1/resource/chat/" {
-			t.Errorf("Expected path /api/v1/resource/chat/, got %s", r.URL.Path)
-		}
-
-		attemptCount++
-		t.Logf("Retry mock received attempt %d", attemptCount)
-
-		// Fail first 2 attempts with 503
-		if attemptCount < 3 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := w.Write([]byte("Service temporarily unavailable")); err != nil {
-				t.Logf("write error: %v", err)
-			}
-			return
-		}
-
-		// Success on 3rd attempt
-		resp := ArgoChatResponse{
-			Response: "Success after retries",
-		}
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Logf("encode error: %v", err)
-		}
-	}))
-	defer retryMock.Close()
-
-	// Create config with retry settings
-	config := &Config{
-		// Don't set OpenAI/Google keys so Argo is used
-		ArgoUser:           "testuser",
-		ArgoEnv:            "test",
-		ProviderURL:        retryMock.URL, // Use ProviderURL instead
-		Provider:           constants.ProviderArgo,
-		SmallModel:         "gpt35",
-		Model:              "gpt4",
-		MaxRequestBodySize: 10 * 1024 * 1024,
-	}
-	// Create proxy server with fast retries (NewEndpoints is called internally)
-	server := NewTestServerWithFastRetries(t, config)
-	proxyServer := httptest.NewServer(server)
-	defer proxyServer.Close()
-
-	// Make request
-	reqBody := AnthropicRequest{
-		Model:     "gpt4",
-		MaxTokens: 100,
-		Messages: []AnthropicMessage{
-			{
-				Role:    core.RoleUser,
-				Content: json.RawMessage(`"Test retry mechanism"`),
+	tests := []struct {
+		name         string
+		argoLegacy   bool
+		expectedPath string
+		writeSuccess func(t *testing.T, w http.ResponseWriter)
+	}{
+		{
+			name:         "legacy",
+			argoLegacy:   true,
+			expectedPath: "/api/v1/resource/chat/",
+			writeSuccess: func(t *testing.T, w http.ResponseWriter) {
+				t.Helper()
+				if err := json.NewEncoder(w).Encode(ArgoChatResponse{Response: "Success after retries"}); err != nil {
+					t.Logf("encode error: %v", err)
+				}
+			},
+		},
+		{
+			name:         "native openai",
+			argoLegacy:   false,
+			expectedPath: "/v1/chat/completions",
+			writeSuccess: func(t *testing.T, w http.ResponseWriter) {
+				t.Helper()
+				if err := json.NewEncoder(w).Encode(OpenAIResponse{
+					ID:    "chatcmpl-retry",
+					Model: "gpt4",
+					Choices: []OpenAIChoice{
+						{
+							Message: OpenAIMessage{
+								Role:    "assistant",
+								Content: "Success after retries",
+							},
+							FinishReason: "stop",
+						},
+					},
+					Usage: &OpenAIUsage{
+						PromptTokens:     10,
+						CompletionTokens: 4,
+						TotalTokens:      14,
+					},
+				}); err != nil {
+					t.Logf("encode error: %v", err)
+				}
 			},
 		},
 	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attemptCount := 0
+			retryMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.expectedPath {
+					t.Errorf("Expected path %s, got %s", tt.expectedPath, r.URL.Path)
+				}
 
-	// Send request
-	resp, err := http.Post(proxyServer.URL+"/v1/messages", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
-	}
-	defer resp.Body.Close()
+				attemptCount++
+				t.Logf("Retry mock received attempt %d", attemptCount)
 
-	// Should succeed after retries
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, string(body))
-	}
+				if attemptCount < 3 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					if _, err := w.Write([]byte("Service temporarily unavailable")); err != nil {
+						t.Logf("write error: %v", err)
+					}
+					return
+				}
 
-	// Verify response
-	var anthResp AnthropicResponse
-	if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+				tt.writeSuccess(t, w)
+			}))
+			defer retryMock.Close()
 
-	if len(anthResp.Content) == 0 {
-		t.Fatal("Expected content in response")
-	}
+			config := &Config{
+				ArgoUser:           "testuser",
+				ArgoEnv:            "test",
+				ArgoLegacy:         tt.argoLegacy,
+				ProviderURL:        retryMock.URL,
+				Provider:           constants.ProviderArgo,
+				SmallModel:         "gpt35",
+				Model:              "gpt4",
+				MaxRequestBodySize: 10 * 1024 * 1024,
+			}
 
-	if !strings.Contains(anthResp.Content[0].Text, "Success after retries") {
-		t.Errorf("Expected 'Success after retries', got %s", anthResp.Content[0].Text)
-	}
+			server := NewTestServerWithFastRetries(t, config)
+			proxyServer := httptest.NewServer(server)
+			defer proxyServer.Close()
 
-	// Verify retry count
-	if attemptCount != 3 {
-		t.Errorf("Expected 3 attempts, got %d", attemptCount)
+			reqBody := AnthropicRequest{
+				Model:     "gpt4",
+				MaxTokens: 100,
+				Messages: []AnthropicMessage{
+					{
+						Role:    core.RoleUser,
+						Content: json.RawMessage(`"Test retry mechanism"`),
+					},
+				},
+			}
+
+			body, err := json.Marshal(reqBody)
+			if err != nil {
+				t.Fatalf("Failed to marshal request: %v", err)
+			}
+
+			resp, err := http.Post(proxyServer.URL+"/v1/messages", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("Failed to send request: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, string(body))
+			}
+
+			var anthResp AnthropicResponse
+			if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
+				t.Fatalf("Failed to decode response: %v", err)
+			}
+
+			if len(anthResp.Content) == 0 {
+				t.Fatal("Expected content in response")
+			}
+
+			if !strings.Contains(anthResp.Content[0].Text, "Success after retries") {
+				t.Errorf("Expected 'Success after retries', got %s", anthResp.Content[0].Text)
+			}
+
+			if attemptCount != 3 {
+				t.Errorf("Expected 3 attempts, got %d", attemptCount)
+			}
+		})
 	}
 }
 
 func TestIntegrationRetryRateLimit(t *testing.T) {
-	// Test retry with 429 rate limit errors
-	attemptCount := 0
-	rateLimitMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify it's hitting the chat endpoint (now includes /api/v1 prefix)
-		if r.URL.Path != "/api/v1/resource/chat/" {
-			t.Errorf("Expected path /api/v1/resource/chat/, got %s", r.URL.Path)
-		}
-
-		attemptCount++
-		t.Logf("Rate limit mock received attempt %d", attemptCount)
-
-		// Return 429 for first attempt with Retry-After header
-		if attemptCount == 1 {
-			w.Header().Set("Retry-After", "1") // 1 second
-			w.WriteHeader(http.StatusTooManyRequests)
-			if _, err := w.Write([]byte("Rate limit exceeded")); err != nil {
-				t.Logf("write error: %v", err)
-			}
-			return
-		}
-
-		// Success on 2nd attempt
-		resp := ArgoChatResponse{
-			Response: "Success after rate limit",
-		}
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Logf("encode error: %v", err)
-		}
-	}))
-	defer rateLimitMock.Close()
-
-	// Create config
-	config := &Config{
-		// Don't set OpenAI/Google keys so Argo is used
-		ArgoUser:           "testuser",
-		ArgoEnv:            "test",
-		ProviderURL:        rateLimitMock.URL, // Use ProviderURL instead
-		Provider:           constants.ProviderArgo,
-		SmallModel:         "gpt35",
-		Model:              "gpt4",
-		MaxRequestBodySize: 10 * 1024 * 1024,
-	}
-	// Use production server to test real Retry-After header handling
-	// (NewTestServerWithFastRetries ignores Retry-After and uses millisecond delays)
-	server, err := NewServer(config)
-	if err != nil {
-		t.Fatalf("Failed to create server: %v", err)
-	}
-	proxyServer := httptest.NewServer(server)
-	defer proxyServer.Close()
-
-	// Make request
-	reqBody := AnthropicRequest{
-		Model:     "gpt4",
-		MaxTokens: 100,
-		Messages: []AnthropicMessage{
-			{
-				Role:    core.RoleUser,
-				Content: json.RawMessage(`"Test rate limit retry"`),
+	tests := []struct {
+		name         string
+		argoLegacy   bool
+		expectedPath string
+		writeSuccess func(t *testing.T, w http.ResponseWriter)
+	}{
+		{
+			name:         "legacy",
+			argoLegacy:   true,
+			expectedPath: "/api/v1/resource/chat/",
+			writeSuccess: func(t *testing.T, w http.ResponseWriter) {
+				t.Helper()
+				if err := json.NewEncoder(w).Encode(ArgoChatResponse{Response: "Success after rate limit"}); err != nil {
+					t.Logf("encode error: %v", err)
+				}
+			},
+		},
+		{
+			name:         "native openai",
+			argoLegacy:   false,
+			expectedPath: "/v1/chat/completions",
+			writeSuccess: func(t *testing.T, w http.ResponseWriter) {
+				t.Helper()
+				if err := json.NewEncoder(w).Encode(OpenAIResponse{
+					ID:    "chatcmpl-rate-limit",
+					Model: "gpt4",
+					Choices: []OpenAIChoice{
+						{
+							Message: OpenAIMessage{
+								Role:    "assistant",
+								Content: "Success after rate limit",
+							},
+							FinishReason: "stop",
+						},
+					},
+					Usage: &OpenAIUsage{
+						PromptTokens:     10,
+						CompletionTokens: 4,
+						TotalTokens:      14,
+					},
+				}); err != nil {
+					t.Logf("encode error: %v", err)
+				}
 			},
 		},
 	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attemptCount := 0
+			rateLimitMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.expectedPath {
+					t.Errorf("Expected path %s, got %s", tt.expectedPath, r.URL.Path)
+				}
 
-	// Send request
-	start := time.Now()
-	resp, err := http.Post(proxyServer.URL+"/v1/messages", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
-	}
-	defer resp.Body.Close()
-	duration := time.Since(start)
+				attemptCount++
+				t.Logf("Rate limit mock received attempt %d", attemptCount)
 
-	// Should succeed after retry
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, string(body))
-	}
+				if attemptCount == 1 {
+					w.Header().Set("Retry-After", "1")
+					w.WriteHeader(http.StatusTooManyRequests)
+					if _, err := w.Write([]byte("Rate limit exceeded")); err != nil {
+						t.Logf("write error: %v", err)
+					}
+					return
+				}
 
-	// Verify response
-	var anthResp AnthropicResponse
-	if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+				tt.writeSuccess(t, w)
+			}))
+			defer rateLimitMock.Close()
 
-	if len(anthResp.Content) == 0 {
-		t.Fatal("Expected content in response")
-	}
+			config := &Config{
+				ArgoUser:           "testuser",
+				ArgoEnv:            "test",
+				ArgoLegacy:         tt.argoLegacy,
+				ProviderURL:        rateLimitMock.URL,
+				Provider:           constants.ProviderArgo,
+				SmallModel:         "gpt35",
+				Model:              "gpt4",
+				MaxRequestBodySize: 10 * 1024 * 1024,
+			}
 
-	if !strings.Contains(anthResp.Content[0].Text, "Success after rate limit") {
-		t.Errorf("Expected 'Success after rate limit', got %s", anthResp.Content[0].Text)
-	}
+			server, err := NewServer(config)
+			if err != nil {
+				t.Fatalf("Failed to create server: %v", err)
+			}
+			proxyServer := httptest.NewServer(server)
+			defer proxyServer.Close()
 
-	// Verify retry count
-	if attemptCount != 2 {
-		t.Errorf("Expected 2 attempts, got %d", attemptCount)
-	}
+			reqBody := AnthropicRequest{
+				Model:     "gpt4",
+				MaxTokens: 100,
+				Messages: []AnthropicMessage{
+					{
+						Role:    core.RoleUser,
+						Content: json.RawMessage(`"Test rate limit retry"`),
+					},
+				},
+			}
 
-	// Verify it respected Retry-After (should take close to 1 second)
-	// Allow some tolerance for timing variations (750ms instead of 1s to account for system timing)
-	if duration < 750*time.Millisecond {
-		t.Errorf("Expected delay of at least 750ms (with 1s Retry-After), got %v", duration)
+			body, err := json.Marshal(reqBody)
+			if err != nil {
+				t.Fatalf("Failed to marshal request: %v", err)
+			}
+
+			start := time.Now()
+			resp, err := http.Post(proxyServer.URL+"/v1/messages", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("Failed to send request: %v", err)
+			}
+			defer resp.Body.Close()
+			duration := time.Since(start)
+
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, string(body))
+			}
+
+			var anthResp AnthropicResponse
+			if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
+				t.Fatalf("Failed to decode response: %v", err)
+			}
+
+			if len(anthResp.Content) == 0 {
+				t.Fatal("Expected content in response")
+			}
+
+			if !strings.Contains(anthResp.Content[0].Text, "Success after rate limit") {
+				t.Errorf("Expected 'Success after rate limit', got %s", anthResp.Content[0].Text)
+			}
+
+			if attemptCount != 2 {
+				t.Errorf("Expected 2 attempts, got %d", attemptCount)
+			}
+
+			if duration < 750*time.Millisecond {
+				t.Errorf("Expected delay of at least 750ms (with 1s Retry-After), got %v", duration)
+			}
+		})
 	}
 }
 
@@ -546,12 +615,16 @@ func TestCustomProviderURL(t *testing.T) {
 	tests := []struct {
 		name              string
 		preferredProvider string
+		requestModel      string
+		expectedText      string
 		setupConfig       func(t *testing.T) (*Config, *httptest.Server)
 		expectedPath      string
 	}{
 		{
 			name:              "OpenAI custom URL",
 			preferredProvider: constants.ProviderOpenAI,
+			requestModel:      "claude-3-haiku-20240307",
+			expectedText:      "Response from custom OpenAI endpoint",
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -608,6 +681,8 @@ func TestCustomProviderURL(t *testing.T) {
 		{
 			name:              "Google custom URL",
 			preferredProvider: constants.ProviderGoogle,
+			requestModel:      "claude-3-haiku-20240307",
+			expectedText:      "Response from custom Google endpoint",
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -654,21 +729,36 @@ func TestCustomProviderURL(t *testing.T) {
 			expectedPath: "/custom/google/models",
 		},
 		{
-			name:              "Argo custom URL",
+			name:              "Argo custom URL native OpenAI",
 			preferredProvider: constants.ProviderArgo,
+			requestModel:      "gpt4",
+			expectedText:      "Response from custom Argo OpenAI endpoint",
 			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
 				// Create a custom mock server
 				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					t.Logf("Custom Argo mock received: %s %s", r.Method, r.URL.Path)
 
-					// Argo URLs end with /api/v1/resource/chat/
-					if !strings.HasSuffix(r.URL.Path, "/api/v1/resource/chat/") {
-						t.Errorf("Expected path to end with /api/v1/resource/chat/, got %s", r.URL.Path)
+					if r.URL.Path != "/custom/argo/v1/chat/completions" {
+						t.Errorf("Expected path /custom/argo/v1/chat/completions, got %s", r.URL.Path)
 					}
 
-					// Return a simple response
-					resp := ArgoChatResponse{
-						Response: "Response from custom Argo endpoint",
+					resp := OpenAIResponse{
+						ID:    "test-custom-argo-openai",
+						Model: "gpt4",
+						Choices: []OpenAIChoice{
+							{
+								Message: OpenAIMessage{
+									Role:    "assistant",
+									Content: "Response from custom Argo OpenAI endpoint",
+								},
+								FinishReason: "stop",
+							},
+						},
+						Usage: &OpenAIUsage{
+							PromptTokens:     10,
+							CompletionTokens: 5,
+							TotalTokens:      15,
+						},
 					}
 					if err := json.NewEncoder(w).Encode(resp); err != nil {
 						t.Logf("encode error: %v", err)
@@ -680,6 +770,95 @@ func TestCustomProviderURL(t *testing.T) {
 					GoogleAPIKey:       "test-key",
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
+					Provider:           constants.ProviderArgo,
+					ProviderURL:        customMock.URL + "/custom/argo",
+					SmallModel:         "gpt35",
+					Model:              "gpt4",
+					MaxRequestBodySize: 10 * 1024 * 1024,
+				}
+
+				return config, customMock
+			},
+			expectedPath: "/custom/argo/v1/chat/completions",
+		},
+		{
+			name:              "Argo custom URL native Anthropic",
+			preferredProvider: constants.ProviderArgo,
+			requestModel:      "claude-3-haiku-20240307",
+			expectedText:      "Response from custom Argo Anthropic endpoint",
+			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
+				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					t.Logf("Custom Argo mock received: %s %s", r.Method, r.URL.Path)
+
+					if r.URL.Path != "/custom/argo/v1/messages" {
+						t.Errorf("Expected path /custom/argo/v1/messages, got %s", r.URL.Path)
+					}
+
+					resp := AnthropicResponse{
+						ID:    "test-custom-argo-anthropic",
+						Type:  "message",
+						Role:  "assistant",
+						Model: "claude-3-haiku-20240307",
+						Content: []AnthropicContentBlock{
+							{
+								Type: "text",
+								Text: "Response from custom Argo Anthropic endpoint",
+							},
+						},
+						StopReason: "end_turn",
+						Usage: &AnthropicUsage{
+							InputTokens:  10,
+							OutputTokens: 5,
+						},
+					}
+					if err := json.NewEncoder(w).Encode(resp); err != nil {
+						t.Logf("encode error: %v", err)
+					}
+				}))
+
+				config := &Config{
+					OpenAIAPIKey:       "test-key",
+					GoogleAPIKey:       "test-key",
+					ArgoUser:           "testuser",
+					ArgoEnv:            "test",
+					Provider:           constants.ProviderArgo,
+					ProviderURL:        customMock.URL + "/custom/argo",
+					SmallModel:         "claude-3-haiku-20240307",
+					Model:              "claude-3-opus-20240229",
+					MaxRequestBodySize: 10 * 1024 * 1024,
+				}
+
+				return config, customMock
+			},
+			expectedPath: "/custom/argo/v1/messages",
+		},
+		{
+			name:              "Argo custom URL legacy",
+			preferredProvider: constants.ProviderArgo,
+			requestModel:      "gpt4",
+			expectedText:      "Response from custom Argo legacy endpoint",
+			setupConfig: func(t *testing.T) (*Config, *httptest.Server) {
+				customMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					t.Logf("Custom Argo mock received: %s %s", r.Method, r.URL.Path)
+
+					if !strings.HasSuffix(r.URL.Path, "/api/v1/resource/chat/") {
+						t.Errorf("Expected path to end with /api/v1/resource/chat/, got %s", r.URL.Path)
+					}
+
+					resp := ArgoChatResponse{
+						Response: "Response from custom Argo legacy endpoint",
+					}
+					if err := json.NewEncoder(w).Encode(resp); err != nil {
+						t.Logf("encode error: %v", err)
+					}
+				}))
+
+				config := &Config{
+					OpenAIAPIKey:       "test-key",
+					GoogleAPIKey:       "test-key",
+					ArgoUser:           "testuser",
+					ArgoEnv:            "test",
+					ArgoLegacy:         true,
 					Provider:           constants.ProviderArgo,
 					ProviderURL:        customMock.URL + "/custom/argo",
 					SmallModel:         "gpt35",
@@ -707,7 +886,7 @@ func TestCustomProviderURL(t *testing.T) {
 
 			// Create request
 			reqBody := AnthropicRequest{
-				Model:     "claude-3-haiku-20240307",
+				Model:     tt.requestModel,
 				MaxTokens: 100,
 				Messages: []AnthropicMessage{
 					{
@@ -743,6 +922,9 @@ func TestCustomProviderURL(t *testing.T) {
 
 			if len(anthResp.Content) == 0 {
 				t.Fatal("Expected content in response")
+			}
+			if !strings.Contains(anthResp.Content[0].Text, tt.expectedText) {
+				t.Fatalf("Expected response content %q, got %q", tt.expectedText, anthResp.Content[0].Text)
 			}
 
 			// Log success

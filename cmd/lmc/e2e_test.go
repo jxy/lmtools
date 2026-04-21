@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,144 @@ type E2ETestServer struct {
 	requests     []interface{}
 }
 
+func (e2e *E2ETestServer) recordRequest(req interface{}) int {
+	e2e.mu.Lock()
+	defer e2e.mu.Unlock()
+	e2e.requestCount++
+	e2e.requests = append(e2e.requests, req)
+	return e2e.requestCount
+}
+
+func extractE2EMessageText(req map[string]interface{}) string {
+	messages, ok := req["messages"].([]interface{})
+	if !ok || len(messages) == 0 {
+		return ""
+	}
+
+	lastMsg, ok := messages[len(messages)-1].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	switch content := lastMsg["content"].(type) {
+	case string:
+		return content
+	case []interface{}:
+		for _, block := range content {
+			blockMap, ok := block.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if blockType, _ := blockMap["type"].(string); blockType != "text" {
+				continue
+			}
+			if text, ok := blockMap["text"].(string); ok {
+				return text
+			}
+		}
+	}
+
+	return ""
+}
+
+func contextualE2EResponse(lastMsg string, requestNum int) string {
+	switch {
+	case strings.Contains(strings.ToLower(lastMsg), "weather"):
+		return "Today is sunny with a high of 75°F."
+	case strings.Contains(strings.ToLower(lastMsg), "hello"):
+		return "Hello! How can I assist you today?"
+	case strings.Contains(lastMsg, "continue"):
+		return fmt.Sprintf("Continuing conversation #%d...", requestNum)
+	case strings.Contains(strings.ToLower(lastMsg), "test"):
+		return "Test response confirmed."
+	case lastMsg != "":
+		return fmt.Sprintf("Response #%d to: %s", requestNum, lastMsg)
+	default:
+		return "Default response"
+	}
+}
+
+func writeE2EOpenAIResponse(w http.ResponseWriter, model, response string, requestNum int) {
+	resp := map[string]interface{}{
+		"id":      fmt.Sprintf("chatcmpl-e2e-%d", requestNum),
+		"object":  "chat.completion",
+		"created": 1234567890,
+		"model":   model,
+		"choices": []map[string]interface{}{
+			{
+				"index": 0,
+				"message": map[string]interface{}{
+					"role":    "assistant",
+					"content": response,
+				},
+				"finish_reason": "stop",
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeE2EAnthropicResponse(w http.ResponseWriter, model, response string, requestNum int) {
+	resp := map[string]interface{}{
+		"id":    fmt.Sprintf("msg-e2e-%d", requestNum),
+		"type":  "message",
+		"role":  "assistant",
+		"model": model,
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": response,
+			},
+		},
+		"stop_reason": "end_turn",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeE2EOpenAIStream(w http.ResponseWriter, model, response string, requestNum int) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	chunks := []string{
+		fmt.Sprintf(`data: {"id":"chatcmpl-e2e-%d","object":"chat.completion.chunk","created":1234567890,"model":"%s","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`, requestNum, model),
+		fmt.Sprintf(`data: {"id":"chatcmpl-e2e-%d","object":"chat.completion.chunk","created":1234567890,"model":"%s","choices":[{"index":0,"delta":{"content":%q},"finish_reason":null}]}`, requestNum, model, response),
+		fmt.Sprintf(`data: {"id":"chatcmpl-e2e-%d","object":"chat.completion.chunk","created":1234567890,"model":"%s","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, requestNum, model),
+		`data: [DONE]`,
+	}
+
+	for _, chunk := range chunks {
+		fmt.Fprintf(w, "%s\n\n", chunk)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
+func writeE2EAnthropicStream(w http.ResponseWriter, model, response string, requestNum int) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	events := []string{
+		fmt.Sprintf(`event: message_start`+"\n"+`data: {"type":"message_start","message":{"id":"msg-e2e-%d","type":"message","role":"assistant","model":"%s","content":[]}}`, requestNum, model),
+		`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		fmt.Sprintf(`event: content_block_delta`+"\n"+`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%q}}`, response),
+		`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}`,
+		`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+		`event: message_stop` + "\n" + `data: {"type":"message_stop"}`,
+	}
+
+	for _, event := range events {
+		fmt.Fprintf(w, "%s\n\n", event)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
 // newE2ETestServer creates a more sophisticated mock server for e2e tests
 func newE2ETestServer(t *testing.T) *E2ETestServer {
 	e2e := &E2ETestServer{
@@ -30,119 +169,112 @@ func newE2ETestServer(t *testing.T) *E2ETestServer {
 
 	mux := http.NewServeMux()
 
-	// Handle chat endpoint
-	mux.HandleFunc("/chat/", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-			Model  string `json:"model"`
-			Stream bool   `json:"stream,omitempty"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	handleChat := func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
 
-		e2e.mu.Lock()
-		e2e.requestCount++
-		e2e.requests = append(e2e.requests, req)
-		requestNum := e2e.requestCount
-		e2e.mu.Unlock()
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
 
-		// Generate contextual responses
-		response := "Default response"
-		if len(req.Messages) > 0 {
-			// Content is now a plain string, use it directly
-			lastMsgStr := req.Messages[len(req.Messages)-1].Content
-			switch {
-			case strings.Contains(strings.ToLower(lastMsgStr), "weather"):
-				response = "Today is sunny with a high of 75°F."
-			case strings.Contains(strings.ToLower(lastMsgStr), "hello"):
-				response = "Hello! How can I assist you today?"
-			case strings.Contains(lastMsgStr, "continue"):
-				response = fmt.Sprintf("Continuing conversation #%d...", requestNum)
-			case strings.Contains(lastMsgStr, "test"):
-				response = "Test response confirmed."
-			default:
-				response = fmt.Sprintf("Response #%d to: %s", requestNum, lastMsgStr)
+		requestNum := e2e.recordRequest(req)
+		model, _ := req["model"].(string)
+		response := contextualE2EResponse(extractE2EMessageText(req), requestNum)
+
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			if stream, _ := req["stream"].(bool); stream {
+				writeE2EOpenAIStream(w, model, "This is a streaming response.", requestNum)
+				return
+			}
+			writeE2EOpenAIResponse(w, model, response, requestNum)
+		case "/v1/messages":
+			if stream, _ := req["stream"].(bool); stream {
+				writeE2EAnthropicStream(w, model, "This is a streaming response.", requestNum)
+				return
+			}
+			writeE2EAnthropicResponse(w, model, response, requestNum)
+		default:
+			resp := map[string]interface{}{
+				"response": response,
+				"model":    model,
+				"id":       fmt.Sprintf("resp-%d", requestNum),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Logf("encode chat resp: %v", err)
 			}
 		}
+	}
 
-		resp := map[string]interface{}{
-			"response": response,
-			"model":    req.Model,
-			"id":       fmt.Sprintf("resp-%d", requestNum),
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Logf("encode chat resp: %v", err)
-		}
-	})
-
-	// Handle embedding endpoint
-	mux.HandleFunc("/embed/", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Input []string `json:"input"`
-			Model string   `json:"model"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	handleEmbed := func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
 
-		e2e.mu.Lock()
-		e2e.requestCount++
-		e2e.requests = append(e2e.requests, req)
-		e2e.mu.Unlock()
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
 
-		// Generate dummy embedding (2D array as expected by response handler)
+		e2e.recordRequest(req)
+
+		model, _ := req["model"].(string)
 		embedding := make([]float64, 1536)
 		for i := range embedding {
 			embedding[i] = float64(i%100) / 100.0
 		}
 
 		resp := map[string]interface{}{
-			"embedding": [][]float64{embedding}, // Wrap in outer array
-			"model":     req.Model,
+			"embedding": [][]float64{embedding},
+			"model":     model,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			t.Logf("encode embed resp: %v", err)
 		}
-	})
+	}
 
-	// Handle streaming endpoint
-	mux.HandleFunc("/streamchat/", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-			Model  string `json:"model"`
-			Stream bool   `json:"stream,omitempty"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	handleLegacyStream := func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
 
-		e2e.mu.Lock()
-		e2e.requestCount++
-		e2e.requests = append(e2e.requests, req)
-		e2e.mu.Unlock()
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
+		e2e.recordRequest(req)
 
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Cache-Control", "no-cache")
+		fmt.Fprint(w, "This is a streaming response.")
+		fmt.Fprintln(w)
+	}
 
-		// Stream a simple response as plain text (Argo format)
-		response := "This is a streaming response."
-		fmt.Fprint(w, response)
-		fmt.Fprintln(w) // Final newline
-	})
+	mux.HandleFunc("/chat/", handleChat)
+	mux.HandleFunc("/api/v1/resource/chat/", handleChat)
+	mux.HandleFunc("/v1/chat/completions", handleChat)
+	mux.HandleFunc("/v1/messages", handleChat)
+
+	mux.HandleFunc("/embed/", handleEmbed)
+	mux.HandleFunc("/api/v1/resource/embed/", handleEmbed)
+
+	mux.HandleFunc("/streamchat/", handleLegacyStream)
+	mux.HandleFunc("/api/v1/resource/streamchat/", handleLegacyStream)
 
 	e2e.Server = httptest.NewServer(mux)
 	t.Cleanup(e2e.Close)
@@ -167,7 +299,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 
 	// Test 1: Create new session
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "alice", "-model", "gpt4o", "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "alice", "-model", "gpt4o", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Hello, this is my first message")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v\nStderr: %s", err, stderr)
@@ -195,7 +327,7 @@ func TestE2E_BasicConversationFlow(t *testing.T) {
 
 	// Test 2: Resume session
 	stdout, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "alice", "-model", "gpt4o", "-resume", sessionID, "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "alice", "-model", "gpt4o", "-resume", sessionID, "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"What's the weather like?")
 	if err != nil {
 		t.Fatalf("Failed to resume session: %v", err)
@@ -237,7 +369,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 
 	// Create initial conversation
 	_, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "bob", "-model", "gpt4o", "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-model", "gpt4o", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Initial message")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -255,7 +387,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 
 	// Add second message
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "bob", "-model", "gpt4o", "-resume", sessionID, "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-model", "gpt4o", "-resume", sessionID, "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Second message")
 	if err != nil {
 		t.Fatalf("Failed to add message: %v", err)
@@ -263,7 +395,7 @@ func TestE2E_BranchingConversation(t *testing.T) {
 
 	// Branch from first message (stdout not used)
 	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "bob", "-model", "gpt4o", "-branch", sessionID + "/0001", "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "bob", "-model", "gpt4o", "-branch", sessionID + "/0001", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Alternative second message")
 	if err != nil {
 		t.Fatalf("Failed to create branch: %v", err)
@@ -296,7 +428,7 @@ func TestE2E_EmbeddingMode(t *testing.T) {
 	server := newE2ETestServer(t)
 
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "charlie", "-model", "v3large", "-e", "-argo-env", server.URL},
+		[]string{"-argo-user", "charlie", "-model", "v3large", "-e", "-provider-url", server.URL},
 		"Generate an embedding for this text")
 	if err != nil {
 		t.Fatalf("Failed to generate embedding: %v\nStderr: %s", err, stderr)
@@ -333,14 +465,14 @@ func TestE2E_StreamingMode(t *testing.T) {
 	// Use test helper to capture streaming output and log directory
 	logDir := t.TempDir()
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "dave", "-model", "gpt4o", "-stream", "-argo-env", server.URL, "-sessions-dir", sessionsDir, "-log-dir", logDir},
+		[]string{"-argo-user", "dave", "-model", "gpt4o", "-stream", "-provider-url", server.URL, "-sessions-dir", sessionsDir, "-log-dir", logDir},
 		"Test streaming response")
 	if err != nil {
 		t.Fatalf("Failed to run streaming command: %v\nStderr: %s", err, stderr)
 	}
 
-	// For Argo provider, streaming should show the plain text response
-	// (The mock server now sends plain text for streaming responses)
+	// lmc should print the streamed response text regardless of whether the
+	// upstream Argo path is legacy plain text or native SSE.
 	outputStr := stdout
 	if !strings.Contains(outputStr, "This is a streaming response.") {
 		t.Errorf("Expected streaming text output, got: %s", outputStr)
@@ -419,7 +551,7 @@ func TestE2E_SessionDeletion(t *testing.T) {
 
 	// Create a session
 	_, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "eve", "-model", "gpt4o", "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "eve", "-model", "gpt4o", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Message to be deleted")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -471,7 +603,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 
 	// Create initial session
 	_, _, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "frank", "-model", "gpt4o", "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "frank", "-model", "gpt4o", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Start concurrent test")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -494,7 +626,7 @@ func TestE2E_ConcurrentOperations(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		go func(id int) {
 			_, _, err := runLmcCommand(t, lmcBin,
-				[]string{"-argo-user", "frank", "-model", "gpt4o", "-resume", sessionID, "-argo-env", server.URL, "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "frank", "-model", "gpt4o", "-resume", sessionID, "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 				fmt.Sprintf("Concurrent message %d", id))
 			if err != nil {
 				errors <- err

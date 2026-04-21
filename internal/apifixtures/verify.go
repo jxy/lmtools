@@ -177,11 +177,12 @@ func verifyRequestCase(root string, meta CaseMeta, opts VerifyOptions) []string 
 		problems = append(problems, fmt.Sprintf("case %q request ingress_family must be openai or anthropic", caseID))
 	}
 
-	for _, provider := range fixtureProviders {
+	for _, provider := range requiredRequestModelKeys(meta) {
 		if strings.TrimSpace(meta.Models[provider]) == "" {
 			problems = append(problems, fmt.Sprintf("case %q request metadata is missing models.%s", caseID, provider))
 		}
 	}
+	problems = append(problems, verifyFeatureConstraints(meta)...)
 
 	problems = append(problems, verifyJSONFile(root, caseID, "ingress.json")...)
 	problems = append(problems, verifyJSONFile(root, caseID, filepath.Join("expected", "typed.json"))...)
@@ -193,6 +194,62 @@ func verifyRequestCase(root string, meta CaseMeta, opts VerifyOptions) []string 
 		problems = append(problems, verifyJSONFile(root, caseID, filepath.Join("expected", "render", provider+".request.json"))...)
 	}
 
+	return problems
+}
+
+func requiredRequestModelKeys(meta CaseMeta) []string {
+	required := make(map[string]struct{})
+	for _, provider := range RequestRenderTargets(meta) {
+		if StringSliceContains(fixtureProviders, provider) {
+			required[provider] = struct{}{}
+		}
+	}
+	for _, targetID := range meta.CaptureTargets {
+		target, err := ParseCaptureTarget(targetID)
+		if err != nil {
+			continue
+		}
+		if target.Host == "argo" {
+			required["argo"] = struct{}{}
+			continue
+		}
+		if StringSliceContains(fixtureProviders, target.Provider) {
+			required[target.Provider] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(required))
+	for key := range required {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func verifyFeatureConstraints(meta CaseMeta) []string {
+	problems := make([]string, 0)
+	if !StringSliceContains(meta.Features, "anthropic-opus-4.7") {
+		return problems
+	}
+
+	if strings.TrimSpace(meta.Models["anthropic"]) == "" {
+		problems = append(problems, fmt.Sprintf("case %q anthropic-opus-4.7 feature requires models.anthropic", meta.ID))
+	} else if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(meta.Models["anthropic"])), "claude-opus-4-7") {
+		problems = append(problems, fmt.Sprintf("case %q anthropic-opus-4.7 feature requires an Opus 4.7 Anthropic model", meta.ID))
+	}
+	for _, provider := range RequestRenderTargets(meta) {
+		if provider != "anthropic" {
+			problems = append(problems, fmt.Sprintf("case %q anthropic-opus-4.7 feature must only render anthropic requests, got %q", meta.ID, provider))
+		}
+	}
+	for _, targetID := range meta.CaptureTargets {
+		target, err := ParseCaptureTarget(targetID)
+		if err != nil {
+			continue
+		}
+		if target.Host != "anthropic" || target.Provider != "anthropic" {
+			problems = append(problems, fmt.Sprintf("case %q anthropic-opus-4.7 feature must only capture official Anthropic targets, got %q", meta.ID, targetID))
+		}
+	}
 	return problems
 }
 

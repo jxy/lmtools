@@ -20,9 +20,11 @@ func resolveAnthropicEndpoints(providerURL, _ string) (EndpointSet, error) {
 	messagesURL, modelsURL := AnthropicURLs(providerURL)
 	base := strings.TrimSuffix(messagesURL, "/messages")
 	return EndpointSet{
-		Base:    base,
-		APIBase: base,
-		Chat:    messagesURL,
-		Models:  modelsURL,
+		Base:                 base,
+		APIBase:              base,
+		Chat:                 messagesURL,
+		Models:               modelsURL,
+		AnthropicMessages:    messagesURL,
+		AnthropicCountTokens: base + "/messages/count_tokens",
 	}, nil
 }

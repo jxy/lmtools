@@ -12,7 +12,7 @@ func TestDetermineArgoModelProvider(t *testing.T) {
 	}{
 		{model: "gpt-5", provider: "openai"},
 		{model: "o3-mini", provider: "openai"},
-		{model: "gemini-2.5-pro", provider: "google"},
+		{model: "gemini-2.5-pro", provider: "openai"},
 		{model: "claude-opus-4-1", provider: "anthropic"},
 		{model: "unknown-model", provider: "openai"},
 	}

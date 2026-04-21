@@ -3,14 +3,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"lmtools/internal/constants"
-	"lmtools/internal/logger"
-	"lmtools/internal/retry"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestSendDoneNoOp tests that SendDone doesn't send [DONE] for Anthropic format
@@ -207,74 +202,42 @@ func TestCompleteWithoutDone(t *testing.T) {
 	}
 }
 
-// New test: verify Anthropic simulated streaming never splits input_json_delta at a backslash escape
+// Verify the simulated Anthropic tool-input chunker never splits input_json_delta
+// at a dangling escape boundary.
 func TestAnthropicStreaming_NoSplitInPartialJSON(t *testing.T) {
 	SetupTestLogger(t)
 
-	// Prepare Argo response with tool_use input containing various escapes
-	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := ArgoChatResponse{
-			Response: map[string]interface{}{
-				"content": "Beginning tool call...\n",
-				"tool_calls": []map[string]interface{}{
-					{
-						"id":   "toolu_vrtx_01TESTANTH",
-						"type": "function",
-						"function": map[string]interface{}{
-							"name": "Edit",
-							// Anthropic expects JSON object for tool input
-							"arguments": map[string]interface{}{
-								"file_path":  "/path/with spaces/and\\slashes.txt",
-								"new_string": "line1\nline2 with tab\t and quote \" and backslash \\",
-							},
-						},
-					},
+	anthResp := &AnthropicResponse{
+		Model: "claude-opus-4-1-20250805",
+		Content: []AnthropicContentBlock{
+			{
+				Type: "text",
+				Text: "Beginning tool call...\n",
+			},
+			{
+				Type: "tool_use",
+				ID:   "toolu_vrtx_01TESTANTH",
+				Name: "Edit",
+				Input: map[string]interface{}{
+					"file_path":  "/path/with spaces/and\\slashes.txt",
+					"new_string": "line1\nline2 with tab\t and quote \" and backslash \\",
 				},
 			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Fatalf("Failed to encode response: %v", err)
-		}
-	}))
-	defer mockArgo.Close()
-
-	// Server config
-	config := &Config{
-		Provider:     constants.ProviderArgo,
-		ArgoUser:     "testuser",
-		ArgoEnv:      mockArgo.URL,
-		ProviderURL:  mockArgo.URL,
-		PingInterval: 1 * time.Second,
+		},
 	}
-	server := NewTestServerDirectWithClient(t, config, retry.NewClient(10*time.Minute, logger.GetLogger()))
+	server := NewMinimalTestServer(t, &Config{})
 
-	// Prepare SSE recorder and handler
 	recorder := httptest.NewRecorder()
 	ctx := context.Background()
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-opus-4-1-20250805", ctx)
+	handler, err := NewAnthropicStreamHandler(recorder, anthResp.Model, ctx)
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
 
-	// Anthropic-style request routed to Argo with tools (forces simulated streaming)
-	anthReq := &AnthropicRequest{
-		Model:  "claude-opus-4-1-20250805",
-		Stream: true,
-		Tools:  []AnthropicTool{{Name: "Edit"}},
-		Messages: []AnthropicMessage{{
-			Role:    "user",
-			Content: json.RawMessage(`"Do edit"`),
-		}},
-		MaxTokens: 100,
+	if err := server.streamArgoResponseContent(ctx, anthResp, handler); err != nil {
+		t.Fatalf("streamArgoResponseContent failed: %v", err)
 	}
 
-	// Execute simulated streaming with pings
-	if err := server.streamFromArgo(context.Background(), anthReq, handler); err != nil {
-		t.Fatalf("streamFromArgo failed: %v", err)
-	}
-
-	// Verify SSE output contains no partial_json splits at dangling escapes
 	output := recorder.Body.String()
 	lines := strings.Split(output, "\n")
 	var partials []string

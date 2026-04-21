@@ -62,15 +62,18 @@ func (s *Server) sendProviderJSONRequest(ctx context.Context, spec providerJSONR
 	if err != nil {
 		return nil, nil, err
 	}
+	requestName := spec.RequestName
+	if requestName == "" {
+		requestName = spec.Provider
+	}
+	logWireHTTPRequest(ctx, "WIRE BACKEND REQUEST "+requestName, req, reqBody)
 
 	resp, err := s.client.Do(ctx, req, spec.Provider)
 	if err != nil {
-		requestName := spec.RequestName
-		if requestName == "" {
-			requestName = spec.Provider
-		}
 		return nil, reqBody, fmt.Errorf("send %s request: %w", requestName, err)
 	}
+	logWireHTTPResponseHeaders(ctx, "WIRE BACKEND RESPONSE HEADERS "+requestName, resp)
+	wrapWireLoggedResponseBody(ctx, "WIRE BACKEND RESPONSE BODY "+requestName, resp)
 
 	return resp, reqBody, nil
 }

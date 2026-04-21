@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"net/http"
 )
 
@@ -27,6 +28,91 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	return &openAIResp, nil
+}
+
+func (s *Server) argoWireProvider(model string) string {
+	return providers.DetermineArgoModelProvider(model)
+}
+
+func (s *Server) useLegacyArgo() bool {
+	return s != nil && s.config != nil && s.config.ArgoLegacy
+}
+
+func (s *Server) configureArgoOpenAIRequest(req *http.Request) {
+	if s.config.ArgoAPIKey != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.config.ArgoAPIKey))
+	}
+}
+
+func (s *Server) configureArgoAnthropicRequest(req *http.Request) {
+	if s.config.ArgoAPIKey != "" {
+		req.Header.Set("x-api-key", s.config.ArgoAPIKey)
+	}
+	req.Header.Set("anthropic-version", "2023-06-01")
+}
+
+func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
+	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	if err != nil {
+		return nil, fmt.Errorf("convert to Argo OpenAI format: %w", err)
+	}
+
+	var openAIResp OpenAIResponse
+	err = s.doJSON(ctx, s.endpoints.ArgoOpenAI, openAIReq, s.configureArgoOpenAIRequest, &openAIResp, "Argo OpenAI")
+	if err != nil {
+		return nil, err
+	}
+
+	return &openAIResp, nil
+}
+
+func (s *Server) forwardToArgoAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
+	var anthResp AnthropicResponse
+	err := s.doJSON(ctx, s.endpoints.ArgoAnthropic, anthReq, s.configureArgoAnthropicRequest, &anthResp, "Argo Anthropic")
+	if err != nil {
+		return nil, err
+	}
+
+	return &anthResp, nil
+}
+
+func (s *Server) argoOpenAIStreamingRequest(ctx context.Context, openAIReq *OpenAIRequest) (*http.Response, error) {
+	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", openAIReq)
+	openAIReq.Stream = true
+	return s.sendStreamingJSONRequest(
+		ctx,
+		constants.ProviderArgo,
+		"Argo OpenAI",
+		s.endpoints.ArgoOpenAI,
+		openAIReq,
+		map[string]string{"Accept": "text/event-stream"},
+		noErrorRequestConfigurer(s.configureArgoOpenAIRequest),
+	)
+}
+
+func (s *Server) argoOpenAIStreamingRequestFromAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
+	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	if err != nil {
+		return nil, fmt.Errorf("convert to Argo OpenAI format: %w", err)
+	}
+	return s.argoOpenAIStreamingRequest(ctx, openAIReq)
+}
+
+func (s *Server) argoAnthropicStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
+	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", anthReq)
+	anthReq.Stream = true
+	return s.sendStreamingJSONRequest(
+		ctx,
+		constants.ProviderArgo,
+		"Argo Anthropic",
+		s.endpoints.ArgoAnthropic,
+		anthReq,
+		map[string]string{
+			"Accept":            "text/event-stream",
+			"anthropic-version": "2023-06-01",
+		},
+		noErrorRequestConfigurer(s.configureArgoAnthropicRequest),
+	)
 }
 
 // forwardToGoogle forwards a request to the Google Gemini API

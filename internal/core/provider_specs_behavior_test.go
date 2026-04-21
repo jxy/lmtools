@@ -279,7 +279,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		t.Fatalf("requireChatBuilder() error = %v", err)
 	}
 
-	t.Run("system prepend and streaming endpoint", func(t *testing.T) {
+	t.Run("gpt model uses native openai endpoint", func(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "gpt5", "")
 		cfg.Env = "http://argo.example.test"
 
@@ -288,11 +288,14 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 			t.Fatalf("buildChat() error = %v", err)
 		}
 
-		if got := req.URL.String(); got != "http://argo.example.test/streamchat/" {
+		if got := req.URL.String(); got != "http://argo.example.test/v1/chat/completions" {
 			t.Fatalf("URL = %q", got)
 		}
 
 		payload := decodeRequestBody(t, body)
+		if payload["stream"] != true {
+			t.Fatalf("stream = %v, want true", payload["stream"])
+		}
 		messages, ok := payload["messages"].([]interface{})
 		if !ok || len(messages) != 2 {
 			t.Fatalf("messages = %T len=%d, want 2 entries", payload["messages"], len(messages))
@@ -303,7 +306,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit tools drive non-streaming openai-format tooling", func(t *testing.T) {
+	t.Run("explicit tools use native openai tools", func(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "gpt5", "")
 		cfg.Env = "http://argo.example.test"
 		cfg.IsToolEnabledFlag = false
@@ -313,7 +316,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 			t.Fatalf("buildChat() error = %v", err)
 		}
 
-		if got := req.URL.String(); got != "http://argo.example.test/chat/" {
+		if got := req.URL.String(); got != "http://argo.example.test/v1/chat/completions" {
 			t.Fatalf("URL = %q", got)
 		}
 
@@ -328,6 +331,36 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		tool, _ := tools[0].(map[string]interface{})
 		if tool["type"] != "function" {
 			t.Fatalf("tool type = %v, want function", tool["type"])
+		}
+	})
+
+	t.Run("claude model uses native anthropic endpoint", func(t *testing.T) {
+		cfg := newProviderSpecTestConfig("argo", "claude-opus-4-1", "")
+		cfg.Env = "http://argo.example.test"
+
+		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "claude-opus-4-1", "Be concise.", nil, nil, true)
+		if err != nil {
+			t.Fatalf("buildChat() error = %v", err)
+		}
+
+		if got := req.URL.String(); got != "http://argo.example.test/v1/messages" {
+			t.Fatalf("URL = %q", got)
+		}
+
+		payload := decodeRequestBody(t, body)
+		if payload["stream"] != true {
+			t.Fatalf("stream = %v, want true", payload["stream"])
+		}
+		if payload["system"] != "Be concise." {
+			t.Fatalf("system = %v, want %q", payload["system"], "Be concise.")
+		}
+		messages, ok := payload["messages"].([]interface{})
+		if !ok || len(messages) != 1 {
+			t.Fatalf("messages = %T len=%d, want 1 entry", payload["messages"], len(messages))
+		}
+		first, _ := messages[0].(map[string]interface{})
+		if first["role"] != "user" {
+			t.Fatalf("first role = %v, want user", first["role"])
 		}
 	})
 }

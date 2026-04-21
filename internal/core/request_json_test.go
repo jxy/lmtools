@@ -805,8 +805,8 @@ func TestCrossProvider_ToolChoiceConsistency(t *testing.T) {
 		{"openai", "gpt-3.5-turbo", "string"},
 		{"anthropic", "claude-3-opus", "object"},
 		{"anthropic", "claude-3-sonnet", "object"},
-		{"google", "gemini-pro", "none"},
-		{"google", "gemini-1.5-flash", "none"},
+		{"argo", "gemini-pro", "string"},
+		{"argo", "gemini-1.5-flash", "string"},
 	}
 
 	for _, tc := range testCases {

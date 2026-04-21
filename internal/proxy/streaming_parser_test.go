@@ -52,6 +52,41 @@ func TestOpenAIStreamParser_SharedStateTransitions(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamParser_UsageAfterFinishReasonCompletesOnce(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"Hello"}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		`data: {"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15},"choices":[]}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	parser := NewOpenAIStreamParser(handler)
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if count := strings.Count(body, "event: message_stop"); count != 1 {
+		t.Fatalf("message_stop count = %d, want 1\nbody=%s", count, body)
+	}
+	if !strings.Contains(body, `"usage":{"input_tokens":10,"output_tokens":5}`) {
+		t.Fatalf("expected final usage in message_delta, body=%s", body)
+	}
+}
+
 func TestGoogleStreamParser_SharedStateTransitions(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler, err := NewAnthropicStreamHandler(recorder, "gemini-1.5-pro", context.Background())

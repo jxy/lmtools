@@ -10,6 +10,7 @@ type providerCredentialState struct {
 	OpenAIKey    bool
 	AnthropicKey bool
 	GoogleKey    bool
+	ArgoKey      bool
 	ArgoUser     bool
 }
 
@@ -22,6 +23,7 @@ func newProviderCredentialState(cfg *Config) providerCredentialState {
 		OpenAIKey:    cfg.OpenAIAPIKey != "",
 		AnthropicKey: cfg.AnthropicAPIKey != "",
 		GoogleKey:    cfg.GoogleAPIKey != "",
+		ArgoKey:      cfg.ArgoAPIKey != "",
 		ArgoUser:     cfg.ArgoUser != "",
 	}
 }
@@ -35,6 +37,8 @@ func (s providerCredentialState) forProvider(provider string) providers.Credenti
 		apiKey = s.AnthropicKey
 	case constants.ProviderGoogle:
 		apiKey = s.GoogleKey
+	case constants.ProviderArgo:
+		apiKey = s.ArgoKey
 	}
 
 	return providers.CredentialState{

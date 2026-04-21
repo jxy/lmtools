@@ -129,6 +129,22 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	log.Infof("Token counting: model=%s, provider=%s", req.Model, provider)
 
+	if provider == constants.ProviderArgo && !s.useLegacyArgo() {
+		resp, err := s.forwardArgoCountTokens(ctx, req)
+		if err != nil {
+			s.sendProviderErrorAsAnthropic(ctx, w, provider, err)
+			return
+		}
+		logger.DebugJSON(log, "Token Count Response", resp)
+		if err := s.sendJSONResponse(ctx, w, resp); err != nil {
+			return
+		}
+		log.Infof("Input tokens: %d", resp.InputTokens)
+		RequestSummary(ctx, r.Method, r.URL.Path, req.Model, mappedModel, provider,
+			len(req.Messages), len(req.Tools), http.StatusOK, false, time.Since(start))
+		return
+	}
+
 	// For now, provide a simple estimation.
 	// This could be enhanced with provider-specific token counting.
 	inputTokens := EstimateRequestTokens(&AnthropicRequest{
@@ -177,10 +193,6 @@ func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info
 }
 
 func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *AnthropicRequest, provider, originalModel string) (*AnthropicResponse, error) {
-	if provider == constants.ProviderArgo && len(anthReq.Tools) > 0 {
-		logger.From(ctx).Warnf("Tools requested but not supported by Argo provider, falling back to non-streaming")
-	}
-
 	capability, ok := proxyProviderCapabilityFor(provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown provider: %s", provider)
@@ -192,6 +204,15 @@ func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *Anthropic
 	}
 
 	return forward(ctx, anthReq, originalModel)
+}
+
+func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
+	var resp AnthropicTokenCountResponse
+	err := s.doJSON(ctx, s.endpoints.ArgoAnthropicCountTokens, req, s.configureArgoAnthropicRequest, &resp, "Argo Anthropic count_tokens")
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // handleNonStreamingRequest processes non-streaming requests

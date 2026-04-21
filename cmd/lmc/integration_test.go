@@ -22,7 +22,7 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 	sessionsDir := t.TempDir()
 
 	// Create initial session
-	_, stderr, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", mockURL, "-sessions-dir", sessionsDir}, "Initial message")
+	_, stderr, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", mockURL, "-sessions-dir", sessionsDir}, "Initial message")
 	if err != nil {
 		t.Fatalf("Failed to create initial session: %v\nStderr: %s", err, stderr)
 	}
@@ -62,7 +62,7 @@ func TestCrossProcessConcurrentResume(t *testing.T) {
 
 			input := fmt.Sprintf("Response from process %d", processID)
 			stdout, stderr, err := runLmcCommand(t, lmcBin,
-				[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 				input)
 
 			results <- struct {
@@ -127,7 +127,7 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	sessionsDir := t.TempDir()
 
 	// Create a test session
-	_, stderr, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", mockURL, "-sessions-dir", sessionsDir}, "Test message")
+	_, stderr, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", mockURL, "-sessions-dir", sessionsDir}, "Test message")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v\nStderr: %s", err, stderr)
 	}
@@ -148,7 +148,7 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	go func() {
 		defer close(firstDone)
 		_, _, firstErr = runLmcCommand(t, lmcBin,
-			[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+			[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 			"This is a long message that will take time to process", WithLogDir(logDir))
 	}()
 
@@ -161,7 +161,7 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	// Try to access the same session from another process
 	start := time.Now()
 	_, stderr2, err2 := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 		"Concurrent message")
 	elapsed := time.Since(start)
 
@@ -196,7 +196,7 @@ func TestCrossProcessSiblingCreation(t *testing.T) {
 	sessionsDir := t.TempDir()
 
 	// Create initial session with a few messages
-	_, _, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", mockURL, "-sessions-dir", sessionsDir}, "Message 1")
+	_, _, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", mockURL, "-sessions-dir", sessionsDir}, "Message 1")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestCrossProcessSiblingCreation(t *testing.T) {
 	sessionID := extractFirstSessionID(stdout)
 
 	// Add another message
-	_, _, err = runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-argo-env", mockURL, "-sessions-dir", sessionsDir}, "Message 2")
+	_, _, err = runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir}, "Message 2")
 	if err != nil {
 		t.Fatalf("Failed to add message: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestCrossProcessSiblingCreation(t *testing.T) {
 			defer wg.Done()
 
 			_, stderr, err := runLmcCommand(t, lmcBin,
-				[]string{"-argo-user", "testuser", "-model", "gpt4o", "-branch", sessionID + "/0001", "-argo-env", mockURL, "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "testuser", "-model", "gpt4o", "-branch", sessionID + "/0001", "-provider-url", mockURL, "-sessions-dir", sessionsDir},
 				fmt.Sprintf("Branch %d response", id))
 			if err != nil {
 				t.Logf("Process %d stderr: %s", id, stderr)

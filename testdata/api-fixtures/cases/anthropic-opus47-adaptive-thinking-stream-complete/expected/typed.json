@@ -1,0 +1,22 @@
+{
+  "max_tokens": 2048,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Plan a two-step check for the calculation. After the thinking block, provide a concise final answer with exactly two numbered steps.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "output_config": {
+    "effort": "max"
+  },
+  "stream": true,
+  "thinking": {
+    "display": "summarized",
+    "type": "adaptive"
+  }
+}

@@ -2,7 +2,9 @@ package mockserver
 
 import (
 	"encoding/json"
+	"io"
 	"lmtools/internal/config"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"net/http"
 	"strings"
@@ -10,22 +12,44 @@ import (
 	"time"
 )
 
-func TestMockServer_BasicChat(t *testing.T) {
-	// Create mock server
+func newMockConfig(mock *MockServer, model string) config.Config {
+	return config.Config{
+		Provider:    constants.ProviderArgo,
+		ArgoUser:    "testuser",
+		Model:       model,
+		ProviderURL: mock.URL(),
+		Timeout:     5 * time.Second,
+	}
+}
+
+func decodeJSONMap(t *testing.T, resp *http.Response) map[string]interface{} {
+	t.Helper()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	return result
+}
+
+func readBodyString(t *testing.T, resp *http.Response) string {
+	t.Helper()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+	return string(body)
+}
+
+func TestMockServer_NativeOpenAIChat(t *testing.T) {
 	mock := NewMockServer(
 		WithDefaultResponse("Hello from mock server!"),
 	)
 	defer mock.Close()
 
-	// Create config pointing to mock server
-	cfg := config.Config{
-		ArgoUser: "testuser",
-		Model:    "gpt4o",
-		ArgoEnv:  mock.URL(),
-		Timeout:  5 * time.Second,
-	}
+	cfg := newMockConfig(mock, "gpt4o")
 
-	// Make a chat request
 	req, _, err := core.BuildRequest(cfg, "Test message")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
@@ -38,27 +62,33 @@ func TestMockServer_BasicChat(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Parse response
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+	result := decodeJSONMap(t, resp)
 
-	// Verify response - mock server returns contextual response for "test"
+	choices, ok := result["choices"].([]interface{})
+	if !ok || len(choices) != 1 {
+		t.Fatalf("Expected one OpenAI choice, got %T", result["choices"])
+	}
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected choice object, got %T", choices[0])
+	}
+	message, ok := choice["message"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected message object, got %T", choice["message"])
+	}
 	expectedResponse := "This is a test response from the mock server."
-	if result["response"] != expectedResponse {
-		t.Errorf("Expected '%s', got %v", expectedResponse, result["response"])
+	if got := message["content"]; got != expectedResponse {
+		t.Errorf("Expected %q, got %v", expectedResponse, got)
 	}
 
-	// Check captured requests
 	requests := mock.GetRequests()
 	if len(requests) != 1 {
 		t.Fatalf("Expected 1 request, got %d", len(requests))
 	}
 
 	lastReq := mock.GetLastRequest()
-	if !strings.HasSuffix(lastReq.Path, "/chat/") {
-		t.Errorf("Expected /chat/ endpoint, got %s", lastReq.Path)
+	if !strings.HasSuffix(lastReq.Path, "/v1/chat/completions") {
+		t.Errorf("Expected /v1/chat/completions endpoint, got %s", lastReq.Path)
 	}
 }
 
@@ -66,13 +96,8 @@ func TestMockServer_Embedding(t *testing.T) {
 	mock := NewMockServer()
 	defer mock.Close()
 
-	cfg := config.Config{
-		ArgoUser: "testuser",
-		Model:    "v3large",
-		Embed:    true,
-		ArgoEnv:  mock.URL(),
-		Timeout:  5 * time.Second,
-	}
+	cfg := newMockConfig(mock, "v3large")
+	cfg.Embed = true
 
 	req, _, err := core.BuildRequest(cfg, "Test embedding")
 	if err != nil {
@@ -113,21 +138,13 @@ func TestMockServer_Embedding(t *testing.T) {
 	}
 }
 
-func TestMockServer_StreamChat(t *testing.T) {
-	mock := NewMockServer(
-		WithDefaultResponse("Streaming response test"),
-	)
+func TestMockServer_NativeAnthropicChat(t *testing.T) {
+	mock := NewMockServer()
 	defer mock.Close()
 
-	cfg := config.Config{
-		ArgoUser:   "testuser",
-		Model:      "gpt4o",
-		StreamChat: true,
-		ArgoEnv:    mock.URL(),
-		Timeout:    5 * time.Second,
-	}
+	cfg := newMockConfig(mock, "claude-sonnet-4-5")
 
-	req, _, err := core.BuildRequest(cfg, "Test streaming")
+	req, _, err := core.BuildRequest(cfg, "Test message")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -139,10 +156,165 @@ func TestMockServer_StreamChat(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Verify streaming response headers
+	result := decodeJSONMap(t, resp)
+	content, ok := result["content"].([]interface{})
+	if !ok || len(content) != 1 {
+		t.Fatalf("Expected one Anthropic content block, got %T", result["content"])
+	}
+	block, ok := content[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected content block object, got %T", content[0])
+	}
+	expectedResponse := "This is a test response from the mock server."
+	if got := block["text"]; got != expectedResponse {
+		t.Errorf("Expected %q, got %v", expectedResponse, got)
+	}
+
+	lastReq := mock.GetLastRequest()
+	if !strings.HasSuffix(lastReq.Path, "/v1/messages") {
+		t.Errorf("Expected /v1/messages endpoint, got %s", lastReq.Path)
+	}
+}
+
+func TestMockServer_LegacyChat(t *testing.T) {
+	mock := NewMockServer(
+		WithDefaultResponse("Hello from mock server!"),
+	)
+	defer mock.Close()
+
+	cfg := newMockConfig(mock, "gpt4o")
+	cfg.ArgoLegacy = true
+
+	req, _, err := core.BuildRequest(cfg, "Test message")
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := decodeJSONMap(t, resp)
+	expectedResponse := "This is a test response from the mock server."
+	if got := result["response"]; got != expectedResponse {
+		t.Errorf("Expected %q, got %v", expectedResponse, got)
+	}
+
+	lastReq := mock.GetLastRequest()
+	if !strings.HasSuffix(lastReq.Path, "/chat/") {
+		t.Errorf("Expected /chat/ endpoint, got %s", lastReq.Path)
+	}
+}
+
+func TestMockServer_NativeOpenAIStreamChat(t *testing.T) {
+	mock := NewMockServer(
+		WithDefaultResponse("Streaming response test"),
+	)
+	defer mock.Close()
+
+	cfg := newMockConfig(mock, "gpt4o")
+	cfg.StreamChat = true
+
+	req, _, err := core.BuildRequest(cfg, "Stream this please")
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "text/event-stream" {
+		t.Errorf("Expected text/event-stream, got %s", contentType)
+	}
+	body := readBodyString(t, resp)
+	if !strings.Contains(body, "data: [DONE]") {
+		t.Errorf("Expected OpenAI SSE terminator, got %q", body)
+	}
+
+	lastReq := mock.GetLastRequest()
+	if !strings.HasSuffix(lastReq.Path, "/v1/chat/completions") {
+		t.Errorf("Expected /v1/chat/completions endpoint, got %s", lastReq.Path)
+	}
+}
+
+func TestMockServer_NativeAnthropicStreamChat(t *testing.T) {
+	mock := NewMockServer(
+		WithDefaultResponse("Streaming response test"),
+	)
+	defer mock.Close()
+
+	cfg := newMockConfig(mock, "claude-sonnet-4-5")
+	cfg.StreamChat = true
+
+	req, _, err := core.BuildRequest(cfg, "Stream this please")
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "text/event-stream" {
+		t.Errorf("Expected text/event-stream, got %s", contentType)
+	}
+	body := readBodyString(t, resp)
+	if !strings.Contains(body, "event: message_start") {
+		t.Errorf("Expected Anthropic SSE start event, got %q", body)
+	}
+
+	lastReq := mock.GetLastRequest()
+	if !strings.HasSuffix(lastReq.Path, "/v1/messages") {
+		t.Errorf("Expected /v1/messages endpoint, got %s", lastReq.Path)
+	}
+}
+
+func TestMockServer_LegacyStreamChat(t *testing.T) {
+	mock := NewMockServer(
+		WithDefaultResponse("Streaming response test"),
+	)
+	defer mock.Close()
+
+	cfg := newMockConfig(mock, "gpt4o")
+	cfg.StreamChat = true
+	cfg.ArgoLegacy = true
+
+	req, _, err := core.BuildRequest(cfg, "Stream this please")
+	if err != nil {
+		t.Fatalf("Failed to build request: %v", err)
+	}
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
 	contentType := resp.Header.Get("Content-Type")
 	if contentType != "text/plain" {
 		t.Errorf("Expected text/plain, got %s", contentType)
+	}
+	body := readBodyString(t, resp)
+	if !strings.Contains(body, "Streaming response test") {
+		t.Errorf("Expected legacy stream body, got %q", body)
+	}
+
+	lastReq := mock.GetLastRequest()
+	if !strings.HasSuffix(lastReq.Path, "/streamchat/") {
+		t.Errorf("Expected /streamchat/ endpoint, got %s", lastReq.Path)
 	}
 }
 
@@ -191,12 +363,7 @@ func TestMockServer_CustomResponse(t *testing.T) {
 	)
 	defer mock.Close()
 
-	cfg := config.Config{
-		ArgoUser: "testuser",
-		Model:    "gpt4o",
-		ArgoEnv:  mock.URL(),
-		Timeout:  5 * time.Second,
-	}
+	cfg := newMockConfig(mock, "gpt4o")
 
 	req, _, err := core.BuildRequest(cfg, "Hello custom")
 	if err != nil {
@@ -232,12 +399,7 @@ func TestMockServer_ErrorSimulation(t *testing.T) {
 	// Simulate a 500 error
 	mock.SimulateError(500, "Internal server error")
 
-	cfg := config.Config{
-		ArgoUser: "testuser",
-		Model:    "gpt4o",
-		ArgoEnv:  mock.URL(),
-		Timeout:  5 * time.Second,
-	}
+	cfg := newMockConfig(mock, "gpt4o")
 
 	req, _, err := core.BuildRequest(cfg, "This should fail")
 	if err != nil {
@@ -260,13 +422,8 @@ func TestMockServer_RequestCapture(t *testing.T) {
 	mock := NewMockServer()
 	defer mock.Close()
 
-	cfg := config.Config{
-		ArgoUser: "testuser",
-		Model:    "gpt4o",
-		System:   "You are a helpful assistant",
-		ArgoEnv:  mock.URL(),
-		Timeout:  5 * time.Second,
-	}
+	cfg := newMockConfig(mock, "gpt4o")
+	cfg.System = "You are a helpful assistant"
 
 	// Make multiple requests
 	messages := []string{"First", "Second", "Third"}

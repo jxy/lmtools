@@ -207,12 +207,14 @@ func TestBuildArgoToolResultRequestOpenAIFormat(t *testing.T) {
 	}
 
 	// Check basic fields
-	if parsedReq["user"] != "testuser" {
-		t.Errorf("Expected user='testuser', got '%v'", parsedReq["user"])
-	}
-
 	if parsedReq["model"] != "gpt5" {
 		t.Errorf("Expected model='gpt5', got '%v'", parsedReq["model"])
+	}
+	if _, ok := parsedReq["user"]; ok {
+		t.Errorf("OpenAI-format Argo request should not include user field, got %v", parsedReq["user"])
+	}
+	if req.URL.String() != "https://apps-dev.inside.anl.gov/argoapi/v1/chat/completions" {
+		t.Errorf("Unexpected URL: %s", req.URL.String())
 	}
 
 	// Check messages structure
@@ -337,23 +339,33 @@ func TestBuildArgoToolResultRequestAnthropicFormat(t *testing.T) {
 		t.Fatalf("Failed to unmarshal request: %v", err)
 	}
 
+	if parsedReq["system"] != "You are a helpful assistant." {
+		t.Errorf("Expected top-level system override, got %v", parsedReq["system"])
+	}
+	if req.URL.String() != "https://apps-dev.inside.anl.gov/argoapi/v1/messages" {
+		t.Errorf("Unexpected URL: %s", req.URL.String())
+	}
+
 	// Check messages structure
 	messages, ok := parsedReq["messages"].([]interface{})
 	if !ok {
 		t.Fatal("Expected messages to be an array")
 	}
 
-	// Should have: system, user, assistant (with content blocks), user (with tool_result blocks)
-	if len(messages) != 4 {
-		t.Errorf("Expected 4 messages, got %d", len(messages))
+	// Anthropic keeps the system prompt out of band.
+	if len(messages) != 3 {
+		t.Errorf("Expected 3 messages, got %d", len(messages))
 	}
 
 	// Check assistant message has content blocks
-	if len(messages) >= 3 {
-		assistantMsg, ok := messages[2].(map[string]interface{})
+	if len(messages) >= 2 {
+		assistantMsg, ok := messages[1].(map[string]interface{})
 		if !ok {
 			t.Error("Expected assistant message to be a map")
 		} else {
+			if assistantMsg["role"] != "assistant" {
+				t.Errorf("Expected role='assistant', got '%v'", assistantMsg["role"])
+			}
 			// Check for content array
 			content, ok := assistantMsg["content"].([]interface{})
 			if !ok {
@@ -401,8 +413,8 @@ func TestBuildArgoToolResultRequestAnthropicFormat(t *testing.T) {
 	}
 
 	// Check user message with tool_result
-	if len(messages) >= 4 {
-		userMsg, ok := messages[3].(map[string]interface{})
+	if len(messages) >= 3 {
+		userMsg, ok := messages[2].(map[string]interface{})
 		if !ok {
 			t.Error("Expected user message to be a map")
 		} else {

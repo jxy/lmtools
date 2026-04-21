@@ -54,7 +54,7 @@ func TestModelRecordingInSessions(t *testing.T) {
 			// Build command arguments
 			args := []string{
 				"-argo-user", "testuser",
-				"-argo-env", ms.URL(),
+				"-provider-url", ms.URL(),
 				"-sessions-dir", sessionsDir,
 			}
 

@@ -18,7 +18,7 @@ func TestArgoModelsURL(t *testing.T) {
 		{
 			name:        "provider_url_with_v1_suffix",
 			providerURL: "https://api.example.com/v1",
-			expected:    "https://api.example.com/v1/api/v1/models/",
+			expected:    "https://api.example.com/api/v1/models/",
 		},
 		{
 			name:        "provider_url_with_api_v1",
@@ -33,12 +33,12 @@ func TestArgoModelsURL(t *testing.T) {
 		{
 			name:        "provider_url_ipv6",
 			providerURL: "http://[::1]:8080/v1",
-			expected:    "http://[::1]:8080/v1/api/v1/models/",
+			expected:    "http://[::1]:8080/api/v1/models/",
 		},
 		{
 			name:        "provider_url_with_port",
 			providerURL: "https://api.example.com:8443/v1",
-			expected:    "https://api.example.com:8443/v1/api/v1/models/",
+			expected:    "https://api.example.com:8443/api/v1/models/",
 		},
 		{
 			name:        "provider_url_root_path",
@@ -68,14 +68,19 @@ func TestArgoModelsURL(t *testing.T) {
 			expected: "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/",
 		},
 		{
-			name:     "env_other_fallback_defaults_to_dev",
-			env:      "staging",
-			expected: "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/",
+			name:     "env_test_fallback",
+			env:      "test",
+			expected: "https://apps-test.inside.anl.gov/argoapi/api/v1/models/",
 		},
 		{
-			name:     "env_empty_defaults_to_dev",
+			name:     "env_other_fallback_defaults_to_prod",
+			env:      "staging",
+			expected: "https://apps.inside.anl.gov/argoapi/api/v1/models/",
+		},
+		{
+			name:     "env_empty_defaults_to_prod",
 			env:      "",
-			expected: "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/",
+			expected: "https://apps.inside.anl.gov/argoapi/api/v1/models/",
 		},
 
 		// Edge cases
@@ -187,6 +192,12 @@ func TestArgoDefaultEndpoints(t *testing.T) {
 			env:        "dev",
 			wantChat:   "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource/chat/",
 			wantStream: "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource/streamchat/",
+		},
+		{
+			name:       "test_defaults_to_apps_test_resource_chat",
+			env:        "test",
+			wantChat:   "https://apps-test.inside.anl.gov/argoapi/api/v1/resource/chat/",
+			wantStream: "https://apps-test.inside.anl.gov/argoapi/api/v1/resource/streamchat/",
 		},
 		{
 			name:       "prod_defaults_to_apps_prod_resource_chat",

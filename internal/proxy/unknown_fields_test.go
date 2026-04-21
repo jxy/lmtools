@@ -127,7 +127,7 @@ func TestGetStructFieldJSONNames(t *testing.T) {
 	expectedFields := []string{
 		"model", "max_tokens", "messages", "system",
 		"stop_sequences", "stream", "temperature", "top_p",
-		"top_k", "metadata", "tools", "tool_choice", "thinking",
+		"top_k", "metadata", "tools", "tool_choice", "thinking", "output_config",
 	}
 
 	if len(fields) != len(expectedFields) {

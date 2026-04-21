@@ -174,43 +174,63 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 
 // streamFromArgo handles streaming from Argo API
 func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
-	log := logger.From(ctx)
+	if s.useLegacyArgo() {
+		if len(anthReq.Tools) > 0 {
+			pingInterval := s.config.PingInterval
+			if pingInterval <= 0 {
+				pingInterval = constants.DefaultPingInterval * time.Second
+			}
+			return s.streamFromArgoWithPings(ctx, anthReq, handler, pingInterval)
+		}
 
-	// Check if tools are present
-	hasTools := len(anthReq.Tools) > 0
+		body, err := s.forwardToArgoStream(ctx, anthReq)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
 
-	// Get ping interval from config, or use default
-	pingInterval := s.config.PingInterval
-	if pingInterval <= 0 {
-		pingInterval = constants.DefaultPingInterval * time.Second
-	}
-	pingInterval = s.validatePingInterval(ctx, pingInterval)
+		if err := ensureAnthropicTextPreamble(handler); err != nil {
+			return err
+		}
 
-	if hasTools {
-		// Argo doesn't support streaming with tools, simulate it
-		log.Infof("Tools present - using simulated streaming with pings (interval: %v)", pingInterval)
-		return s.streamFromArgoWithPings(ctx, anthReq, handler, pingInterval)
-	}
-
-	// No tools - use real streaming endpoint with pings
-	log.Infof("No tools - using real Argo streaming endpoint with pings (interval: %v)", pingInterval)
-
-	// Get streaming response from Argo
-	streamBody, err := s.forwardToArgoStream(ctx, anthReq)
-	if err != nil {
-		return err
-	}
-	defer streamBody.Close()
-
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		return err
+		parser := NewArgoStreamParser(handler)
+		if s.config.PingInterval > 0 {
+			return parser.ParseWithPingInterval(body, s.validatePingInterval(ctx, s.config.PingInterval))
+		}
+		return parser.Parse(body)
 	}
 
-	// Ensure content_block_start is sent before deltas for each block
-	// Event order: message_start → content_block_start → deltas → content_block_stop → message_stop
-	parser := NewArgoStreamParser(handler)
-	// The parser handles sending all closing events (message_stop) when EOF is reached
-	return parser.ParseWithPingInterval(streamBody, pingInterval)
+	switch s.argoWireProvider(anthReq.Model) {
+	case constants.ProviderAnthropic:
+		resp, err := s.argoAnthropicStreamingRequest(ctx, anthReq)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
+			return err
+		}
+
+		return s.parseAnthropicStream(resp.Body, handler)
+	default:
+		resp, err := s.argoOpenAIStreamingRequestFromAnthropic(ctx, anthReq)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
+			return err
+		}
+
+		if err := ensureAnthropicTextPreamble(handler); err != nil {
+			return err
+		}
+
+		parser := NewOpenAIStreamParser(handler)
+		return parser.Parse(resp.Body)
+	}
 }
 
 // streamFromArgoWithPings handles streaming simulation when tools are present
@@ -574,50 +594,51 @@ func (s *Server) convertGoogleStreamToOpenAI(ctx context.Context, body io.Reader
 
 // streamOpenAIFromArgo handles streaming from Argo API and converts to OpenAI format
 func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error {
-	log := logger.From(ctx)
+	if s.useLegacyArgo() {
+		if len(anthReq.Tools) > 0 {
+			return s.simulateOpenAIStreamFromArgo(ctx, anthReq, writer)
+		}
 
-	// Check if tools are present
-	hasTools := len(anthReq.Tools) > 0
+		body, err := s.forwardToArgoStream(ctx, anthReq)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
 
-	if hasTools {
-		// Argo doesn't support streaming with tools, simulate it
-		log.Infof("Tools present - using simulated streaming for OpenAI format")
-		return s.simulateOpenAIStreamFromArgo(ctx, anthReq, writer)
-	}
-
-	// No tools - use real streaming endpoint
-	log.Infof("No tools - using real Argo streaming endpoint")
-
-	// Get streaming response from Argo
-	streamBody, err := s.forwardToArgoStream(ctx, anthReq)
-	if err != nil {
-		return err
-	}
-	defer streamBody.Close()
-
-	// Create converter
-	converter := NewOpenAIStreamConverter(writer, ctx)
-
-	// Read the entire stream into memory first with size limit
-	// This is necessary because ContentSplitter works on complete strings
-	data, err := s.readStreamingBody(streamBody)
-	if err != nil {
-		return handleStreamError(ctx, writer, "ArgoToOpenAIReader", err)
-	}
-
-	// Use ContentSplitter for proper UTF-8 aware chunking
-	splitter := NewContentSplitter(ctx, TextMode, 1024)
-	chunks := splitter.Split(string(data))
-
-	// Stream each chunk
-	for _, chunk := range chunks {
-		if err := converter.HandleArgoText(chunk); err != nil {
-			return handleStreamError(ctx, writer, "ArgoToOpenAIConverter", err)
+		converter := NewOpenAIStreamConverter(writer, ctx)
+		buffer := make([]byte, 1024)
+		for {
+			n, readErr := body.Read(buffer)
+			if n > 0 {
+				if err := converter.HandleArgoText(string(buffer[:n])); err != nil {
+					return err
+				}
+			}
+			if readErr == io.EOF {
+				return converter.FinishStream("stop", nil)
+			}
+			if readErr != nil {
+				return readErr
+			}
 		}
 	}
 
-	// Complete the stream
-	return converter.Complete("stop")
+	switch s.argoWireProvider(anthReq.Model) {
+	case constants.ProviderAnthropic:
+		resp, err := s.argoAnthropicStreamingRequest(ctx, anthReq)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
+			return err
+		}
+
+		return s.convertAnthropicStreamToOpenAI(ctx, resp.Body, writer)
+	default:
+		return fmt.Errorf("direct Argo OpenAI streaming should bypass conversion path")
+	}
 }
 
 // simulateOpenAIStreamFromArgo simulates OpenAI streaming when Argo has tools

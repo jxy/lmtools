@@ -229,9 +229,14 @@ func TestArgoModelsURLConstruction(t *testing.T) {
 			expectedURL: "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/",
 		},
 		{
-			name:        "env_empty_defaults_to_dev",
+			name:        "env_test_fallback",
+			argoEnv:     "test",
+			expectedURL: "https://apps-test.inside.anl.gov/argoapi/api/v1/models/",
+		},
+		{
+			name:        "env_empty_defaults_to_prod",
 			argoEnv:     "",
-			expectedURL: "https://apps-dev.inside.anl.gov/argoapi/api/v1/models/",
+			expectedURL: "https://apps.inside.anl.gov/argoapi/api/v1/models/",
 		},
 		// Trailing slash handling
 		{

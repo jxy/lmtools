@@ -4,10 +4,8 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
+	"lmtools/internal/mockserver"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -207,8 +205,8 @@ func waitForLogFiles(t *testing.T, dir string, pattern string, expectedCount int
 	return count
 }
 
-// setupTestEnvironment creates a temporary HOME and a simple mock server
-// returning JSON on /chat/ to be used by integration-tagged tests.
+// setupTestEnvironment creates a temporary HOME and a mock server that supports
+// both Argo legacy endpoints and the native OpenAI/Anthropic compatibility endpoints.
 func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
 	t.Helper()
 
@@ -221,19 +219,10 @@ func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
 		t.Fatalf("Failed to create .lmc directory: %v", err)
 	}
 
-	// Start a simple mock server
-	mux := http.NewServeMux()
-	mux.HandleFunc("/chat/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := map[string]interface{}{
-			"response": "Mock response for testing",
-			"model":    "gpt4o",
-		}
-		_ = json.NewEncoder(w).Encode(response)
-	})
-
-	server := httptest.NewServer(mux)
+	server := mockserver.NewMockServer(
+		mockserver.WithDefaultResponse("Mock response for testing"),
+	)
 	t.Cleanup(server.Close)
 
-	return tmpHome, server.URL
+	return tmpHome, server.URL()
 }

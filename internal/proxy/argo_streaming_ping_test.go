@@ -359,8 +359,8 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 }
 
 func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
-	// Test that pings are sent while waiting for non-streaming response (with tools)
-	// For testing, we use a 100ms ping interval (fast tests, still realistic)
+	// Argo now supports native streaming with tools, so the proxy should not
+	// simulate ping-based streaming for these requests.
 
 	tests := []struct {
 		name             string
@@ -371,20 +371,20 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 		{
 			name:             "Response delayed 20ms - no pings expected",
 			responseDelay:    20 * time.Millisecond, // Reduced from 50ms
-			expectedMinPings: 0,                     // Response arrives before first ping interval (100ms)
+			expectedMinPings: 0,
 			expectedMaxPings: 0,
 		},
 		{
-			name:             "Response delayed 100ms - should get 1 ping",
+			name:             "Response delayed 100ms - still no simulated pings",
 			responseDelay:    100 * time.Millisecond, // Reduced from 250ms
-			expectedMinPings: 1,                      // Should get 1 ping at 100ms mark
-			expectedMaxPings: 2,                      // Might get 2 depending on timing
+			expectedMinPings: 0,
+			expectedMaxPings: 0,
 		},
 		{
-			name:             "Response delayed 200ms - should get 2 pings",
+			name:             "Response delayed 200ms - still no simulated pings",
 			responseDelay:    200 * time.Millisecond, // Reduced from 450ms
-			expectedMinPings: 2,                      // Should get pings at 100ms and 200ms marks
-			expectedMaxPings: 3,
+			expectedMinPings: 0,
+			expectedMaxPings: 0,
 		},
 	}
 
@@ -396,23 +396,35 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 
 				// Read request body
 				body, _ := io.ReadAll(r.Body)
-				var req ArgoChatRequest
+				var req OpenAIRequest
 				if err := json.Unmarshal(body, &req); err != nil {
 					http.Error(w, "Bad request", http.StatusBadRequest)
+					return
+				}
+				if !req.Stream {
+					http.Error(w, "expected streaming request", http.StatusBadRequest)
 					return
 				}
 
 				// Simulate delay before responding
 				time.Sleep(tt.responseDelay)
 
-				// Return non-streaming response
-				resp := ArgoChatResponse{
-					Response: "Hello from delayed mock Argo!",
+				setSSEHeaders(w)
+				w.WriteHeader(http.StatusOK)
+				chunks := []string{
+					`data: {"id":"chatcmpl-delay-1","choices":[{"delta":{"content":"Hello from delayed mock Argo!"},"index":0}]}`,
+					`data: {"id":"chatcmpl-delay-1","choices":[{"delta":{},"finish_reason":"stop","index":0}]}`,
+					`data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+					`data: [DONE]`,
 				}
-
-				w.Header().Set("Content-Type", "application/json")
-				if err := json.NewEncoder(w).Encode(resp); err != nil {
-					t.Logf("Failed to encode response: %v", err)
+				for _, chunk := range chunks {
+					if _, err := io.WriteString(w, chunk+"\n\n"); err != nil {
+						t.Logf("Failed to write SSE chunk: %v", err)
+						return
+					}
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
 				}
 			}))
 			defer argoMock.Close()
@@ -435,7 +447,8 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 			proxyServer := httptest.NewServer(server)
 			defer proxyServer.Close()
 
-			// Create request with tools (forces simulated streaming)
+			// Create request with tools. Native Argo streaming should handle this
+			// directly without the proxy synthesizing ping events.
 			req := AnthropicRequest{
 				Model:     "gpto3",
 				MaxTokens: 100,

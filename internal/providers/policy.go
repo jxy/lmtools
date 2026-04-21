@@ -57,7 +57,7 @@ func EvaluateCredentialState(provider string, state CredentialState, surface Val
 			return true, ""
 		}
 	case CredentialKindArgoUser:
-		if state.ArgoUser || (policy.AllowProviderURL && state.ProviderURL) {
+		if state.ArgoUser || state.APIKey || (policy.AllowProviderURL && state.ProviderURL) {
 			return true, ""
 		}
 	default:

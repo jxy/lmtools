@@ -20,12 +20,19 @@ type AnthropicRequest struct {
 	Tools         []AnthropicTool        `json:"tools,omitempty"`
 	ToolChoice    *AnthropicToolChoice   `json:"tool_choice,omitempty"`
 	Thinking      *AnthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig  *AnthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 // AnthropicThinking represents the thinking configuration for Claude models.
 type AnthropicThinking struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
+}
+
+// AnthropicOutputConfig represents Anthropic output configuration.
+type AnthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // AnthropicMessage represents a message in the Anthropic format.
@@ -145,13 +152,14 @@ type AnthropicToolChoice struct {
 
 // AnthropicResponse represents a response from the Anthropic Messages API.
 type AnthropicResponse struct {
-	ID         string                  `json:"id"`
-	Type       string                  `json:"type"`
-	Role       core.Role               `json:"role"`
-	Content    []AnthropicContentBlock `json:"content"`
-	Model      string                  `json:"model"`
-	StopReason string                  `json:"stop_reason,omitempty"`
-	Usage      *AnthropicUsage         `json:"usage,omitempty"`
+	ID           string                  `json:"id"`
+	Type         string                  `json:"type"`
+	Role         core.Role               `json:"role"`
+	Content      []AnthropicContentBlock `json:"content"`
+	Model        string                  `json:"model"`
+	StopReason   string                  `json:"stop_reason,omitempty"`
+	StopSequence string                  `json:"stop_sequence,omitempty"`
+	Usage        *AnthropicUsage         `json:"usage,omitempty"`
 }
 
 // AnthropicUsage represents token usage information.
@@ -194,6 +202,9 @@ type ContentBlockDeltaEvent struct {
 type DeltaContent struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+	// For thinking_delta and signature_delta events.
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 	// Use pointer so empty string is emitted when explicitly present.
 	PartialJSON *string `json:"partial_json,omitempty"`
 }

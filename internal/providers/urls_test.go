@@ -89,6 +89,7 @@ func TestResolveChatURL(t *testing.T) {
 		provider    string
 		providerURL string
 		argoEnv     string
+		argoLegacy  bool
 		model       string
 		stream      bool
 		want        string
@@ -102,23 +103,38 @@ func TestResolveChatURL(t *testing.T) {
 			want:        "https://example.test/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse",
 		},
 		{
-			name:     "argo custom env keeps direct base",
+			name:     "argo custom env uses native openai endpoint",
 			provider: "argo",
 			argoEnv:  "https://custom.example/api",
-			want:     "https://custom.example/api/chat/",
+			want:     "https://custom.example/api/v1/chat/completions",
 		},
 		{
-			name:     "argo custom env stream keeps direct base",
+			name:     "argo custom env streaming stays on native openai endpoint",
 			provider: "argo",
 			argoEnv:  "https://custom.example/api",
 			stream:   true,
-			want:     "https://custom.example/api/streamchat/",
+			want:     "https://custom.example/api/v1/chat/completions",
+		},
+		{
+			name:     "argo claude routes to native anthropic endpoint",
+			provider: "argo",
+			argoEnv:  "https://custom.example/api",
+			model:    "claude-opus-4-1",
+			want:     "https://custom.example/api/v1/messages",
+		},
+		{
+			name:       "argo legacy stream uses legacy endpoint",
+			provider:   "argo",
+			argoEnv:    "https://custom.example/api",
+			argoLegacy: true,
+			stream:     true,
+			want:       "https://custom.example/api/api/v1/resource/streamchat/",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url, err := ResolveChatURL(tt.provider, tt.providerURL, tt.argoEnv, tt.model, tt.stream)
+			url, err := ResolveChatURLWithArgoOptions(tt.provider, tt.providerURL, tt.argoEnv, tt.model, tt.stream, tt.argoLegacy)
 			if err != nil {
 				t.Fatalf("ResolveChatURL() error = %v", err)
 			}
@@ -144,10 +160,10 @@ func TestResolveEmbedURL(t *testing.T) {
 			want:        "https://api.openai.com/v1/embeddings",
 		},
 		{
-			name:     "argo custom env keeps direct base",
+			name:     "argo custom env keeps normalized embed path",
 			provider: "argo",
 			argoEnv:  "https://custom.example/api",
-			want:     "https://custom.example/api/embed/",
+			want:     "https://custom.example/api/api/v1/resource/embed/",
 		},
 	}
 
@@ -169,7 +185,7 @@ func TestResolveModelsURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveModelsURL() error = %v", err)
 	}
-	if got != "https://custom.example/api/models/" {
+	if got != "https://custom.example/api/api/v1/models/" {
 		t.Fatalf("ResolveModelsURL() = %q", got)
 	}
 }
@@ -177,6 +193,15 @@ func TestResolveModelsURL(t *testing.T) {
 func TestResolveArgoBaseURL(t *testing.T) {
 	if got := ResolveArgoBaseURL("prod"); got != ArgoProdURL {
 		t.Fatalf("ResolveArgoBaseURL(prod) = %q, want %q", got, ArgoProdURL)
+	}
+	if got := ResolveArgoBaseURL("dev"); got != ArgoDevURL {
+		t.Fatalf("ResolveArgoBaseURL(dev) = %q, want %q", got, ArgoDevURL)
+	}
+	if got := ResolveArgoBaseURL("test"); got != ArgoTestURL {
+		t.Fatalf("ResolveArgoBaseURL(test) = %q, want %q", got, ArgoTestURL)
+	}
+	if got := ResolveArgoBaseURL(""); got != ArgoProdURL {
+		t.Fatalf("ResolveArgoBaseURL(\"\") = %q, want %q", got, ArgoProdURL)
 	}
 	if got := ResolveArgoBaseURL("https://custom.example/api"); got != "https://custom.example/api" {
 		t.Fatalf("ResolveArgoBaseURL(custom) = %q", got)

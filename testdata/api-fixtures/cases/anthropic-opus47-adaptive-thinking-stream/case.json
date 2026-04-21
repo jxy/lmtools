@@ -1,0 +1,20 @@
+{
+  "id": "anthropic-opus47-adaptive-thinking-stream",
+  "description": "Anthropic Opus 4.7 streaming request with adaptive thinking and low max_tokens truncation",
+  "kinds": [
+    "request"
+  ],
+  "features": [
+    "anthropic-opus-4.7"
+  ],
+  "ingress_family": "anthropic",
+  "models": {
+    "anthropic": "claude-opus-4-7"
+  },
+  "render_targets": [
+    "anthropic"
+  ],
+  "capture_targets": [
+    "anthropic-stream"
+  ]
+}

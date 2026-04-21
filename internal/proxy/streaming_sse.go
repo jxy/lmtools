@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"lmtools/internal/logger"
 	"net/http"
+	"strings"
 )
 
 // SSEWriter handles Server-Sent Events writing.
@@ -41,12 +43,14 @@ func (s *SSEWriter) WriteEvent(eventType, data string) error {
 		logger.From(s.ctx).Debugf("→ CLIENT: data: %s", data)
 	}
 
+	var payload strings.Builder
 	if eventType != "" {
-		if _, err := fmt.Fprintf(s.w, "event: %s\n", eventType); err != nil {
-			return err
-		}
+		fmt.Fprintf(&payload, "event: %s\n", eventType)
 	}
-	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", data); err != nil {
+	fmt.Fprintf(&payload, "data: %s\n\n", data)
+	raw := payload.String()
+	logWireBytes(s.ctx, "WIRE CLIENT STREAM", []byte(raw))
+	if _, err := io.WriteString(s.w, raw); err != nil {
 		return err
 	}
 	s.flusher.Flush()

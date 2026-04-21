@@ -5,6 +5,7 @@ import "lmtools/internal/constants"
 const (
 	ArgoProdURL = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
 	ArgoDevURL  = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource"
+	ArgoTestURL = "https://apps-test.inside.anl.gov/argoapi/api/v1/resource"
 
 	DefaultArgoChatModel      = "gpt5"
 	DefaultOpenAIChatModel    = "gpt-5"

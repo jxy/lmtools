@@ -7,12 +7,15 @@ import (
 )
 
 type EndpointSet struct {
-	Base    string
-	APIBase string
-	Chat    string
-	Stream  string
-	Embed   string
-	Models  string
+	Base                 string
+	APIBase              string
+	Chat                 string
+	Stream               string
+	Embed                string
+	Models               string
+	OpenAIChat           string
+	AnthropicMessages    string
+	AnthropicCountTokens string
 }
 
 type endpointResolver func(providerURL, argoEnv string) (EndpointSet, error)
@@ -43,16 +46,28 @@ func ResolveEndpoints(provider, providerURL, argoEnv string) (EndpointSet, error
 }
 
 func ResolveChatURL(provider, providerURL, argoEnv, model string, stream bool) (string, error) {
+	return ResolveChatURLWithArgoOptions(provider, providerURL, argoEnv, model, stream, false)
+}
+
+func ResolveChatURLWithArgoOptions(provider, providerURL, argoEnv, model string, stream, argoLegacy bool) (string, error) {
 	endpoints, err := ResolveEndpoints(provider, providerURL, argoEnv)
 	if err != nil {
 		return "", err
 	}
 
 	switch constants.NormalizeProvider(provider) {
-	case constants.ProviderOpenAI, constants.ProviderAnthropic, constants.ProviderArgo:
-		if constants.NormalizeProvider(provider) == constants.ProviderArgo && stream {
-			return endpoints.Stream, nil
+	case constants.ProviderArgo:
+		if argoLegacy {
+			if stream {
+				return endpoints.Stream, nil
+			}
+			return endpoints.Chat, nil
 		}
+		if DetermineArgoModelProvider(model) == constants.ProviderAnthropic {
+			return endpoints.AnthropicMessages, nil
+		}
+		return endpoints.OpenAIChat, nil
+	case constants.ProviderOpenAI, constants.ProviderAnthropic:
 		return endpoints.Chat, nil
 	case constants.ProviderGoogle:
 		action := "generateContent"
@@ -66,6 +81,10 @@ func ResolveChatURL(provider, providerURL, argoEnv, model string, stream bool) (
 }
 
 func ResolveEmbedURL(provider, providerURL, argoEnv string) (string, error) {
+	return ResolveEmbedURLWithArgoOptions(provider, providerURL, argoEnv, false)
+}
+
+func ResolveEmbedURLWithArgoOptions(provider, providerURL, argoEnv string, _ bool) (string, error) {
 	endpoints, err := ResolveEndpoints(provider, providerURL, argoEnv)
 	if err != nil {
 		return "", err
@@ -80,9 +99,36 @@ func ResolveEmbedURL(provider, providerURL, argoEnv string) (string, error) {
 }
 
 func ResolveModelsURL(provider, providerURL, argoEnv string) (string, error) {
+	return ResolveModelsURLWithArgoOptions(provider, providerURL, argoEnv, false)
+}
+
+func ResolveModelsURLWithArgoOptions(provider, providerURL, argoEnv string, _ bool) (string, error) {
 	endpoints, err := ResolveEndpoints(provider, providerURL, argoEnv)
 	if err != nil {
 		return "", err
 	}
 	return endpoints.Models, nil
+}
+
+func ResolveCountTokensURL(provider, providerURL, argoEnv, model string) (string, error) {
+	return ResolveCountTokensURLWithArgoOptions(provider, providerURL, argoEnv, model, false)
+}
+
+func ResolveCountTokensURLWithArgoOptions(provider, providerURL, argoEnv, model string, argoLegacy bool) (string, error) {
+	endpoints, err := ResolveEndpoints(provider, providerURL, argoEnv)
+	if err != nil {
+		return "", err
+	}
+
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderAnthropic:
+		return endpoints.AnthropicCountTokens, nil
+	case constants.ProviderArgo:
+		if argoLegacy {
+			return "", fmt.Errorf("%s provider does not support count_tokens in legacy mode", DisplayName(provider))
+		}
+		return endpoints.AnthropicCountTokens, nil
+	default:
+		return "", fmt.Errorf("%s provider does not support count_tokens", DisplayName(provider))
+	}
 }

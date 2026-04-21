@@ -20,19 +20,29 @@ func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 	tests := []struct {
 		name           string
 		provider       string
+		model          string
 		apiKeyFile     string
 		expectedURL    string
-		expectedFormat string // "argo", "openai", "google", "anthropic"
+		expectedFormat string // "openai", "google", "anthropic"
 	}{
 		{
-			name:           "Argo provider",
+			name:           "Argo provider defaults to native OpenAI format",
 			provider:       "argo",
+			model:          "gpt-4o-mini",
 			expectedURL:    "apps.inside.anl.gov/argoapi",
-			expectedFormat: "argo",
+			expectedFormat: "openai",
+		},
+		{
+			name:           "Argo Claude model uses native Anthropic format",
+			provider:       "argo",
+			model:          "claude-3-5-sonnet",
+			expectedURL:    "apps.inside.anl.gov/argoapi",
+			expectedFormat: "anthropic",
 		},
 		{
 			name:           "OpenAI provider",
 			provider:       "openai",
+			model:          "gpt-4o-mini",
 			apiKeyFile:     "testdata/fake-key.txt",
 			expectedURL:    "api.openai.com",
 			expectedFormat: "openai",
@@ -40,6 +50,7 @@ func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 		{
 			name:           "Google provider",
 			provider:       "google",
+			model:          "gemini-2.5-pro",
 			apiKeyFile:     "testdata/fake-key.txt",
 			expectedURL:    "generativelanguage.googleapis.com",
 			expectedFormat: "google",
@@ -47,6 +58,7 @@ func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 		{
 			name:           "Anthropic provider",
 			provider:       "anthropic",
+			model:          "claude-3-opus-20240229",
 			apiKeyFile:     "testdata/fake-key.txt",
 			expectedURL:    "api.anthropic.com",
 			expectedFormat: "anthropic",
@@ -62,7 +74,7 @@ func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 
 			cfg := &TestRequestConfig{
 				User:       "testuser",
-				Model:      "",
+				Model:      tt.model,
 				System:     "You are a helpful assistant",
 				Env:        "prod",
 				Provider:   tt.provider,
@@ -88,11 +100,6 @@ func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 			}
 
 			switch tt.expectedFormat {
-			case "argo":
-				// Argo format should have "user" field
-				if _, ok := requestData["user"]; !ok {
-					t.Error("Argo request should have 'user' field")
-				}
 			case "openai":
 				// OpenAI format should have "model" and "messages" at top level
 				if _, ok := requestData["model"]; !ok {
@@ -132,19 +139,29 @@ func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 	tests := []struct {
 		name           string
 		provider       string
+		model          string
 		apiKeyFile     string
 		expectedURL    string
 		expectedFormat string
 	}{
 		{
-			name:           "Argo provider",
+			name:           "Argo provider defaults to native OpenAI format",
 			provider:       "argo",
+			model:          "gpt-4o-mini",
 			expectedURL:    "apps.inside.anl.gov/argoapi",
-			expectedFormat: "argo",
+			expectedFormat: "openai",
+		},
+		{
+			name:           "Argo Claude model uses native Anthropic format",
+			provider:       "argo",
+			model:          "claude-3-5-sonnet",
+			expectedURL:    "apps.inside.anl.gov/argoapi",
+			expectedFormat: "anthropic",
 		},
 		{
 			name:           "OpenAI provider",
 			provider:       "openai",
+			model:          "gpt-4o-mini",
 			apiKeyFile:     "testdata/fake-key.txt",
 			expectedURL:    "api.openai.com",
 			expectedFormat: "openai",
@@ -152,6 +169,7 @@ func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 		{
 			name:           "Google provider",
 			provider:       "google",
+			model:          "gemini-2.5-pro",
 			apiKeyFile:     "testdata/fake-key.txt",
 			expectedURL:    "generativelanguage.googleapis.com",
 			expectedFormat: "google",
@@ -159,6 +177,7 @@ func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 		{
 			name:           "Anthropic provider",
 			provider:       "anthropic",
+			model:          "claude-3-opus-20240229",
 			apiKeyFile:     "testdata/fake-key.txt",
 			expectedURL:    "api.anthropic.com",
 			expectedFormat: "anthropic",
@@ -174,7 +193,7 @@ func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 
 			cfg := &TestRequestConfig{
 				User:       "testuser",
-				Model:      "",
+				Model:      tt.model,
 				System:     "You are a helpful assistant",
 				Env:        "prod",
 				Provider:   tt.provider,
@@ -200,10 +219,6 @@ func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 			}
 
 			switch tt.expectedFormat {
-			case "argo":
-				if _, ok := requestData["user"]; !ok {
-					t.Error("Argo request should have 'user' field")
-				}
 			case "openai":
 				if _, ok := requestData["model"]; !ok {
 					t.Error("OpenAI request should have 'model' field")

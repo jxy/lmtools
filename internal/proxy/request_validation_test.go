@@ -27,7 +27,7 @@ func TestHandleMessagesRejectsUnsupportedMetadataForArgo(t *testing.T) {
 	})
 
 	body := `{
-		"model": "claude-test",
+		"model": "gpt-4o-mini",
 		"max_tokens": 10,
 		"messages": [{"role":"user","content":"hi"}],
 		"metadata": {"request_id": "123"}
@@ -47,7 +47,7 @@ func TestHandleMessagesRejectsUnsupportedMetadataForArgo(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal error response: %v", err)
 	}
-	if resp.Error.Message != `field "metadata" is not supported when proxying to provider "argo"` {
+	if resp.Error.Message != `field "metadata" is not supported when proxying to provider "openai"` {
 		t.Fatalf("message = %q", resp.Error.Message)
 	}
 }
@@ -59,7 +59,7 @@ func TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo(t *testing.T) {
 	})
 
 	body := `{
-		"model": "gpt-4o-mini",
+		"model": "claude-test",
 		"messages": [{"role":"user","content":"hi"}],
 		"response_format": {"type":"json_object"}
 	}`
@@ -78,7 +78,92 @@ func TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal error response: %v", err)
 	}
-	if resp.Error.Message != `field "response_format" is not supported when proxying to provider "argo"` {
+	if resp.Error.Message != `field "response_format" is not supported when proxying to provider "anthropic"` {
 		t.Fatalf("message = %q", resp.Error.Message)
+	}
+}
+
+func TestValidateAnthropicOpus47Features(t *testing.T) {
+	tests := []struct {
+		name     string
+		req      AnthropicRequest
+		provider string
+		wantErr  string
+	}{
+		{
+			name:     "allows adaptive thinking and effort on official opus 4.7 anthropic route",
+			provider: constants.ProviderAnthropic,
+			req: AnthropicRequest{
+				Model:     "claude-opus-4-7",
+				MaxTokens: 100,
+				Messages:  []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				Thinking: &AnthropicThinking{
+					Type:    "adaptive",
+					Display: "summarized",
+				},
+				OutputConfig: &AnthropicOutputConfig{Effort: "xhigh"},
+			},
+		},
+		{
+			name:     "rejects opus 4.7 fields on argo",
+			provider: constants.ProviderArgo,
+			req: AnthropicRequest{
+				Model:        "claude-opus-4-7",
+				Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				OutputConfig: &AnthropicOutputConfig{Effort: "high"},
+			},
+			wantErr: `anthropic Opus 4.7 thinking/output_config fields are only supported when proxying to provider "anthropic"`,
+		},
+		{
+			name:     "rejects opus 4.7 fields on non opus model",
+			provider: constants.ProviderAnthropic,
+			req: AnthropicRequest{
+				Model:        "claude-sonnet-4-5",
+				Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				OutputConfig: &AnthropicOutputConfig{Effort: "high"},
+			},
+			wantErr: `anthropic Opus 4.7 thinking/output_config fields require model "claude-opus-4-7"`,
+		},
+		{
+			name:     "rejects budget tokens with adaptive thinking",
+			provider: constants.ProviderAnthropic,
+			req: AnthropicRequest{
+				Model:    "claude-opus-4-7",
+				Messages: []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				Thinking: &AnthropicThinking{
+					Type:         "adaptive",
+					BudgetTokens: 1024,
+				},
+			},
+			wantErr: `thinking.budget_tokens is not valid with thinking.type="adaptive"`,
+		},
+		{
+			name:     "rejects unknown effort",
+			provider: constants.ProviderAnthropic,
+			req: AnthropicRequest{
+				Model:        "claude-opus-4-7",
+				Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				OutputConfig: &AnthropicOutputConfig{Effort: "extreme"},
+			},
+			wantErr: "output_config.effort must be one of low, medium, high, xhigh, max",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAnthropicRequestForProvider(&tt.req, tt.provider)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateAnthropicRequestForProvider() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }

@@ -13,10 +13,14 @@ type Config struct {
 	AnthropicAPIKey string
 	OpenAIAPIKey    string
 	GoogleAPIKey    string
+	ArgoAPIKey      string
 
 	// Argo Configuration
-	ArgoUser string
-	ArgoEnv  string
+	ArgoUser   string
+	ArgoDev    bool
+	ArgoTest   bool
+	ArgoLegacy bool
+	ArgoEnv    string
 
 	// Provider Configuration
 	Provider    string
@@ -51,6 +55,20 @@ func (c *Config) ApplyDynamicModelDefaults() {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	if c.ArgoDev && c.ArgoTest {
+		return fmt.Errorf("invalid flag combination: -argo-dev and -argo-test cannot be used together")
+	}
+
+	if c.ArgoEnv == "" {
+		if c.ArgoDev {
+			c.ArgoEnv = "dev"
+		} else if c.ArgoTest {
+			c.ArgoEnv = "test"
+		} else {
+			c.ArgoEnv = "prod"
+		}
+	}
+
 	c.Provider = constants.NormalizeProvider(c.Provider)
 	if !constants.IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid -provider: %s, must be one of: %s",

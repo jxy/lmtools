@@ -385,6 +385,62 @@ func TestVerifySuiteHonorsRenderTargets(t *testing.T) {
 	}
 }
 
+func TestVerifySuiteAllowsAnthropicOnlyOpus47Feature(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "opus47-case")
+	if err := os.MkdirAll(filepath.Join(caseDir, "expected", "render"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(caseDir) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "opus47-case",
+      "description": "opus47 case",
+      "kinds": ["request"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "opus47-case",
+  "description": "opus47 case",
+  "kinds": ["request"],
+  "features": ["anthropic-opus-4.7"],
+  "ingress_family": "anthropic",
+  "models": {
+    "anthropic": "claude-opus-4-7"
+  },
+  "render_targets": ["anthropic"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "ingress.json"), `{"model":"claude-opus-4-7","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "typed.json"), `{"messages":[{"role":"user","blocks":[{"type":"text","text":"hi"}]}],"max_tokens":10,"stream":false,"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "anthropic.request.json"), `{"model":"claude-opus-4-7","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`)
+
+	if err := VerifySuite(root, VerifyOptions{}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteRejectsOpus47FeatureOnNonAnthropicRenderTarget(t *testing.T) {
+	meta := CaseMeta{
+		ID:            "bad-opus47",
+		Features:      []string{"anthropic-opus-4.7"},
+		Models:        map[string]string{"anthropic": "claude-opus-4-7"},
+		RenderTargets: []string{"anthropic", "openai"},
+	}
+	problems := verifyFeatureConstraints(meta)
+	if len(problems) == 0 {
+		t.Fatal("expected feature constraint problem")
+	}
+	if !strings.Contains(problems[0], "must only render anthropic requests") {
+		t.Fatalf("problem = %q, want render-target rejection", problems[0])
+	}
+}
+
 func TestReadCaseFileExpandsFixtureFileData(t *testing.T) {
 	root := t.TempDir()
 	caseID := "audio-case"

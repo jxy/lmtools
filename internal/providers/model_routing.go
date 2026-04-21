@@ -5,24 +5,13 @@ import (
 	"strings"
 )
 
-// argoModelProviders maps model prefixes to their provider-native message/tool formats.
-// This is static provider metadata and is shared by both core and proxy.
-var argoModelProviders = map[string]string{
-	"gpt":    constants.ProviderOpenAI,
-	"o1":     constants.ProviderOpenAI,
-	"o3":     constants.ProviderOpenAI,
-	"gemini": constants.ProviderGoogle,
-	"claude": constants.ProviderAnthropic,
-}
-
 // DetermineArgoModelProvider reports which provider format an Argo model should use.
-// Unknown models intentionally default to OpenAI-style formatting.
+// Argo's native compatibility layer is binary:
+//   - Claude models use Anthropic's messages wire format
+//   - Everything else uses OpenAI's chat/completions wire format
 func DetermineArgoModelProvider(model string) string {
-	modelLower := strings.ToLower(model)
-	for prefix, provider := range argoModelProviders {
-		if strings.HasPrefix(modelLower, prefix) {
-			return provider
-		}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "claude") {
+		return constants.ProviderAnthropic
 	}
 	return constants.ProviderOpenAI
 }

@@ -56,6 +56,7 @@ const (
 const (
 	ArgoProdURL = providers.ArgoProdURL
 	ArgoDevURL  = providers.ArgoDevURL
+	ArgoTestURL = providers.ArgoTestURL
 )
 
 // ============================================================================
@@ -134,7 +135,7 @@ func buildArgoEmbedRequest(cfg EmbedRequestConfig, input string) (*http.Request,
 		return nil, nil, fmt.Errorf("failed to marshal embed request: %w", err)
 	}
 
-	endpoint, err := providers.ResolveEmbedURL(constants.ProviderArgo, "", cfg.GetEnv())
+	endpoint, err := providers.ResolveEmbedURLWithArgoOptions(constants.ProviderArgo, cfg.GetProviderURL(), cfg.GetEnv(), isArgoLegacyMode(cfg))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -195,7 +196,7 @@ func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response
 	defer resp.Body.Close()
 
 	// Get provider, default to argo
-	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
+	provider := effectiveResponseProvider(cfg)
 
 	// Validate HTTP status first
 	if resp.StatusCode != http.StatusOK {
@@ -203,6 +204,9 @@ func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response
 		errorData, err := limitio.ReadLimitedWithKind(resp.Body, constants.MaxErrorResponseSize, "API error response")
 		if err != nil {
 			errorData = []byte("failed to read error response")
+		}
+		if logger != nil && logger.IsDebugEnabled() {
+			logger.Debugf("WIRE BACKEND RESPONSE BODY:\n%s", string(errorData))
 		}
 		return Response{}, errors.NewHTTPError(resp.StatusCode, string(errorData))
 	}
@@ -212,7 +216,7 @@ func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response
 
 	// Handle streaming responses with provider-specific parsing.
 	// Argo request planning already downgrades tool-enabled requests to non-streaming.
-	if cfg.IsStreamChat() {
+	if shouldHandleStreamingResponse(cfg, provider, resp) {
 		response, err = handleStreamingResponse(ctx, cfg, resp, provider, logger, notifier)
 	} else {
 		response, err = handleNonStreamingResponse(cfg, resp, provider, logger, notifier)
@@ -223,6 +227,34 @@ func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response
 	}
 
 	return response, nil
+}
+
+func effectiveResponseProvider(cfg ResponseConfig) string {
+	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
+	if provider != constants.ProviderArgo || cfg.IsEmbed() {
+		return provider
+	}
+	if isArgoLegacyMode(cfg) {
+		return constants.ProviderArgo
+	}
+
+	modelCfg, ok := cfg.(ModelConfig)
+	if !ok {
+		return providers.DetermineArgoModelProvider("")
+	}
+	return providers.DetermineArgoModelProvider(modelCfg.GetModel())
+}
+
+func shouldHandleStreamingResponse(cfg ResponseConfig, provider string, resp *http.Response) bool {
+	if !cfg.IsStreamChat() {
+		return false
+	}
+	if provider != constants.ProviderArgo || !isArgoLegacyMode(cfg) {
+		return true
+	}
+
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	return strings.Contains(contentType, "text/plain") || strings.Contains(contentType, "text/event-stream")
 }
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
@@ -240,6 +272,9 @@ func handleNonStreamingResponse(cfg ResponseConfig, resp *http.Response, provide
 	data, err := limitio.ReadLimitedWithKind(resp.Body, constants.DefaultMaxResponseBodySize, "API response body")
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if logger != nil && logger.IsDebugEnabled() {
+		logger.Debugf("WIRE BACKEND RESPONSE BODY:\n%s", string(data))
 	}
 
 	// Log response

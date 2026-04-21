@@ -230,6 +230,12 @@ func projectTypedRequest(typed TypedRequest) map[string]interface{} {
 	if typed.ReasoningEffort != "" {
 		projected["reasoning_effort"] = typed.ReasoningEffort
 	}
+	if typed.Thinking != nil {
+		projected["thinking"] = typed.Thinking
+	}
+	if typed.OutputConfig != nil {
+		projected["output_config"] = typed.OutputConfig
+	}
 	if len(typed.Tools) > 0 {
 		projected["tools"] = projectToolDefinitions(typed.Tools)
 	}

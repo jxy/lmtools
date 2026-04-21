@@ -81,19 +81,36 @@ func TestAnthropicSystemPromptNoDouplication(t *testing.T) {
 	}
 }
 
-// TestArgoSystemPromptInMessages verifies that system prompts stay in messages for all Argo models
+// TestArgoSystemPromptRouting verifies that Argo matches the native wire format
+// chosen from the model name.
 func TestArgoSystemPromptInMessages(t *testing.T) {
-	models := []string{
-		"claude-3-opus-20240229", // Anthropic via Argo
-		"gpt-4",                  // OpenAI via Argo
-		"gemini-pro",             // Google via Argo
+	tests := []struct {
+		model        string
+		expectField  string
+		expectInline bool
+	}{
+		{
+			model:        "claude-3-opus-20240229",
+			expectField:  "system",
+			expectInline: false,
+		},
+		{
+			model:        "gpt-4",
+			expectField:  "",
+			expectInline: true,
+		},
+		{
+			model:        "gemini-pro",
+			expectField:  "",
+			expectInline: true,
+		},
 	}
 
-	for _, model := range models {
-		t.Run(model, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
 			cfg := &TestRequestConfig{
 				User:              "test",
-				Model:             model,
+				Model:             tt.model,
 				System:            "You are a helpful assistant",
 				Provider:          "argo",
 				IsStreamChatMode:  false,
@@ -111,15 +128,17 @@ func TestArgoSystemPromptInMessages(t *testing.T) {
 				t.Fatalf("Failed to parse request body: %v", err)
 			}
 
-			// Check that messages array contains system message
+			if tt.expectField == "system" {
+				if reqData["system"] != cfg.System {
+					t.Fatalf("Expected top-level system=%q, got %v", cfg.System, reqData["system"])
+				}
+			} else if _, ok := reqData["system"]; ok {
+				t.Fatalf("Did not expect top-level system field, got %v", reqData["system"])
+			}
+
 			messages, ok := reqData["messages"].([]interface{})
 			if !ok {
 				t.Fatal("Expected 'messages' to be an array")
-			}
-
-			// First message should be system
-			if len(messages) < 2 {
-				t.Fatal("Expected at least 2 messages (system + user)")
 			}
 
 			firstMsg, ok := messages[0].(map[string]interface{})
@@ -128,22 +147,22 @@ func TestArgoSystemPromptInMessages(t *testing.T) {
 			}
 
 			role, _ := firstMsg["role"].(string)
-			if role != "system" {
-				t.Errorf("Expected first message role to be 'system', got %q", role)
-			}
-
-			// Verify content matches
-			// For Google format via Argo, content is in parts
-			var content string
-			if c, ok := firstMsg["content"].(string); ok {
-				content = c
-			} else if parts, ok := firstMsg["parts"].([]interface{}); ok && len(parts) > 0 {
-				if part, ok := parts[0].(map[string]interface{}); ok {
-					content, _ = part["text"].(string)
+			if tt.expectInline {
+				if len(messages) < 2 {
+					t.Fatal("Expected at least 2 messages (system + user)")
 				}
-			}
-			if content != cfg.System {
-				t.Errorf("Expected system content=%q, got %q", cfg.System, content)
+				if role != "system" {
+					t.Errorf("Expected first message role to be 'system', got %q", role)
+				}
+
+				content, _ := firstMsg["content"].(string)
+				if content != cfg.System {
+					t.Errorf("Expected system content=%q, got %q", cfg.System, content)
+				}
+			} else {
+				if role != "user" {
+					t.Errorf("Expected first message role to be 'user', got %q", role)
+				}
 			}
 		})
 	}

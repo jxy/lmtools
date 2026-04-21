@@ -1,0 +1,22 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Plan a two-step check for the calculation.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "output_config": {
+    "effort": "max"
+  },
+  "stream": true,
+  "thinking": {
+    "display": "summarized",
+    "type": "adaptive"
+  }
+}

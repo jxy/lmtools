@@ -27,7 +27,7 @@ func TestLoggingIntegration(t *testing.T) {
 	// Test 1: Embedding request with logging
 	logDir := t.TempDir()
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-e", "-model", "v3large", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-e", "-model", "v3large", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
 		"Test message for embedding", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run embedding: %v\nStderr: %s", err, stderr)
@@ -58,7 +58,7 @@ func TestLoggingIntegration(t *testing.T) {
 
 	// Test 2: Chat request with logging (use same log dir)
 	_, stderr, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
 		"Test chat message", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run chat: %v\nStderr: %s", err, stderr)
@@ -144,8 +144,8 @@ func TestStreamingLogging(t *testing.T) {
 
 	// Test streaming request with custom log directory
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-stream", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
-		"Test streaming message", WithLogDir(logDir))
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-stream", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
+		"Stream this message", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run streaming: %v\nStderr: %s", err, stderr)
 	}
@@ -220,7 +220,7 @@ func TestConcurrentLogging(t *testing.T) {
 		go func(id int) {
 			// Use specific log dir for concurrent test
 			_, stderr, err := runLmcCommand(t, lmcBin,
-				[]string{"-argo-user", "testuser", "-e", "-argo-env", ms.URL(), "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "testuser", "-e", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
 				"Concurrent test message", WithLogDir(logDir))
 			if err != nil {
 				t.Logf("Process %d failed: %v, stderr: %s", id, err, stderr)
