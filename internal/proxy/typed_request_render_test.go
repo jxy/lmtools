@@ -51,6 +51,31 @@ func TestTypedToAnthropicRequestPreservesTopPWithoutTemperature(t *testing.T) {
 	}
 }
 
+func TestTypedToAnthropicRequestOmitsTemperatureForOpus47(t *testing.T) {
+	req, err := TypedToAnthropicRequest(TypedRequest{
+		MaxTokens:   intPtr(32),
+		Temperature: float64Ptr(0.2),
+		TopP:        float64Ptr(0.9),
+		Messages: []core.TypedMessage{
+			{
+				Role: string(core.RoleUser),
+				Blocks: []core.Block{
+					core.TextBlock{Text: "hi"},
+				},
+			},
+		},
+	}, "claude-opus-4-7")
+	if err != nil {
+		t.Fatalf("TypedToAnthropicRequest() error = %v", err)
+	}
+	if req.Temperature != nil {
+		t.Fatalf("Temperature = %v, want nil for Opus 4.7", req.Temperature)
+	}
+	if req.TopP != nil {
+		t.Fatalf("TopP = %v, want nil when source temperature was supplied", req.TopP)
+	}
+}
+
 func TestTypedToAnthropicRequestPreservesOpus47ThinkingConfig(t *testing.T) {
 	req, err := TypedToAnthropicRequest(TypedRequest{
 		MaxTokens: intPtr(128),
@@ -76,5 +101,27 @@ func TestTypedToAnthropicRequestPreservesOpus47ThinkingConfig(t *testing.T) {
 	}
 	if req.OutputConfig == nil || req.OutputConfig.Effort != "xhigh" {
 		t.Fatalf("OutputConfig = %+v, want effort=xhigh", req.OutputConfig)
+	}
+}
+
+func TestTypedToAnthropicRequestAllowsOutputConfigForIntermediateNonAnthropicModels(t *testing.T) {
+	req, err := TypedToAnthropicRequest(TypedRequest{
+		MaxTokens: intPtr(64),
+		Messages: []core.TypedMessage{
+			{
+				Role: string(core.RoleUser),
+				Blocks: []core.Block{
+					core.TextBlock{Text: "return json"},
+				},
+			},
+		},
+		ResponseFormat:  &ResponseFormat{Type: "json_object"},
+		ReasoningEffort: "high",
+	}, "gemini-3.1-flash-lite-preview")
+	if err != nil {
+		t.Fatalf("TypedToAnthropicRequest() error = %v", err)
+	}
+	if req.OutputConfig == nil || req.OutputConfig.Format == nil || req.OutputConfig.Effort != "high" {
+		t.Fatalf("OutputConfig = %+v, want preserved intermediate output_config", req.OutputConfig)
 	}
 }

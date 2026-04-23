@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"lmtools/internal/core"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,7 @@ import (
 // TypedRequest represents a provider-agnostic request structure
 type TypedRequest struct {
 	System          string
+	Developer       string
 	Messages        []core.TypedMessage
 	Tools           []core.ToolDefinition
 	ToolChoice      *core.ToolChoice
@@ -33,6 +35,9 @@ type TypedRequest struct {
 	ReasoningEffort string // for OpenAI o1 models
 	Thinking        *AnthropicThinking
 	OutputConfig    *AnthropicOutputConfig
+	ResponseFormat  *ResponseFormat
+	Metadata        map[string]interface{}
+	ServiceTier     string
 }
 
 // OpenAIRequestToTyped converts an OpenAI request to TypedRequest
@@ -49,6 +54,9 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 		Stop:            req.Stop,
 		Stream:          req.Stream,
 		ReasoningEffort: req.ReasoningEffort,
+		ResponseFormat:  req.ResponseFormat,
+		Metadata:        cloneStringInterfaceMap(req.Metadata),
+		ServiceTier:     req.ServiceTier,
 	}
 
 	// Convert OpenAI messages to typed OpenAI messages first
@@ -63,38 +71,23 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 	}
 
 	// Convert messages using typed function
-	typedMessages := core.FromOpenAITyped(openAITypedMessages)
-
-	// Extract system message if present
-	for i, msg := range typedMessages {
-		if msg.Role == "system" {
-			// Extract system message text
-			for _, block := range msg.Blocks {
-				if textBlock, ok := block.(core.TextBlock); ok {
-					typed.System = textBlock.Text
-					break
-				}
-			}
-			// Remove system message from messages array
-			typed.Messages = append(typedMessages[:i], typedMessages[i+1:]...)
-			break
-		}
-	}
-
-	// If no system message was extracted, use all messages
-	if typed.System == "" && typed.Messages == nil {
-		typed.Messages = typedMessages
-	}
+	typed.Messages = core.FromOpenAITyped(openAITypedMessages)
 
 	// Convert tools
 	if len(req.Tools) > 0 {
-		typed.Tools = make([]core.ToolDefinition, len(req.Tools))
-		for i, tool := range req.Tools {
-			typed.Tools[i] = core.ToolDefinition{
+		typed.Tools = make([]core.ToolDefinition, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			if tool.Type != "" && tool.Type != "function" {
+				continue
+			}
+			if tool.Function.Name == "" {
+				continue
+			}
+			typed.Tools = append(typed.Tools, core.ToolDefinition{
 				Name:        tool.Function.Name,
 				Description: tool.Function.Description,
 				InputSchema: tool.Function.Parameters,
-			}
+			})
 		}
 	}
 
@@ -107,13 +100,19 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 // AnthropicRequestToTyped converts an Anthropic request to TypedRequest
 func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 	typed := TypedRequest{
-		MaxTokens:    &req.MaxTokens,
-		Temperature:  req.Temperature,
-		TopP:         req.TopP,
-		Stop:         req.StopSequences,
-		Stream:       req.Stream,
-		Thinking:     req.Thinking,
-		OutputConfig: req.OutputConfig,
+		MaxTokens:      &req.MaxTokens,
+		Temperature:    req.Temperature,
+		TopP:           req.TopP,
+		Stop:           req.StopSequences,
+		Stream:         req.Stream,
+		Thinking:       req.Thinking,
+		OutputConfig:   req.OutputConfig,
+		ResponseFormat: anthropicOutputConfigToOpenAIResponseFormat(req.OutputConfig),
+		Metadata:       cloneStringInterfaceMap(req.Metadata),
+		ServiceTier:    req.ServiceTier,
+	}
+	if req.OutputConfig != nil {
+		typed.ReasoningEffort = anthropicEffortToOpenAIReasoningEffort(req.OutputConfig.Effort)
 	}
 
 	// Handle system message
@@ -151,13 +150,19 @@ func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 
 	// Convert tools
 	if len(req.Tools) > 0 {
-		typed.Tools = make([]core.ToolDefinition, len(req.Tools))
-		for i, tool := range req.Tools {
-			typed.Tools[i] = core.ToolDefinition{
+		typed.Tools = make([]core.ToolDefinition, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			if tool.Name == "" {
+				continue
+			}
+			if tool.Type != "" && tool.Type != "custom" && tool.Type != "function" && tool.InputSchema == nil {
+				continue
+			}
+			typed.Tools = append(typed.Tools, core.ToolDefinition{
 				Name:        tool.Name,
 				Description: tool.Description,
 				InputSchema: tool.InputSchema,
-			}
+			})
 		}
 	}
 
@@ -170,6 +175,38 @@ func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 	}
 
 	return typed
+}
+
+func typedMessageText(msg core.TypedMessage) string {
+	return typedMessageTextBlocks(msg.Blocks)
+}
+
+func typedMessageTextBlocks(blocks []core.Block) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		switch value := block.(type) {
+		case core.TextBlock:
+			if value.Text != "" {
+				parts = append(parts, value.Text)
+			}
+		case *core.TextBlock:
+			if value != nil && value.Text != "" {
+				parts = append(parts, value.Text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func cloneStringInterfaceMap(input map[string]interface{}) map[string]interface{} {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
 }
 
 // TypedToOpenAIResponse converts a typed response to OpenAI format

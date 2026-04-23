@@ -19,20 +19,8 @@
       "owned_by": "openai"
     },
     {
-      "created": 1773451123,
-      "id": "gpt-5.4-mini",
-      "object": "model",
-      "owned_by": "system"
-    },
-    {
-      "created": 1772691852,
-      "id": "gpt-5.4",
-      "object": "model",
-      "owned_by": "system"
-    },
-    {
-      "created": 1773450837,
-      "id": "gpt-5.4-nano-2026-03-17",
+      "created": 1776399994,
+      "id": "gpt-image-2-2026-04-21",
       "object": "model",
       "owned_by": "system"
     },
@@ -45,6 +33,18 @@
     {
       "created": 1773451076,
       "id": "gpt-5.4-mini-2026-03-17",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "created": 1773451123,
+      "id": "gpt-5.4-mini",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "created": 1776399795,
+      "id": "gpt-image-2",
       "object": "model",
       "owned_by": "system"
     },
@@ -741,6 +741,18 @@
     {
       "created": 1772659657,
       "id": "gpt-5.4-pro-2026-03-05",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "created": 1772691852,
+      "id": "gpt-5.4",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "created": 1773450837,
+      "id": "gpt-5.4-nano-2026-03-17",
       "object": "model",
       "owned_by": "system"
     },

@@ -67,7 +67,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	ctx := r.Context()
 	log := logger.From(ctx)
 
-	if err := validateOpenAIRequestForProvider(openAIReq, route.Provider); err != nil {
+	if err := validateOpenAIRequestForProvider(openAIReq, route.Provider, route.MappedModel); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
@@ -146,8 +146,9 @@ func (s *Server) sendOpenAICompatibleRequest(ctx context.Context, url, apiKey, r
 	return resp, nil
 }
 
-func rewriteOpenAIResponseModel(body []byte, originalModel string) (*OpenAIResponse, error) {
+func rewriteOpenAIResponseModel(ctx context.Context, body []byte, originalModel, source string) (*OpenAIResponse, error) {
 	var openAIResp OpenAIResponse
+	warnUnknownFields(ctx, body, OpenAIResponse{}, source)
 	if err := json.Unmarshal(body, &openAIResp); err != nil {
 		return nil, err
 	}
@@ -193,7 +194,7 @@ func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.
 		return
 	}
 
-	openAIResp, err := rewriteOpenAIResponseModel(respBody, originalModel)
+	openAIResp, err := rewriteOpenAIResponseModel(ctx, respBody, originalModel, requestName+" response")
 	if err != nil {
 		log.Errorf("Failed to parse OpenAI response: %v", err)
 		// Still send the response even if we can't parse it
@@ -217,6 +218,7 @@ func (s *Server) forwardArgoOpenAIDirectly(w http.ResponseWriter, r *http.Reques
 func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, mappedModel, originalModel string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
+	warnOpenAIRequestDropsForGoogle(ctx, openAIReq)
 
 	typed := OpenAIRequestToTyped(openAIReq)
 	googleReq, err := TypedToGoogleRequest(typed, mappedModel, nil)
@@ -327,6 +329,7 @@ func (s *Server) forwardOpenAICompatibleStreamDirectly(w http.ResponseWriter, r 
 
 			// Extract the data portion
 			data := strings.TrimPrefix(line, "data: ")
+			warnUnknownFields(ctx, []byte(data), OpenAIStreamChunk{}, requestName+" stream chunk")
 
 			// Try to parse and update model name
 			var chunk map[string]interface{}

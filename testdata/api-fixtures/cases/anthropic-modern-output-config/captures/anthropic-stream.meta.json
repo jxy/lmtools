@@ -1,0 +1,85 @@
+{
+  "case_id": "anthropic-modern-output-config",
+  "target": "anthropic-stream",
+  "url": "https://api.anthropic.com/v1/messages",
+  "status_code": 200,
+  "content_type": "text/event-stream; charset=utf-8",
+  "captured_at": "2026-04-23T08:48:20-05:00",
+  "response_headers": {
+    "Anthropic-Organization-Id": [
+      "ff99ea6f-4abc-487d-b0a5-070732273637"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Limit": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Remaining": [
+      "449000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Reset": [
+      "2026-04-23T13:48:17Z"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Limit": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Remaining": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Reset": [
+      "2026-04-23T13:48:17Z"
+    ],
+    "Anthropic-Ratelimit-Requests-Limit": [
+      "1000"
+    ],
+    "Anthropic-Ratelimit-Requests-Remaining": [
+      "999"
+    ],
+    "Anthropic-Ratelimit-Requests-Reset": [
+      "2026-04-23T13:48:17Z"
+    ],
+    "Anthropic-Ratelimit-Tokens-Limit": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Remaining": [
+      "539000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Reset": [
+      "2026-04-23T13:48:17Z"
+    ],
+    "Cache-Control": [
+      "no-cache"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9f0d532eb8aeeb66-ORD"
+    ],
+    "Content-Security-Policy": [
+      "default-src 'none'; frame-ancestors 'none'"
+    ],
+    "Content-Type": [
+      "text/event-stream; charset=utf-8"
+    ],
+    "Date": [
+      "Thu, 23 Apr 2026 13:48:19 GMT"
+    ],
+    "Request-Id": [
+      "req_011CaLop6HFiFpKQppUsZyjf"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "_cfuvid=3sPYg4DKyxpy54Gmp5.xkGnjrBk9kzMfB35DKxScDac-1776952097.076862-1.0.1.1-KoJ2kMdvIFqCk8AGOaWn4SK.8dM606TTvXNCAfSVrcc; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Envoy-Upstream-Service-Time": [
+      "2371"
+    ],
+    "X-Robots-Tag": [
+      "none"
+    ]
+  }
+}

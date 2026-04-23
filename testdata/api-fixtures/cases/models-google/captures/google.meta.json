@@ -4,7 +4,7 @@
   "url": "https://generativelanguage.googleapis.com/v1beta/models",
   "status_code": 200,
   "content_type": "application/json; charset=UTF-8",
-  "captured_at": "2026-04-17T13:08:24-05:00",
+  "captured_at": "2026-04-22T14:08:00-05:00",
   "response_headers": {
     "Alt-Svc": [
       "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
@@ -13,13 +13,13 @@
       "application/json; charset=UTF-8"
     ],
     "Date": [
-      "Fri, 17 Apr 2026 18:08:24 GMT"
+      "Wed, 22 Apr 2026 19:08:00 GMT"
     ],
     "Server": [
       "scaffolding on HTTPServer2"
     ],
     "Server-Timing": [
-      "gfet4t7; dur=77"
+      "gfet4t7; dur=67"
     ],
     "Vary": [
       "Origin",

@@ -1,0 +1,74 @@
+{
+  "model": "claude-opus-4-7",
+  "max_tokens": 128,
+  "system": [
+    {
+      "type": "text",
+      "text": "Prefer structured output.",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Return the unit test status.",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "fixture": "anthropic-modern-output-config"
+  },
+  "service_tier": "auto",
+  "output_config": {
+    "effort": "max",
+    "format": {
+      "type": "json_schema",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "checked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "checked"
+        ]
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "lookup_status",
+      "description": "Look up a build or test status.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ]
+}

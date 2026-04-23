@@ -4,7 +4,7 @@
   "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:streamGenerateContent?alt=sse",
   "status_code": 200,
   "content_type": "text/event-stream",
-  "captured_at": "2026-04-17T13:01:00-05:00",
+  "captured_at": "2026-04-22T14:09:27-05:00",
   "response_headers": {
     "Alt-Svc": [
       "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
@@ -16,13 +16,13 @@
       "text/event-stream"
     ],
     "Date": [
-      "Fri, 17 Apr 2026 18:01:00 GMT"
+      "Wed, 22 Apr 2026 19:09:27 GMT"
     ],
     "Server": [
       "scaffolding on HTTPServer2"
     ],
     "Server-Timing": [
-      "gfet4t7; dur=7995"
+      "gfet4t7; dur=12695"
     ],
     "Vary": [
       "Origin",

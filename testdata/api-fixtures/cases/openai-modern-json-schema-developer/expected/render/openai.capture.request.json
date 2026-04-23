@@ -1,0 +1,44 @@
+{
+  "model": "gpt-5.4-nano",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Answer only with JSON matching the schema."
+    },
+    {
+      "role": "developer",
+      "content": "Use short values and do not include extra keys."
+    },
+    {
+      "role": "user",
+      "content": "Return the city and country for Chicago."
+    }
+  ],
+  "max_completion_tokens": 256,
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "city_lookup",
+      "description": "A city lookup result.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city",
+          "country"
+        ]
+      },
+      "strict": true
+    }
+  },
+  "reasoning_effort": "xhigh",
+  "service_tier": "default"
+}

@@ -4,8 +4,8 @@
       "content": {
         "parts": [
           {
-            "text": "The image shows a species of ant, specifically ***Camponotus flavomarginatus***.\n\nThese ants are part of the *Camponotus* genus, commonly known as carpenter ants. This particular species is characterized by its distinct reddish-brown body and the yellowish-gold margins on the edges of its abdominal segments, which give it its name (*flavomarginatus* translates roughly to \"yellow-margined\").",
-            "thoughtSignature": "EjQKMgEMOdbH5yBP4ozwNrbctNitUQKF8wkn/P+LEVqJceUn3IcNwzf70hNWB9PkhC/cKy9z"
+            "text": "The image shows a **carpenter ant** (*Camponotus flavomarginatus*).\n\nIt is a member of the genus *Camponotus*, which are commonly known as carpenter ants. This specific species is characterized by its distinct reddish-brown body with a darker, often blackish abdomen. You can see the ant’s segmented body, antennae, and legs in sharp detail against a plain background.",
+            "thoughtSignature": "EjQKMgEMOdbHfenyVL++1X61aGDFRh+DhoXRxWSbtQpDoT/5tqAkBFf6Wjprwc+DsnrZMjcV"
           }
         ],
         "role": "model"
@@ -15,9 +15,9 @@
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "MXbiadXdCvKBjMcP94LXyAc",
+  "responseId": "chzpafnbI8Wx1MkP3p-4yA4",
   "usageMetadata": {
-    "candidatesTokenCount": 85,
+    "candidatesTokenCount": 83,
     "promptTokenCount": 41,
     "promptTokensDetails": [
       {
@@ -25,6 +25,6 @@
         "tokenCount": 41
       }
     ],
-    "totalTokenCount": 126
+    "totalTokenCount": 124
   }
 }

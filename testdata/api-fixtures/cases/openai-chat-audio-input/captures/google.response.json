@@ -4,8 +4,8 @@
       "content": {
         "parts": [
           {
-            "text": "It appears that you haven't attached or uploaded an audio file to your message. \n\nPlease **upload the audio file** (or provide a link if it's hosted online), and I will be happy to transcribe it for you.",
-            "thoughtSignature": "EjQKMgEMOdbH6/Z4NnLOTbN7VF+SoRTBEuUn/c6XlkxJf9zQ/Se3fx4tMYQCmhETIuptgn3C"
+            "text": "Please provide the audio file or a link to the audio you would like me to transcribe. Once you upload it or provide the source, I will be happy to transcribe it for you!",
+            "thoughtSignature": "EjQKMgEMOdbHIuY+Se3jYSOFVaXApTNXzvB36+CH2hRAsuvA/q1KdhNEfs3yRNazqMbToq8V"
           }
         ],
         "role": "model"
@@ -15,9 +15,9 @@
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "lnbiad3TGv2f1MkPwKu9KA",
+  "responseId": "fRzpaff5Bs3H1MkPyuD5kAs",
   "usageMetadata": {
-    "candidatesTokenCount": 49,
+    "candidatesTokenCount": 37,
     "promptTokenCount": 12,
     "promptTokensDetails": [
       {
@@ -25,6 +25,6 @@
         "tokenCount": 12
       }
     ],
-    "totalTokenCount": 61
+    "totalTokenCount": 49
   }
 }

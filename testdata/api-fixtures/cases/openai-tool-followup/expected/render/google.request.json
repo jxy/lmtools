@@ -47,7 +47,10 @@
   },
   "toolConfig": {
     "functionCallingConfig": {
-      "mode": "AUTO"
+      "mode": "ANY",
+      "allowedFunctionNames": [
+        "get_weather"
+      ]
     }
   },
   "tools": [

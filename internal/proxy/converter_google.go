@@ -4,18 +4,11 @@ import (
 	"context"
 	"fmt"
 	"lmtools/internal/core"
-	"lmtools/internal/logger"
 )
 
 // ConvertAnthropicToGoogle converts an Anthropic request to Google AI format
 func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
-	// Log omitted fields at DEBUG level
-	if len(req.Metadata) > 0 {
-		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by Google)", req.Metadata)
-	}
-	if req.ToolChoice != nil {
-		logger.From(ctx).Debugf("Omitting tool_choice from Anthropic request (Google uses different tool configuration): type=%s, name=%s", req.ToolChoice.Type, req.ToolChoice.Name)
-	}
+	warnAnthropicRequestDropsForGoogle(ctx, req)
 
 	if req.System != nil {
 		if _, err := extractSystemContent(req.System); err != nil {
@@ -24,6 +17,12 @@ func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *Anthropic
 	}
 
 	typed := AnthropicRequestToTyped(req)
+	if req.OutputConfig != nil {
+		typed.ReasoningEffort = anthropicEffortToOpenAIReasoningEffort(req.OutputConfig.Effort)
+	}
+	if typed.ReasoningEffort == "" && req.Thinking != nil && (req.Thinking.Type == "enabled" || req.Thinking.Type == "adaptive") {
+		typed.ReasoningEffort = "high"
+	}
 	return TypedToGoogleRequest(typed, req.Model, req.TopK)
 }
 
@@ -57,9 +56,13 @@ func (c *Converter) ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel
 				})
 			} else if part.FunctionCall != nil {
 				// Convert function call to tool use
+				toolID := part.FunctionCall.ID
+				if toolID == "" {
+					toolID = generateToolUseID()
+				}
 				content = append(content, AnthropicContentBlock{
 					Type:  "tool_use",
-					ID:    generateToolUseID(),
+					ID:    toolID,
 					Name:  part.FunctionCall.Name,
 					Input: part.FunctionCall.Args,
 				})

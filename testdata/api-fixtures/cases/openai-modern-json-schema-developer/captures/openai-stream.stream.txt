@@ -1,0 +1,27 @@
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"finish_reason":null}],"usage":null,"obfuscation":"5sW"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"{\""},"finish_reason":null}],"usage":null,"obfuscation":"s2"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"city"},"finish_reason":null}],"usage":null,"obfuscation":"P"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"\":\""},"finish_reason":null}],"usage":null,"obfuscation":""}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"Chicago"},"finish_reason":null}],"usage":null,"obfuscation":"OCdyz6pYCP3i3W"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"\",\""},"finish_reason":null}],"usage":null,"obfuscation":""}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"country"},"finish_reason":null}],"usage":null,"obfuscation":"Q9nq2O6A9tMBPM"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"\":\""},"finish_reason":null}],"usage":null,"obfuscation":""}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"United"},"finish_reason":null}],"usage":null,"obfuscation":"f4WDmSdYTJPzL6V"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":" States"},"finish_reason":null}],"usage":null,"obfuscation":"TZaobGiihV7Hw9"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"\"}"},"finish_reason":null}],"usage":null,"obfuscation":"qI"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":null,"obfuscation":"1ejuPhsktMud103"}
+
+data: {"id":"chatcmpl-DXZq1KGphjwNSPj6EKspTca4mLvCn","object":"chat.completion.chunk","created":1776894957,"model":"gpt-5.4-nano-2026-03-17","service_tier":"default","system_fingerprint":null,"choices":[],"usage":{"prompt_tokens":78,"completion_tokens":43,"total_tokens":121,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"completion_tokens_details":{"reasoning_tokens":20,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0}},"obfuscation":"nA"}
+
+data: [DONE]

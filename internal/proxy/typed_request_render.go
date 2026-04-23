@@ -69,6 +69,9 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (int
 		Stream:          typed.Stream,
 		Stop:            typed.Stop,
 		ReasoningEffort: typed.ReasoningEffort,
+		ResponseFormat:  typed.ResponseFormat,
+		Metadata:        cloneStringInterfaceMap(typed.Metadata),
+		ServiceTier:     serviceTierForOpenAI(typed.ServiceTier),
 	}
 	if openAIModelUsesMaxCompletionTokens(ctx.Model) {
 		openAIReq.MaxCompletionTokens = typed.MaxTokens
@@ -76,7 +79,7 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (int
 		openAIReq.MaxTokens = typed.MaxTokens
 	}
 
-	messages := core.PrependSystemMessage(prepared.Messages, prepared.System)
+	messages := prependOpenAIInstructionMessages(prepared.Messages, typed.System, typed.Developer, ctx.Model)
 	openAIReq.Messages = typedOpenAIMessagesToProxy(core.ToOpenAITyped(messages))
 	openAIReq.Tools = proxyOpenAIToolsFromCore(prepared.Tools)
 	if typed.ToolChoice != nil {
@@ -87,6 +90,14 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (int
 }
 
 func openAIModelUsesMaxCompletionTokens(model string) bool {
+	modelLower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(modelLower, "gpt-5") ||
+		strings.HasPrefix(modelLower, "o1") ||
+		strings.HasPrefix(modelLower, "o3") ||
+		strings.HasPrefix(modelLower, "o4")
+}
+
+func openAIModelUsesDeveloperRole(model string) bool {
 	modelLower := strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(modelLower, "gpt-5") ||
 		strings.HasPrefix(modelLower, "o1") ||
@@ -112,14 +123,21 @@ func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (
 		return nil, err
 	}
 
+	outputConfig := mergeAnthropicOutputConfig(typed.OutputConfig, typed.ResponseFormat, typed.ReasoningEffort)
+	temperature := typed.Temperature
+	if anthropicModelRejectsTemperature(ctx.Model) {
+		temperature = nil
+	}
 	anthReq := &AnthropicRequest{
 		Model:         ctx.Model,
 		Stream:        prepared.Stream,
 		StopSequences: typed.Stop,
-		Temperature:   typed.Temperature,
+		Temperature:   temperature,
 		Tools:         proxyAnthropicToolsFromCore(prepared.Tools),
 		Thinking:      typed.Thinking,
-		OutputConfig:  typed.OutputConfig,
+		OutputConfig:  outputConfig,
+		Metadata:      cloneStringInterfaceMap(typed.Metadata),
+		ServiceTier:   serviceTierForAnthropic(typed.ServiceTier),
 	}
 	if typed.Temperature == nil {
 		anthReq.TopP = typed.TopP
@@ -149,6 +167,10 @@ func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (
 	return anthReq, nil
 }
 
+func anthropicModelRejectsTemperature(model string) bool {
+	return isAnthropicOpus47Model(model)
+}
+
 func TypedToGoogleRequest(typed TypedRequest, model string, topK *int) (*GoogleRequest, error) {
 	rendered, err := renderTypedRequest(constants.ProviderGoogle, typed, typedRenderContext{Model: model, TopK: topK})
 	if err != nil {
@@ -175,6 +197,8 @@ func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (int
 			StopSequences:   typed.Stop,
 		},
 	}
+	applyResponseFormatToGoogleConfig(googleReq.GenerationConfig, typed.ResponseFormat)
+	googleReq.GenerationConfig.ThinkingConfig = googleThinkingConfigForReasoning(ctx.Model, typed.ReasoningEffort)
 
 	if ctx.TopK != nil {
 		googleReq.GenerationConfig.TopK = ctx.TopK
@@ -190,11 +214,7 @@ func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (int
 
 	googleReq.Tools = proxyGoogleToolsFromCore(prepared.Tools)
 	if len(googleReq.Tools) > 0 {
-		googleReq.ToolConfig = &GoogleToolConfig{
-			FunctionCallingConfig: GoogleFunctionConfig{
-				Mode: "AUTO",
-			},
-		}
+		googleReq.ToolConfig = googleToolConfigFromChoice(typed.ToolChoice)
 	}
 
 	return googleReq, nil
@@ -228,9 +248,18 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (inter
 		TopP:            typed.TopP,
 		Stop:            typed.Stop,
 		ReasoningEffort: typed.ReasoningEffort,
+		ResponseFormat:  typed.ResponseFormat,
+		Metadata:        cloneStringInterfaceMap(typed.Metadata),
+		ServiceTier:     typed.ServiceTier,
 	}
 
-	typedMessages := core.PrependSystemMessage(typed.Messages, typed.System)
+	var typedMessages []core.TypedMessage
+	if providers.DetermineArgoModelProvider(ctx.Model) == constants.ProviderOpenAI {
+		typedMessages = prependOpenAIInstructionMessages(typed.Messages, typed.System, typed.Developer, ctx.Model)
+	} else {
+		system, messages := prepareOutOfBandInstructionMessages(typed.Messages, typed.System, typed.Developer)
+		typedMessages = core.PrependSystemMessage(messages, system)
+	}
 	messages := make([]ArgoMessage, 0, len(typedMessages))
 	renderMessages := argoMessageRendererForModel(ctx.Model)
 	renderedMessages, err := renderMessages(typedMessages)

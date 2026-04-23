@@ -1,8 +1,0 @@
-{
-  "response": {
-    "error": {
-      "message": "Error code: 400 - {'error': {'message': \"Invalid 'messages[0]'. Content blocks are expected to be either text or image_url type.\", 'type': 'invalid_request_error', 'param': 'messages[0]', 'code': 'invalid_value'}}",
-      "type": "BadRequestError"
-    }
-  }
-}

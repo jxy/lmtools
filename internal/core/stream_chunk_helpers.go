@@ -82,6 +82,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 
 // ParsedGoogleFunctionCall captures a normalized Google streamed function call.
 type ParsedGoogleFunctionCall struct {
+	ID               string
 	Name             string
 	Args             json.RawMessage
 	ThoughtSignature string
@@ -110,6 +111,7 @@ func ParseGoogleStreamChunk(data []byte) (ParsedGoogleStreamChunk, error) {
 					Text             string `json:"text"`
 					ThoughtSignature string `json:"thoughtSignature"`
 					FunctionCall     *struct {
+						ID   string          `json:"id,omitempty"`
 						Name string          `json:"name"`
 						Args json.RawMessage `json:"args"`
 					} `json:"functionCall"`
@@ -148,6 +150,7 @@ func ParseGoogleStreamChunk(data []byte) (ParsedGoogleStreamChunk, error) {
 		}
 		if part.FunctionCall != nil {
 			parsed.FunctionCalls = append(parsed.FunctionCalls, ParsedGoogleFunctionCall{
+				ID:               part.FunctionCall.ID,
 				Name:             part.FunctionCall.Name,
 				Args:             part.FunctionCall.Args,
 				ThoughtSignature: part.ThoughtSignature,

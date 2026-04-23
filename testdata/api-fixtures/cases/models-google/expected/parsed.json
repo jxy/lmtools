@@ -7,6 +7,18 @@
       "owned_by": "google"
     },
     {
+      "display_name": "Deep Research Max Preview (Apr-21-2026)",
+      "id": "deep-research-max-preview-04-2026",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "display_name": "Deep Research Preview (Apr-21-2026)",
+      "id": "deep-research-preview-04-2026",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
       "display_name": "Deep Research Pro Preview (Dec-12-2025)",
       "id": "deep-research-pro-preview-12-2025",
       "object": "model",
@@ -57,18 +69,6 @@
     {
       "display_name": "Gemini 2.5 Flash-Lite",
       "id": "gemini-2.5-flash-lite",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "display_name": "Gemini 2.5 Flash Native Audio Latest",
-      "id": "gemini-2.5-flash-native-audio-latest",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "display_name": "Gemini 2.5 Flash Native Audio Preview 09-2025",
-      "id": "gemini-2.5-flash-native-audio-preview-09-2025",
       "object": "model",
       "owned_by": "google"
     },
@@ -141,6 +141,12 @@
     {
       "display_name": "Gemini Embedding 001",
       "id": "gemini-embedding-001",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "display_name": "Gemini Embedding 2",
+      "id": "gemini-embedding-2",
       "object": "model",
       "owned_by": "google"
     },
@@ -291,12 +297,6 @@
     {
       "display_name": "Veo 3.1",
       "id": "veo-3.1-generate-preview",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "display_name": "Veo 3.1 lite",
-      "id": "veo-3.1-lite-generate-preview",
       "object": "model",
       "owned_by": "google"
     }

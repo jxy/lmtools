@@ -215,6 +215,9 @@ func projectTypedRequest(typed TypedRequest) map[string]interface{} {
 	if typed.System != "" {
 		projected["system"] = typed.System
 	}
+	if typed.Developer != "" {
+		projected["developer"] = typed.Developer
+	}
 	if typed.MaxTokens != nil {
 		projected["max_tokens"] = *typed.MaxTokens
 	}
@@ -235,6 +238,15 @@ func projectTypedRequest(typed TypedRequest) map[string]interface{} {
 	}
 	if typed.OutputConfig != nil {
 		projected["output_config"] = typed.OutputConfig
+	}
+	if typed.ResponseFormat != nil {
+		projected["response_format"] = typed.ResponseFormat
+	}
+	if len(typed.Metadata) > 0 {
+		projected["metadata"] = typed.Metadata
+	}
+	if typed.ServiceTier != "" {
+		projected["service_tier"] = typed.ServiceTier
 	}
 	if len(typed.Tools) > 0 {
 		projected["tools"] = projectToolDefinitions(typed.Tools)

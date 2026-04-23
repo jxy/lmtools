@@ -295,6 +295,7 @@ func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetCon
 	}
 
 	if target.Stream {
+		data = normalizeStreamCapture(data)
 		if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".stream.txt"), data, 0o644); err != nil {
 			return err
 		}
@@ -311,6 +312,13 @@ func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetCon
 
 	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
 	return nil
+}
+
+func normalizeStreamCapture(data []byte) []byte {
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	data = bytes.ReplaceAll(data, []byte("\r"), []byte("\n"))
+	data = bytes.TrimRight(data, "\n")
+	return append(data, '\n')
 }
 
 func captureModelsCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
@@ -331,7 +339,7 @@ func captureModelsCase(root string, meta apifixtures.CaseMeta, target targetConf
 		req.Header.Set(key, value)
 	}
 
-	resp, data, err := doCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, nil, targetHost(target), nil)
+	resp, data, err := doCaptureModelsRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, target)
 	if err != nil {
 		return err
 	}
@@ -371,6 +379,156 @@ func captureModelsCase(root string, meta apifixtures.CaseMeta, target targetConf
 	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
 	return nil
 }
+
+func doCaptureModelsRequest(ctx context.Context, client *http.Client, req *http.Request, target targetConfig) (*http.Response, []byte, error) {
+	switch target.Provider {
+	case "anthropic":
+		return doCaptureAnthropicModelsRequest(ctx, client, req, target)
+	case "google":
+		return doCaptureGoogleModelsRequest(ctx, client, req, target)
+	default:
+		return doCaptureRequest(ctx, client, req, nil, targetHost(target), nil)
+	}
+}
+
+func doCaptureAnthropicModelsRequest(ctx context.Context, client *http.Client, req *http.Request, target targetConfig) (*http.Response, []byte, error) {
+	var combined modelcatalog.AnthropicModelsResponse
+	afterID := ""
+	seenCursors := map[string]struct{}{}
+	var lastResp *http.Response
+
+	for page := 0; page < maxModelsCapturePages; page++ {
+		pageReq := cloneRequestWithQuery(req, map[string]string{
+			"limit":    "1000",
+			"after_id": afterID,
+		})
+		resp, data, err := doCaptureRequest(ctx, client, pageReq, nil, targetHost(target), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		lastResp = resp
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return resp, data, nil
+		}
+
+		var pageResponse modelcatalog.AnthropicModelsResponse
+		if err := json.Unmarshal(data, &pageResponse); err != nil {
+			return nil, nil, fmt.Errorf("parse Anthropic models page: %w", err)
+		}
+		pageModels := pageResponse.Data
+		if len(pageModels) == 0 {
+			pageModels = pageResponse.Models
+		}
+		if combined.FirstID == "" {
+			combined.FirstID = firstNonEmptyModelID(pageResponse.FirstID, pageModels)
+		}
+		combined.Data = append(combined.Data, pageModels...)
+
+		if !pageResponse.HasMore || pageResponse.LastID == "" {
+			combined.LastID = lastModelID(pageResponse.LastID, pageModels)
+			combined.HasMore = false
+			if combined.Data == nil {
+				combined.Data = []modelcatalog.AnthropicModelInfo{}
+			}
+			return marshalCapturedModelsResponse(lastResp, combined)
+		}
+		if _, ok := seenCursors[pageResponse.LastID]; ok {
+			return nil, nil, fmt.Errorf("anthropic models pagination repeated cursor %q", pageResponse.LastID)
+		}
+		seenCursors[pageResponse.LastID] = struct{}{}
+		afterID = pageResponse.LastID
+	}
+
+	return nil, nil, fmt.Errorf("anthropic models pagination exceeded %d pages", maxModelsCapturePages)
+}
+
+func doCaptureGoogleModelsRequest(ctx context.Context, client *http.Client, req *http.Request, target targetConfig) (*http.Response, []byte, error) {
+	var combined modelcatalog.GoogleModelsResponse
+	pageToken := ""
+	seenTokens := map[string]struct{}{}
+	var lastResp *http.Response
+
+	for page := 0; page < maxModelsCapturePages; page++ {
+		pageReq := cloneRequestWithQuery(req, map[string]string{
+			"pageSize":  "1000",
+			"pageToken": pageToken,
+		})
+		resp, data, err := doCaptureRequest(ctx, client, pageReq, nil, targetHost(target), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		lastResp = resp
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return resp, data, nil
+		}
+
+		var pageResponse modelcatalog.GoogleModelsResponse
+		if err := json.Unmarshal(data, &pageResponse); err != nil {
+			return nil, nil, fmt.Errorf("parse Google models page: %w", err)
+		}
+		combined.Models = append(combined.Models, pageResponse.Models...)
+
+		if pageResponse.NextPageToken == "" {
+			if combined.Models == nil {
+				combined.Models = []modelcatalog.GoogleModelInfo{}
+			}
+			return marshalCapturedModelsResponse(lastResp, combined)
+		}
+		if _, ok := seenTokens[pageResponse.NextPageToken]; ok {
+			return nil, nil, fmt.Errorf("google models pagination repeated token %q", pageResponse.NextPageToken)
+		}
+		seenTokens[pageResponse.NextPageToken] = struct{}{}
+		pageToken = pageResponse.NextPageToken
+	}
+
+	return nil, nil, fmt.Errorf("google models pagination exceeded %d pages", maxModelsCapturePages)
+}
+
+func marshalCapturedModelsResponse(resp *http.Response, body interface{}) (*http.Response, []byte, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resp, data, nil
+}
+
+func cloneRequestWithQuery(req *http.Request, params map[string]string) *http.Request {
+	cloned := req.Clone(req.Context())
+	clonedURL := *cloned.URL
+	query := clonedURL.Query()
+	for key, value := range params {
+		if value == "" {
+			query.Del(key)
+			continue
+		}
+		query.Set(key, value)
+	}
+	clonedURL.RawQuery = query.Encode()
+	cloned.URL = &clonedURL
+	return cloned
+}
+
+func firstNonEmptyModelID(fallback string, models []modelcatalog.AnthropicModelInfo) string {
+	if fallback != "" {
+		return fallback
+	}
+	if len(models) == 0 {
+		return ""
+	}
+	return models[0].ID
+}
+
+func lastModelID(fallback string, models []modelcatalog.AnthropicModelInfo) string {
+	if fallback != "" {
+		return fallback
+	}
+	if len(models) == 0 {
+		return ""
+	}
+	return models[len(models)-1].ID
+}
+
+const maxModelsCapturePages = 100
 
 func doCaptureRequest(ctx context.Context, client *http.Client, req *http.Request, body []byte, provider string, cfg *retry.Config) (*http.Response, []byte, error) {
 	if cfg == nil {

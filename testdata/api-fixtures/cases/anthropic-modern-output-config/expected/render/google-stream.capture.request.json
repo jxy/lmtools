@@ -1,0 +1,68 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Return the unit test status."
+        }
+      ]
+    }
+  ],
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "Prefer structured output."
+      }
+    ]
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "lookup_status",
+          "description": "Look up a build or test status.",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "suite": {
+                "type": "STRING"
+              }
+            },
+            "required": [
+              "suite"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "AUTO"
+    }
+  },
+  "generationConfig": {
+    "maxOutputTokens": 1024,
+    "responseMimeType": "application/json",
+    "responseJsonSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "checked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status",
+        "checked"
+      ]
+    },
+    "thinkingConfig": {
+      "thinkingLevel": "high"
+    }
+  }
+}

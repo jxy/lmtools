@@ -1,0 +1,83 @@
+{
+  "max_tokens": 128,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Return the unit test status.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "metadata": {
+    "fixture": "anthropic-modern-output-config"
+  },
+  "output_config": {
+    "effort": "max",
+    "format": {
+      "type": "json_schema",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "checked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "checked"
+        ]
+      }
+    }
+  },
+  "reasoning_effort": "xhigh",
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "response",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "checked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "checked"
+        ]
+      }
+    }
+  },
+  "service_tier": "auto",
+  "stream": false,
+  "system": "Prefer structured output.",
+  "tools": [
+    {
+      "name": "lookup_status",
+      "description": "Look up a build or test status.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      }
+    }
+  ]
+}

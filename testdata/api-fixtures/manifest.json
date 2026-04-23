@@ -76,6 +76,20 @@
       ]
     },
     {
+      "id": "openai-modern-json-schema-developer",
+      "description": "OpenAI ingress with developer instructions, reasoning effort, JSON schema output, and portable metadata",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "anthropic-modern-output-config",
+      "description": "Anthropic ingress with output_config format and modern metadata rendered to OpenAI and Google",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
       "id": "response-openai-tool-call",
       "description": "OpenAI response with text and function tool call",
       "kinds": [

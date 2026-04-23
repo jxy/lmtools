@@ -9,12 +9,12 @@
         ],
         "role": "model"
       },
-      "finishReason": "MAX_TOKENS",
+      "finishReason": "STOP",
       "index": 0
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "EnbiaZzFA8O-jMcPp7_SaA",
+  "responseId": "aBzpaYKFNeWk1MkPj9qH0Q0",
   "usageMetadata": {
     "candidatesTokenCount": 1,
     "promptTokenCount": 31,

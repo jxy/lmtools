@@ -25,10 +25,13 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 	// Determine the provider to handle max_tokens correctly
 	provider := providers.DetermineArgoModelProvider(req.Model)
 	if provider == constants.ProviderOpenAI {
-		logDroppedThinkingBlocksForOpenAI(ctx, req.Messages)
+		warnAnthropicRequestDropsForOpenAI(ctx, req)
 	}
 
 	typed := AnthropicRequestToTyped(req)
+	if req.OutputConfig != nil {
+		typed.ReasoningEffort = anthropicEffortToOpenAIReasoningEffort(req.OutputConfig.Effort)
+	}
 	argoReq, err := TypedToArgoRequest(typed, req.Model, user)
 	if err != nil {
 		return nil, err
@@ -90,10 +93,10 @@ func estimateTokenCount(content []AnthropicContentBlock) int {
 // logOmittedFields logs fields that are omitted when converting from Anthropic to Argo
 func (c *Converter) logOmittedFields(ctx context.Context, req *AnthropicRequest) {
 	if req.TopK != nil {
-		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by Argo)", *req.TopK)
+		warnDroppedField(ctx, "Anthropic", "Argo", "top_k", "")
 	}
 	if len(req.Metadata) > 0 {
-		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by Argo)", req.Metadata)
+		warnDroppedField(ctx, "Anthropic", "Argo", "metadata", "")
 	}
 }
 
@@ -103,7 +106,9 @@ func (c *Converter) applyThinkingConfig(ctx context.Context, req *AnthropicReque
 		modelLower := strings.ToLower(req.Model)
 		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
 			// For GPT and O3/O4 models, convert to reasoning_effort
-			argoReq.ReasoningEffort = "high"
+			if argoReq.ReasoningEffort == "" {
+				argoReq.ReasoningEffort = "high"
+			}
 			logger.From(ctx).Debugf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model)
 		} else if strings.HasPrefix(modelLower, "claude") {
 			// For Claude models (opus/sonnet), pass through the thinking structure

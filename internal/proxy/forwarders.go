@@ -51,6 +51,12 @@ func (s *Server) configureArgoAnthropicRequest(req *http.Request) {
 	req.Header.Set("anthropic-version", "2023-06-01")
 }
 
+func applyAnthropicBetaHeader(req *http.Request, beta string) {
+	if beta != "" {
+		req.Header.Set("anthropic-beta", beta)
+	}
+}
+
 func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
@@ -68,7 +74,10 @@ func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequ
 
 func (s *Server) forwardToArgoAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
-	err := s.doJSON(ctx, s.endpoints.ArgoAnthropic, anthReq, s.configureArgoAnthropicRequest, &anthResp, "Argo Anthropic")
+	err := s.doJSON(ctx, s.endpoints.ArgoAnthropic, anthReq, func(req *http.Request) {
+		s.configureArgoAnthropicRequest(req)
+		applyAnthropicBetaHeader(req, anthReq.Betas)
+	}, &anthResp, "Argo Anthropic")
 	if err != nil {
 		return nil, err
 	}
@@ -101,16 +110,20 @@ func (s *Server) argoOpenAIStreamingRequestFromAnthropic(ctx context.Context, an
 func (s *Server) argoAnthropicStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
 	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", anthReq)
 	anthReq.Stream = true
+	extraHeaders := map[string]string{
+		"Accept":            "text/event-stream",
+		"anthropic-version": "2023-06-01",
+	}
+	if anthReq.Betas != "" {
+		extraHeaders["anthropic-beta"] = anthReq.Betas
+	}
 	return s.sendStreamingJSONRequest(
 		ctx,
 		constants.ProviderArgo,
 		"Argo Anthropic",
 		s.endpoints.ArgoAnthropic,
 		anthReq,
-		map[string]string{
-			"Accept":            "text/event-stream",
-			"anthropic-version": "2023-06-01",
-		},
+		extraHeaders,
 		noErrorRequestConfigurer(s.configureArgoAnthropicRequest),
 	)
 }
@@ -165,6 +178,7 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 	var anthResp AnthropicResponse
 	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
 		_ = auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
+		applyAnthropicBetaHeader(req, anthReq.Betas)
 	}, &anthResp, "Anthropic")
 	if err != nil {
 		return nil, err

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	"lmtools/internal/logger"
 	"strings"
 	"time"
 )
@@ -15,13 +15,7 @@ import (
 // canonical intermediate representation to ensure consistency.
 // Flow: Anthropic -> TypedRequest -> OpenAI
 func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *AnthropicRequest) (*OpenAIRequest, error) {
-	// Log omitted fields at DEBUG level
-	if req.TopK != nil {
-		logger.From(ctx).Debugf("Omitting top_k=%d from Anthropic request (not supported by OpenAI)", *req.TopK)
-	}
-	if len(req.Metadata) > 0 {
-		logger.DebugJSON(logger.From(ctx), "Omitting metadata from Anthropic request (not supported by OpenAI)", req.Metadata)
-	}
+	warnAnthropicRequestDropsForOpenAI(ctx, req)
 
 	if req.System != nil {
 		if _, err := extractSystemContent(req.System); err != nil {
@@ -29,17 +23,18 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 		}
 	}
 
-	logDroppedThinkingBlocksForOpenAI(ctx, req.Messages)
-
 	typed := AnthropicRequestToTyped(req)
+	if req.OutputConfig != nil {
+		if effort := anthropicEffortToOpenAIReasoningEffort(req.OutputConfig.Effort); effort != "" {
+			typed.ReasoningEffort = effort
+		}
+	}
 
 	// Handle thinking field for OpenAI models
-	if req.Thinking != nil && req.Thinking.Type == "enabled" {
-		modelLower := strings.ToLower(req.Model)
-		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
+	if typed.ReasoningEffort == "" && req.Thinking != nil && req.Thinking.Type == "enabled" {
+		if openAIModelUsesDeveloperRole(req.Model) || strings.HasPrefix(strings.ToLower(req.Model), "gpt") {
 			// For GPT and O3/O4 models, convert to reasoning_effort
 			typed.ReasoningEffort = "high"
-			logger.From(ctx).Debugf("Converting thinking.budget_tokens=%d to reasoning_effort=high for model %s", req.Thinking.BudgetTokens, req.Model)
 		}
 	}
 
@@ -57,10 +52,11 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 
 	choice := resp.Choices[0]
 	anthResp := &AnthropicResponse{
-		ID:    resp.ID,
-		Type:  "message",
-		Model: originalModel,
-		Role:  core.RoleAssistant,
+		ID:          resp.ID,
+		Type:        "message",
+		Model:       originalModel,
+		Role:        core.RoleAssistant,
+		ServiceTier: resp.ServiceTier,
 	}
 	if resp.Usage != nil {
 		anthResp.Usage = &AnthropicUsage{
@@ -89,6 +85,12 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 				Text: text,
 			})
 		}
+	}
+	if choice.Message.Refusal != nil && *choice.Message.Refusal != "" {
+		content = append(content, AnthropicContentBlock{
+			Type: "text",
+			Text: *choice.Message.Refusal,
+		})
 	}
 
 	// Add tool calls if present
@@ -136,30 +138,28 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 // a single source of truth for message handling logic.
 // Flow: OpenAI -> TypedRequest -> Anthropic
 func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *OpenAIRequest) (*AnthropicRequest, error) {
-	_ = ctx
+	warnOpenAIRequestDropsForAnthropic(ctx, req)
 
 	// Use the typed conversion path as the single source of truth
 	typed := OpenAIRequestToTyped(req)
-	return TypedToAnthropicRequest(typed, req.Model)
-}
-
-func logDroppedThinkingBlocksForOpenAI(ctx context.Context, messages []AnthropicMessage) {
-	for _, msg := range messages {
-		_, blocks, err := parseAnthropicMessageContent(msg.Content)
-		if err != nil {
-			continue
+	if req.User != "" {
+		if typed.Metadata == nil {
+			typed.Metadata = map[string]interface{}{}
 		}
-		for _, block := range blocks {
-			if block.Type != "thinking" {
-				continue
-			}
-			droppedBlock := map[string]interface{}{
-				"type":     "thinking",
-				"thinking": block.Thinking,
-			}
-			logger.From(ctx).Debugf("Dropping thinking content block (not supported by OpenAI): %+v", droppedBlock)
+		typed.Metadata["user_id"] = req.User
+	} else if req.SafetyIdentifier != "" {
+		if typed.Metadata == nil {
+			typed.Metadata = map[string]interface{}{}
 		}
+		typed.Metadata["user_id"] = req.SafetyIdentifier
 	}
+	if req.StreamOptions != nil && req.StreamOptions.IncludeUsage {
+		if typed.Metadata == nil {
+			typed.Metadata = map[string]interface{}{}
+		}
+		typed.Metadata[constants.IncludeUsageKey] = true
+	}
+	return TypedToAnthropicRequest(typed, req.Model)
 }
 
 // ConvertAnthropicResponseToOpenAI converts an Anthropic response to OpenAI format
@@ -175,10 +175,11 @@ func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, or
 
 	// Convert Anthropic response to OpenAI response format
 	openAIResp := &OpenAIResponse{
-		ID:      responseID,
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   originalModel,
+		ID:          responseID,
+		Object:      "chat.completion",
+		Created:     time.Now().Unix(),
+		Model:       originalModel,
+		ServiceTier: resp.ServiceTier,
 	}
 
 	// Convert usage if present

@@ -1,0 +1,25 @@
+{
+  "id": "anthropic-modern-output-config",
+  "description": "Anthropic ingress with output_config format and modern metadata rendered to OpenAI and Google",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "anthropic",
+  "models": {
+    "anthropic": "claude-opus-4-7",
+    "openai": "gpt-5.4-nano",
+    "google": "gemini-3.1-flash-lite-preview"
+  },
+  "render_targets": [
+    "openai",
+    "google"
+  ],
+  "capture_targets": [
+    "anthropic",
+    "anthropic-stream",
+    "openai",
+    "openai-stream",
+    "google",
+    "google-stream"
+  ]
+}

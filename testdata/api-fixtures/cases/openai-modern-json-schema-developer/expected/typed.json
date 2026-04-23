@@ -1,0 +1,64 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Answer only with JSON matching the schema.",
+          "type": "text"
+        }
+      ],
+      "role": "system"
+    },
+    {
+      "blocks": [
+        {
+          "text": "Use short values and do not include extra keys.",
+          "type": "text"
+        }
+      ],
+      "role": "developer"
+    },
+    {
+      "blocks": [
+        {
+          "text": "Return the city and country for Chicago.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "metadata": {
+    "fixture": "openai-modern-json-schema-developer"
+  },
+  "reasoning_effort": "xhigh",
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "city_lookup",
+      "description": "A city lookup result.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city",
+          "country"
+        ]
+      },
+      "strict": true
+    }
+  },
+  "service_tier": "default",
+  "stream": false,
+  "temperature": 0.2,
+  "top_p": 0.9
+}

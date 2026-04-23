@@ -4,7 +4,7 @@
   "url": "https://api.anthropic.com/v1/messages",
   "status_code": 200,
   "content_type": "application/json",
-  "captured_at": "2026-04-17T13:06:16-05:00",
+  "captured_at": "2026-04-22T14:06:28-05:00",
   "response_headers": {
     "Anthropic-Organization-Id": [
       "ff99ea6f-4abc-487d-b0a5-070732273637"
@@ -16,7 +16,7 @@
       "450000"
     ],
     "Anthropic-Ratelimit-Input-Tokens-Reset": [
-      "2026-04-17T18:06:16Z"
+      "2026-04-22T19:06:28Z"
     ],
     "Anthropic-Ratelimit-Output-Tokens-Limit": [
       "90000"
@@ -25,7 +25,7 @@
       "90000"
     ],
     "Anthropic-Ratelimit-Output-Tokens-Reset": [
-      "2026-04-17T18:06:16Z"
+      "2026-04-22T19:06:28Z"
     ],
     "Anthropic-Ratelimit-Requests-Limit": [
       "1000"
@@ -34,7 +34,7 @@
       "999"
     ],
     "Anthropic-Ratelimit-Requests-Reset": [
-      "2026-04-17T18:06:15Z"
+      "2026-04-22T19:06:28Z"
     ],
     "Anthropic-Ratelimit-Tokens-Limit": [
       "540000"
@@ -43,13 +43,13 @@
       "540000"
     ],
     "Anthropic-Ratelimit-Tokens-Reset": [
-      "2026-04-17T18:06:16Z"
+      "2026-04-22T19:06:28Z"
     ],
     "Cf-Cache-Status": [
       "DYNAMIC"
     ],
     "Cf-Ray": [
-      "9edd5cd47e89141c-ORD"
+      "9f06e7e8596010ae-ORD"
     ],
     "Content-Security-Policy": [
       "default-src 'none'; frame-ancestors 'none'"
@@ -58,19 +58,19 @@
       "application/json"
     ],
     "Date": [
-      "Fri, 17 Apr 2026 18:06:16 GMT"
+      "Wed, 22 Apr 2026 19:06:29 GMT"
     ],
     "Request-Id": [
-      "req_011Ca9ndbRyvTWDcJUKjsk6T"
+      "req_011CaKLGVD7Gzjj81VwPm9FP"
     ],
     "Server": [
       "cloudflare"
     ],
     "Server-Timing": [
-      "x-originResponse;dur=432"
+      "x-originResponse;dur=431"
     ],
     "Set-Cookie": [
-      "_cfuvid=3LOhbYzw3S5xL7WMx5BSJQJUC_NH5FhxMJ9W2tCO2UM-1776449175.754941-1.0.1.1-sUPZWQcUknk2IJrymmPHhm_Vv5y2.6WIphpueuN.Z2U; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+      "_cfuvid=QLayMnLZPSxuc9s06tUk87eBNuEm4m5MIBV4AOgQanY-1776884788.5362499-1.0.1.1-YrFMCrBcEc0mfz1hr8YXr72USj4.lUZnhcBUmuNE5K4; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
     ],
     "Strict-Transport-Security": [
       "max-age=31536000; includeSubDomains; preload"
@@ -79,7 +79,7 @@
       "Accept-Encoding"
     ],
     "X-Envoy-Upstream-Service-Time": [
-      "430"
+      "428"
     ],
     "X-Robots-Tag": [
       "none"

@@ -2,18 +2,21 @@ package proxy
 
 // ArgoChatRequest represents a chat request to the Argo API.
 type ArgoChatRequest struct {
-	User                string             `json:"user"`
-	Model               string             `json:"model"`
-	Messages            []ArgoMessage      `json:"messages"`
-	Temperature         *float64           `json:"temperature,omitempty"`
-	TopP                *float64           `json:"top_p,omitempty"`
-	Stop                []string           `json:"stop,omitempty"`
-	MaxTokens           int                `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int                `json:"max_completion_tokens,omitempty"`
-	Tools               interface{}        `json:"tools,omitempty"`
-	ToolChoice          interface{}        `json:"tool_choice,omitempty"`
-	ReasoningEffort     string             `json:"reasoning_effort,omitempty"`
-	Thinking            *AnthropicThinking `json:"thinking,omitempty"`
+	User                string                 `json:"user"`
+	Model               string                 `json:"model"`
+	Messages            []ArgoMessage          `json:"messages"`
+	Temperature         *float64               `json:"temperature,omitempty"`
+	TopP                *float64               `json:"top_p,omitempty"`
+	Stop                []string               `json:"stop,omitempty"`
+	MaxTokens           int                    `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                    `json:"max_completion_tokens,omitempty"`
+	Tools               interface{}            `json:"tools,omitempty"`
+	ToolChoice          interface{}            `json:"tool_choice,omitempty"`
+	ReasoningEffort     string                 `json:"reasoning_effort,omitempty"`
+	ResponseFormat      *ResponseFormat        `json:"response_format,omitempty"`
+	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	ServiceTier         string                 `json:"service_tier,omitempty"`
+	Thinking            *AnthropicThinking     `json:"thinking,omitempty"`
 }
 
 // ArgoMessage represents a message in Argo format.

@@ -40,22 +40,6 @@ func validateAnthropicRequestForProvider(req *AnthropicRequest, provider string)
 		return nil
 	}
 
-	if len(req.Metadata) > 0 {
-		return unsupportedProviderField("metadata", normalized)
-	}
-	if req.TopK != nil && (normalized == constants.ProviderOpenAI || normalized == constants.ProviderArgo) {
-		return unsupportedProviderField("top_k", normalized)
-	}
-	if req.ToolChoice != nil && normalized == constants.ProviderGoogle {
-		return unsupportedProviderField("tool_choice", normalized)
-	}
-	if req.Thinking != nil && normalized == constants.ProviderGoogle {
-		return unsupportedProviderField("thinking", normalized)
-	}
-	if req.OutputConfig != nil {
-		return unsupportedProviderField("output_config", normalized)
-	}
-
 	return nil
 }
 
@@ -64,27 +48,15 @@ func validateAnthropicOpus47Features(req *AnthropicRequest, provider string) err
 		return nil
 	}
 
-	usesAdaptiveThinking := req.Thinking != nil && strings.EqualFold(req.Thinking.Type, "adaptive")
-	usesThinkingDisplay := req.Thinking != nil && req.Thinking.Display != ""
-	usesOutputConfig := req.OutputConfig != nil
-	if !usesAdaptiveThinking && !usesThinkingDisplay && !usesOutputConfig {
-		return nil
+	if err := validateAnthropicFeatureSet(req.Thinking, req.OutputConfig); err != nil {
+		return err
 	}
 
 	normalized := constants.NormalizeProvider(provider)
 	if normalized != constants.ProviderAnthropic {
-		return fmt.Errorf("anthropic Opus 4.7 thinking/output_config fields are only supported when proxying to provider %q", constants.ProviderAnthropic)
+		return nil
 	}
-	if !isAnthropicOpus47Model(req.Model) {
-		return fmt.Errorf("anthropic Opus 4.7 thinking/output_config fields require model %q", "claude-opus-4-7")
-	}
-	if usesAdaptiveThinking && req.Thinking.BudgetTokens != 0 {
-		return fmt.Errorf("thinking.budget_tokens is not valid with thinking.type=%q", "adaptive")
-	}
-	if req.OutputConfig != nil && !isValidAnthropicEffort(req.OutputConfig.Effort) {
-		return fmt.Errorf("output_config.effort must be one of low, medium, high, xhigh, max")
-	}
-	return nil
+	return validateAnthropicFeatureSupportForModel(req.Model, req.Thinking, req.OutputConfig)
 }
 
 func isAnthropicOpus47Model(model string) bool {
@@ -101,45 +73,58 @@ func isValidAnthropicEffort(effort string) bool {
 	}
 }
 
-func validateOpenAIRequestForProvider(req *OpenAIRequest, provider string) error {
+func validateOpenAIRequestForProvider(req *OpenAIRequest, provider, targetModel string) error {
 	normalized := constants.NormalizeProvider(provider)
+	model := strings.TrimSpace(targetModel)
+	if model == "" {
+		model = req.Model
+	}
 	if normalized == constants.ProviderArgo {
-		normalized = providers.DetermineArgoModelProvider(req.Model)
+		normalized = providers.DetermineArgoModelProvider(model)
 	}
 	if normalized == constants.ProviderOpenAI {
 		return nil
 	}
-
-	if req.N != nil {
-		return unsupportedProviderField("n", normalized)
-	}
-	if req.PresencePenalty != nil {
-		return unsupportedProviderField("presence_penalty", normalized)
-	}
-	if req.FrequencyPenalty != nil {
-		return unsupportedProviderField("frequency_penalty", normalized)
-	}
-	if len(req.LogitBias) > 0 {
-		return unsupportedProviderField("logit_bias", normalized)
-	}
-	if req.User != "" {
-		return unsupportedProviderField("user", normalized)
-	}
-	if req.ResponseFormat != nil {
-		return unsupportedProviderField("response_format", normalized)
-	}
-	if req.StreamOptions != nil {
-		return unsupportedProviderField("stream_options", normalized)
-	}
-	for _, message := range req.Messages {
-		if message.Name != "" {
-			return unsupportedProviderField("messages[].name", normalized)
-		}
+	if normalized == constants.ProviderAnthropic {
+		outputConfig := mergeAnthropicOutputConfig(nil, req.ResponseFormat, req.ReasoningEffort)
+		return validateAnthropicFeatureSupportForModel(model, nil, outputConfig)
 	}
 
 	return nil
 }
 
-func unsupportedProviderField(field, provider string) error {
-	return fmt.Errorf("field %q is not supported when proxying to provider %q", field, provider)
+func validateAnthropicFeatureSet(thinking *AnthropicThinking, outputConfig *AnthropicOutputConfig) error {
+	usesAdaptiveThinking := thinking != nil && strings.EqualFold(thinking.Type, "adaptive")
+	usesThinkingDisplay := thinking != nil && thinking.Display != ""
+	usesOutputConfig := outputConfig != nil
+	if !usesAdaptiveThinking && !usesThinkingDisplay && !usesOutputConfig {
+		return nil
+	}
+
+	if usesAdaptiveThinking && thinking.BudgetTokens != 0 {
+		return fmt.Errorf("thinking.budget_tokens is not valid with thinking.type=%q", "adaptive")
+	}
+	if outputConfig != nil && !isValidAnthropicEffort(outputConfig.Effort) {
+		return fmt.Errorf("output_config.effort must be one of low, medium, high, xhigh, max")
+	}
+	return nil
+}
+
+func validateAnthropicFeatureSupportForModel(model string, thinking *AnthropicThinking, outputConfig *AnthropicOutputConfig) error {
+	if err := validateAnthropicFeatureSet(thinking, outputConfig); err != nil {
+		return err
+	}
+	if !anthropicUsesOpus47Features(thinking, outputConfig) {
+		return nil
+	}
+	if !isAnthropicOpus47Model(model) {
+		return fmt.Errorf("anthropic Opus 4.7 thinking/output_config fields require model %q", "claude-opus-4-7")
+	}
+	return nil
+}
+
+func anthropicUsesOpus47Features(thinking *AnthropicThinking, outputConfig *AnthropicOutputConfig) bool {
+	usesAdaptiveThinking := thinking != nil && strings.EqualFold(thinking.Type, "adaptive")
+	usesThinkingDisplay := thinking != nil && thinking.Display != ""
+	return usesAdaptiveThinking || usesThinkingDisplay || outputConfig != nil
 }

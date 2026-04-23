@@ -104,6 +104,7 @@ func (s *Server) doJSON(
 	}
 
 	// Parse response
+	warnUnknownFields(ctx, body, respBody, provider+" response")
 	if err := json.Unmarshal(body, respBody); err != nil {
 		if log.IsDebugEnabled() {
 			log.Debugf("Raw %s response (parse failed): %s", provider, string(body))

@@ -1,0 +1,31 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "{\"city\":\"Chicago\",\"country\":\"United States\"}",
+            "thoughtSignature": "EuQFCuEFAQw51sf95OjqnVthnVNbAaqrUFwr9jtw2/k+4CMZcHIzQo44SNJAPxKh2ygzzY5BNHDACny0iPnI0PYS4wwcNRYmSjGjalEJFR35UtyWwxI+chbJLq9xThzLc3CdRHvGZRtX7GSHaD4RhSXhKbQLYvvKHTM8ThIWQcfcASBp/MLz/iL7YFKGUGgUO4LFtIdUanO662//+Clxb316otxxncFuB7AWP4qGFD6hGrPb4W50cihTvJsYeFuFhGwfynOyUSYADjqjHbj78mLqpuW4E0BCoGcIVezIbzgrv+nVAk6ta3u+LdCNBWlxSR2KlRmqJeNVykzItZqessRNjTvALeuFX2Sdrmde5zAZJwhoIHJLmDq4ralmbmXeSV5FX4bOg/lt9dgC4DeryQnbCPQP+cN6rxsBu1WpLAS5GZZVpuH+Mye4POdKcf7LS2+xxXbhnalNqMaVf9VvJBa2loPxJg/3HJVyBRNRv4jhnBUTNUVFJuQioakylC9lXVOgV6cY9rje+cMaTA+rOQeHI1XqUAt1saewpYg5LZXRJKEW1diiz7Lyv2u95+YdRxMW8g4IyaNXNHxQCiDd/zK4TqoK/4fgFtb9Dr0WP1cwYRpIpFzkfIwK4ECs9T66dQxeu9jDBvr8tpueIwTiCu3uDxNR6rbwHnqgUpqtRdV7q2EOQvguSApoD6gkdiEa4NwXghUT//bTWQuuIKM2dTgTlWridCEYBzU2pmezNIxq2sBFjDikWNv63TompTq9SFW6vd8tkI8rJlwAYZg/lZELfonNwg40MfxhueAw71GVvL9LwULihhz5Ix7y1zwMFpqcAzyl1TU/iIl2PsWfxAfbAv6nGJDThZDlhyUmgrPOjEs4O/Oy0/7j0H/oZkRgUrqYKX0guHPfK3srnHBv5O/WEXWOV3fBTmIS/s+33u1BpYjup0h637Ng2QZQQ9mrWjE0P8mcFR7ZtrM7FLXLQIuX/SVg6Tc="
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-3.1-flash-lite-preview",
+  "responseId": "MCPqaaWTJf-b_uMPs8bSgAQ",
+  "usageMetadata": {
+    "candidatesTokenCount": 10,
+    "promptTokenCount": 28,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 28
+      }
+    ],
+    "thoughtsTokenCount": 197,
+    "totalTokenCount": 235
+  }
+}

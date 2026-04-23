@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/providers"
@@ -15,7 +16,7 @@ type (
 
 type proxyProviderCapability struct {
 	Provider          string
-	ParseModels       func(*Server, []byte) ([]ModelItem, error)
+	ParseModels       func(*Server, context.Context, []byte) ([]ModelItem, error)
 	RenderTyped       typedRequestRenderer
 	AnthropicResponse anthropicResponseForwarderFactory
 	AnthropicStream   anthropicStreamForwarderFactory
@@ -31,7 +32,7 @@ func initProxyProviderCapabilities() {
 	proxyProviderCapabilities = map[string]proxyProviderCapability{
 		constants.ProviderOpenAI: {
 			Provider:    constants.ProviderOpenAI,
-			ParseModels: (*Server).parseOpenAIModels,
+			ParseModels: (*Server).parseOpenAIModelsForProvider,
 			RenderTyped: renderTypedToOpenAIRequest,
 			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
 				return s.forwardAnthropicViaOpenAI
@@ -42,7 +43,7 @@ func initProxyProviderCapabilities() {
 		},
 		constants.ProviderAnthropic: {
 			Provider:    constants.ProviderAnthropic,
-			ParseModels: (*Server).parseAnthropicModels,
+			ParseModels: (*Server).parseAnthropicModelsForProvider,
 			RenderTyped: renderTypedToAnthropicRequest,
 			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
 				return s.forwardAnthropicViaAnthropic
@@ -56,7 +57,7 @@ func initProxyProviderCapabilities() {
 		},
 		constants.ProviderGoogle: {
 			Provider:    constants.ProviderGoogle,
-			ParseModels: (*Server).parseGoogleModels,
+			ParseModels: (*Server).parseGoogleModelsForProvider,
 			RenderTyped: renderTypedToGoogleRequest,
 			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
 				return s.forwardAnthropicViaGoogle
@@ -70,7 +71,7 @@ func initProxyProviderCapabilities() {
 		},
 		constants.ProviderArgo: {
 			Provider:    constants.ProviderArgo,
-			ParseModels: (*Server).parseArgoModels,
+			ParseModels: (*Server).parseArgoModelsForProvider,
 			RenderTyped: renderTypedToArgoRequest,
 			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
 				return s.forwardAnthropicViaArgo

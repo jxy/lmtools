@@ -4,7 +4,7 @@
   "url": "https://api.anthropic.com/v1/models",
   "status_code": 200,
   "content_type": "application/json",
-  "captured_at": "2026-04-17T13:08:24-05:00",
+  "captured_at": "2026-04-22T14:06:31-05:00",
   "response_headers": {
     "Anthropic-Organization-Id": [
       "ff99ea6f-4abc-487d-b0a5-070732273637"
@@ -13,7 +13,7 @@
       "DYNAMIC"
     ],
     "Cf-Ray": [
-      "9edd5ff8ba2a141c-ORD"
+      "9f06e7fb08e110ae-ORD"
     ],
     "Content-Security-Policy": [
       "default-src 'none'; frame-ancestors 'none'"
@@ -22,19 +22,19 @@
       "application/json"
     ],
     "Date": [
-      "Fri, 17 Apr 2026 18:08:24 GMT"
+      "Wed, 22 Apr 2026 19:06:31 GMT"
     ],
     "Request-Id": [
-      "req_011Ca9no5ddM1aBEgqKdvhPs"
+      "req_011CaKLGhzYu4ccCoQvqemY2"
     ],
     "Server": [
       "cloudflare"
     ],
     "Server-Timing": [
-      "x-originResponse;dur=36"
+      "x-originResponse;dur=55"
     ],
     "Set-Cookie": [
-      "_cfuvid=.lnytwYO7meCBb0gWkXn_EyRWkIOgavxW1ug3JosV5g-1776449304.4368231-1.0.1.1-ppzcBNcEBn_BVlUWTieAdwEExeHDvy_R44QZac4r6NQ; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+      "_cfuvid=HnehEc.3KyjxG.CRCl5yebtYYlPgDdCanmPy5nIXXxs-1776884791.5310383-1.0.1.1-zYHjHmgfL9BmO9aMUl8fcHk8TN_v6X_K9YWNPjF93cU; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
     ],
     "Strict-Transport-Security": [
       "max-age=31536000; includeSubDomains; preload"
@@ -43,7 +43,7 @@
       "Accept-Encoding"
     ],
     "X-Envoy-Upstream-Service-Time": [
-      "32"
+      "53"
     ],
     "X-Robots-Tag": [
       "none"

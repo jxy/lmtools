@@ -4,7 +4,7 @@
   "url": "https://api.openai.com/v1/chat/completions",
   "status_code": 200,
   "content_type": "application/json",
-  "captured_at": "2026-04-17T13:05:40-05:00",
+  "captured_at": "2026-04-22T14:06:15-05:00",
   "response_headers": {
     "Access-Control-Expose-Headers": [
       "X-Request-ID"
@@ -16,19 +16,19 @@
       "DYNAMIC"
     ],
     "Cf-Ray": [
-      "9edd5bf2e8c2608a-ORD"
+      "9f06e7915ce4025e-ORD"
     ],
     "Content-Type": [
       "application/json"
     ],
     "Date": [
-      "Fri, 17 Apr 2026 18:05:40 GMT"
+      "Wed, 22 Apr 2026 19:06:15 GMT"
     ],
     "Openai-Organization": [
       "user-luppstbuzesizhcpyp8mf8vl"
     ],
     "Openai-Processing-Ms": [
-      "600"
+      "523"
     ],
     "Openai-Project": [
       "proj_LOtYBLbKh37UwfhEcM1rrSEn"
@@ -40,7 +40,7 @@
       "cloudflare"
     ],
     "Set-Cookie": [
-      "__cf_bm=XQWayatPDcFaTkA2sNJjahaCRHFoHYvl7tvN0ccR8SQ-1776449139.6700778-1.0.1.1-ltNkT4_Gy8YvDtBCQiPlTMPJmIh0k0P5pRmQ4dc_MZnpCxTmru.7I0aIbwI7HYAyvqtEBaraFOeyjWfFPAq2pYCsu6inHmAEoqDxn3DwHenLTiES.d4DYL0STxREQW0d; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Fri, 17 Apr 2026 18:35:40 GMT"
+      "__cf_bm=f0ONfFmhytBPSiwMgCysViax2fGHvX4NQnM1WelOhJA-1776884774.6124942-1.0.1.1-ZPxCVonmytuSKvmiCYCZhwPKb7.MRwF6.iCQSkXdQ4NFdVZ61LYeQewjf3jIpYM6s1C0Ju2BUkMYcdfMOw.YssmvA7WU56u1tT.1ameq2n6Nhiff1KX655.bSabx7kEJ; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 22 Apr 2026 19:36:15 GMT"
     ],
     "Strict-Transport-Security": [
       "max-age=31536000; includeSubDomains; preload"
@@ -70,7 +70,7 @@
       "0s"
     ],
     "X-Request-Id": [
-      "req_316d5d3499ff4b409dad616438bb8925"
+      "req_4caad3d1aba44b0db9bd402bdfadd0d6"
     ]
   }
 }

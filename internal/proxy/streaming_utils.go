@@ -35,11 +35,17 @@ func AnthropicUsageToOpenAI(usage *AnthropicUsage) *OpenAIUsage {
 	if usage == nil {
 		return nil
 	}
-	return &OpenAIUsage{
+	openAIUsage := &OpenAIUsage{
 		PromptTokens:     usage.InputTokens,
 		CompletionTokens: usage.OutputTokens,
 		TotalTokens:      usage.InputTokens + usage.OutputTokens,
 	}
+	if usage.CacheReadInputTokens > 0 {
+		openAIUsage.PromptTokensDetails = &OpenAITokenDetails{
+			CachedTokens: usage.CacheReadInputTokens,
+		}
+	}
+	return openAIUsage
 }
 
 // OpenAIUsageToAnthropic converts OpenAI usage to Anthropic format
@@ -47,10 +53,14 @@ func OpenAIUsageToAnthropic(usage *OpenAIUsage) *AnthropicUsage {
 	if usage == nil {
 		return nil
 	}
-	return &AnthropicUsage{
+	anthropicUsage := &AnthropicUsage{
 		InputTokens:  usage.PromptTokens,
 		OutputTokens: usage.CompletionTokens,
 	}
+	if usage.PromptTokensDetails != nil {
+		anthropicUsage.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
+	}
+	return anthropicUsage
 }
 
 // OpenAIUsageFromCounts creates OpenAI usage from token counts

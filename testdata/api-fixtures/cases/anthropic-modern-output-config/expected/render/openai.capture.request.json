@@ -1,0 +1,38 @@
+{
+  "model": "gpt-5.4-nano",
+  "messages": [
+    {
+      "role": "developer",
+      "content": "Prefer structured output."
+    },
+    {
+      "role": "user",
+      "content": "Return the unit test status."
+    }
+  ],
+  "max_completion_tokens": 128,
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "response",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "checked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "checked"
+        ]
+      }
+    }
+  },
+  "reasoning_effort": "xhigh",
+  "service_tier": "auto"
+}

@@ -188,10 +188,14 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) 
 				if functionCall, ok := partMap["functionCall"].(map[string]interface{}); ok {
 					name := functionCall["name"].(string)
 					args, _ := json.Marshal(functionCall["args"])
+					toolID, _ := functionCall["id"].(string)
+					if toolID == "" {
+						toolID = fmt.Sprintf("call_%x", time.Now().UnixNano())
+					}
 
 					toolCall := &ToolCallDelta{
 						Index: c.currentToolIndex,
-						ID:    fmt.Sprintf("call_%x", time.Now().UnixNano()),
+						ID:    toolID,
 						Type:  "function",
 						Function: &FunctionCallDelta{
 							Name:      name,

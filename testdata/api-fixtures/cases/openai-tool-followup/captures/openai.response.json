@@ -14,15 +14,15 @@
               "arguments": "{\"location\":\"Chicago\",\"unit\":\"celsius\"}",
               "name": "get_weather"
             },
-            "id": "call_3BThtwGnH2Qp76EX28Fmh5jY",
+            "id": "call_KF84kNIVJ025iaLSSHbcqCbE",
             "type": "function"
           }
         ]
       }
     }
   ],
-  "created": 1776449248,
-  "id": "chatcmpl-DVhtAsaHdueZ1af3x4xO9XwN0gEGC",
+  "created": 1776884777,
+  "id": "chatcmpl-DXXBpDFW5FEtQP8yf6lHkvJ8fSkzG",
   "model": "gpt-5.4-nano-2026-03-17",
   "object": "chat.completion",
   "service_tier": "default",

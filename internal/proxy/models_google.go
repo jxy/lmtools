@@ -40,6 +40,7 @@ type GoogleInlineData struct {
 type GoogleFunctionCall struct {
 	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args"`
+	ID   string                 `json:"id,omitempty"`
 }
 
 // GoogleFunctionResp represents a function response.
@@ -82,11 +83,22 @@ type GoogleSafety struct {
 
 // GoogleGenConfig represents generation configuration.
 type GoogleGenConfig struct {
-	Temperature     *float64 `json:"temperature,omitempty"`
-	TopP            *float64 `json:"topP,omitempty"`
-	TopK            *int     `json:"topK,omitempty"`
-	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
-	StopSequences   []string `json:"stopSequences,omitempty"`
+	Temperature        *float64              `json:"temperature,omitempty"`
+	TopP               *float64              `json:"topP,omitempty"`
+	TopK               *int                  `json:"topK,omitempty"`
+	MaxOutputTokens    *int                  `json:"maxOutputTokens,omitempty"`
+	StopSequences      []string              `json:"stopSequences,omitempty"`
+	ResponseMIMEType   string                `json:"responseMimeType,omitempty"`
+	ResponseSchema     interface{}           `json:"responseSchema,omitempty"`
+	ResponseJSONSchema interface{}           `json:"responseJsonSchema,omitempty"`
+	ThinkingConfig     *GoogleThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// GoogleThinkingConfig represents Gemini native thinking controls.
+type GoogleThinkingConfig struct {
+	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
+	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
 }
 
 // GoogleGenerationConfig is an alias for GoogleGenConfig.
@@ -97,6 +109,8 @@ type GoogleResponse struct {
 	Candidates     []GoogleCandidate     `json:"candidates"`
 	UsageMetadata  *GoogleUsage          `json:"usageMetadata,omitempty"`
 	PromptFeedback *GooglePromptFeedback `json:"promptFeedback,omitempty"`
+	ModelVersion   string                `json:"modelVersion,omitempty"`
+	ResponseID     string                `json:"responseId,omitempty"`
 }
 
 // GoogleCandidate represents a response candidate.
@@ -109,9 +123,17 @@ type GoogleCandidate struct {
 
 // GoogleUsage represents usage metadata.
 type GoogleUsage struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount     int                  `json:"promptTokenCount"`
+	CandidatesTokenCount int                  `json:"candidatesTokenCount"`
+	TotalTokenCount      int                  `json:"totalTokenCount"`
+	PromptTokensDetails  []GoogleTokenDetails `json:"promptTokensDetails,omitempty"`
+	ThoughtsTokenCount   int                  `json:"thoughtsTokenCount,omitempty"`
+}
+
+// GoogleTokenDetails represents token accounting details by modality.
+type GoogleTokenDetails struct {
+	Modality   string `json:"modality,omitempty"`
+	TokenCount int    `json:"tokenCount,omitempty"`
 }
 
 // GooglePromptFeedback represents prompt feedback.

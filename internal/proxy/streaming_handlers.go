@@ -98,6 +98,13 @@ func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicR
 func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
 	// Enable streaming
 	anthReq.Stream = true
+	extraHeaders := map[string]string{
+		"Accept":            "text/event-stream",
+		"anthropic-version": "2023-06-01",
+	}
+	if anthReq.Betas != "" {
+		extraHeaders["anthropic-beta"] = anthReq.Betas
+	}
 
 	return s.sendStreamingJSONRequest(
 		ctx,
@@ -105,10 +112,7 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 		"Anthropic",
 		s.endpoints.Anthropic,
 		anthReq,
-		map[string]string{
-			"Accept":            "text/event-stream",
-			"anthropic-version": "2023-06-01",
-		},
+		extraHeaders,
 		func(req *http.Request) error {
 			return auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
 		},
@@ -260,6 +264,7 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHandler) error {
 	log := logger.From(handler.ctx)
 	if err := consumeSSEStream(body, func(currentEvent string, data json.RawMessage) error {
+		recognized := warnAnthropicStreamEventFields(handler.ctx, currentEvent, data)
 		switch currentEvent {
 		case EventMessageStart:
 			var evt MessageStartEvent
@@ -335,6 +340,16 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			}
 			return io.EOF
 
+		case EventPing:
+			var evt PingEvent
+			if err := json.Unmarshal(data, &evt); err != nil {
+				if handleErr := handleStreamError(handler.ctx, nil, "AnthropicStreamParser", err); handleErr != nil {
+					return handleErr
+				}
+				return nil
+			}
+			return handler.SendEvent(EventPing, evt)
+
 		case EventError:
 			var evt ErrorEvent
 			if err := json.Unmarshal(data, &evt); err != nil {
@@ -350,7 +365,9 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			return handleStreamError(handler.ctx, nil, "AnthropicStreamParser:upstream", upstreamErr)
 
 		default:
-			log.Debugf("Unknown SSE event type: %s, data: %s", currentEvent, string(data))
+			if !recognized {
+				log.Warnf("Unknown Anthropic SSE event type %q ignored: %s", currentEvent, string(data))
+			}
 			return nil
 		}
 	}); err != nil {
@@ -363,6 +380,37 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 	}
 
 	return nil
+}
+
+func warnAnthropicStreamEventFields(ctx context.Context, currentEvent string, data json.RawMessage) bool {
+	switch currentEvent {
+	case EventMessageStart:
+		warnUnknownFields(ctx, data, MessageStartEvent{}, "Anthropic stream message_start")
+		return true
+	case EventContentBlockStart:
+		warnUnknownFields(ctx, data, ContentBlockStartEvent{}, "Anthropic stream content_block_start")
+		return true
+	case EventContentBlockDelta:
+		warnUnknownFields(ctx, data, ContentBlockDeltaEvent{}, "Anthropic stream content_block_delta")
+		return true
+	case EventContentBlockStop:
+		warnUnknownFields(ctx, data, ContentBlockStopEvent{}, "Anthropic stream content_block_stop")
+		return true
+	case EventMessageDelta:
+		warnUnknownFields(ctx, data, MessageDeltaEvent{}, "Anthropic stream message_delta")
+		return true
+	case EventMessageStop:
+		warnUnknownFields(ctx, data, MessageStopEvent{}, "Anthropic stream message_stop")
+		return true
+	case EventError:
+		warnUnknownFields(ctx, data, ErrorEvent{}, "Anthropic stream error")
+		return true
+	case EventPing:
+		warnUnknownFields(ctx, data, PingEvent{}, "Anthropic stream ping")
+		return true
+	default:
+		return false
+	}
 }
 
 // validatePingInterval ensures the ping interval is within acceptable bounds
@@ -539,6 +587,9 @@ func (s *Server) convertAnthropicStreamToOpenAI(ctx context.Context, body io.Rea
 	converter := NewOpenAIStreamConverter(writer, ctx)
 
 	if err := consumeSSEStream(body, func(currentEvent string, data json.RawMessage) error {
+		if !warnAnthropicStreamEventFields(ctx, currentEvent, data) {
+			logger.From(ctx).Warnf("Unknown Anthropic SSE event type %q ignored during OpenAI conversion: %s", currentEvent, string(data))
+		}
 		if err := converter.HandleAnthropicEvent(currentEvent, data); err != nil {
 			return handleStreamError(ctx, writer, "AnthropicToOpenAIConverter", err)
 		}
@@ -575,6 +626,7 @@ func (s *Server) convertGoogleStreamToOpenAI(ctx context.Context, body io.Reader
 	converter := NewOpenAIStreamConverter(writer, ctx)
 
 	if err := consumeSSEStream(body, func(_ string, data json.RawMessage) error {
+		warnUnknownFields(ctx, data, GoogleResponse{}, "Google stream chunk")
 		var chunk map[string]interface{}
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			return handleStreamError(ctx, nil, "GoogleToOpenAIChunk", err)

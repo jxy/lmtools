@@ -10,11 +10,83 @@ import (
 )
 
 type Item struct {
-	ID          string
-	Object      string
-	Created     int64
-	OwnedBy     string
-	DisplayName string
+	ID                         string
+	Object                     string
+	Created                    int64
+	OwnedBy                    string
+	DisplayName                string
+	CreatedAt                  string
+	MaxInputTokens             int64
+	MaxOutputTokens            int64
+	SupportedGenerationMethods []string
+	Capabilities               map[string]interface{}
+	Metadata                   map[string]interface{}
+}
+
+type OpenAIModelsResponse struct {
+	Object string            `json:"object"`
+	Data   []OpenAIModelInfo `json:"data"`
+}
+
+type OpenAIModelInfo struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+type ArgoModelsResponse struct {
+	Object string          `json:"object"`
+	Data   []ArgoModelInfo `json:"data"`
+	Models []ArgoModelInfo `json:"models"`
+}
+
+type ArgoModelInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	InternalID string `json:"internal_id"`
+	Object     string `json:"object"`
+	Created    int64  `json:"created"`
+	OwnedBy    string `json:"owned_by"`
+}
+
+type GoogleModelsResponse struct {
+	Models        []GoogleModelInfo `json:"models"`
+	NextPageToken string            `json:"nextPageToken"`
+}
+
+type GoogleModelInfo struct {
+	Name                       string   `json:"name"`
+	BaseModelID                string   `json:"baseModelId"`
+	Version                    string   `json:"version"`
+	DisplayName                string   `json:"displayName"`
+	Description                string   `json:"description"`
+	InputTokenLimit            int64    `json:"inputTokenLimit"`
+	OutputTokenLimit           int64    `json:"outputTokenLimit"`
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+	Thinking                   *bool    `json:"thinking"`
+	Temperature                *float64 `json:"temperature"`
+	MaxTemperature             *float64 `json:"maxTemperature"`
+	TopP                       *float64 `json:"topP"`
+	TopK                       *int64   `json:"topK"`
+}
+
+type AnthropicModelsResponse struct {
+	Models  []AnthropicModelInfo `json:"models"`
+	Data    []AnthropicModelInfo `json:"data"`
+	FirstID string               `json:"first_id"`
+	HasMore bool                 `json:"has_more"`
+	LastID  string               `json:"last_id"`
+}
+
+type AnthropicModelInfo struct {
+	ID             string                 `json:"id"`
+	DisplayName    string                 `json:"display_name"`
+	CreatedAt      string                 `json:"created_at"`
+	MaxInputTokens int64                  `json:"max_input_tokens"`
+	MaxTokens      int64                  `json:"max_tokens"`
+	Type           string                 `json:"type"`
+	Capabilities   map[string]interface{} `json:"capabilities"`
 }
 
 type Projection struct {
@@ -58,20 +130,7 @@ func ParseArgo(data []byte) ([]Item, error) {
 		return buildItems(constants.ProviderArgo, created, response.Models, nil), nil
 	}
 
-	var objectResponse struct {
-		Data []struct {
-			ID         string `json:"id"`
-			Name       string `json:"name"`
-			InternalID string `json:"internal_id"`
-			OwnedBy    string `json:"owned_by"`
-		} `json:"data"`
-		Models []struct {
-			ID         string `json:"id"`
-			Name       string `json:"name"`
-			InternalID string `json:"internal_id"`
-			OwnedBy    string `json:"owned_by"`
-		} `json:"models"`
-	}
+	var objectResponse ArgoModelsResponse
 	if err := json.Unmarshal(data, &objectResponse); err == nil {
 		if len(objectResponse.Data) > 0 {
 			items := make([]structuredModel, 0, len(objectResponse.Data))
@@ -80,6 +139,7 @@ func ParseArgo(data []byte) ([]Item, error) {
 					ID:          firstNonEmpty(model.InternalID, model.ID),
 					DisplayName: structuredDisplayName(model.ID, model.Name, model.InternalID),
 					OwnedBy:     firstNonEmpty(model.OwnedBy, constants.ProviderArgo),
+					Created:     model.Created,
 				})
 			}
 			return buildStructuredItems(created, items), nil
@@ -91,6 +151,7 @@ func ParseArgo(data []byte) ([]Item, error) {
 					ID:          firstNonEmpty(model.InternalID, model.ID),
 					DisplayName: structuredDisplayName(model.ID, model.Name, model.InternalID),
 					OwnedBy:     firstNonEmpty(model.OwnedBy, constants.ProviderArgo),
+					Created:     model.Created,
 				})
 			}
 			return buildStructuredItems(created, items), nil
@@ -101,14 +162,7 @@ func ParseArgo(data []byte) ([]Item, error) {
 }
 
 func ParseOpenAI(data []byte) ([]Item, error) {
-	var response struct {
-		Data []struct {
-			ID      string `json:"id"`
-			Object  string `json:"object"`
-			Created int64  `json:"created"`
-			OwnedBy string `json:"owned_by"`
-		} `json:"data"`
-	}
+	var response OpenAIModelsResponse
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("parse OpenAI models: %w", err)
 	}
@@ -134,41 +188,29 @@ func ParseOpenAI(data []byte) ([]Item, error) {
 }
 
 func ParseGoogle(data []byte) ([]Item, error) {
-	var response struct {
-		Models []struct {
-			Name        string `json:"name"`
-			DisplayName string `json:"displayName"`
-		} `json:"models"`
-	}
+	var response GoogleModelsResponse
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("parse Google models: %w", err)
 	}
 
-	created := time.Now().Unix()
 	items := make([]Item, 0, len(response.Models))
 	for _, model := range response.Models {
 		items = append(items, Item{
-			ID:          strings.TrimPrefix(model.Name, "models/"),
-			Object:      "model",
-			Created:     created,
-			OwnedBy:     constants.ProviderGoogle,
-			DisplayName: model.DisplayName,
+			ID:                         strings.TrimPrefix(model.Name, "models/"),
+			Object:                     "model",
+			OwnedBy:                    constants.ProviderGoogle,
+			DisplayName:                model.DisplayName,
+			MaxInputTokens:             model.InputTokenLimit,
+			MaxOutputTokens:            model.OutputTokenLimit,
+			SupportedGenerationMethods: append([]string(nil), model.SupportedGenerationMethods...),
+			Metadata:                   googleModelMetadata(model),
 		})
 	}
 	return items, nil
 }
 
 func ParseAnthropic(data []byte) ([]Item, error) {
-	var response struct {
-		Models []struct {
-			ID          string `json:"id"`
-			DisplayName string `json:"display_name"`
-		} `json:"models"`
-		Data []struct {
-			ID          string `json:"id"`
-			DisplayName string `json:"display_name"`
-		} `json:"data"`
-	}
+	var response AnthropicModelsResponse
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("parse Anthropic models: %w", err)
 	}
@@ -181,15 +223,19 @@ func ParseAnthropic(data []byte) ([]Item, error) {
 		return nil, fmt.Errorf("no models found in Anthropic response")
 	}
 
-	created := time.Now().Unix()
 	items := make([]Item, 0, len(models))
 	for _, model := range models {
+		created := unixFromRFC3339(model.CreatedAt)
 		items = append(items, Item{
-			ID:          model.ID,
-			Object:      "model",
-			Created:     created,
-			OwnedBy:     constants.ProviderAnthropic,
-			DisplayName: model.DisplayName,
+			ID:              model.ID,
+			Object:          firstNonEmpty(model.Type, "model"),
+			Created:         created,
+			OwnedBy:         constants.ProviderAnthropic,
+			DisplayName:     model.DisplayName,
+			CreatedAt:       model.CreatedAt,
+			MaxInputTokens:  model.MaxInputTokens,
+			MaxOutputTokens: model.MaxTokens,
+			Capabilities:    cloneMap(model.Capabilities),
 		})
 	}
 	return items, nil
@@ -240,15 +286,20 @@ type structuredModel struct {
 	ID          string
 	DisplayName string
 	OwnedBy     string
+	Created     int64
 }
 
 func buildStructuredItems(created int64, models []structuredModel) []Item {
 	items := make([]Item, 0, len(models))
 	for _, model := range models {
+		modelCreated := model.Created
+		if modelCreated == 0 {
+			modelCreated = created
+		}
 		items = append(items, Item{
 			ID:          model.ID,
 			Object:      "model",
-			Created:     created,
+			Created:     modelCreated,
 			OwnedBy:     model.OwnedBy,
 			DisplayName: model.DisplayName,
 		})
@@ -274,4 +325,58 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func unixFromRFC3339(value string) int64 {
+	if value == "" {
+		return 0
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return 0
+	}
+	return parsed.Unix()
+}
+
+func googleModelMetadata(model GoogleModelInfo) map[string]interface{} {
+	metadata := make(map[string]interface{})
+	addStringMetadata(metadata, "base_model_id", model.BaseModelID)
+	addStringMetadata(metadata, "version", model.Version)
+	addStringMetadata(metadata, "description", model.Description)
+	addFloatMetadata(metadata, "temperature", model.Temperature)
+	addFloatMetadata(metadata, "max_temperature", model.MaxTemperature)
+	addFloatMetadata(metadata, "top_p", model.TopP)
+	if model.TopK != nil {
+		metadata["top_k"] = *model.TopK
+	}
+	if model.Thinking != nil {
+		metadata["thinking"] = *model.Thinking
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func addStringMetadata(metadata map[string]interface{}, key, value string) {
+	if value != "" {
+		metadata[key] = value
+	}
+}
+
+func addFloatMetadata(metadata map[string]interface{}, key string, value *float64) {
+	if value != nil {
+		metadata[key] = *value
+	}
+}
+
+func cloneMap(values map[string]interface{}) map[string]interface{} {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }

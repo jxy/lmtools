@@ -471,6 +471,16 @@
       "owned_by": "system"
     },
     {
+      "id": "gpt-image-2",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-image-2-2026-04-21",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
       "id": "gpt-realtime",
       "object": "model",
       "owned_by": "system"

@@ -200,6 +200,15 @@ func TestCaptureCaseRejectsUnsupportedTarget(t *testing.T) {
 	}
 }
 
+func TestNormalizeStreamCapture(t *testing.T) {
+	input := []byte("data: one\r\n\r\ndata: two\r\n\r\n\r\n")
+	got := string(normalizeStreamCapture(input))
+	want := "data: one\n\ndata: two\n"
+	if got != want {
+		t.Fatalf("normalizeStreamCapture() = %q, want %q", got, want)
+	}
+}
+
 func TestRefreshDerivedArtifactsWritesParsedResponse(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", "fixture-case", "expected")
@@ -643,6 +652,115 @@ func TestModelsEndpointForTarget(t *testing.T) {
 			t.Fatalf("headers = %v, want none", headers)
 		}
 	})
+}
+
+func TestDoCaptureModelsRequestFollowsAnthropicPagination(t *testing.T) {
+	requests := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RawQuery)
+		if got := r.URL.Query().Get("limit"); got != "1000" {
+			t.Errorf("limit = %q, want 1000", got)
+		}
+		switch r.URL.Query().Get("after_id") {
+		case "":
+			_, _ = w.Write([]byte(`{
+				"data": [{"id": "claude-first", "display_name": "Claude First", "type": "model"}],
+				"first_id": "claude-first",
+				"has_more": true,
+				"last_id": "claude-first"
+			}`))
+		case "claude-first":
+			_, _ = w.Write([]byte(`{
+				"data": [{"id": "claude-second", "display_name": "Claude Second", "type": "model"}],
+				"first_id": "claude-second",
+				"has_more": false,
+				"last_id": "claude-second"
+			}`))
+		default:
+			t.Fatalf("unexpected after_id %q", r.URL.Query().Get("after_id"))
+		}
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/v1/models", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, data, err := doCaptureModelsRequest(context.Background(), server.Client(), req, targetConfig{ID: "anthropic", Provider: "anthropic"})
+	if err != nil {
+		t.Fatalf("doCaptureModelsRequest() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	var got struct {
+		Data    []map[string]interface{} `json:"data"`
+		HasMore bool                     `json:"has_more"`
+		FirstID string                   `json:"first_id"`
+		LastID  string                   `json:"last_id"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(got.Data) != 2 || got.Data[0]["id"] != "claude-first" || got.Data[1]["id"] != "claude-second" {
+		t.Fatalf("combined data = %#v", got.Data)
+	}
+	if got.HasMore || got.FirstID != "claude-first" || got.LastID != "claude-second" {
+		t.Fatalf("pagination metadata = has_more:%v first:%q last:%q", got.HasMore, got.FirstID, got.LastID)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2: %v", len(requests), requests)
+	}
+}
+
+func TestDoCaptureModelsRequestFollowsGooglePagination(t *testing.T) {
+	requests := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RawQuery)
+		if got := r.URL.Query().Get("pageSize"); got != "1000" {
+			t.Errorf("pageSize = %q, want 1000", got)
+		}
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_, _ = w.Write([]byte(`{
+				"models": [{"name": "models/gemini-first", "displayName": "Gemini First"}],
+				"nextPageToken": "next-page"
+			}`))
+		case "next-page":
+			_, _ = w.Write([]byte(`{
+				"models": [{"name": "models/gemini-second", "displayName": "Gemini Second"}]
+			}`))
+		default:
+			t.Fatalf("unexpected pageToken %q", r.URL.Query().Get("pageToken"))
+		}
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/v1beta/models", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, data, err := doCaptureModelsRequest(context.Background(), server.Client(), req, targetConfig{ID: "google", Provider: "google"})
+	if err != nil {
+		t.Fatalf("doCaptureModelsRequest() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	var got struct {
+		Models        []map[string]interface{} `json:"models"`
+		NextPageToken string                   `json:"nextPageToken"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(got.Models) != 2 || got.Models[0]["name"] != "models/gemini-first" || got.Models[1]["name"] != "models/gemini-second" {
+		t.Fatalf("combined models = %#v", got.Models)
+	}
+	if got.NextPageToken != "" {
+		t.Fatalf("nextPageToken = %q, want empty", got.NextPageToken)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2: %v", len(requests), requests)
+	}
 }
 
 func TestDoCaptureRequestRetriesRateLimit(t *testing.T) {

@@ -19,6 +19,7 @@ func (s *Server) parseAnthropicRequest(r *http.Request) (*AnthropicRequest, erro
 	if err := validateParsedAnthropicRequest(&req); err != nil {
 		return nil, err
 	}
+	req.Betas = r.Header.Get("anthropic-beta")
 	return &req, nil
 }
 

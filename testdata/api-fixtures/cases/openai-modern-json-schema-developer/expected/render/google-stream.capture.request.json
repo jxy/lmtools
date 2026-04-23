@@ -1,0 +1,44 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Return the city and country for Chicago."
+        }
+      ]
+    }
+  ],
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "Answer only with JSON matching the schema.\nUse short values and do not include extra keys."
+      }
+    ]
+  },
+  "generationConfig": {
+    "temperature": 0.2,
+    "topP": 0.9,
+    "maxOutputTokens": 1024,
+    "responseMimeType": "application/json",
+    "responseJsonSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "city",
+        "country"
+      ]
+    },
+    "thinkingConfig": {
+      "thinkingLevel": "high"
+    }
+  }
+}

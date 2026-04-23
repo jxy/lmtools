@@ -1,0 +1,82 @@
+{
+  "case_id": "openai-modern-json-schema-developer",
+  "target": "anthropic",
+  "url": "https://api.anthropic.com/v1/messages",
+  "status_code": 200,
+  "content_type": "application/json",
+  "captured_at": "2026-04-23T08:48:06-05:00",
+  "response_headers": {
+    "Anthropic-Organization-Id": [
+      "ff99ea6f-4abc-487d-b0a5-070732273637"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Limit": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Remaining": [
+      "450000"
+    ],
+    "Anthropic-Ratelimit-Input-Tokens-Reset": [
+      "2026-04-23T13:48:06Z"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Limit": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Remaining": [
+      "90000"
+    ],
+    "Anthropic-Ratelimit-Output-Tokens-Reset": [
+      "2026-04-23T13:48:06Z"
+    ],
+    "Anthropic-Ratelimit-Requests-Limit": [
+      "1000"
+    ],
+    "Anthropic-Ratelimit-Requests-Remaining": [
+      "999"
+    ],
+    "Anthropic-Ratelimit-Requests-Reset": [
+      "2026-04-23T13:48:04Z"
+    ],
+    "Anthropic-Ratelimit-Tokens-Limit": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Remaining": [
+      "540000"
+    ],
+    "Anthropic-Ratelimit-Tokens-Reset": [
+      "2026-04-23T13:48:06Z"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9f0d52dc9c720276-ORD"
+    ],
+    "Content-Security-Policy": [
+      "default-src 'none'; frame-ancestors 'none'"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 23 Apr 2026 13:48:06 GMT"
+    ],
+    "Request-Id": [
+      "req_011CaLoo7xgaFAZKbi52sffY"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "_cfuvid=EnkP6FzgqruGfU8abcnSpI0gUIwVoxaIy7zF3PsPmXk-1776952083.9370332-1.0.1.1-s6FGhFPNVjlTPNq5lAIrJOOrEPsVrIX47uKGr7vMl9U; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Envoy-Upstream-Service-Time": [
+      "2896"
+    ],
+    "X-Robots-Tag": [
+      "none"
+    ]
+  }
+}

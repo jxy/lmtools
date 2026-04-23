@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"lmtools/internal/constants"
 	"net/http"
@@ -624,5 +625,212 @@ func TestModelsEndpointMalformedResponse(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestModelsEndpointFetchesAnthropicPagination(t *testing.T) {
+	requests := make([]string, 0, 2)
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RawQuery)
+		if got := r.URL.Query().Get("limit"); got != "1000" {
+			t.Errorf("limit = %q, want 1000", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("after_id") {
+		case "":
+			_, _ = w.Write([]byte(`{
+				"data": [{
+					"id": "claude-first",
+					"display_name": "Claude First",
+					"created_at": "2026-01-02T00:00:00Z",
+					"max_input_tokens": 1000,
+					"max_tokens": 2000,
+					"type": "model",
+					"capabilities": {"thinking": {"supported": true}}
+				}],
+				"first_id": "claude-first",
+				"has_more": true,
+				"last_id": "claude-first"
+			}`))
+		case "claude-first":
+			_, _ = w.Write([]byte(`{
+				"data": [{
+					"id": "claude-second",
+					"display_name": "Claude Second",
+					"created_at": "2026-01-03T00:00:00Z",
+					"max_input_tokens": 3000,
+					"max_tokens": 4000,
+					"type": "model"
+				}],
+				"first_id": "claude-second",
+				"has_more": false,
+				"last_id": "claude-second"
+			}`))
+		default:
+			t.Fatalf("unexpected after_id %q", r.URL.Query().Get("after_id"))
+		}
+	}))
+	defer mockServer.Close()
+
+	config := &Config{
+		Provider:           constants.ProviderAnthropic,
+		ProviderURL:        mockServer.URL + "/v1",
+		AnthropicAPIKey:    "sk-ant-test",
+		MaxRequestBodySize: 1024 * 1024,
+	}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		Object string      `json:"object"`
+		Data   []ModelItem `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(response.Data) != 2 {
+		t.Fatalf("models = %d, want 2: %#v", len(response.Data), response.Data)
+	}
+	if response.Data[0].ID != "claude-first" || response.Data[1].ID != "claude-second" {
+		t.Fatalf("model ids = %#v", response.Data)
+	}
+	if response.Data[0].Created == 0 || response.Data[0].CreatedAt != "2026-01-02T00:00:00Z" {
+		t.Fatalf("first model creation metadata not preserved: %#v", response.Data[0])
+	}
+	if response.Data[0].MaxInputTokens != 1000 || response.Data[0].MaxOutputTokens != 2000 {
+		t.Fatalf("first model token metadata not preserved: %#v", response.Data[0])
+	}
+	if response.Data[0].Capabilities["thinking"] == nil {
+		t.Fatalf("first model capabilities not preserved: %#v", response.Data[0].Capabilities)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2: %v", len(requests), requests)
+	}
+}
+
+func TestModelsEndpointFetchesGooglePagination(t *testing.T) {
+	requests := make([]string, 0, 2)
+	thinking := true
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RawQuery)
+		if got := r.URL.Query().Get("pageSize"); got != "1000" {
+			t.Errorf("pageSize = %q, want 1000", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"models": []map[string]interface{}{
+					{
+						"name":                       "models/gemini-first",
+						"displayName":                "Gemini First",
+						"description":                "first model",
+						"inputTokenLimit":            1000,
+						"outputTokenLimit":           2000,
+						"supportedGenerationMethods": []string{"generateContent", "countTokens"},
+						"thinking":                   thinking,
+					},
+				},
+				"nextPageToken": "next-page",
+			})
+		case "next-page":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"models": []map[string]interface{}{
+					{
+						"name":             "models/gemini-second",
+						"displayName":      "Gemini Second",
+						"inputTokenLimit":  3000,
+						"outputTokenLimit": 4000,
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected pageToken %q", r.URL.Query().Get("pageToken"))
+		}
+	}))
+	defer mockServer.Close()
+
+	config := &Config{
+		Provider:           constants.ProviderGoogle,
+		ProviderURL:        mockServer.URL,
+		GoogleAPIKey:       "google-key",
+		MaxRequestBodySize: 1024 * 1024,
+	}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		Object string      `json:"object"`
+		Data   []ModelItem `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(response.Data) != 2 {
+		t.Fatalf("models = %d, want 2: %#v", len(response.Data), response.Data)
+	}
+	if response.Data[0].ID != "gemini-first" || response.Data[1].ID != "gemini-second" {
+		t.Fatalf("model ids = %#v", response.Data)
+	}
+	if response.Data[0].DisplayName != "Gemini First" {
+		t.Fatalf("display_name = %q, want Gemini First", response.Data[0].DisplayName)
+	}
+	if response.Data[0].MaxInputTokens != 1000 || response.Data[0].MaxOutputTokens != 2000 {
+		t.Fatalf("first model token metadata not preserved: %#v", response.Data[0])
+	}
+	if got := strings.Join(response.Data[0].SupportedGenerationMethods, ","); got != "generateContent,countTokens" {
+		t.Fatalf("supported_generation_methods = %q", got)
+	}
+	if response.Data[0].Metadata["description"] != "first model" || response.Data[0].Metadata["thinking"] != true {
+		t.Fatalf("google metadata not preserved: %#v", response.Data[0].Metadata)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2: %v", len(requests), requests)
+	}
+}
+
+func TestModelsEndpointWarnsOnUnknownModelFields(t *testing.T) {
+	server := NewMinimalTestServer(t, &Config{})
+
+	logs := captureWarnLogs(t, func() {
+		_, err := server.parseGoogleModelsForProvider(context.Background(), []byte(`{
+			"models": [{
+				"name": "models/gemini-test",
+				"displayName": "Gemini Test",
+				"newModelField": true
+			}],
+			"newTopLevel": true
+		}`))
+		if err != nil {
+			t.Fatalf("parseGoogleModelsForProvider() error = %v", err)
+		}
+	})
+
+	for _, want := range []string{
+		`Unknown JSON fields in Google models response (ignored):`,
+		`models[].newModelField`,
+		`newTopLevel`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("warning %q not found in logs:\n%s", want, logs)
+		}
 	}
 }

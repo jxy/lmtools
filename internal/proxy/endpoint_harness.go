@@ -40,6 +40,7 @@ func (s *Server) decodeEndpointRequest(r *http.Request, dst interface{}) error {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
 	logWireHTTPRequest(r.Context(), "WIRE CLIENT REQUEST", r, body)
+	warnUnknownFieldsWithDisposition(r.Context(), body, dst, "client request", "rejected")
 	if err := decodeStrictJSON(body, dst); err != nil {
 		return err
 	}

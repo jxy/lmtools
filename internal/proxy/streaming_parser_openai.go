@@ -39,6 +39,7 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 				return p.finishPending("end_turn")
 			}
 
+			warnUnknownFields(p.handler.ctx, []byte(data), OpenAIStreamChunk{}, "OpenAI stream chunk")
 			parsed, err := core.ParseOpenAIStreamChunk([]byte(data))
 			if err != nil {
 				if handleErr := handleStreamError(p.handler.ctx, nil, "OpenAIStreamParser", err); handleErr != nil {

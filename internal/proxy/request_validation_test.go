@@ -1,11 +1,8 @@
 package proxy
 
 import (
-	"bytes"
 	"encoding/json"
 	"lmtools/internal/constants"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -20,66 +17,63 @@ func TestDecodeStrictJSONRejectsUnknownField(t *testing.T) {
 	}
 }
 
-func TestHandleMessagesRejectsUnsupportedMetadataForArgo(t *testing.T) {
-	server := NewMinimalTestServer(t, &Config{
-		Provider: constants.ProviderArgo,
-		ArgoUser: "fixture-user",
-	})
-
-	body := `{
-		"model": "gpt-4o-mini",
-		"max_tokens": 10,
-		"messages": [{"role":"user","content":"hi"}],
-		"metadata": {"request_id": "123"}
-	}`
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	server.handleMessages(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+func TestValidateAnthropicAllowsWarnOnlyFieldsForConvertedProviders(t *testing.T) {
+	req := &AnthropicRequest{
+		Model:     "gpt-4o-mini",
+		MaxTokens: 10,
+		Messages:  []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+		Metadata:  map[string]interface{}{"request_id": "123"},
+		TopK:      intPtr(40),
 	}
 
-	var resp AnthropicError
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal error response: %v", err)
-	}
-	if resp.Error.Message != `field "metadata" is not supported when proxying to provider "openai"` {
-		t.Fatalf("message = %q", resp.Error.Message)
+	if err := validateAnthropicRequestForProvider(req, constants.ProviderArgo); err != nil {
+		t.Fatalf("validateAnthropicRequestForProvider() error = %v", err)
 	}
 }
 
-func TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo(t *testing.T) {
-	server := NewMinimalTestServer(t, &Config{
-		Provider: constants.ProviderArgo,
-		ArgoUser: "fixture-user",
-	})
-
-	body := `{
-		"model": "claude-test",
-		"messages": [{"role":"user","content":"hi"}],
-		"response_format": {"type":"json_object"}
-	}`
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	server.handleOpenAIChatCompletions(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+func TestValidateOpenAIAllowsWarnOnlyFieldsForConvertedProviders(t *testing.T) {
+	req := &OpenAIRequest{
+		Model:    "claude-test",
+		Messages: []OpenAIMessage{{Role: "user", Content: "hi"}},
+		ResponseFormat: &ResponseFormat{
+			Type: "json_object",
+		},
+		StreamOptions: &OpenAIStreamOptions{IncludeUsage: true},
 	}
 
-	var resp OpenAIError
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal error response: %v", err)
+	if err := validateOpenAIRequestForProvider(req, constants.ProviderArgo, "gpt-5"); err != nil {
+		t.Fatalf("validateOpenAIRequestForProvider() error = %v", err)
 	}
-	if resp.Error.Message != `field "response_format" is not supported when proxying to provider "anthropic"` {
-		t.Fatalf("message = %q", resp.Error.Message)
+}
+
+func TestValidateOpenAIRejectsAnthropicOutputConfigFeaturesOnNonOpusTarget(t *testing.T) {
+	req := &OpenAIRequest{
+		Model:           "claude-test",
+		Messages:        []OpenAIMessage{{Role: "user", Content: "hi"}},
+		ReasoningEffort: "high",
+		ResponseFormat:  &ResponseFormat{Type: "json_object"},
+		StreamOptions:   &OpenAIStreamOptions{IncludeUsage: true},
+	}
+
+	err := validateOpenAIRequestForProvider(req, constants.ProviderAnthropic, "claude-sonnet-4-5")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if got := err.Error(); got != `anthropic Opus 4.7 thinking/output_config fields require model "claude-opus-4-7"` {
+		t.Fatalf("error = %q, want opus 4.7 validation", got)
+	}
+}
+
+func TestValidateOpenAIAllowsAnthropicOutputConfigFeaturesOnOpusTarget(t *testing.T) {
+	req := &OpenAIRequest{
+		Model:           "claude-test",
+		Messages:        []OpenAIMessage{{Role: "user", Content: "hi"}},
+		ReasoningEffort: "xhigh",
+		ResponseFormat:  &ResponseFormat{Type: "json_schema", JSONSchema: &OpenAIJSONSchema{Schema: map[string]interface{}{"type": "object"}}},
+	}
+
+	if err := validateOpenAIRequestForProvider(req, constants.ProviderArgo, "claude-opus-4-7"); err != nil {
+		t.Fatalf("validateOpenAIRequestForProvider() error = %v", err)
 	}
 }
 
@@ -105,14 +99,13 @@ func TestValidateAnthropicOpus47Features(t *testing.T) {
 			},
 		},
 		{
-			name:     "rejects opus 4.7 fields on argo",
+			name:     "allows opus 4.7 fields on argo conversion route",
 			provider: constants.ProviderArgo,
 			req: AnthropicRequest{
 				Model:        "claude-opus-4-7",
 				Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 				OutputConfig: &AnthropicOutputConfig{Effort: "high"},
 			},
-			wantErr: `anthropic Opus 4.7 thinking/output_config fields are only supported when proxying to provider "anthropic"`,
 		},
 		{
 			name:     "rejects opus 4.7 fields on non opus model",

@@ -4,20 +4,28 @@
       "content": {
         "parts": [
           {
-            "text": "The weather in Chicago is currently 18°C and cloudy.",
-            "thoughtSignature": "EjQKMgEMOdbHd7iG5stEkPmMXmaRV9O0XYJx2nKDhKxcRj3hcfL0YOtybHGFV1r0+VgMKs8L"
+            "functionCall": {
+              "args": {
+                "location": "Chicago",
+                "unit": "fahrenheit"
+              },
+              "id": "6f7gm7v8",
+              "name": "get_weather"
+            },
+            "thoughtSignature": "EjQKMgEMOdbHON9F5saY/zameMn/3eUTfIjZxl3qY74RcuiEWmOLRSlA5koXEcxFKCbABTi0"
           }
         ],
         "role": "model"
       },
+      "finishMessage": "Model generated function call(s).",
       "finishReason": "STOP",
       "index": 0
     }
   ],
   "modelVersion": "gemini-3.1-flash-lite-preview",
-  "responseId": "_nbiacgxs92Mxw_QgpJx",
+  "responseId": "jxzpacODOdGr1MkPjPXBqQs",
   "usageMetadata": {
-    "candidatesTokenCount": 14,
+    "candidatesTokenCount": 23,
     "promptTokenCount": 120,
     "promptTokensDetails": [
       {
@@ -25,6 +33,6 @@
         "tokenCount": 120
       }
     ],
-    "totalTokenCount": 134
+    "totalTokenCount": 143
   }
 }

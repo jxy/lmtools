@@ -3,7 +3,7 @@
   "messages": [
     {
       "content": "Be concise.\nNo markdown.",
-      "role": "system"
+      "role": "developer"
     },
     {
       "content": "Hello there",

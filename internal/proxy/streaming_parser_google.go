@@ -21,6 +21,8 @@ func NewGoogleStreamParser(handler *AnthropicStreamHandler) *GoogleStreamParser 
 func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 	seenFinish := false
 	if err := consumeSSEStream(reader, func(_ string, raw json.RawMessage) error {
+		warnUnknownFields(p.handler.ctx, raw, GoogleResponse{}, "Google stream chunk")
+
 		if logger.From(p.handler.ctx).IsDebugEnabled() {
 			var chunk map[string]interface{}
 			if err := json.Unmarshal(raw, &chunk); err == nil {
@@ -62,7 +64,10 @@ func (p *GoogleStreamParser) processChunk(chunk core.ParsedGoogleStreamChunk) er
 	}
 
 	for _, functionCall := range chunk.FunctionCalls {
-		toolID := generateToolUseID()
+		toolID := functionCall.ID
+		if toolID == "" {
+			toolID = generateToolUseID()
+		}
 		blockIndex, err := beginParsedToolUseBlock(p.handler, nil, toolID, functionCall.Name)
 		if err != nil {
 			return err

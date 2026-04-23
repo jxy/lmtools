@@ -1,9 +1,22 @@
 package proxy
 
-import "lmtools/internal/core"
+import (
+	"lmtools/internal/constants"
+	"lmtools/internal/core"
+)
 
 func prepareTypedRequestPayload(provider string, typed TypedRequest, ctx typedRenderContext) (core.PreparedRequestPayload, error) {
-	return core.PrepareRequestPayload(provider, ctx.Model, typed.Messages, typed.System, typed.Tools, typed.ToolChoice, typed.Stream)
+	messages := typed.Messages
+	var system string
+	switch provider {
+	case constants.ProviderAnthropic, constants.ProviderGoogle:
+		system, messages = prepareOutOfBandInstructionMessages(typed.Messages, typed.System, typed.Developer)
+	case constants.ProviderOpenAI:
+		// OpenAI carries instruction roles inline in the message array.
+	default:
+		system = combineInstructionText(typed.System, typed.Developer)
+	}
+	return core.PrepareRequestPayload(provider, ctx.Model, messages, system, typed.Tools, typed.ToolChoice, typed.Stream)
 }
 
 func proxyOpenAIToolsFromCore(raw interface{}) []OpenAITool {
