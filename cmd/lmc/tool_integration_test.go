@@ -158,7 +158,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 		return typedMessages, nil
 	}
 
-	rb, err := core.BuildRequestWithToolInteractions(context.Background(), &cfg, sess, getMessagesWithTools)
+	rb, err := core.BuildRequestWithToolInteractions(context.Background(), cfg.RequestOptions(), sess, getMessagesWithTools)
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 	// Handle response (should return tool calls)
 	notifier := core.NewTestNotifier()
-	response, err := core.HandleResponse(ctx, &cfg, resp, log, notifier)
+	response, err := core.HandleResponse(ctx, cfg.RequestOptions(), resp, log, notifier)
 	if err != nil {
 		t.Fatalf("Failed to handle response: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 	// Create and execute tools
 	approver := core.NewTestApprover(true) // Auto-approve for tests
-	executor, err := core.NewExecutor(&cfg, logger.GetLogger(), notifier, approver)
+	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 		lastMsg.Blocks = append(lastMsg.Blocks, core.TextBlock{Text: additionalText})
 	}
 
-	req2, reqBody2, err := core.BuildToolResultRequest(&cfg, cfg.Model, "You are a helpful assistant.", nil, typedMessages)
+	req2, reqBody2, err := core.BuildToolResultRequest(cfg.RequestOptions(), cfg.Model, "You are a helpful assistant.", nil, typedMessages)
 	if err != nil {
 		t.Fatalf("Failed to build tool result request: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 	defer resp2.Body.Close()
 
 	// Handle final response
-	finalResponse, err := core.HandleResponse(ctx, &cfg, resp2, log, notifier)
+	finalResponse, err := core.HandleResponse(ctx, cfg.RequestOptions(), resp2, log, notifier)
 	if err != nil {
 		t.Fatalf("Failed to handle final response: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	messages := []core.TypedMessage{
 		core.NewTextMessage("user", userMsg),
 	}
-	req, reqBody, err := core.BuildChatRequest(&cfg, messages, core.ChatBuildOptions{})
+	req, reqBody, err := core.BuildChatRequest(cfg.RequestOptions(), messages, core.ChatBuildOptions{})
 	if err != nil {
 		t.Fatalf("Failed to build chat request: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	defer resp.Body.Close()
 
 	// Handle initial response
-	response, err := core.HandleResponse(ctx, &cfg, resp, log, notifier)
+	response, err := core.HandleResponse(ctx, cfg.RequestOptions(), resp, log, notifier)
 	if err != nil {
 		t.Fatalf("Failed to handle initial response: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	// Create tool context for execution
 	toolCtx := core.ToolContext{
 		Ctx:      ctx,
-		Cfg:      &cfg,
+		Cfg:      cfg.RequestOptions(),
 		Logger:   log,
 		Notifier: notifier,
 		Approver: &testApprover{autoApprove: true},
@@ -816,7 +816,7 @@ func TestParallelToolExecution(t *testing.T) {
 
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true) // Auto-approve for tests
-	executor, err := core.NewExecutor(&cfg, logger.GetLogger(), notifier, approver)
+	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,7 +890,7 @@ func TestToolOutputTruncation(t *testing.T) {
 
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true) // Auto-approve for tests
-	executor, err := core.NewExecutor(&cfg, logger.GetLogger(), notifier, approver)
+	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1014,7 +1014,7 @@ func TestToolApprovalMechanisms(t *testing.T) {
 
 			notifier := core.NewTestNotifier()
 			approver := core.NewTestApprover(true) // Auto-approve for tests
-			executor, err := core.NewExecutor(&cfg, logger.GetLogger(), notifier, approver)
+			executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
 			if err != nil {
 				t.Fatal(err)
 			}

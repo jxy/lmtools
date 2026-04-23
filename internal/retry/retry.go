@@ -38,36 +38,39 @@ func DefaultConfig() *Config {
 	}
 }
 
+var providerConfigs = map[string]Config{
+	constants.ProviderOpenAI: {
+		MaxRetries:     8,
+		InitialBackoff: 2 * time.Second,
+		MaxBackoff:     60 * time.Second,
+		BackoffFactor:  2.0,
+	},
+	constants.ProviderGoogle: {
+		MaxRetries:     8,
+		InitialBackoff: 1 * time.Second,
+		MaxBackoff:     20 * time.Second,
+		BackoffFactor:  1.5,
+	},
+	constants.ProviderArgo: {
+		MaxRetries:     10,
+		InitialBackoff: 1 * time.Second,
+		MaxBackoff:     60 * time.Second,
+		BackoffFactor:  2.0,
+	},
+	"lmc": {
+		MaxRetries:     10,
+		InitialBackoff: 1 * time.Second,
+		MaxBackoff:     60 * time.Second,
+		BackoffFactor:  2.0,
+	},
+}
+
 // ProviderConfig returns provider-specific retry configuration
 func ProviderConfig(provider string) *Config {
-	switch provider {
-	case constants.ProviderOpenAI:
-		// OpenAI has aggressive rate limiting
-		return &Config{
-			MaxRetries:     8,
-			InitialBackoff: 2 * time.Second,
-			MaxBackoff:     60 * time.Second,
-			BackoffFactor:  2.0,
-		}
-	case constants.ProviderGoogle:
-		// Google is generally more lenient
-		return &Config{
-			MaxRetries:     8,
-			InitialBackoff: 1 * time.Second,
-			MaxBackoff:     20 * time.Second,
-			BackoffFactor:  1.5,
-		}
-	case constants.ProviderArgo, "lmc":
-		// Internal service, enhanced retry with exponential backoff
-		return &Config{
-			MaxRetries:     10,
-			InitialBackoff: 1 * time.Second,
-			MaxBackoff:     60 * time.Second, // Cap at 60 seconds to prevent excessive delays
-			BackoffFactor:  2.0,
-		}
-	default:
-		return DefaultConfig()
+	if cfg, ok := providerConfigs[provider]; ok {
+		return &cfg
 	}
+	return DefaultConfig()
 }
 
 // Retryer handles retry logic for HTTP requests

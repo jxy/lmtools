@@ -62,6 +62,95 @@ type SessionResumeConfig interface {
 	GetBranch() string
 }
 
+// RequestOptions is the concrete request configuration consumed by core and
+// session code after CLI flag parsing has applied defaults and validation.
+type RequestOptions struct {
+	User                string
+	Model               string
+	System              string
+	EffectiveSystem     string
+	SystemExplicitlySet bool
+	Env                 string
+	ArgoLegacy          bool
+	Embed               bool
+	StreamChat          bool
+	Provider            string
+	ProviderURL         string
+	APIKeyFile          string
+	ToolEnabled         bool
+	ToolTimeout         time.Duration
+	ToolWhitelist       string
+	ToolBlacklist       string
+	ToolAutoApprove     bool
+	ToolNonInteractive  bool
+	MaxToolRounds       int
+	MaxToolParallel     int
+	ToolMaxOutputBytes  int
+	Resume              string
+	Branch              string
+}
+
+func (o RequestOptions) GetUser() string   { return o.User }
+func (o RequestOptions) GetModel() string  { return o.Model }
+func (o RequestOptions) GetSystem() string { return o.System }
+
+func (o RequestOptions) GetEffectiveSystem() string {
+	if o.EffectiveSystem != "" {
+		return o.EffectiveSystem
+	}
+	return o.System
+}
+
+func (o RequestOptions) IsSystemExplicitlySet() bool { return o.SystemExplicitlySet }
+func (o RequestOptions) GetEnv() string              { return o.Env }
+func (o RequestOptions) IsArgoLegacy() bool          { return o.ArgoLegacy }
+func (o RequestOptions) IsEmbed() bool               { return o.Embed }
+func (o RequestOptions) IsStreamChat() bool          { return o.StreamChat }
+func (o RequestOptions) GetProvider() string         { return o.Provider }
+func (o RequestOptions) GetProviderURL() string      { return o.ProviderURL }
+func (o RequestOptions) GetAPIKeyFile() string       { return o.APIKeyFile }
+func (o RequestOptions) IsToolEnabled() bool         { return o.ToolEnabled }
+
+func (o RequestOptions) GetToolTimeout() time.Duration {
+	if o.ToolTimeout <= 0 {
+		return DefaultToolTimeout
+	}
+	return o.ToolTimeout
+}
+
+func (o RequestOptions) GetToolWhitelist() string    { return o.ToolWhitelist }
+func (o RequestOptions) GetToolBlacklist() string    { return o.ToolBlacklist }
+func (o RequestOptions) GetToolAutoApprove() bool    { return o.ToolAutoApprove }
+func (o RequestOptions) GetToolNonInteractive() bool { return o.ToolNonInteractive }
+
+func (o RequestOptions) GetMaxToolRounds() int {
+	if o.MaxToolRounds <= 0 {
+		return DefaultMaxToolRounds
+	}
+	return o.MaxToolRounds
+}
+
+func (o RequestOptions) GetMaxToolParallel() int {
+	if o.MaxToolParallel <= 0 {
+		return DefaultMaxToolParallel
+	}
+	return o.MaxToolParallel
+}
+
+func (o RequestOptions) GetToolMaxOutputBytes() int {
+	if o.ToolMaxOutputBytes <= 0 {
+		return int(DefaultMaxOutputSize)
+	}
+	const maxAllowed = 100 * 1024 * 1024
+	if o.ToolMaxOutputBytes > maxAllowed {
+		return maxAllowed
+	}
+	return o.ToolMaxOutputBytes
+}
+
+func (o RequestOptions) GetResume() string { return o.Resume }
+func (o RequestOptions) GetBranch() string { return o.Branch }
+
 type ChatRequestConfig interface {
 	UserConfig
 	ModelConfig

@@ -67,10 +67,10 @@ func TestSystemPromptWithToolFlag(t *testing.T) {
 				t.Errorf("SystemExplicitlySet: got %v, want %v", cfg.SystemExplicitlySet, tt.expectedExplicitlySet)
 			}
 
-			// Check GetEffectiveSystem()
-			actualSystem := cfg.GetEffectiveSystem()
+			// Check effective system prompt in the concrete core options.
+			actualSystem := cfg.RequestOptions().GetEffectiveSystem()
 			if actualSystem != tt.expectedSystem {
-				t.Errorf("GetEffectiveSystem(): got %q, want %q", actualSystem, tt.expectedSystem)
+				t.Errorf("RequestOptions().GetEffectiveSystem(): got %q, want %q", actualSystem, tt.expectedSystem)
 			}
 
 			// Also verify the raw System field for transparency

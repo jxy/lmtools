@@ -24,7 +24,7 @@ func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage,
 	if err != nil {
 		return PreparedRequestPayload{}, err
 	}
-	if err := validateMessagesForProvider(provider, typedMessages); err != nil {
+	if err := ValidateMessagesForProvider(provider, typedMessages); err != nil {
 		return PreparedRequestPayload{}, err
 	}
 
@@ -55,7 +55,9 @@ func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage,
 	return payload, nil
 }
 
-func validateMessagesForProvider(provider string, typedMessages []TypedMessage) error {
+// ValidateMessagesForProvider rejects message block shapes that the target
+// provider cannot render.
+func ValidateMessagesForProvider(provider string, typedMessages []TypedMessage) error {
 	normalized := constants.NormalizeProvider(provider)
 	if normalized != constants.ProviderAnthropic && normalized != constants.ProviderArgo {
 		return nil

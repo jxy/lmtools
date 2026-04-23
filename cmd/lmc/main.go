@@ -40,18 +40,20 @@ const (
 type RequestController struct {
 	ctx      context.Context
 	cfg      *config.Config
+	opts     core.RequestOptions
 	notifier core.Notifier
 	logDir   string
 }
 
 // NewRequestController creates a new request controller
-func NewRequestController(ctx context.Context, cfg *config.Config, notifier core.Notifier, logDir string) *RequestController {
+func NewRequestController(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir string) *RequestController {
 	// Add request counter to context for request-scoped logging
 	ctx = logger.WithNewRequestCounter(ctx)
 
 	return &RequestController{
 		ctx:      ctx,
 		cfg:      cfg,
+		opts:     opts,
 		notifier: notifier,
 		logDir:   logDir,
 	}
@@ -87,7 +89,7 @@ func (rc *RequestController) handleRequest(inputStr string, sess *session.Sessio
 
 // buildRequest constructs the HTTP request
 func (rc *RequestController) buildRequest(sess *session.Session, inputStr string) (core.RequestBuild, error) {
-	return buildHTTPRequest(rc.ctx, rc.cfg, sess, inputStr, rc.logDir, rc.notifier)
+	return buildHTTPRequest(rc.ctx, rc.cfg, rc.opts, sess, inputStr, rc.logDir, rc.notifier)
 }
 
 // sendRequest sends the request with retry logic
@@ -97,7 +99,7 @@ func (rc *RequestController) sendRequest(req *http.Request) (*http.Response, err
 
 // handleResponse processes the HTTP response
 func (rc *RequestController) handleResponse(resp *http.Response) (*core.Response, error) {
-	response, err := core.HandleResponse(rc.ctx, *rc.cfg, resp, logger.From(rc.ctx), rc.notifier)
+	response, err := core.HandleResponse(rc.ctx, rc.opts, resp, logger.From(rc.ctx), rc.notifier)
 	if err != nil {
 		return nil, errors.WrapError("handle response", err)
 	}
@@ -142,12 +144,12 @@ func (rc *RequestController) newToolContext(sess *session.Session, response *cor
 	messageBuilder := rc.createMessageBuilder(sess)
 
 	// Create CLI-specific UI for tool display
-	ui := tools.NewCLIToolUI(rc.notifier, *rc.cfg)
+	ui := tools.NewCLIToolUI(rc.notifier, rc.opts)
 
 	// Return the complete tool context
 	return core.ToolContext{
 		Ctx:          rc.ctx,
-		Cfg:          *rc.cfg,
+		Cfg:          rc.opts,
 		Logger:       logger.From(rc.ctx),
 		Notifier:     rc.notifier,
 		Approver:     approver,
@@ -230,6 +232,7 @@ func run(notifier core.Notifier) error {
 	if err != nil {
 		return errors.WrapError("parse flags", err)
 	}
+	opts := cfg.RequestOptions()
 
 	// Initialize logging
 	logDir, err := setupLogging(cfg, notifier)
@@ -269,7 +272,7 @@ func run(notifier core.Notifier) error {
 	var executedPending bool
 
 	if !cfg.NoSession {
-		coordinator := session.NewCoordinator(&cfg, notifier)
+		coordinator := session.NewCoordinator(opts, notifier)
 		approver := NewCliApprover(notifier)
 
 		result, err := coordinator.PrepareSession(ctx, inputStr, isRegeneration, approver)
@@ -286,7 +289,7 @@ func run(notifier core.Notifier) error {
 	}
 
 	// Create request controller and handle the request
-	controller := NewRequestController(ctx, &cfg, notifier, logDir)
+	controller := NewRequestController(ctx, &cfg, opts, notifier, logDir)
 	return controller.handleRequest(inputStr, sess, isRegeneration)
 }
 
@@ -314,11 +317,6 @@ func handleSpecialFlags(ctx context.Context, cfg *config.Config, notifier core.N
 
 	return false, nil
 }
-
-// Removed duplicate message builder functions - now using session.BuildAssistantMessageWithToolCalls
-// and session.BuildUserMessageWithToolResults from internal/session/message_builder.go
-
-// executePendingTools moved to internal/session/pending_tools.go as ExecutePendingTools
 
 // setupLogging initializes the logging system based on configuration
 func setupLogging(cfg config.Config, notifier core.Notifier) (string, error) {
@@ -386,7 +384,7 @@ func readAndValidateInput(isRegeneration bool) (string, error) {
 }
 
 // buildHTTPRequest builds the HTTP request based on configuration
-func buildHTTPRequest(ctx context.Context, cfg *config.Config, sess *session.Session, inputStr string, logDir string, notifier core.Notifier) (core.RequestBuild, error) {
+func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, sess *session.Session, inputStr string, logDir string, notifier core.Notifier) (core.RequestBuild, error) {
 	var req *http.Request
 	var body []byte
 	var model string
@@ -399,7 +397,7 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, sess *session.Ses
 		if cfg.Embed {
 			actualModel = core.DefaultEmbedModel
 		} else {
-			provider := providers.ResolveProvider(cfg.Provider)
+			provider := providers.ResolveProvider(opts.Provider)
 			actualModel = core.GetDefaultChatModel(provider)
 		}
 	}
@@ -408,7 +406,7 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, sess *session.Ses
 	if sess != nil {
 		// Always use the tool-aware message builder for sessions
 		// This ensures tool interactions are preserved during regeneration
-		rb, err := core.BuildRequestWithToolInteractions(ctx, *cfg, sess, session.BuildMessagesWithToolInteractions)
+		rb, err := core.BuildRequestWithToolInteractions(ctx, opts, sess, session.BuildMessagesWithToolInteractions)
 		if err != nil {
 			return core.RequestBuild{}, errors.WrapError("build request", err)
 		}
@@ -417,10 +415,10 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, sess *session.Ses
 		model = rb.Model
 		toolDefs = rb.ToolDefs
 	} else {
-		req, body, err = core.BuildRequest(*cfg, inputStr)
+		req, body, err = core.BuildRequest(opts, inputStr)
 		if err == nil {
 			model = actualModel
-			if cfg.IsToolEnabled() {
+			if opts.IsToolEnabled() {
 				toolDefs = core.GetBuiltinUniversalCommandTool()
 			}
 		}
@@ -562,7 +560,7 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 	provider := cfg.Provider
 	provider = providers.ResolveProvider(provider)
 
-	url, err := providers.ResolveModelsURLWithArgoOptions(provider, cfg.ProviderURL, cfg.GetEnv(), cfg.ArgoLegacy)
+	url, err := providers.ResolveModelsURLWithArgoOptions(provider, cfg.ProviderURL, cfg.ArgoEnv, cfg.ArgoLegacy)
 	if err != nil {
 		return errors.WrapError("validate provider", err)
 	}

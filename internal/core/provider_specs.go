@@ -9,6 +9,7 @@ import (
 	"lmtools/internal/providers"
 	"net/http"
 	"os"
+	"sync"
 )
 
 type (
@@ -31,80 +32,72 @@ type providerSpec struct {
 	Marshal        providerMessageMarshaller
 }
 
-func openAIProviderSpec() providerSpec {
-	return providerSpec{
-		Provider: constants.ProviderOpenAI,
-		BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, _ string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-			return buildToolAwareRequest(cfg, constants.ProviderOpenAI, typedMessages, model, "", toolDefs, toolChoice, stream)
+var (
+	providerSpecs     map[string]providerSpec
+	providerSpecsOnce sync.Once
+)
+
+func initProviderSpecs() {
+	providerSpecs = map[string]providerSpec{
+		constants.ProviderOpenAI: {
+			Provider: constants.ProviderOpenAI,
+			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, _ string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+				return buildToolAwareRequest(cfg, constants.ProviderOpenAI, typedMessages, model, "", toolDefs, toolChoice, stream)
+			},
+			BuildEmbed:     buildOpenAIEmbedRequest,
+			HandleStream:   handleOpenAIStreamWithTools,
+			ParseResponse:  parseOpenAIResponse,
+			ConvertTools:   convertOpenAITools,
+			RequestMap:     openAIRequestMap,
+			ResolveChatURL: openAIChatURL,
+			Marshal:        marshalOpenAITypedMessages,
 		},
-		BuildEmbed:     buildOpenAIEmbedRequest,
-		HandleStream:   handleOpenAIStreamWithTools,
-		ParseResponse:  parseOpenAIResponse,
-		ConvertTools:   convertOpenAITools,
-		RequestMap:     openAIRequestMap,
-		ResolveChatURL: openAIChatURL,
-		Marshal:        marshalOpenAITypedMessages,
+		constants.ProviderAnthropic: {
+			Provider: constants.ProviderAnthropic,
+			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+				return buildToolAwareRequest(cfg, constants.ProviderAnthropic, typedMessages, model, system, toolDefs, toolChoice, stream)
+			},
+			HandleStream:   handleAnthropicStreamWithTools,
+			ParseResponse:  parseAnthropicResponse,
+			ConvertTools:   convertAnthropicTools,
+			RequestMap:     anthropicRequestMap,
+			ResolveChatURL: anthropicChatURL,
+			Marshal:        marshalAnthropicTypedMessages,
+		},
+		constants.ProviderGoogle: {
+			Provider: constants.ProviderGoogle,
+			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+				return buildToolAwareRequest(cfg, constants.ProviderGoogle, typedMessages, model, system, toolDefs, toolChoice, stream)
+			},
+			HandleStream:   handleGoogleStreamWithTools,
+			ParseResponse:  parseGoogleResponseDetailed,
+			ConvertTools:   convertGoogleTools,
+			RequestMap:     googleRequestMap,
+			ResolveChatURL: googleChatURL,
+			Marshal:        marshalGoogleTypedMessages,
+		},
+		constants.ProviderArgo: {
+			Provider: constants.ProviderArgo,
+			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+				return buildArgoChatRequest(cfg, typedMessages, model, system, toolDefs, toolChoice, stream)
+			},
+			BuildEmbed: buildArgoEmbedRequest,
+			HandleStream: func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, _ Notifier) (Response, error) {
+				return handleArgoStream(ctx, body, logFile, out)
+			},
+			ParseResponse: parseArgoResponse,
+		},
 	}
 }
 
-func anthropicProviderSpec() providerSpec {
-	return providerSpec{
-		Provider: constants.ProviderAnthropic,
-		BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-			return buildToolAwareRequest(cfg, constants.ProviderAnthropic, typedMessages, model, system, toolDefs, toolChoice, stream)
-		},
-		HandleStream:   handleAnthropicStreamWithTools,
-		ParseResponse:  parseAnthropicResponse,
-		ConvertTools:   convertAnthropicTools,
-		RequestMap:     anthropicRequestMap,
-		ResolveChatURL: anthropicChatURL,
-		Marshal:        marshalAnthropicTypedMessages,
-	}
-}
-
-func googleProviderSpec() providerSpec {
-	return providerSpec{
-		Provider: constants.ProviderGoogle,
-		BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-			return buildToolAwareRequest(cfg, constants.ProviderGoogle, typedMessages, model, system, toolDefs, toolChoice, stream)
-		},
-		HandleStream:   handleGoogleStreamWithTools,
-		ParseResponse:  parseGoogleResponseDetailed,
-		ConvertTools:   convertGoogleTools,
-		RequestMap:     googleRequestMap,
-		ResolveChatURL: googleChatURL,
-		Marshal:        marshalGoogleTypedMessages,
-	}
-}
-
-func argoProviderSpec() providerSpec {
-	return providerSpec{
-		Provider: constants.ProviderArgo,
-		BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-			return buildArgoChatRequest(cfg, typedMessages, model, system, toolDefs, toolChoice, stream)
-		},
-		BuildEmbed: buildArgoEmbedRequest,
-		HandleStream: func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, _ Notifier) (Response, error) {
-			return handleArgoStream(ctx, body, logFile, out)
-		},
-		ParseResponse: parseArgoResponse,
-	}
-}
-
-func defaultOpenAIProviderSpec() providerSpec {
-	return openAIProviderSpec()
+func providerSpecRegistry() map[string]providerSpec {
+	providerSpecsOnce.Do(initProviderSpecs)
+	return providerSpecs
 }
 
 func providerSpecForName(provider string) (providerSpec, error) {
-	switch constants.NormalizeProvider(provider) {
-	case constants.ProviderOpenAI:
-		return openAIProviderSpec(), nil
-	case constants.ProviderAnthropic:
-		return anthropicProviderSpec(), nil
-	case constants.ProviderGoogle:
-		return googleProviderSpec(), nil
-	case constants.ProviderArgo:
-		return argoProviderSpec(), nil
+	if spec, ok := providerSpecRegistry()[constants.NormalizeProvider(provider)]; ok {
+		return spec, nil
 	}
 	return providerSpec{}, fmt.Errorf("unsupported provider: %s", provider)
 }
@@ -113,7 +106,7 @@ func providerSpecForModel(model string) providerSpec {
 	spec, err := providerSpecForName(providers.DetermineArgoModelProvider(model))
 	if err != nil {
 		// DetermineArgoModelProvider defaults unknown models to openai, so this is defensive.
-		return defaultOpenAIProviderSpec()
+		return providerSpecRegistry()[constants.ProviderOpenAI]
 	}
 	return spec
 }

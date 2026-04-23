@@ -133,6 +133,37 @@ func TestParseFlagsCustom(t *testing.T) {
 	}
 }
 
+func TestRequestOptionsAppliesCoreDefaults(t *testing.T) {
+	cfg, err := ParseFlags([]string{
+		"-argo-user", "alice",
+		"-tool",
+		"-tool-timeout", "0s",
+		"-max-tool-rounds", "0",
+		"-max-tool-parallel", "0",
+		"-tool-max-output-bytes", "0",
+	})
+	if err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+
+	opts := cfg.RequestOptions()
+	if opts.GetEffectiveSystem() == cfg.System {
+		t.Fatalf("effective system prompt was not switched for tool mode")
+	}
+	if got := opts.GetToolTimeout(); got != 30*time.Second {
+		t.Fatalf("GetToolTimeout() = %v, want 30s", got)
+	}
+	if got := opts.GetMaxToolRounds(); got != 32 {
+		t.Fatalf("GetMaxToolRounds() = %d, want 32", got)
+	}
+	if got := opts.GetMaxToolParallel(); got != 4 {
+		t.Fatalf("GetMaxToolParallel() = %d, want 4", got)
+	}
+	if got := opts.GetToolMaxOutputBytes(); got != 1024*1024 {
+		t.Fatalf("GetToolMaxOutputBytes() = %d, want 1MiB", got)
+	}
+}
+
 func TestEmbedModeAutoDisablesSessions(t *testing.T) {
 	args := []string{"-argo-user", "testuser", "-e"}
 	cfg, err := ParseFlags(args)

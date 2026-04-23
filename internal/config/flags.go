@@ -195,125 +195,42 @@ Examples:
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
-// Adapter methods for Config to implement core.RequestConfig interface
-
-func (c Config) GetUser() string {
-	return c.ArgoUser
-}
-
-func (c Config) GetModel() string {
-	return c.Model
-}
-
-func (c Config) GetSystem() string {
-	return c.System
-}
-
-func (c Config) IsSystemExplicitlySet() bool {
-	return c.SystemExplicitlySet
-}
-
-func (c Config) GetEnv() string {
-	if c.ArgoEnv == "" {
-		return resolveArgoEnvironment(c.ArgoDev, c.ArgoTest)
-	}
-	return c.ArgoEnv
-}
-
-func (c Config) IsArgoLegacy() bool {
-	return c.ArgoLegacy
-}
-
-func (c Config) IsEmbed() bool {
-	return c.Embed
-}
-
-func (c Config) IsStreamChat() bool {
-	return c.StreamChat
-}
-
-func (c Config) GetProvider() string {
-	return c.Provider
-}
-
-func (c Config) GetProviderURL() string {
-	return c.ProviderURL
-}
-
-func (c Config) GetAPIKeyFile() string {
-	return c.APIKeyFile
-}
-
-func (c Config) IsToolEnabled() bool {
-	return c.EnableTool
-}
-
-// GetEffectiveSystem returns the appropriate system prompt:
-// - If tool is enabled and no system prompt was explicitly set, returns the tool system prompt
-// - Otherwise returns the configured system prompt
-func (c Config) GetEffectiveSystem() string {
-	// If tool is enabled via -tool flag and system wasn't explicitly set, use tool prompt
+// RequestOptions converts parsed CLI flags into the concrete value consumed by
+// core/session code.
+func (c Config) RequestOptions() core.RequestOptions {
+	effectiveSystem := c.System
 	if c.EnableTool && !c.SystemExplicitlySet {
-		return prompts.ToolSystemPrompt
+		effectiveSystem = prompts.ToolSystemPrompt
 	}
-	return c.System
-}
 
-func (c Config) GetToolTimeout() time.Duration {
-	if c.ToolTimeout <= 0 {
-		return core.DefaultToolTimeout
+	argoEnv := c.ArgoEnv
+	if argoEnv == "" {
+		argoEnv = resolveArgoEnvironment(c.ArgoDev, c.ArgoTest)
 	}
-	return c.ToolTimeout
-}
 
-func (c Config) GetToolWhitelist() string {
-	return c.ToolWhitelist
-}
-
-func (c Config) GetToolBlacklist() string {
-	return c.ToolBlacklist
-}
-
-func (c Config) GetToolAutoApprove() bool {
-	return c.ToolAutoApprove
-}
-
-func (c Config) GetToolNonInteractive() bool {
-	return c.ToolNonInteractive
-}
-
-func (c Config) GetMaxToolRounds() int {
-	if c.MaxToolRounds <= 0 {
-		return core.DefaultMaxToolRounds
+	return core.RequestOptions{
+		User:                c.ArgoUser,
+		Model:               c.Model,
+		System:              c.System,
+		EffectiveSystem:     effectiveSystem,
+		SystemExplicitlySet: c.SystemExplicitlySet,
+		Env:                 argoEnv,
+		ArgoLegacy:          c.ArgoLegacy,
+		Embed:               c.Embed,
+		StreamChat:          c.StreamChat,
+		Provider:            c.Provider,
+		ProviderURL:         c.ProviderURL,
+		APIKeyFile:          c.APIKeyFile,
+		ToolEnabled:         c.EnableTool,
+		ToolTimeout:         c.ToolTimeout,
+		ToolWhitelist:       c.ToolWhitelist,
+		ToolBlacklist:       c.ToolBlacklist,
+		ToolAutoApprove:     c.ToolAutoApprove,
+		ToolNonInteractive:  c.ToolNonInteractive,
+		MaxToolRounds:       c.MaxToolRounds,
+		MaxToolParallel:     c.MaxToolParallel,
+		ToolMaxOutputBytes:  c.ToolMaxOutputBytes,
+		Resume:              c.Resume,
+		Branch:              c.Branch,
 	}
-	return c.MaxToolRounds
-}
-
-func (c Config) GetMaxToolParallel() int {
-	if c.MaxToolParallel <= 0 {
-		return 4 // Default to 4 parallel executions
-	}
-	return c.MaxToolParallel
-}
-
-func (c Config) GetToolMaxOutputBytes() int {
-	if c.ToolMaxOutputBytes <= 0 {
-		return int(core.DefaultMaxOutputSize)
-	}
-	// Add upper bound validation (100MB)
-	const maxAllowed = 100 * 1024 * 1024 // 100MB
-	if c.ToolMaxOutputBytes > maxAllowed {
-		return maxAllowed
-	}
-	return c.ToolMaxOutputBytes
-}
-
-// GetResume returns the resume session ID/path
-func (c Config) GetResume() string {
-	return c.Resume
-}
-
-// GetBranch returns the branch message ID
-func (c Config) GetBranch() string {
-	return c.Branch
 }

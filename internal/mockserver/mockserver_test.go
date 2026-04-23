@@ -50,7 +50,7 @@ func TestMockServer_NativeOpenAIChat(t *testing.T) {
 
 	cfg := newMockConfig(mock, "gpt4o")
 
-	req, _, err := core.BuildRequest(cfg, "Test message")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Test message")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestMockServer_Embedding(t *testing.T) {
 	cfg := newMockConfig(mock, "v3large")
 	cfg.Embed = true
 
-	req, _, err := core.BuildRequest(cfg, "Test embedding")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Test embedding")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestMockServer_NativeAnthropicChat(t *testing.T) {
 
 	cfg := newMockConfig(mock, "claude-sonnet-4-5")
 
-	req, _, err := core.BuildRequest(cfg, "Test message")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Test message")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestMockServer_LegacyChat(t *testing.T) {
 	cfg := newMockConfig(mock, "gpt4o")
 	cfg.ArgoLegacy = true
 
-	req, _, err := core.BuildRequest(cfg, "Test message")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Test message")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestMockServer_NativeOpenAIStreamChat(t *testing.T) {
 	cfg := newMockConfig(mock, "gpt4o")
 	cfg.StreamChat = true
 
-	req, _, err := core.BuildRequest(cfg, "Stream this please")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Stream this please")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestMockServer_NativeAnthropicStreamChat(t *testing.T) {
 	cfg := newMockConfig(mock, "claude-sonnet-4-5")
 	cfg.StreamChat = true
 
-	req, _, err := core.BuildRequest(cfg, "Stream this please")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Stream this please")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestMockServer_LegacyStreamChat(t *testing.T) {
 	cfg.StreamChat = true
 	cfg.ArgoLegacy = true
 
-	req, _, err := core.BuildRequest(cfg, "Stream this please")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Stream this please")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestMockServer_CustomResponse(t *testing.T) {
 
 	cfg := newMockConfig(mock, "gpt4o")
 
-	req, _, err := core.BuildRequest(cfg, "Hello custom")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "Hello custom")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestMockServer_ErrorSimulation(t *testing.T) {
 
 	cfg := newMockConfig(mock, "gpt4o")
 
-	req, _, err := core.BuildRequest(cfg, "This should fail")
+	req, _, err := core.BuildRequest(cfg.RequestOptions(), "This should fail")
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestMockServer_RequestCapture(t *testing.T) {
 	messages := []string{"First", "Second", "Third"}
 
 	for _, msg := range messages {
-		req, _, err := core.BuildRequest(cfg, msg)
+		req, _, err := core.BuildRequest(cfg.RequestOptions(), msg)
 		if err != nil {
 			t.Fatalf("Failed to build request: %v", err)
 		}

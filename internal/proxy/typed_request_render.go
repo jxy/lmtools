@@ -233,12 +233,8 @@ func TypedToArgoRequest(typed TypedRequest, model string, user string) (*ArgoCha
 }
 
 func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
-	for _, message := range typed.Messages {
-		for _, block := range message.Blocks {
-			if _, ok := block.(core.AudioBlock); ok {
-				return nil, fmt.Errorf("argo provider does not support audio input blocks")
-			}
-		}
+	if err := core.ValidateMessagesForProvider(constants.ProviderArgo, typed.Messages); err != nil {
+		return nil, err
 	}
 
 	argoReq := &ArgoChatRequest{
