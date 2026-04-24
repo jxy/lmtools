@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"encoding/json"
-	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/providers"
@@ -15,10 +14,7 @@ type typedRenderContext struct {
 	User  string
 }
 
-type (
-	typedRequestRenderer func(TypedRequest, typedRenderContext) (interface{}, error)
-	argoMessageRenderer  func([]core.TypedMessage) ([]ArgoMessage, error)
-)
+type argoMessageRenderer func([]core.TypedMessage) ([]ArgoMessage, error)
 
 var argoMessageRenderers = map[string]argoMessageRenderer{
 	constants.ProviderOpenAI: func(messages []core.TypedMessage) ([]ArgoMessage, error) {
@@ -26,14 +22,6 @@ var argoMessageRenderers = map[string]argoMessageRenderer{
 	},
 	constants.ProviderAnthropic: typedMessagesToArgoAnthropic,
 	constants.ProviderGoogle:    typedMessagesToArgoAnthropic,
-}
-
-func renderTypedRequest(provider string, typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
-	capability, ok := proxyProviderCapabilityFor(provider)
-	if !ok || capability.RenderTyped == nil {
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
-	}
-	return capability.RenderTyped(typed, ctx)
 }
 
 func argoMessageRendererForModel(model string) argoMessageRenderer {
@@ -45,18 +33,10 @@ func argoMessageRendererForModel(model string) argoMessageRenderer {
 }
 
 func TypedToOpenAIRequest(typed TypedRequest, model string) (*OpenAIRequest, error) {
-	rendered, err := renderTypedRequest(constants.ProviderOpenAI, typed, typedRenderContext{Model: model})
-	if err != nil {
-		return nil, err
-	}
-	openAIReq, ok := rendered.(*OpenAIRequest)
-	if !ok {
-		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderOpenAI)
-	}
-	return openAIReq, nil
+	return renderTypedToOpenAIRequest(typed, typedRenderContext{Model: model})
 }
 
-func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*OpenAIRequest, error) {
 	prepared, err := prepareTypedRequestPayload(constants.ProviderOpenAI, typed, ctx)
 	if err != nil {
 		return nil, err
@@ -106,18 +86,10 @@ func openAIModelUsesDeveloperRole(model string) bool {
 }
 
 func TypedToAnthropicRequest(typed TypedRequest, model string) (*AnthropicRequest, error) {
-	rendered, err := renderTypedRequest(constants.ProviderAnthropic, typed, typedRenderContext{Model: model})
-	if err != nil {
-		return nil, err
-	}
-	anthReq, ok := rendered.(*AnthropicRequest)
-	if !ok {
-		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderAnthropic)
-	}
-	return anthReq, nil
+	return renderTypedToAnthropicRequest(typed, typedRenderContext{Model: model})
 }
 
-func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (*AnthropicRequest, error) {
 	prepared, err := prepareTypedRequestPayload(constants.ProviderAnthropic, typed, ctx)
 	if err != nil {
 		return nil, err
@@ -172,18 +144,10 @@ func anthropicModelRejectsTemperature(model string) bool {
 }
 
 func TypedToGoogleRequest(typed TypedRequest, model string, topK *int) (*GoogleRequest, error) {
-	rendered, err := renderTypedRequest(constants.ProviderGoogle, typed, typedRenderContext{Model: model, TopK: topK})
-	if err != nil {
-		return nil, err
-	}
-	googleReq, ok := rendered.(*GoogleRequest)
-	if !ok {
-		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderGoogle)
-	}
-	return googleReq, nil
+	return renderTypedToGoogleRequest(typed, typedRenderContext{Model: model, TopK: topK})
 }
 
-func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (*GoogleRequest, error) {
 	prepared, err := prepareTypedRequestPayload(constants.ProviderGoogle, typed, ctx)
 	if err != nil {
 		return nil, err
@@ -221,18 +185,10 @@ func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (int
 }
 
 func TypedToArgoRequest(typed TypedRequest, model string, user string) (*ArgoChatRequest, error) {
-	rendered, err := renderTypedRequest(constants.ProviderArgo, typed, typedRenderContext{Model: model, User: user})
-	if err != nil {
-		return nil, err
-	}
-	argoReq, ok := rendered.(*ArgoChatRequest)
-	if !ok {
-		return nil, fmt.Errorf("internal render type mismatch for provider: %s", constants.ProviderArgo)
-	}
-	return argoReq, nil
+	return renderTypedToArgoRequest(typed, typedRenderContext{Model: model, User: user})
 }
 
-func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (interface{}, error) {
+func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*ArgoChatRequest, error) {
 	if err := core.ValidateMessagesForProvider(constants.ProviderArgo, typed.Messages); err != nil {
 		return nil, err
 	}

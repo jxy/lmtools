@@ -220,7 +220,12 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 	log := logger.From(ctx)
 	warnOpenAIRequestDropsForGoogle(ctx, openAIReq)
 
-	typed := OpenAIRequestToTyped(openAIReq)
+	typed, err := OpenAIRequestToTypedStrict(openAIReq)
+	if err != nil {
+		log.Errorf("Failed to convert OpenAI request: %v", err)
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "conversion_error", http.StatusBadRequest)
+		return
+	}
 	googleReq, err := TypedToGoogleRequest(typed, mappedModel, nil)
 	if err != nil {
 		log.Errorf("Failed to convert OpenAI to Google format: %v", err)
@@ -263,11 +268,11 @@ func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	capability, ok := proxyProviderCapabilityFor(provider)
+	policy, ok := openAIStreamPolicyFor(provider)
 	if !ok {
 		err = fmt.Errorf("unknown provider: %s", provider)
 	} else {
-		forward, lookupErr := capability.requireOpenAIStreamForwarder(s)
+		forward, lookupErr := policy.requireStreamForwarder(s)
 		if lookupErr != nil {
 			err = lookupErr
 		} else {

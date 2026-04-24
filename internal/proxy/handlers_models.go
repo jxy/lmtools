@@ -94,7 +94,7 @@ func (s *Server) handleModelsNonOK(ctx context.Context, provider string, status 
 func (s *Server) fetchProviderModels(ctx context.Context) ([]ModelItem, error) {
 	provider := s.config.Provider
 
-	capability, ok := proxyProviderCapabilityFor(provider)
+	capability, ok := modelProviderCapabilityFor(provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -134,7 +134,7 @@ func (s *Server) fetchModels(ctx context.Context, url string, prepareRequest fun
 	return data, resp.StatusCode, nil
 }
 
-func (s *Server) fetchModelsWithCapability(ctx context.Context, capability proxyProviderCapability) ([]ModelItem, error) {
+func (s *Server) fetchModelsWithCapability(ctx context.Context, capability modelProviderCapability) ([]ModelItem, error) {
 	log := logger.From(ctx)
 
 	url, err := providers.ResolveModelsURL(s.config.Provider, s.config.ProviderURL, s.config.ArgoEnv)
@@ -154,7 +154,7 @@ func (s *Server) fetchModelsWithCapability(ctx context.Context, capability proxy
 	return s.fetchModelPages(ctx, capability, url, prepareRequest)
 }
 
-func (s *Server) fetchModelPages(ctx context.Context, capability proxyProviderCapability, url string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
+func (s *Server) fetchModelPages(ctx context.Context, capability modelProviderCapability, url string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
 	switch capability.Provider {
 	case constants.ProviderAnthropic:
 		return s.fetchAnthropicModelPages(ctx, capability, url, prepareRequest)
@@ -165,7 +165,7 @@ func (s *Server) fetchModelPages(ctx context.Context, capability proxyProviderCa
 	}
 }
 
-func (s *Server) fetchSingleModelPage(ctx context.Context, capability proxyProviderCapability, url string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
+func (s *Server) fetchSingleModelPage(ctx context.Context, capability modelProviderCapability, url string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
 	data, statusCode, err := s.fetchModels(ctx, url, prepareRequest)
 	if err != nil {
 		return nil, err
@@ -178,7 +178,7 @@ func (s *Server) fetchSingleModelPage(ctx context.Context, capability proxyProvi
 	return capability.ParseModels(s, ctx, data)
 }
 
-func (s *Server) fetchAnthropicModelPages(ctx context.Context, capability proxyProviderCapability, rawURL string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
+func (s *Server) fetchAnthropicModelPages(ctx context.Context, capability modelProviderCapability, rawURL string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
 	var all []ModelItem
 	afterID := ""
 	seenCursors := map[string]struct{}{}
@@ -223,7 +223,7 @@ func (s *Server) fetchAnthropicModelPages(ctx context.Context, capability proxyP
 	return nil, fmt.Errorf("anthropic models pagination exceeded %d pages", maxModelListPages)
 }
 
-func (s *Server) fetchGoogleModelPages(ctx context.Context, capability proxyProviderCapability, rawURL string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
+func (s *Server) fetchGoogleModelPages(ctx context.Context, capability modelProviderCapability, rawURL string, prepareRequest func(*http.Request)) ([]ModelItem, error) {
 	var all []ModelItem
 	pageToken := ""
 	seenTokens := map[string]struct{}{}

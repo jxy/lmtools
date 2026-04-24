@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"lmtools/internal/core"
 	"strings"
 	"time"
@@ -42,6 +43,15 @@ type TypedRequest struct {
 
 // OpenAIRequestToTyped converts an OpenAI request to TypedRequest
 func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
+	typed, _ := openAIRequestToTyped(req, false)
+	return typed
+}
+
+func OpenAIRequestToTypedStrict(req *OpenAIRequest) (TypedRequest, error) {
+	return openAIRequestToTyped(req, true)
+}
+
+func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == nil && req.MaxCompletionTokens != nil {
 		maxTokens = req.MaxCompletionTokens
@@ -62,9 +72,13 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 	// Convert OpenAI messages to typed OpenAI messages first
 	openAITypedMessages := make([]core.OpenAIMessage, len(req.Messages))
 	for i, msg := range req.Messages {
+		content, err := openAIContentToTypedUnionForMode(msg.Content, strict)
+		if err != nil {
+			return TypedRequest{}, fmt.Errorf("messages[%d].content: %w", i, err)
+		}
 		openAITypedMessages[i] = core.OpenAIMessage{
 			Role:       string(msg.Role),
-			Content:    openAIContentToTypedUnion(msg.Content),
+			Content:    content,
 			ToolCalls:  openAIToolCallsToTyped(msg.ToolCalls),
 			ToolCallID: msg.ToolCallID,
 		}
@@ -94,7 +108,7 @@ func OpenAIRequestToTyped(req *OpenAIRequest) TypedRequest {
 	// Convert tool choice
 	typed.ToolChoice = openAIToolChoiceToTyped(req.ToolChoice)
 
-	return typed
+	return typed, nil
 }
 
 // AnthropicRequestToTyped converts an Anthropic request to TypedRequest

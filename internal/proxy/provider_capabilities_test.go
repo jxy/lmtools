@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestProxyProviderCapabilitiesComplete(t *testing.T) {
+func TestModelProviderCapabilitiesComplete(t *testing.T) {
 	providerNames := []string{
 		constants.ProviderOpenAI,
 		constants.ProviderAnthropic,
@@ -16,7 +16,7 @@ func TestProxyProviderCapabilitiesComplete(t *testing.T) {
 
 	for _, provider := range providerNames {
 		t.Run(provider, func(t *testing.T) {
-			capability, ok := proxyProviderCapabilityFor(provider)
+			capability, ok := modelProviderCapabilityFor(provider)
 			if !ok {
 				t.Fatalf("missing capability for provider %q", provider)
 			}
@@ -29,13 +29,39 @@ func TestProxyProviderCapabilitiesComplete(t *testing.T) {
 			if providers.SupportsModelsEndpoint(provider) && capability.ParseModels == nil {
 				t.Fatal("ParseModels must be set when models endpoint is supported")
 			}
-			if capability.RenderTyped == nil {
-				t.Fatal("RenderTyped must be set")
+		})
+	}
+}
+
+func TestProviderForwardingPoliciesComplete(t *testing.T) {
+	providerNames := []string{
+		constants.ProviderOpenAI,
+		constants.ProviderAnthropic,
+		constants.ProviderGoogle,
+		constants.ProviderArgo,
+	}
+
+	for _, provider := range providerNames {
+		t.Run(provider, func(t *testing.T) {
+			policy, ok := anthropicForwardingPolicyFor(provider)
+			if !ok {
+				t.Fatalf("missing Anthropic forwarding policy for provider %q", provider)
 			}
-			if capability.AnthropicResponse == nil || capability.AnthropicStream == nil {
+			if policy.Response == nil || policy.Stream == nil {
 				t.Fatal("Anthropic forwarding must be set")
 			}
-			if provider != constants.ProviderOpenAI && capability.OpenAIStream == nil {
+
+			openAIStream, ok := openAIStreamPolicyFor(provider)
+			if provider == constants.ProviderOpenAI {
+				if ok {
+					t.Fatal("OpenAI provider should use direct OpenAI streaming, not conversion policy")
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("missing OpenAI stream policy for provider %q", provider)
+			}
+			if openAIStream.Stream == nil {
 				t.Fatal("OpenAI-format streaming forwarder must be set")
 			}
 		})

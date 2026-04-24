@@ -179,62 +179,74 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 // streamFromArgo handles streaming from Argo API
 func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
 	if s.useLegacyArgo() {
-		if len(anthReq.Tools) > 0 {
-			pingInterval := s.config.PingInterval
-			if pingInterval <= 0 {
-				pingInterval = constants.DefaultPingInterval * time.Second
-			}
-			return s.streamFromArgoWithPings(ctx, anthReq, handler, pingInterval)
-		}
-
-		body, err := s.forwardToArgoStream(ctx, anthReq)
-		if err != nil {
-			return err
-		}
-		defer body.Close()
-
-		if err := ensureAnthropicTextPreamble(handler); err != nil {
-			return err
-		}
-
-		parser := NewArgoStreamParser(handler)
-		if s.config.PingInterval > 0 {
-			return parser.ParseWithPingInterval(body, s.validatePingInterval(ctx, s.config.PingInterval))
-		}
-		return parser.Parse(body)
+		return s.streamLegacyArgo(ctx, anthReq, handler)
 	}
 
 	switch s.argoWireProvider(anthReq.Model) {
 	case constants.ProviderAnthropic:
-		resp, err := s.argoAnthropicStreamingRequest(ctx, anthReq)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-
-		if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
-			return err
-		}
-
-		return s.parseAnthropicStream(resp.Body, handler)
+		return s.streamNativeArgoAnthropic(ctx, anthReq, handler)
 	default:
-		resp, err := s.argoOpenAIStreamingRequestFromAnthropic(ctx, anthReq)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-
-		if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
-			return err
-		}
-
-		if err := ensureAnthropicTextPreamble(handler); err != nil {
-			return err
-		}
-
-		parser := NewOpenAIStreamParser(handler)
-		return parser.Parse(resp.Body)
+		return s.streamNativeArgoOpenAI(ctx, anthReq, handler)
 	}
+}
+
+func (s *Server) streamLegacyArgo(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	if len(anthReq.Tools) > 0 {
+		pingInterval := s.config.PingInterval
+		if pingInterval <= 0 {
+			pingInterval = constants.DefaultPingInterval * time.Second
+		}
+		return s.streamFromArgoWithPings(ctx, anthReq, handler, pingInterval)
+	}
+
+	body, err := s.forwardToArgoStream(ctx, anthReq)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		return err
+	}
+
+	parser := NewArgoStreamParser(handler)
+	if s.config.PingInterval > 0 {
+		return parser.ParseWithPingInterval(body, s.validatePingInterval(ctx, s.config.PingInterval))
+	}
+	return parser.Parse(body)
+}
+
+func (s *Server) streamNativeArgoAnthropic(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	resp, err := s.argoAnthropicStreamingRequest(ctx, anthReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
+		return err
+	}
+
+	return s.parseAnthropicStream(resp.Body, handler)
+}
+
+func (s *Server) streamNativeArgoOpenAI(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error {
+	resp, err := s.argoOpenAIStreamingRequestFromAnthropic(ctx, anthReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
+		return err
+	}
+
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		return err
+	}
+
+	parser := NewOpenAIStreamParser(handler)
+	return parser.Parse(resp.Body)
 }
 
 // streamFromArgoWithPings handles streaming simulation when tools are present

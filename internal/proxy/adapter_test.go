@@ -1,8 +1,10 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"lmtools/internal/core"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +61,82 @@ func TestOpenAIRequestToTyped_PreservesInstructionMessagesInOrder(t *testing.T) 
 		if typed.Messages[i].Role != role {
 			t.Fatalf("Messages[%d].Role = %q, want %q", i, typed.Messages[i].Role, role)
 		}
+	}
+}
+
+func TestOpenAIRequestToTypedStrictRejectsMalformedContentPart(t *testing.T) {
+	req := &OpenAIRequest{
+		Messages: []OpenAIMessage{
+			{
+				Role: core.RoleUser,
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "image_url",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := OpenAIRequestToTypedStrict(req)
+	if err == nil {
+		t.Fatal("OpenAIRequestToTypedStrict() error = nil, want malformed content error")
+	}
+	if !strings.Contains(err.Error(), "messages[0].content") || !strings.Contains(err.Error(), "content[0].image_url") {
+		t.Fatalf("OpenAIRequestToTypedStrict() error = %q, want indexed content path", err)
+	}
+}
+
+func TestOpenAIRequestToTypedKeepsLegacyTolerantProjection(t *testing.T) {
+	req := &OpenAIRequest{
+		Messages: []OpenAIMessage{
+			{
+				Role: core.RoleUser,
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "unknown",
+					},
+					map[string]interface{}{
+						"type": "text",
+						"text": "kept",
+					},
+				},
+			},
+		},
+	}
+
+	typed := OpenAIRequestToTyped(req)
+	if len(typed.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(typed.Messages))
+	}
+	if len(typed.Messages[0].Blocks) != 1 {
+		t.Fatalf("len(Messages[0].Blocks) = %d, want 1", len(typed.Messages[0].Blocks))
+	}
+	block, ok := typed.Messages[0].Blocks[0].(core.TextBlock)
+	if !ok || block.Text != "kept" {
+		t.Fatalf("Messages[0].Blocks[0] = %#v, want text block %q", typed.Messages[0].Blocks[0], "kept")
+	}
+}
+
+func TestConvertOpenAIRequestToAnthropicRejectsMalformedContentPart(t *testing.T) {
+	converter := NewConverter(NewModelMapper(&Config{Provider: "anthropic"}))
+	req := &OpenAIRequest{
+		Model: "gpt-4.1",
+		Messages: []OpenAIMessage{
+			{
+				Role: core.RoleUser,
+				Content: []interface{}{
+					map[string]interface{}{"type": "unknown"},
+				},
+			},
+		},
+	}
+
+	_, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), req)
+	if err == nil {
+		t.Fatal("ConvertOpenAIRequestToAnthropic() error = nil, want malformed content error")
+	}
+	if !strings.Contains(err.Error(), `content[0].type: unsupported "unknown"`) {
+		t.Fatalf("ConvertOpenAIRequestToAnthropic() error = %q, want unsupported content type", err)
 	}
 }

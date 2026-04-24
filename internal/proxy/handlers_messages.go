@@ -194,12 +194,12 @@ func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info
 }
 
 func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *AnthropicRequest, provider, originalModel string) (*AnthropicResponse, error) {
-	capability, ok := proxyProviderCapabilityFor(provider)
+	policy, ok := anthropicForwardingPolicyFor(provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
 
-	forward, err := capability.requireAnthropicResponseForwarder(s)
+	forward, err := policy.requireResponseForwarder(s)
 	if err != nil {
 		return nil, err
 	}
@@ -253,11 +253,11 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	capability, ok := proxyProviderCapabilityFor(provider)
+	policy, ok := anthropicForwardingPolicyFor(provider)
 	if !ok {
 		err = fmt.Errorf("unknown provider: %s", provider)
 	} else {
-		forward, lookupErr := capability.requireAnthropicStreamForwarder(s)
+		forward, lookupErr := policy.requireStreamForwarder(s)
 		if lookupErr != nil {
 			err = lookupErr
 		} else {

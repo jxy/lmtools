@@ -14,85 +14,132 @@ type (
 	openAIStreamForwarderFactory      func(*Server) openAIStreamForwarder
 )
 
-type proxyProviderCapability struct {
-	Provider          string
-	ParseModels       func(*Server, context.Context, []byte) ([]ModelItem, error)
-	RenderTyped       typedRequestRenderer
-	AnthropicResponse anthropicResponseForwarderFactory
-	AnthropicStream   anthropicStreamForwarderFactory
-	OpenAIStream      openAIStreamForwarderFactory
+type modelProviderCapability struct {
+	Provider    string
+	ParseModels func(*Server, context.Context, []byte) ([]ModelItem, error)
+}
+
+type anthropicForwardingPolicy struct {
+	Provider string
+	Response anthropicResponseForwarderFactory
+	Stream   anthropicStreamForwarderFactory
+}
+
+type openAIStreamPolicy struct {
+	Provider string
+	Stream   openAIStreamForwarderFactory
 }
 
 var (
-	proxyProviderCapabilities     map[string]proxyProviderCapability
-	proxyProviderCapabilitiesOnce sync.Once
+	modelProviderCapabilities     map[string]modelProviderCapability
+	modelProviderCapabilitiesOnce sync.Once
+	anthropicForwardingPolicies   map[string]anthropicForwardingPolicy
+	openAIStreamPolicies          map[string]openAIStreamPolicy
+	forwardingPoliciesOnce        sync.Once
 )
 
-func initProxyProviderCapabilities() {
-	proxyProviderCapabilities = map[string]proxyProviderCapability{
+func initModelProviderCapabilities() {
+	modelProviderCapabilities = map[string]modelProviderCapability{
 		constants.ProviderOpenAI: {
 			Provider:    constants.ProviderOpenAI,
 			ParseModels: (*Server).parseOpenAIModelsForProvider,
-			RenderTyped: renderTypedToOpenAIRequest,
-			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
-				return s.forwardAnthropicViaOpenAI
-			},
-			AnthropicStream: func(s *Server) anthropicStreamForwarder {
-				return s.streamFromOpenAI
-			},
 		},
 		constants.ProviderAnthropic: {
 			Provider:    constants.ProviderAnthropic,
 			ParseModels: (*Server).parseAnthropicModelsForProvider,
-			RenderTyped: renderTypedToAnthropicRequest,
-			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
-				return s.forwardAnthropicViaAnthropic
-			},
-			AnthropicStream: func(s *Server) anthropicStreamForwarder {
-				return s.streamFromAnthropic
-			},
-			OpenAIStream: func(s *Server) openAIStreamForwarder {
-				return s.streamOpenAIFromAnthropic
-			},
 		},
 		constants.ProviderGoogle: {
 			Provider:    constants.ProviderGoogle,
 			ParseModels: (*Server).parseGoogleModelsForProvider,
-			RenderTyped: renderTypedToGoogleRequest,
-			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
-				return s.forwardAnthropicViaGoogle
-			},
-			AnthropicStream: func(s *Server) anthropicStreamForwarder {
-				return s.streamFromGoogle
-			},
-			OpenAIStream: func(s *Server) openAIStreamForwarder {
-				return s.streamOpenAIFromGoogle
-			},
 		},
 		constants.ProviderArgo: {
 			Provider:    constants.ProviderArgo,
 			ParseModels: (*Server).parseArgoModelsForProvider,
-			RenderTyped: renderTypedToArgoRequest,
-			AnthropicResponse: func(s *Server) anthropicResponseForwarder {
+		},
+	}
+}
+
+func initForwardingPolicies() {
+	anthropicForwardingPolicies = map[string]anthropicForwardingPolicy{
+		constants.ProviderOpenAI: {
+			Provider: constants.ProviderOpenAI,
+			Response: func(s *Server) anthropicResponseForwarder {
+				return s.forwardAnthropicViaOpenAI
+			},
+			Stream: func(s *Server) anthropicStreamForwarder {
+				return s.streamFromOpenAI
+			},
+		},
+		constants.ProviderAnthropic: {
+			Provider: constants.ProviderAnthropic,
+			Response: func(s *Server) anthropicResponseForwarder {
+				return s.forwardAnthropicViaAnthropic
+			},
+			Stream: func(s *Server) anthropicStreamForwarder {
+				return s.streamFromAnthropic
+			},
+		},
+		constants.ProviderGoogle: {
+			Provider: constants.ProviderGoogle,
+			Response: func(s *Server) anthropicResponseForwarder {
+				return s.forwardAnthropicViaGoogle
+			},
+			Stream: func(s *Server) anthropicStreamForwarder {
+				return s.streamFromGoogle
+			},
+		},
+		constants.ProviderArgo: {
+			Provider: constants.ProviderArgo,
+			Response: func(s *Server) anthropicResponseForwarder {
 				return s.forwardAnthropicViaArgo
 			},
-			AnthropicStream: func(s *Server) anthropicStreamForwarder {
+			Stream: func(s *Server) anthropicStreamForwarder {
 				return s.streamFromArgo
 			},
-			OpenAIStream: func(s *Server) openAIStreamForwarder {
+		},
+	}
+
+	openAIStreamPolicies = map[string]openAIStreamPolicy{
+		constants.ProviderAnthropic: {
+			Provider: constants.ProviderAnthropic,
+			Stream: func(s *Server) openAIStreamForwarder {
+				return s.streamOpenAIFromAnthropic
+			},
+		},
+		constants.ProviderGoogle: {
+			Provider: constants.ProviderGoogle,
+			Stream: func(s *Server) openAIStreamForwarder {
+				return s.streamOpenAIFromGoogle
+			},
+		},
+		constants.ProviderArgo: {
+			Provider: constants.ProviderArgo,
+			Stream: func(s *Server) openAIStreamForwarder {
 				return s.streamOpenAIFromArgo
 			},
 		},
 	}
 }
 
-func proxyProviderCapabilityFor(provider string) (proxyProviderCapability, bool) {
-	proxyProviderCapabilitiesOnce.Do(initProxyProviderCapabilities)
-	capability, ok := proxyProviderCapabilities[constants.NormalizeProvider(provider)]
+func modelProviderCapabilityFor(provider string) (modelProviderCapability, bool) {
+	modelProviderCapabilitiesOnce.Do(initModelProviderCapabilities)
+	capability, ok := modelProviderCapabilities[constants.NormalizeProvider(provider)]
 	return capability, ok
 }
 
-func (capability proxyProviderCapability) displayName() string {
+func anthropicForwardingPolicyFor(provider string) (anthropicForwardingPolicy, bool) {
+	forwardingPoliciesOnce.Do(initForwardingPolicies)
+	policy, ok := anthropicForwardingPolicies[constants.NormalizeProvider(provider)]
+	return policy, ok
+}
+
+func openAIStreamPolicyFor(provider string) (openAIStreamPolicy, bool) {
+	forwardingPoliciesOnce.Do(initForwardingPolicies)
+	policy, ok := openAIStreamPolicies[constants.NormalizeProvider(provider)]
+	return policy, ok
+}
+
+func (capability modelProviderCapability) displayName() string {
 	if info, ok := providers.InfoFor(capability.Provider); ok {
 		return info.DisplayName
 	}
@@ -102,23 +149,23 @@ func (capability proxyProviderCapability) displayName() string {
 	return "unknown"
 }
 
-func (capability proxyProviderCapability) requireAnthropicResponseForwarder(s *Server) (anthropicResponseForwarder, error) {
-	if capability.AnthropicResponse == nil {
-		return nil, fmt.Errorf("route request: unknown provider: %s", capability.Provider)
+func (policy anthropicForwardingPolicy) requireResponseForwarder(s *Server) (anthropicResponseForwarder, error) {
+	if policy.Response == nil {
+		return nil, fmt.Errorf("route request: unknown provider: %s", policy.Provider)
 	}
-	return capability.AnthropicResponse(s), nil
+	return policy.Response(s), nil
 }
 
-func (capability proxyProviderCapability) requireAnthropicStreamForwarder(s *Server) (anthropicStreamForwarder, error) {
-	if capability.AnthropicStream == nil {
-		return nil, fmt.Errorf("stream request: unknown provider: %s", capability.Provider)
+func (policy anthropicForwardingPolicy) requireStreamForwarder(s *Server) (anthropicStreamForwarder, error) {
+	if policy.Stream == nil {
+		return nil, fmt.Errorf("stream request: unknown provider: %s", policy.Provider)
 	}
-	return capability.AnthropicStream(s), nil
+	return policy.Stream(s), nil
 }
 
-func (capability proxyProviderCapability) requireOpenAIStreamForwarder(s *Server) (openAIStreamForwarder, error) {
-	if capability.OpenAIStream == nil {
-		return nil, fmt.Errorf("unsupported provider for streaming: %s", capability.Provider)
+func (policy openAIStreamPolicy) requireStreamForwarder(s *Server) (openAIStreamForwarder, error) {
+	if policy.Stream == nil {
+		return nil, fmt.Errorf("unsupported provider for streaming: %s", policy.Provider)
 	}
-	return capability.OpenAIStream(s), nil
+	return policy.Stream(s), nil
 }

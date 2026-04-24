@@ -336,35 +336,39 @@ func rawJSONToInterface(raw json.RawMessage) interface{} {
 	return nil
 }
 
-func openAIContentToTypedUnion(content interface{}) core.OpenAIContentUnion {
+func openAIContentToTypedUnionForMode(content interface{}, strict bool) (core.OpenAIContentUnion, error) {
 	switch value := content.(type) {
 	case string:
 		return core.OpenAIContentUnion{
 			Text:     &value,
 			Contents: nil,
-		}
+		}, nil
 	case []interface{}:
-		return core.OpenAIContentUnion{
-			Contents: openAIContentItemsToTyped(value),
-		}
+		contents, err := openAIContentItemsToTypedForMode(value, strict)
+		return core.OpenAIContentUnion{Contents: contents}, err
 	case []map[string]interface{}:
 		items := make([]interface{}, len(value))
 		for i, item := range value {
 			items[i] = item
 		}
-		return core.OpenAIContentUnion{
-			Contents: openAIContentItemsToTyped(items),
-		}
+		contents, err := openAIContentItemsToTypedForMode(items, strict)
+		return core.OpenAIContentUnion{Contents: contents}, err
 	default:
-		return core.OpenAIContentUnion{}
+		if strict && content != nil {
+			return core.OpenAIContentUnion{}, fmt.Errorf("expected string or content array, got %T", content)
+		}
+		return core.OpenAIContentUnion{}, nil
 	}
 }
 
-func openAIContentItemsToTyped(items []interface{}) []core.OpenAIContent {
+func openAIContentItemsToTypedForMode(items []interface{}, strict bool) ([]core.OpenAIContent, error) {
 	contents := make([]core.OpenAIContent, 0, len(items))
-	for _, item := range items {
+	for i, item := range items {
 		contentMap, ok := item.(map[string]interface{})
 		if !ok {
+			if strict {
+				return nil, fmt.Errorf("content[%d]: expected object, got %T", i, item)
+			}
 			continue
 		}
 
@@ -378,6 +382,9 @@ func openAIContentItemsToTyped(items []interface{}) []core.OpenAIContent {
 		case "image_url":
 			imageURLMap, ok := contentMap["image_url"].(map[string]interface{})
 			if !ok {
+				if strict {
+					return nil, fmt.Errorf("content[%d].image_url: expected object", i)
+				}
 				continue
 			}
 			contents = append(contents, core.OpenAIContent{
@@ -390,6 +397,9 @@ func openAIContentItemsToTyped(items []interface{}) []core.OpenAIContent {
 		case "input_audio":
 			audioMap, ok := contentMap["input_audio"].(map[string]interface{})
 			if !ok {
+				if strict {
+					return nil, fmt.Errorf("content[%d].input_audio: expected object", i)
+				}
 				continue
 			}
 			audioData := &core.AudioData{
@@ -409,6 +419,9 @@ func openAIContentItemsToTyped(items []interface{}) []core.OpenAIContent {
 		case "file":
 			fileMap, ok := contentMap["file"].(map[string]interface{})
 			if !ok {
+				if strict {
+					return nil, fmt.Errorf("content[%d].file: expected object", i)
+				}
 				continue
 			}
 			contents = append(contents, core.OpenAIContent{
@@ -422,9 +435,16 @@ func openAIContentItemsToTyped(items []interface{}) []core.OpenAIContent {
 					Size:     core.GetInt64(fileMap, "size"),
 				},
 			})
+		default:
+			if strict {
+				if contentType == "" {
+					return nil, fmt.Errorf("content[%d].type: missing or not a string", i)
+				}
+				return nil, fmt.Errorf("content[%d].type: unsupported %q", i, contentType)
+			}
 		}
 	}
-	return contents
+	return contents, nil
 }
 
 func openAIToolCallsToTyped(toolCalls []ToolCall) []core.OpenAIToolCall {

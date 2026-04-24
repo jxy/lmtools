@@ -140,8 +140,10 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *OpenAIRequest) (*AnthropicRequest, error) {
 	warnOpenAIRequestDropsForAnthropic(ctx, req)
 
-	// Use the typed conversion path as the single source of truth
-	typed := OpenAIRequestToTyped(req)
+	typed, err := OpenAIRequestToTypedStrict(req)
+	if err != nil {
+		return nil, err
+	}
 	if req.User != "" {
 		if typed.Metadata == nil {
 			typed.Metadata = map[string]interface{}{}
