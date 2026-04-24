@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"lmtools/internal/prompts"
 	"os"
 	"strings"
@@ -19,6 +20,9 @@ type TestRequestConfig struct {
 	Provider            string
 	ProviderURL         string
 	APIKeyFile          string
+	Effort              string
+	JSONMode            bool
+	JSONSchema          json.RawMessage
 	IsEmbedMode         bool
 	IsStreamChatMode    bool
 	IsToolEnabledFlag   bool
@@ -49,9 +53,14 @@ func (c *TestRequestConfig) GetEnv() string              { return c.Env }
 func (c *TestRequestConfig) GetProvider() string         { return c.Provider }
 func (c *TestRequestConfig) GetProviderURL() string      { return c.ProviderURL }
 func (c *TestRequestConfig) GetAPIKeyFile() string       { return c.APIKeyFile }
-func (c *TestRequestConfig) IsEmbed() bool               { return c.IsEmbedMode }
-func (c *TestRequestConfig) IsStreamChat() bool          { return c.IsStreamChatMode }
-func (c *TestRequestConfig) IsToolEnabled() bool         { return c.IsToolEnabledFlag }
+func (c *TestRequestConfig) GetEffort() string           { return c.Effort }
+func (c *TestRequestConfig) IsJSONMode() bool            { return c.JSONMode }
+func (c *TestRequestConfig) GetJSONSchema() json.RawMessage {
+	return append(json.RawMessage(nil), c.JSONSchema...)
+}
+func (c *TestRequestConfig) IsEmbed() bool       { return c.IsEmbedMode }
+func (c *TestRequestConfig) IsStreamChat() bool  { return c.IsStreamChatMode }
+func (c *TestRequestConfig) IsToolEnabled() bool { return c.IsToolEnabledFlag }
 func (c *TestRequestConfig) GetToolTimeout() time.Duration {
 	if c.ToolTimeout > 0 {
 		return c.ToolTimeout

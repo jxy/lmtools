@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"lmtools/internal/constants"
@@ -16,11 +17,15 @@ func getDefaultUser() string {
 
 type Config struct {
 	// Tool execution settings
-	MaxToolRounds       int           `json:"max_tool_rounds,omitempty"`
-	MaxToolParallel     int           `json:"max_tool_parallel,omitempty"`
-	Model               string        // model to use
-	Embed               bool          // whether to run in embed mode
-	StreamChat          bool          // whether to use streaming chat mode
+	MaxToolRounds       int    `json:"max_tool_rounds,omitempty"`
+	MaxToolParallel     int    `json:"max_tool_parallel,omitempty"`
+	Model               string // model to use
+	Embed               bool   // whether to run in embed mode
+	StreamChat          bool   // whether to use streaming chat mode
+	Effort              string // reasoning effort hint
+	JSONMode            bool   // request JSON object output
+	JSONSchemaPath      string // path to JSON schema for structured output
+	JSONSchema          json.RawMessage
 	ArgoUser            string        // user identifier for Argo provider (or use APIKeyFile)
 	System              string        // system prompt for chat
 	SystemExplicitlySet bool          // whether -s flag was explicitly provided
@@ -87,6 +92,10 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, err
 	}
 
+	if err := validateOutputFlags(&cfg); err != nil {
+		return cfg, err
+	}
+
 	if err := normalizeAndValidateProvider(&cfg); err != nil {
 		return cfg, err
 	}
@@ -111,6 +120,9 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
+	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
+	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
+	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")
 
 	// Tool Options
 	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable built-in universal_command tool")
@@ -221,6 +233,9 @@ func (c Config) RequestOptions() core.RequestOptions {
 		Provider:            c.Provider,
 		ProviderURL:         c.ProviderURL,
 		APIKeyFile:          c.APIKeyFile,
+		Effort:              c.Effort,
+		JSONMode:            c.JSONMode,
+		JSONSchema:          append(json.RawMessage(nil), c.JSONSchema...),
 		ToolEnabled:         c.EnableTool,
 		ToolTimeout:         c.ToolTimeout,
 		ToolWhitelist:       c.ToolWhitelist,

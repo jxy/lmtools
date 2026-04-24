@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"lmtools/internal/constants"
 )
@@ -15,6 +16,9 @@ type PreparedRequestPayload struct {
 	Tools      interface{}
 	ToolChoice interface{}
 	Stream     bool
+	Effort     string
+	JSONMode   bool
+	JSONSchema json.RawMessage
 }
 
 // PrepareRequestPayload applies provider-specific request normalization,

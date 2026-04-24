@@ -14,6 +14,7 @@ func openAIRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 		"stream":   payload.Stream,
 	}
 	addToolFields(reqMap, payload)
+	addOpenAIOutputFields(reqMap, payload)
 	return reqMap
 }
 
@@ -27,6 +28,7 @@ func anthropicRequestMap(payload PreparedRequestPayload) map[string]interface{} 
 		reqMap["system"] = payload.System
 	}
 	addToolFields(reqMap, payload)
+	addAnthropicOutputFields(reqMap, payload)
 	return reqMap
 }
 
@@ -41,7 +43,163 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 		reqMap["tools"] = payload.Tools
 		reqMap["toolConfig"] = googleAutoToolConfig()
 	}
+	addGoogleOutputFields(reqMap, payload)
 	return reqMap
+}
+
+func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg interface{}) {
+	outputCfg, ok := cfg.(OutputConfig)
+	if !ok {
+		return
+	}
+	payload.Effort = strings.ToLower(strings.TrimSpace(outputCfg.GetEffort()))
+	payload.JSONMode = outputCfg.IsJSONMode()
+	if schema := outputCfg.GetJSONSchema(); len(schema) > 0 {
+		payload.JSONSchema = append(payload.JSONSchema[:0], schema...)
+	}
+}
+
+func addOpenAIOutputFields(reqMap map[string]interface{}, payload PreparedRequestPayload) {
+	if effort := openAIReasoningEffort(payload.Effort); effort != "" {
+		reqMap["reasoning_effort"] = effort
+	}
+	if responseFormat := openAIResponseFormat(payload); responseFormat != nil {
+		reqMap["response_format"] = responseFormat
+	}
+}
+
+func addAnthropicOutputFields(reqMap map[string]interface{}, payload PreparedRequestPayload) {
+	outputConfig := make(map[string]interface{})
+	if effort := anthropicOutputEffort(payload.Effort); effort != "" {
+		outputConfig["effort"] = effort
+	}
+	if format := anthropicOutputFormat(payload); format != nil {
+		outputConfig["format"] = format
+	}
+	if len(outputConfig) > 0 {
+		reqMap["output_config"] = outputConfig
+	}
+}
+
+func addGoogleOutputFields(reqMap map[string]interface{}, payload PreparedRequestPayload) {
+	generationConfig := make(map[string]interface{})
+	if existing, ok := reqMap["generationConfig"].(map[string]interface{}); ok {
+		generationConfig = existing
+	}
+
+	if payload.JSONMode || len(payload.JSONSchema) > 0 {
+		generationConfig["responseMimeType"] = "application/json"
+	}
+	if len(payload.JSONSchema) > 0 {
+		generationConfig["responseJsonSchema"] = payload.JSONSchema
+	}
+	if thinkingConfig := googleThinkingConfig(payload.Model, payload.Effort); thinkingConfig != nil {
+		generationConfig["thinkingConfig"] = thinkingConfig
+	}
+	if len(generationConfig) > 0 {
+		reqMap["generationConfig"] = generationConfig
+	}
+}
+
+func openAIReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return strings.ToLower(strings.TrimSpace(effort))
+	case "max":
+		return "xhigh"
+	default:
+		return ""
+	}
+}
+
+func anthropicOutputEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "minimal", "low":
+		return "low"
+	case "medium", "high", "xhigh", "max":
+		return strings.ToLower(strings.TrimSpace(effort))
+	default:
+		return ""
+	}
+}
+
+func openAIResponseFormat(payload PreparedRequestPayload) map[string]interface{} {
+	if len(payload.JSONSchema) > 0 {
+		return map[string]interface{}{
+			"type": "json_schema",
+			"json_schema": map[string]interface{}{
+				"name":   "response",
+				"schema": payload.JSONSchema,
+			},
+		}
+	}
+	if payload.JSONMode {
+		return map[string]interface{}{"type": "json_object"}
+	}
+	return nil
+}
+
+func anthropicOutputFormat(payload PreparedRequestPayload) map[string]interface{} {
+	if len(payload.JSONSchema) > 0 {
+		return map[string]interface{}{
+			"type":   "json_schema",
+			"schema": payload.JSONSchema,
+		}
+	}
+	if payload.JSONMode {
+		return map[string]interface{}{"type": "json_object"}
+	}
+	return nil
+}
+
+func googleThinkingConfig(model, effort string) map[string]interface{} {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "" {
+		return nil
+	}
+
+	modelLower := strings.ToLower(strings.TrimSpace(model))
+	if strings.Contains(modelLower, "gemini-2.5") {
+		budget, ok := googleThinkingBudget(effort)
+		if !ok {
+			return nil
+		}
+		return map[string]interface{}{"thinkingBudget": budget}
+	}
+
+	level := googleThinkingLevel(effort)
+	if level == "" {
+		return nil
+	}
+	return map[string]interface{}{"thinkingLevel": level}
+}
+
+func googleThinkingBudget(effort string) (int, bool) {
+	switch effort {
+	case "none":
+		return 0, true
+	case "minimal", "low":
+		return 1024, true
+	case "medium":
+		return 8192, true
+	case "high", "xhigh", "max":
+		return 24576, true
+	default:
+		return 0, false
+	}
+}
+
+func googleThinkingLevel(effort string) string {
+	switch effort {
+	case "minimal":
+		return "minimal"
+	case "low", "medium", "high":
+		return effort
+	case "xhigh", "max":
+		return "high"
+	default:
+		return ""
+	}
 }
 
 func googleSystemInstruction(system string) map[string]interface{} {

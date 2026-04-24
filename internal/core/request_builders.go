@@ -97,6 +97,7 @@ func buildToolAwareRequest(cfg ChatRequestConfig, provider string, typedMessages
 	if err != nil {
 		return nil, nil, err
 	}
+	applyOutputOptionsFromConfig(&payload, cfg)
 
 	body, err := json.Marshal(spec.RequestMap(payload))
 	if err != nil {

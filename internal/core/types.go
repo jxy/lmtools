@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"time"
@@ -57,6 +58,12 @@ type ToolConfig interface {
 	GetToolMaxOutputBytes() int
 }
 
+type OutputConfig interface {
+	GetEffort() string
+	IsJSONMode() bool
+	GetJSONSchema() json.RawMessage
+}
+
 type SessionResumeConfig interface {
 	GetResume() string
 	GetBranch() string
@@ -77,6 +84,9 @@ type RequestOptions struct {
 	Provider            string
 	ProviderURL         string
 	APIKeyFile          string
+	Effort              string
+	JSONMode            bool
+	JSONSchema          json.RawMessage
 	ToolEnabled         bool
 	ToolTimeout         time.Duration
 	ToolWhitelist       string
@@ -109,7 +119,12 @@ func (o RequestOptions) IsStreamChat() bool          { return o.StreamChat }
 func (o RequestOptions) GetProvider() string         { return o.Provider }
 func (o RequestOptions) GetProviderURL() string      { return o.ProviderURL }
 func (o RequestOptions) GetAPIKeyFile() string       { return o.APIKeyFile }
-func (o RequestOptions) IsToolEnabled() bool         { return o.ToolEnabled }
+func (o RequestOptions) GetEffort() string           { return o.Effort }
+func (o RequestOptions) IsJSONMode() bool            { return o.JSONMode }
+func (o RequestOptions) GetJSONSchema() json.RawMessage {
+	return append(json.RawMessage(nil), o.JSONSchema...)
+}
+func (o RequestOptions) IsToolEnabled() bool { return o.ToolEnabled }
 
 func (o RequestOptions) GetToolTimeout() time.Duration {
 	if o.ToolTimeout <= 0 {

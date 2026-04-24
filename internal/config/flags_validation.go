@@ -1,12 +1,15 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providers"
+	"os"
+	"strings"
 )
 
 type explicitFlagState struct {
@@ -72,6 +75,50 @@ func validateModeFlagCombinations(cfg Config) error {
 		return fmt.Errorf(prompts.ErrEmbedWithSession)
 	}
 	return nil
+}
+
+func validateOutputFlags(cfg *Config) error {
+	if cfg.JSONMode && cfg.JSONSchemaPath != "" {
+		return fmt.Errorf("invalid flag combination: -json and -json-schema cannot be used together")
+	}
+
+	if cfg.Embed && (cfg.Effort != "" || cfg.JSONMode || cfg.JSONSchemaPath != "") {
+		return fmt.Errorf("invalid flag combination: -effort, -json, and -json-schema are only supported in chat mode")
+	}
+
+	if cfg.Effort != "" && !isValidEffortFlag(cfg.Effort) {
+		return fmt.Errorf("-effort must be one of: none, minimal, low, medium, high, xhigh, max")
+	}
+
+	if cfg.JSONSchemaPath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(cfg.JSONSchemaPath)
+	if err != nil {
+		return fmt.Errorf("read -json-schema file: %w", err)
+	}
+	if !json.Valid(data) {
+		return fmt.Errorf("-json-schema file must contain valid JSON")
+	}
+	var schema map[string]interface{}
+	if err := json.Unmarshal(data, &schema); err != nil {
+		return fmt.Errorf("-json-schema file must contain a JSON object: %w", err)
+	}
+	if schema == nil {
+		return fmt.Errorf("-json-schema file must contain a JSON object")
+	}
+	cfg.JSONSchema = append(cfg.JSONSchema[:0], data...)
+	return nil
+}
+
+func isValidEffortFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateSessionFlagCombinations(cfg Config) error {

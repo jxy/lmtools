@@ -127,6 +127,9 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 ### Chat Options
 - `-stream`: Use streaming chat mode for real-time responses
 - `-s string`: System prompt for chat mode (default: "You are a brilliant assistant.")
+- `-effort string`: Reasoning effort hint (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
+- `-json`: Request JSON object output
+- `-json-schema string`: Path to a JSON schema file for structured output
 
 ### Tool Execution
 - `-tool`: Enable built-in universal_command tool for system command execution

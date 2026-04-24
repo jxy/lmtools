@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -161,6 +162,91 @@ func TestRequestOptionsAppliesCoreDefaults(t *testing.T) {
 	}
 	if got := opts.GetToolMaxOutputBytes(); got != 1024*1024 {
 		t.Fatalf("GetToolMaxOutputBytes() = %d, want 1MiB", got)
+	}
+}
+
+func TestParseFlagsOutputOptions(t *testing.T) {
+	schemaPath := t.TempDir() + "/schema.json"
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object","properties":{"answer":{"type":"string"}}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := ParseFlags([]string{
+		"-argo-user", "alice",
+		"-effort", "high",
+		"-json-schema", schemaPath,
+	})
+	if err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	if cfg.Effort != "high" {
+		t.Fatalf("Effort = %q, want high", cfg.Effort)
+	}
+	if string(cfg.JSONSchema) == "" {
+		t.Fatal("JSONSchema was not loaded")
+	}
+
+	opts := cfg.RequestOptions()
+	if opts.GetEffort() != "high" {
+		t.Fatalf("RequestOptions.GetEffort() = %q, want high", opts.GetEffort())
+	}
+	if string(opts.GetJSONSchema()) != string(cfg.JSONSchema) {
+		t.Fatalf("RequestOptions schema was not preserved")
+	}
+}
+
+func TestParseFlagsOutputOptionValidation(t *testing.T) {
+	invalidSchemaPath := t.TempDir() + "/schema.json"
+	if err := os.WriteFile(invalidSchemaPath, []byte(`not json`), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	nullSchemaPath := t.TempDir() + "/null-schema.json"
+	if err := os.WriteFile(nullSchemaPath, []byte(`null`), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "json and schema conflict",
+			args:    []string{"-argo-user", "alice", "-json", "-json-schema", invalidSchemaPath},
+			wantErr: "-json and -json-schema cannot be used together",
+		},
+		{
+			name:    "invalid effort",
+			args:    []string{"-argo-user", "alice", "-effort", "extreme"},
+			wantErr: "-effort must be one of",
+		},
+		{
+			name:    "embed output option",
+			args:    []string{"-argo-user", "alice", "-e", "-json"},
+			wantErr: "only supported in chat mode",
+		},
+		{
+			name:    "invalid schema json",
+			args:    []string{"-argo-user", "alice", "-json-schema", invalidSchemaPath},
+			wantErr: "valid JSON",
+		},
+		{
+			name:    "null schema json",
+			args:    []string{"-argo-user", "alice", "-json-schema", nullSchemaPath},
+			wantErr: "JSON object",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseFlags(tt.args)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

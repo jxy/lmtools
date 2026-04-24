@@ -50,6 +50,7 @@ func newArgoChatRequestPlan(cfg ChatRequestConfig, messages []TypedMessage, mode
 	if err != nil {
 		return argoChatRequestPlan{}, err
 	}
+	applyOutputOptionsFromConfig(&payload, cfg)
 
 	plan := argoChatRequestPlan{
 		Model:        model,
@@ -96,6 +97,9 @@ func buildLegacyArgoChatRequest(cfg ChatRequestConfig, model string, messages []
 			bodyMap["tool_choice"] = converted.ToolChoice
 		}
 	}
+	payload := PreparedRequestPayload{Model: model}
+	applyOutputOptionsFromConfig(&payload, cfg)
+	addOpenAIOutputFields(bodyMap, payload)
 
 	body, err := json.Marshal(bodyMap)
 	if err != nil {
