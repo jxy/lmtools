@@ -225,8 +225,5 @@ func (s *GoogleStreamState) generateToolCallID() string {
 
 // RunStream is a unified helper for running provider-specific streaming parsers
 func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, state StreamState, providerName string) (string, []ToolCall, error) {
-	parser := func(line string, s interface{}) (string, []ToolCall, bool, error) {
-		return state.ParseLine(line)
-	}
-	return handleGenericStream(ctx, body, logFile, out, notifier, parser, state, providerName)
+	return handleGenericStream(ctx, body, logFile, out, notifier, state, providerName)
 }

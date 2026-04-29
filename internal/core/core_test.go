@@ -559,7 +559,6 @@ func TestSSEParserMultiLine(t *testing.T) {
 		name     string
 		input    string
 		expected []string
-		parser   streamParser
 	}{
 		{
 			name: "multi-line data frame",
@@ -574,7 +573,6 @@ line2
 line3"}`,
 				`{"text": "single"}`,
 			},
-			parser: parseTestSSE,
 		},
 		{
 			name: "comment lines ignored",
@@ -587,7 +585,6 @@ data: {"text": "data2"}`,
 				`{"text": "data1"}`,
 				`{"text": "data2"}`,
 			},
-			parser: parseTestSSE,
 		},
 		{
 			name: "event and id fields",
@@ -600,7 +597,6 @@ event: ping
 			expected: []string{
 				`{"text": "with metadata"}`,
 			},
-			parser: parseTestSSE,
 		},
 	}
 
@@ -617,22 +613,14 @@ event: ping
 			defer os.Remove(logFile.Name())
 			defer logFile.Close()
 
-			// Collect parsed content
 			var collected []string
-			parser := func(line string, state interface{}) (string, []ToolCall, bool, error) {
-				if strings.HasPrefix(line, "data: ") {
-					content := strings.TrimPrefix(line, "data: ")
-					collected = append(collected, content)
-					return content, nil, false, nil
-				}
-				return "", nil, false, nil
-			}
+			state := &collectingStreamState{collected: &collected}
 
 			// Run the parser
 			ctx := context.Background()
 			var output strings.Builder
 			testNotifier := &testNotifier{}
-			_, _, err = handleGenericStream(ctx, io.NopCloser(reader), logFile, &output, testNotifier, parser, nil, "test")
+			_, _, err = handleGenericStream(ctx, io.NopCloser(reader), logFile, &output, testNotifier, state, "test")
 			if err != nil {
 				t.Fatalf("handleGenericStream failed: %v", err)
 			}
@@ -652,6 +640,19 @@ event: ping
 			}
 		})
 	}
+}
+
+type collectingStreamState struct {
+	collected *[]string
+}
+
+func (s *collectingStreamState) ParseLine(line string) (string, []ToolCall, bool, error) {
+	if strings.HasPrefix(line, "data: ") {
+		content := strings.TrimPrefix(line, "data: ")
+		*s.collected = append(*s.collected, content)
+		return content, nil, false, nil
+	}
+	return "", nil, false, nil
 }
 
 type testLogger struct {
@@ -690,13 +691,6 @@ func (t *testLogger) LogJSON(dir string, prefix string, data []byte) error {
 	defer f.Close()
 	_, err = f.Write(data)
 	return err
-}
-
-func parseTestSSE(line string, state interface{}) (string, []ToolCall, bool, error) {
-	if strings.HasPrefix(line, "data: ") {
-		return strings.TrimPrefix(line, "data: "), nil, false, nil
-	}
-	return "", nil, false, nil
 }
 
 // testNotifier is a minimal implementation for testing

@@ -60,7 +60,7 @@ func NewRequestController(ctx context.Context, cfg *config.Config, opts core.Req
 }
 
 // handleRequest processes the main request lifecycle
-func (rc *RequestController) handleRequest(inputStr string, sess *session.Session, isRegeneration bool) error {
+func (rc *RequestController) handleRequest(inputStr string, sess *session.Session) error {
 	// Build HTTP request
 	rb, err := rc.buildRequest(sess, inputStr)
 	if err != nil {
@@ -172,24 +172,15 @@ func (rc *RequestController) createToolStoreAndMessageBuilder(sess *session.Sess
 	return store, store.Messages
 }
 
-// createMessageBuilder creates an appropriate message builder for the session
+// createMessageBuilder creates an appropriate message builder for the session.
 func (rc *RequestController) createMessageBuilder(sess *session.Session) func(string) ([]core.TypedMessage, error) {
-	if sess != nil {
-		if cached, err := session.CreateCachedMessageBuilder(rc.ctx, sess.Path); err == nil {
-			// Use the cached builder directly
-			return cached
-		} else {
-			logger.From(rc.ctx).Warnf("Failed to create cached message builder: %v", err)
-			// Fall back to the default builder with context wrapper
-			return func(path string) ([]core.TypedMessage, error) {
-				return session.BuildMessagesWithToolInteractions(rc.ctx, path)
-			}
-		}
-	} else {
-		// Use default builder with context wrapper
-		return func(path string) ([]core.TypedMessage, error) {
-			return session.BuildMessagesWithToolInteractions(rc.ctx, path)
-		}
+	cached, err := session.CreateCachedMessageBuilder(rc.ctx, sess.Path)
+	if err == nil {
+		return cached
+	}
+	logger.From(rc.ctx).Warnf("Failed to create cached message builder: %v", err)
+	return func(path string) ([]core.TypedMessage, error) {
+		return session.BuildMessagesWithToolInteractions(rc.ctx, path)
 	}
 }
 
@@ -299,7 +290,7 @@ func run(notifier core.Notifier) error {
 
 	// Create request controller and handle the request
 	controller := NewRequestController(ctx, &cfg, opts, notifier, logDir)
-	return controller.handleRequest(inputStr, sess, isRegeneration)
+	return controller.handleRequest(inputStr, sess)
 }
 
 // handleSpecialFlags handles flags that don't require the full request processing

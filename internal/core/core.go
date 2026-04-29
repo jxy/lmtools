@@ -442,13 +442,9 @@ func BuildRequestWithToolInteractions(ctx context.Context, cfg ChatRequestConfig
 // Streaming Response Handlers
 // ============================================================================
 
-// streamParser defines a unified function that processes a line from a stream
-// and returns content, tool calls (may be nil), done status, and any error
-type streamParser func(line string, state interface{}) (content string, toolCalls []ToolCall, done bool, err error)
-
 // handleGenericStream is a unified stream handler that processes streaming responses
-// using a provided parser function that may return tool calls
-func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, parser streamParser, initialState interface{}, provider string) (string, []ToolCall, error) {
+// using a provider-specific stream state that may return tool calls.
+func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, state StreamState, provider string) (string, []ToolCall, error) {
 	// Body is closed by HandleResponse, not here
 
 	var accumulated strings.Builder
@@ -457,7 +453,6 @@ func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.Fi
 	// Increase buffer size to handle large SSE lines (default is ~64KB)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 2MB max
 
-	state := initialState
 	var sseBuf []string
 	var parseErrorCount int
 
@@ -475,7 +470,7 @@ func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.Fi
 		_, _ = logFile.WriteString("data: " + joined + "\n\n")
 
 		// Parse the complete data
-		content, toolCalls, done, err := parser("data: "+joined, state)
+		content, toolCalls, done, err := state.ParseLine("data: " + joined)
 		if err != nil {
 			// Log parsing error to file
 			_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
@@ -536,7 +531,7 @@ scanLoop:
 			switch {
 			case strings.HasPrefix(line, "event:"):
 				// Provider-specific event handling
-				content, toolCalls, done, err := parser(line, state)
+				content, toolCalls, done, err := state.ParseLine(line)
 				if err != nil {
 					// Log parsing error to file
 					_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)

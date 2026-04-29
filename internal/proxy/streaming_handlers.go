@@ -55,22 +55,39 @@ func ensureAnthropicTextPreamble(handler *AnthropicStreamHandler) error {
 func consumeSSEStream(reader io.Reader, onData func(event string, data json.RawMessage) error) error {
 	scanner := NewSSEScanner(reader)
 	var currentEvent string
+	var dataLines []string
+
+	flush := func() error {
+		if len(dataLines) == 0 {
+			return nil
+		}
+		data := strings.Join(dataLines, "\n")
+		dataLines = dataLines[:0]
+		return onData(currentEvent, json.RawMessage(data))
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		switch {
-		case strings.HasPrefix(line, "event: "):
-			currentEvent = strings.TrimPrefix(line, "event: ")
-		case strings.HasPrefix(line, "data: "):
-			data := strings.TrimPrefix(line, "data: ")
-			if err := onData(currentEvent, json.RawMessage(data)); err != nil {
+		case line == "":
+			if err := flush(); err != nil {
 				return err
 			}
+		case strings.HasPrefix(line, "event: "):
+			if err := flush(); err != nil {
+				return err
+			}
+			currentEvent = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return flush()
 }
 
 // googleStreamingRequest builds and sends an HTTP request for Google streaming.

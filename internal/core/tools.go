@@ -88,51 +88,25 @@ type ToolUI interface {
 	AfterExecute(results []ToolResult)
 }
 
-// toolRunner encapsulates all dependencies needed for tool execution
-type toolRunner struct {
-	Ctx        context.Context
-	Cfg        ChatRequestConfig
-	Logger     Logger
-	Notifier   Notifier
-	Approver   Approver
-	ExecCfg    ToolExecutionConfig
-	Model      string
-	ToolDefs   []ToolDefinition
-	MsgBuilder func(string) ([]TypedMessage, error)
-	UI         ToolUI
-}
-
-// InitialToolState represents the initial state for tool execution
-type InitialToolState struct {
-	Text      string
-	ToolCalls []ToolCall
-	Streamed  bool
-}
-
-// run executes the tool execution loop
-func (r *toolRunner) run(initial InitialToolState) (string, bool, error) {
-	return r.handleToolExecution(initial)
-}
-
-// handleToolExecution implements the tool execution loop
-func (r *toolRunner) handleToolExecution(initial InitialToolState) (string, bool, error) {
-	maxRounds := r.Cfg.GetMaxToolRounds()
+// handleToolExecutionLoop implements the tool execution loop.
+func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
+	maxRounds := tc.Cfg.GetMaxToolRounds()
 	if maxRounds <= 0 {
 		maxRounds = DefaultMaxToolRounds
 	}
 
-	executor, err := NewExecutor(r.Cfg, r.Logger, r.Notifier, r.Approver)
+	executor, err := NewExecutor(tc.Cfg, tc.Logger, tc.Notifier, tc.Approver)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create executor: %w", err)
 	}
 
 	rounds := 0
 	response := Response{
-		Text:      initial.Text,
-		ToolCalls: initial.ToolCalls,
+		Text:      tc.InitialText,
+		ToolCalls: tc.InitialCalls,
 	}
-	finalText := initial.Text // Track the final text to return
-	finalStreamed := initial.Streamed
+	finalText := tc.InitialText
+	finalStreamed := tc.InitialStreamed
 
 	for rounds < maxRounds && len(response.ToolCalls) > 0 {
 		rounds++
@@ -140,41 +114,41 @@ func (r *toolRunner) handleToolExecution(initial InitialToolState) (string, bool
 		// Save assistant's response with tool calls only on first round
 		// Subsequent rounds already saved their tool calls at the end of the previous iteration
 		if rounds == 1 {
-			if err := persistAssistantRound(r.Ctx, r.ExecCfg.Store, response, r.ExecCfg.ActualModel, r.Logger); err != nil {
+			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
 				return finalText, finalStreamed, err
 			}
 		}
 
 		// Notify UI before executing tools
-		if r.UI != nil {
-			r.UI.BeforeExecute(response.ToolCalls)
+		if tc.UI != nil {
+			tc.UI.BeforeExecute(response.ToolCalls)
 		}
 
 		// Execute tools in parallel
-		results := executor.ExecuteParallel(r.Ctx, response.ToolCalls)
+		results := executor.ExecuteParallel(tc.Ctx, response.ToolCalls)
 
 		// Notify UI after executing tools
-		if r.UI != nil {
-			r.UI.AfterExecute(results)
+		if tc.UI != nil {
+			tc.UI.AfterExecute(results)
 		}
 
 		// Save tool results
 		additionalText := BuildTruncationNotes(results, response.ToolCalls)
-		if err := persistToolResultsRound(r.Ctx, r.ExecCfg.Store, results, additionalText); err != nil {
+		if err := persistToolResultsRound(tc.Ctx, tc.ExecCfg.Store, results, additionalText); err != nil {
 			return finalText, finalStreamed, err
 		}
 
 		// Build and send follow-up request
-		resp, err := BuildAndSendFollowupRequest(r.Ctx, r.Cfg, r.ExecCfg, r.Model, r.ToolDefs, r.MsgBuilder, r.Logger)
+		resp, err := BuildAndSendFollowupRequest(tc.Ctx, tc.Cfg, tc.ExecCfg, tc.Model, tc.ToolDefs, tc.MessagesFn, tc.Logger)
 		if err != nil {
 			return finalText, finalStreamed, err
 		}
 		// HandleResponse closes the response body - no need to close it here
 
 		// Handle the response
-		response, err = HandleResponseWithOptions(r.Ctx, r.Cfg, resp, r.Logger, r.Notifier, ResponseParseOptions{
-			ArgoLegacy: isArgoLegacyMode(r.Cfg),
-			ToolDefs:   r.ToolDefs,
+		response, err = HandleResponseWithOptions(tc.Ctx, tc.Cfg, resp, tc.Logger, tc.Notifier, ResponseParseOptions{
+			ArgoLegacy: isArgoLegacyMode(tc.Cfg),
+			ToolDefs:   tc.ToolDefs,
 		})
 		if err != nil {
 			return finalText, finalStreamed, fmt.Errorf("failed to handle tool result response: %w", err)
@@ -188,7 +162,7 @@ func (r *toolRunner) handleToolExecution(initial InitialToolState) (string, bool
 
 		// Save response if we have content, tool calls, or provider metadata to preserve.
 		if response.Text != "" || len(response.ToolCalls) > 0 || response.ThoughtSignature != "" {
-			if err := persistAssistantRound(r.Ctx, r.ExecCfg.Store, response, r.ExecCfg.ActualModel, r.Logger); err != nil {
+			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
 				return finalText, finalStreamed, err
 			}
 		}
@@ -218,26 +192,7 @@ func (r *toolRunner) handleToolExecution(initial InitialToolState) (string, bool
 // Performance optimization: The function builds a message index once at the start to avoid
 // O(n^2) behavior when rebuilding messages across multiple tool execution rounds.
 func HandleToolExecution(tc ToolContext) ToolExecutionResult {
-	// Create a toolRunner with all the dependencies
-	runner := &toolRunner{
-		Ctx:        tc.Ctx,
-		Cfg:        tc.Cfg,
-		Logger:     tc.Logger,
-		Notifier:   tc.Notifier,
-		Approver:   tc.Approver,
-		ExecCfg:    tc.ExecCfg,
-		Model:      tc.Model,
-		ToolDefs:   tc.ToolDefs,
-		MsgBuilder: tc.MessagesFn,
-		UI:         tc.UI,
-	}
-
-	// Run the tool execution loop
-	finalText, finalStreamed, err := runner.run(InitialToolState{
-		Text:      tc.InitialText,
-		ToolCalls: tc.InitialCalls,
-		Streamed:  tc.InitialStreamed,
-	})
+	finalText, finalStreamed, err := handleToolExecutionLoop(tc)
 
 	return ToolExecutionResult{
 		FinalText:     finalText,
