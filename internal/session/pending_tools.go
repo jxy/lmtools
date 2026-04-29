@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/ui/tools"
@@ -29,6 +30,10 @@ func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.ToolConfig
 	if len(pendingTools) == 0 {
 		log.Debugf("No pending tools found in session %s", GetSessionID(sess.Path))
 		return false, nil
+	}
+
+	if !cfg.IsToolEnabled() {
+		return true, errors.WrapError("execute pending tools", fmt.Errorf("pending tool calls require -tool to continue"))
 	}
 
 	// Notify user about pending tool execution

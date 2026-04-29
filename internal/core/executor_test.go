@@ -803,3 +803,92 @@ func TestIsInteractive(t *testing.T) {
 	// We can at least verify it doesn't panic
 	_ = isInteractive()
 }
+
+type gateApprover struct {
+	gate  string
+	calls [][]string
+	mu    sync.Mutex
+}
+
+func (a *gateApprover) Approve(ctx context.Context, command []string) (bool, error) {
+	a.mu.Lock()
+	a.calls = append(a.calls, append([]string(nil), command...))
+	a.mu.Unlock()
+
+	if len(command) > 3 && command[3] == "second" {
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+		if err := os.WriteFile(a.gate, []byte("approved"), constants.FilePerm); err != nil {
+			return false, err
+		}
+	}
+
+	return true, nil
+}
+
+func TestExecutorParallelApprovesSequentiallyBeforeLaunch(t *testing.T) {
+	tmpDir := t.TempDir()
+	gate := filepath.Join(tmpDir, "approved")
+	approver := &gateApprover{gate: gate}
+
+	cfg := mockExecutorConfig{
+		toolTimeout:     5 * time.Second,
+		enableTool:      true,
+		toolAutoApprove: false,
+	}
+	logger := &mockLogger{debugEnabled: true}
+	executor, err := NewExecutor(cfg, logger, NewTestNotifier(), approver)
+	if err != nil {
+		t.Fatalf("Failed to create executor: %v", err)
+	}
+	executor.policy.Interactive = true
+	executor.policy.AutoApprove = false
+
+	calls := []ToolCall{
+		{
+			ID:   "call_first",
+			Name: "universal_command",
+			Args: mustMarshalToolArgs(t, []string{"sh", "-c", `test -f "$1"`, "first", gate}),
+		},
+		{
+			ID:   "call_second",
+			Name: "universal_command",
+			Args: mustMarshalToolArgs(t, []string{"sh", "-c", `test -f "$1"`, "second", gate}),
+		},
+	}
+
+	results := executor.ExecuteParallel(context.Background(), calls)
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	for _, result := range results {
+		if result.Error != "" {
+			t.Fatalf("%s failed: %s", result.ID, result.Error)
+		}
+	}
+
+	approver.mu.Lock()
+	defer approver.mu.Unlock()
+	if len(approver.calls) != 2 {
+		t.Fatalf("got %d approval calls, want 2", len(approver.calls))
+	}
+	if approver.calls[0][3] != "first" || approver.calls[1][3] != "second" {
+		t.Fatalf("approval order = %#v", approver.calls)
+	}
+}
+
+func mustMarshalToolArgs(t *testing.T, command []string) json.RawMessage {
+	t.Helper()
+	args, err := json.Marshal(map[string]interface{}{
+		"command": command,
+	})
+	if err != nil {
+		t.Fatalf("marshal tool args: %v", err)
+	}
+	return args
+}

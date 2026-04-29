@@ -184,6 +184,13 @@ type Response struct {
 	Text             string
 	ToolCalls        []ToolCall
 	ThoughtSignature string
+	Streamed         bool
+}
+
+// ResponseParseOptions controls provider-specific compatibility parsing.
+type ResponseParseOptions struct {
+	ArgoLegacy bool
+	ToolDefs   []ToolDefinition
 }
 
 // HandleResponse processes an HTTP response based on configuration.
@@ -193,6 +200,11 @@ type Response struct {
 // The response body is closed by this function - callers should not close it.
 // Returns: (Response, error)
 func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response, logger Logger, notifier Notifier) (Response, error) {
+	return HandleResponseWithOptions(ctx, cfg, resp, logger, notifier, ResponseParseOptions{})
+}
+
+// HandleResponseWithOptions processes an HTTP response with compatibility parse options.
+func HandleResponseWithOptions(ctx context.Context, cfg ResponseConfig, resp *http.Response, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
 	defer resp.Body.Close()
 
 	// Get provider, default to argo
@@ -214,18 +226,20 @@ func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response
 	var response Response
 	var err error
 
-	// Handle streaming responses with provider-specific parsing.
-	// Argo request planning already downgrades tool-enabled requests to non-streaming.
-	if shouldHandleStreamingResponse(cfg, provider, resp) {
+	// Handle streaming responses with provider-specific parsing. Legacy Argo may
+	// downgrade tool-enabled requests to non-streaming during request planning.
+	streamed := shouldHandleStreamingResponse(cfg, provider, resp)
+	if streamed {
 		response, err = handleStreamingResponse(ctx, cfg, resp, provider, logger, notifier)
 	} else {
-		response, err = handleNonStreamingResponse(cfg, resp, provider, logger, notifier)
+		response, err = handleNonStreamingResponse(cfg, resp, provider, logger, notifier, opts)
 	}
 
 	if err != nil {
 		return Response{}, err
 	}
 
+	response.Streamed = streamed
 	return response, nil
 }
 
@@ -267,7 +281,7 @@ func handleStreamingResponse(ctx context.Context, cfg ResponseConfig, resp *http
 }
 
 // handleNonStreamingResponse handles non-streaming responses
-func handleNonStreamingResponse(cfg ResponseConfig, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
+func handleNonStreamingResponse(cfg ResponseConfig, resp *http.Response, provider string, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
 	// Read response body with size limit from constants
 	data, err := limitio.ReadLimitedWithKind(resp.Body, constants.DefaultMaxResponseBodySize, "API response body")
 	if err != nil {
@@ -290,6 +304,13 @@ func handleNonStreamingResponse(cfg ResponseConfig, resp *http.Response, provide
 	spec, err := providerSpecForName(provider)
 	if err != nil {
 		return Response{}, err
+	}
+	if provider == constants.ProviderArgo && opts.ArgoLegacy {
+		text, toolCalls, err := parseArgoResponseWithToolsOptions(data, cfg.IsEmbed(), ArgoResponseParseOptions{
+			ExtractEmbeddedTools: true,
+			ToolDefs:             opts.ToolDefs,
+		})
+		return Response{Text: text, ToolCalls: toolCalls}, err
 	}
 	return spec.parseResponseData(data, cfg.IsEmbed())
 }
@@ -365,7 +386,7 @@ func BuildToolResultRequest(cfg ChatRequestConfig, model string, system string, 
 		ModelOverride:  model,
 		SystemOverride: system,
 		ToolDefs:       toolDefs,
-		Stream:         false, // Tool results never stream
+		Stream:         cfg.IsStreamChat(),
 	}
 	return BuildChatRequest(cfg, typedMessages, opts)
 }

@@ -1128,6 +1128,74 @@ func TestBuildToolResultRequest(t *testing.T) {
 	}
 }
 
+func TestBuildToolResultRequestStreamingPolicy(t *testing.T) {
+	typedMessages := []TypedMessage{
+		NewTextMessage("user", "Run a command"),
+		{
+			Role: "assistant",
+			Blocks: []Block{
+				ToolUseBlock{
+					ID:    "call_1",
+					Name:  "universal_command",
+					Input: json.RawMessage(`{"command":["echo","ok"]}`),
+				},
+			},
+		},
+		{
+			Role: "user",
+			Blocks: []Block{
+				ToolResultBlock{
+					ToolUseID: "call_1",
+					Name:      "universal_command",
+					Content:   "ok",
+				},
+			},
+		},
+	}
+
+	t.Run("native providers preserve streaming", func(t *testing.T) {
+		cfg := newCoreTestRequestConfig()
+		cfg.Provider = "argo"
+		cfg.Model = "gpt-5"
+		cfg.IsStreamChatMode = true
+		cfg.IsToolEnabledFlag = true
+
+		req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
+		if err != nil {
+			t.Fatalf("BuildToolResultRequest failed: %v", err)
+		}
+		if !strings.Contains(string(body), `"stream":true`) {
+			t.Fatalf("native Argo follow-up should preserve stream=true, body: %s", body)
+		}
+		if got := req.Header.Get("Accept"); got != "text/event-stream" {
+			t.Fatalf("Accept = %q, want text/event-stream", got)
+		}
+	})
+
+	t.Run("legacy argo with tools disables streaming", func(t *testing.T) {
+		cfg := newCoreTestRequestConfig()
+		cfg.Provider = "argo"
+		cfg.Model = "gpt-5"
+		cfg.ArgoLegacy = true
+		cfg.IsStreamChatMode = true
+		cfg.IsToolEnabledFlag = true
+
+		req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
+		if err != nil {
+			t.Fatalf("BuildToolResultRequest failed: %v", err)
+		}
+		if strings.Contains(req.URL.Path, "streamchat") {
+			t.Fatalf("legacy Argo tool follow-up should use non-stream endpoint, got %s", req.URL.String())
+		}
+		if strings.Contains(string(body), `"stream":`) {
+			t.Fatalf("legacy Argo body should not include stream for tool follow-up, body: %s", body)
+		}
+		if got := req.Header.Get("Accept"); got == "text/event-stream" {
+			t.Fatalf("legacy Argo tool follow-up should not request SSE")
+		}
+	})
+}
+
 func TestToolConversionRoundTrip(t *testing.T) {
 	// Test that tool calls can be converted between formats and back
 	originalCalls := []ToolCall{

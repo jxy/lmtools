@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/core"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -319,6 +320,51 @@ func TestExecutePendingTools(t *testing.T) {
 				tt.checkResults(t, sess)
 			}
 		})
+	}
+}
+
+func TestExecutePendingToolsRequiresToolFlag(t *testing.T) {
+	tempDir := t.TempDir()
+	SetSessionsDir(filepath.Join(tempDir, "sessions"))
+
+	sess, err := CreateSession("", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	assistantMsg := Message{
+		Role:      "assistant",
+		Content:   "I'll run a command",
+		Timestamp: time.Now(),
+		Model:     "test-model",
+	}
+	toolCalls := []core.ToolCall{
+		{
+			ID:   "call_123",
+			Name: "universal_command",
+			Args: json.RawMessage(`{"command":["echo","ok"]}`),
+		},
+	}
+	if _, err := AppendMessageWithToolInteraction(context.Background(), sess, assistantMsg, toolCalls, nil); err != nil {
+		t.Fatalf("AppendMessageWithToolInteraction failed: %v", err)
+	}
+
+	cfg := core.NewTestRequestConfig()
+	cfg.IsToolEnabledFlag = false
+	hasPending, err := ExecutePendingTools(context.Background(), sess, cfg, &MockLogger{}, &pendingTestNotifier{}, &MockApprover{shouldApprove: true})
+	if !hasPending {
+		t.Fatal("expected pending tools to be reported")
+	}
+	if err == nil || !strings.Contains(err.Error(), "require -tool") {
+		t.Fatalf("expected requires -tool error, got %v", err)
+	}
+
+	pending, err := CheckForPendingToolCalls(context.Background(), sess.Path)
+	if err != nil {
+		t.Fatalf("CheckForPendingToolCalls failed: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending tool calls should remain unexecuted, got %d", len(pending))
 	}
 }
 

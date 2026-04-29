@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/core"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -388,6 +389,80 @@ func TestBuildMessagesWithToolInteractions(t *testing.T) {
 	}
 	if _, ok := typedMessages[2].Blocks[0].(core.ToolResultBlock); !ok {
 		t.Error("Third message should contain tool result block")
+	}
+}
+
+func TestBuildMessagesWithToolInteractionsPreservesToolResultDetails(t *testing.T) {
+	baseDir := t.TempDir()
+	oldDir := GetSessionsDir()
+	SetSessionsDir(baseDir)
+	defer SetSessionsDir(oldDir)
+
+	sessionPath := filepath.Join(baseDir, "0001")
+	if err := os.MkdirAll(sessionPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeMessage(sessionPath, "0001", Message{
+		ID:        "0001",
+		Role:      "assistant",
+		Content:   "running",
+		Timestamp: time.Now(),
+		Model:     "test-model",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveToolInteraction(sessionPath, "0001", &core.ToolInteraction{
+		Calls: []core.ToolCall{
+			{
+				ID:   "call_1",
+				Name: "universal_command",
+				Args: json.RawMessage(`{"command":["sh","-c","echo out; exit 1"]}`),
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeMessage(sessionPath, "0002", Message{
+		ID:        "0002",
+		Role:      "user",
+		Timestamp: time.Now().Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveToolInteraction(sessionPath, "0002", &core.ToolInteraction{
+		Results: []core.ToolResult{
+			{
+				ID:     "call_1",
+				Output: "partial output",
+				Error:  "exit status 1",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	typedMessages, err := BuildMessagesWithToolInteractions(context.Background(), sessionPath)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractions failed: %v", err)
+	}
+	if len(typedMessages) != 2 {
+		t.Fatalf("got %d messages, want 2", len(typedMessages))
+	}
+
+	result, ok := typedMessages[1].Blocks[0].(core.ToolResultBlock)
+	if !ok {
+		t.Fatalf("result block = %T, want ToolResultBlock", typedMessages[1].Blocks[0])
+	}
+	if result.Name != "universal_command" {
+		t.Fatalf("tool result name = %q, want universal_command", result.Name)
+	}
+	if !result.IsError {
+		t.Fatal("tool result should be marked as error")
+	}
+	if !strings.Contains(result.Content, "partial output") || !strings.Contains(result.Content, "exit status 1") {
+		t.Fatalf("tool result should preserve output and error, got %q", result.Content)
 	}
 }
 

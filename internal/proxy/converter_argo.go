@@ -147,7 +147,7 @@ func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, or
 	case string:
 		return anthropicResponseFromText(responseID, originalModel, r, req)
 	case map[string]interface{}:
-		return convertArgoMapResponseToAnthropic(r, responseID, originalModel, req)
+		return c.convertArgoMapResponseToAnthropic(r, responseID, originalModel, req)
 	default:
 		return anthropicResponseFromText(responseID, originalModel, fmt.Sprintf("%v", resp.Response), req)
 	}
@@ -182,20 +182,20 @@ func anthropicResponseFromContent(responseID, originalModel string, content []An
 	}
 }
 
-func convertArgoMapResponseToAnthropic(response map[string]interface{}, responseID, originalModel string, req *AnthropicRequest) *AnthropicResponse {
-	content := extractArgoContentBlocks(response, req)
+func (c *Converter) convertArgoMapResponseToAnthropic(response map[string]interface{}, responseID, originalModel string, req *AnthropicRequest) *AnthropicResponse {
+	content := c.extractArgoContentBlocks(response, req)
 	content = append(content, extractArgoToolUseBlocks(response["tool_calls"])...)
 	return anthropicResponseFromContent(responseID, originalModel, content, req)
 }
 
-func extractArgoContentBlocks(response map[string]interface{}, req *AnthropicRequest) []AnthropicContentBlock {
+func (c *Converter) extractArgoContentBlocks(response map[string]interface{}, req *AnthropicRequest) []AnthropicContentBlock {
 	contentValue, ok := response["content"]
 	if !ok {
 		return nil
 	}
 
 	if contentStr, ok := contentValue.(string); ok && contentStr != "" {
-		return parseArgoStringContent(contentStr, response["tool_calls"], req)
+		return parseArgoStringContent(contentStr, response["tool_calls"], req, c.useLegacyArgo())
 	}
 
 	contentArray, ok := contentValue.([]interface{})
@@ -218,10 +218,17 @@ func extractArgoContentBlocks(response map[string]interface{}, req *AnthropicReq
 	return content
 }
 
-func parseArgoStringContent(contentStr string, rawToolCalls interface{}, req *AnthropicRequest) []AnthropicContentBlock {
+func (c *Converter) useLegacyArgo() bool {
+	return c != nil && c.mapper != nil && c.mapper.config != nil && c.mapper.config.ArgoLegacy
+}
+
+func parseArgoStringContent(contentStr string, rawToolCalls interface{}, req *AnthropicRequest, allowEmbeddedExtraction bool) []AnthropicContentBlock {
 	content := []AnthropicContentBlock{{Type: "text", Text: contentStr}}
 	exists, empty := argoToolCallPresence(rawToolCalls)
 	if !empty && exists {
+		return content
+	}
+	if !allowEmbeddedExtraction {
 		return content
 	}
 

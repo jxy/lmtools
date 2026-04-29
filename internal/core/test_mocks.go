@@ -34,6 +34,7 @@ type TestRequestConfig struct {
 	MaxToolRounds       int
 	MaxToolParallel     int
 	ToolMaxOutputBytes  int
+	ArgoLegacy          bool
 	Resume              string
 	Branch              string
 }
@@ -93,6 +94,9 @@ func (c *TestRequestConfig) GetToolMaxOutputBytes() int {
 }
 func (c *TestRequestConfig) GetResume() string { return c.Resume }
 func (c *TestRequestConfig) GetBranch() string { return c.Branch }
+func (c *TestRequestConfig) IsArgoLegacy() bool {
+	return c.ArgoLegacy
+}
 
 // NewTestRequestConfig creates a TestRequestConfig with default values
 func NewTestRequestConfig() *TestRequestConfig {

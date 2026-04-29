@@ -12,6 +12,15 @@ import (
 // 2. Adding context would require changes throughout the call chain for minimal benefit
 // 3. Debug logging is handled by ExtractEmbeddedToolCalls when needed
 func parseArgoResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
+	return parseArgoResponseWithToolsOptions(data, isEmbed, ArgoResponseParseOptions{})
+}
+
+type ArgoResponseParseOptions struct {
+	ExtractEmbeddedTools bool
+	ToolDefs             []ToolDefinition
+}
+
+func parseArgoResponseWithToolsOptions(data []byte, isEmbed bool, opts ArgoResponseParseOptions) (string, []ToolCall, error) {
 	if isEmbed {
 		// Embedding responses don't have tool calls
 		var embedResp struct {
@@ -128,10 +137,8 @@ func parseArgoResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, 
 
 		// Workaround: Argo sometimes embeds one or more tool_use JSON objects inside content
 		// while providing an empty/missing tool_calls array. Extract all of them in order.
-		if (toolCallsPresentAndEmpty || !toolCallsExists) && len(toolCalls) == 0 && content != "" {
-			// Use the new simplified extraction pipeline
-			// Note: Tool validation happens at a higher level where tool definitions are available
-			extractedContent, extractedCalls, err := ExtractEmbeddedToolCalls(content, nil)
+		if opts.ExtractEmbeddedTools && (toolCallsPresentAndEmpty || !toolCallsExists) && len(toolCalls) == 0 && content != "" {
+			extractedContent, extractedCalls, err := ExtractEmbeddedToolCalls(content, opts.ToolDefs)
 			if err == nil && len(extractedCalls) > 0 {
 				content = extractedContent
 				toolCalls = extractedCalls

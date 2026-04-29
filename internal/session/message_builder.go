@@ -32,6 +32,7 @@ func BuildMessagesWithToolInteractions(ctx context.Context, sessionPath string) 
 func BuildMessagesWithIndex(ctx context.Context, messages []Message, messageIndex map[string]string, sessionPath string) ([]core.TypedMessage, error) {
 	// Reconstruct messages with tool interactions
 	var result []core.TypedMessage
+	toolNamesByID := make(map[string]string)
 
 	for _, msg := range messages {
 		// Load any tool interactions for this message using the index
@@ -42,7 +43,7 @@ func BuildMessagesWithIndex(ctx context.Context, messages []Message, messageInde
 			return nil, errors.WrapError("load tool interaction for message "+msg.ID, err)
 		}
 
-		result = append(result, buildTypedMessage(msg, toolInteraction))
+		result = append(result, buildTypedMessage(msg, toolInteraction, toolNamesByID))
 	}
 
 	return result, nil
@@ -57,7 +58,7 @@ func resolveIndexedMessageDir(ctx context.Context, messageIndex map[string]strin
 	return msgDir
 }
 
-func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction) core.TypedMessage {
+func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction, toolNamesByID map[string]string) core.TypedMessage {
 	typedMsg := core.TypedMessage{
 		Role:   string(msg.Role),
 		Blocks: make([]core.Block, 0),
@@ -81,18 +82,13 @@ func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction) core.
 			Input:            call.Args,
 			ThoughtSignature: call.ThoughtSignature,
 		})
+		if call.ID != "" {
+			toolNamesByID[call.ID] = call.Name
+		}
 	}
 
 	for _, res := range toolInteraction.Results {
-		block := core.ToolResultBlock{
-			ToolUseID: res.ID,
-			Content:   res.Output,
-		}
-		if res.Error != "" {
-			block.IsError = true
-			block.Content = res.Error
-		}
-		typedMsg.Blocks = append(typedMsg.Blocks, block)
+		typedMsg.Blocks = append(typedMsg.Blocks, core.ToolResultBlockFromResult(res, toolNamesByID[res.ID]))
 	}
 
 	return typedMsg

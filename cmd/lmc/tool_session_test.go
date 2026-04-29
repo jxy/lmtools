@@ -563,6 +563,7 @@ func TestPendingToolsIntegration(t *testing.T) {
 		"-resume", sessionID,
 		"-sessions-dir", sessionsDir,
 		"-log-dir", logDir,
+		"-tool",
 		"-tool-whitelist", whitelistPath,
 		"-tool-auto-approve",
 	}
@@ -590,56 +591,50 @@ func TestPendingToolsIntegration(t *testing.T) {
 		t.Error("Expected to see tool output 'hello from tool'")
 	}
 
-	// Verify tool results were saved
-	// First check the original session
-	reloadedSess, err := session.LoadSession(sessionID)
-	if err != nil {
-		t.Fatal(err)
+	// Enabling tools can fork a resumed session because the effective system
+	// prompt changes. Verify the pending result was saved in whichever session
+	// path became active instead of assuming it stayed under the original ID.
+	toolResultsPath, interaction := findToolResultContaining(t, sessionsDir, "hello from tool")
+	t.Logf("Tool results saved in %s", toolResultsPath)
+	if len(interaction.Results) != 1 {
+		t.Fatalf("Expected 1 tool result, got %d", len(interaction.Results))
 	}
+}
 
-	// Debug: List all files in the session directory
-	files, _ := os.ReadDir(reloadedSess.Path)
-	t.Logf("Files in session directory %s:", sessionID)
-	for _, f := range files {
-		t.Logf("  %s", f.Name())
-	}
+func findToolResultContaining(t *testing.T, root, needle string) (string, core.ToolInteraction) {
+	t.Helper()
 
-	// Check if a sibling was created
-	sessionParent := filepath.Dir(reloadedSess.Path)
-	siblings, _ := os.ReadDir(sessionParent)
-	t.Logf("Sibling directories in %s:", sessionParent)
-	for _, s := range siblings {
-		if s.IsDir() {
-			t.Logf("  %s", s.Name())
-			// Check files in sibling
-			sibPath := filepath.Join(sessionParent, s.Name())
-			sibFiles, _ := os.ReadDir(sibPath)
-			t.Logf("    Files in %s:", s.Name())
-			for _, f := range sibFiles {
-				t.Logf("      %s", f.Name())
-			}
+	var foundPath string
+	var foundInteraction core.ToolInteraction
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-	}
-
-	// The tool results should be in the original session (0001) since no fork occurs
-	// Tool calls are in 0001.tools.json (message 0001), results should be in 0002.tools.json
-
-	// Check for tool results in message 0002 of session 0001
-	toolResultsPath := filepath.Join(reloadedSess.Path, "0002.tools.json")
-	if _, err := os.Stat(toolResultsPath); os.IsNotExist(err) {
-		t.Error("Tool results file (0002.tools.json) was not created in session 0001")
-	} else {
-		// Read and verify content
-		data, _ := os.ReadFile(toolResultsPath)
-		t.Logf("Tool results content: %s", string(data))
-
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".tools.json") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
 		var interaction core.ToolInteraction
-		if err := json.Unmarshal(data, &interaction); err == nil {
-			if len(interaction.Results) != 1 {
-				t.Errorf("Expected 1 tool result, got %d", len(interaction.Results))
-			} else if !strings.Contains(interaction.Results[0].Output, "hello from tool") {
-				t.Errorf("Tool output doesn't contain expected text, got: %s", interaction.Results[0].Output)
+		if err := json.Unmarshal(data, &interaction); err != nil {
+			return err
+		}
+		for _, result := range interaction.Results {
+			if strings.Contains(result.Output, needle) {
+				foundPath = path
+				foundInteraction = interaction
+				return filepath.SkipAll
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to search tool results: %v", err)
 	}
+	if foundPath == "" {
+		t.Fatalf("no tool result under %s contained %q", root, needle)
+	}
+	return foundPath, foundInteraction
 }

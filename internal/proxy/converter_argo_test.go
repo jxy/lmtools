@@ -119,8 +119,38 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 	}
 }
 
-func TestConvertArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedInContent(t *testing.T) {
+func newLegacyArgoTestConverter() *Converter {
+	return NewConverter(NewModelMapper(&Config{ArgoLegacy: true}))
+}
+
+func TestConvertArgoToAnthropicWithRequest_EmbeddedToolIgnoredOutsideLegacy(t *testing.T) {
 	converter := &Converter{}
+	argo := &ArgoChatResponse{
+		Response: map[string]interface{}{
+			"content":    "Use a tool:{'type':'tool_use','id':'toolu_1','name':'Read','input':{'file_path':'/tmp/a'}}",
+			"tool_calls": []interface{}{},
+		},
+	}
+	req := &AnthropicRequest{
+		Model:    "claude-3-sonnet-20240229",
+		Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}},
+		Tools:    []AnthropicTool{{Name: "Read"}},
+	}
+
+	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	if len(result.Content) != 1 || result.Content[0].Type != "text" {
+		t.Fatalf("expected embedded content to remain text outside legacy, got %#v", result.Content)
+	}
+	if !strings.Contains(result.Content[0].Text, "tool_use") {
+		t.Fatalf("expected embedded tool JSON to remain in text, got %q", result.Content[0].Text)
+	}
+}
+
+func TestConvertArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedInContent(t *testing.T) {
+	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content":    "Now let me read the openai_convert.go file to understand the current ConvertBlocksToOpenAIContent implementation:{'type': 'tool_use', 'id': 'toolu_vrtx_01TCVSw8Ff8eJHs5nSaZsPBt', 'name': 'Read', 'input': {'file_path': '/path/to/project/internal/core/openai_convert.go'}}",
@@ -159,7 +189,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedIn
 
 // Ensure trailing punctuation/formatting suffix after embedded tool call is preserved
 func TestConvertArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctuation(t *testing.T) {
-	converter := &Converter{}
+	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			// Note trailing period after the embedded JSON
@@ -192,7 +222,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctuation(
 
 // Simplified case: single-quoted embedded tool_use with content and file_path; ensure full input preserved
 func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuotedSimplified(t *testing.T) {
-	converter := &Converter{}
+	converter := newLegacyArgoTestConverter()
 
 	// This string simulates the content after Argo JSON decoding (first-level escapes resolved):
 	// single-quoted JSON-like object embedded in content, with inner content containing newlines and double quotes.
@@ -238,7 +268,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuotedSimpli
 
 // Full-case derived from DEBUG: ensure both content and file_path are present
 func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentAndFilePath(t *testing.T) {
-	converter := &Converter{}
+	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content": `Let me create the refactored version with the content parameter:
@@ -273,7 +303,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentAndFile
 }
 
 func TestConvertArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbeddedInContent(t *testing.T) {
-	converter := &Converter{}
+	converter := newLegacyArgoTestConverter()
 	embedded := `{'id': 'call_123', 'type': 'function', 'function': {'name': 'universal_command', 'arguments': '{"command":["ls","-la"]}'}}`
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
@@ -299,7 +329,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbeddedInCo
 }
 
 func TestConvertArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCalls(t *testing.T) {
-	converter := &Converter{}
+	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content": "Step 1: read file:{'type': 'tool_use', 'id': 'toolu_r1', 'name': 'Read', 'input': {'file_path': '/path/a'}} Next, grep it:{'type': 'tool_use', 'id': 'toolu_r2', 'name': 'Grep', 'input': {'pattern': 'foo', 'glob': '*.go'}}",

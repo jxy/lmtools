@@ -94,7 +94,7 @@ echo "Test" | lmc -argo-user yourname -argo-legacy
 # Set system prompt
 echo "Hello" | lmc -argo-user yourname -s "You are a helpful coding assistant"
 
-# Disable session tracking
+# Disable session tracking (tool loops use in-memory context for the current run)
 echo "One-off question" | lmc -argo-user yourname -no-session
 ```
 
@@ -125,7 +125,7 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 - `-list-models`: List available models from provider
 
 ### Chat Options
-- `-stream`: Use streaming chat mode for real-time responses
+- `-stream`: Use streaming chat mode for real-time responses. Tool follow-up requests keep streaming except on `-argo-legacy`, where tool loops fall back to non-streaming for compatibility.
 - `-s string`: System prompt for chat mode (default: "You are a brilliant assistant.")
 - `-effort string`: Reasoning effort hint (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
 - `-json`: Request JSON object output
@@ -141,7 +141,7 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 - `-tool-non-interactive`: Run in non-interactive mode (deny unapproved commands)
 - `-tool-max-output-bytes int`: Maximum output size per tool execution (default: 1MB, max: 100MB)
 - `-max-tool-rounds int`: Maximum rounds of tool execution (default: 32)
-- `-max-tool-parallel int`: Maximum parallel tool executions (default: 4)
+- `-max-tool-parallel int`: Maximum parallel tool executions (default: 4). Approval prompts for parallel calls are requested sequentially before execution starts.
 
 ### Session Management
 - `-resume string`: Resume session or branch by ID/path
@@ -149,7 +149,7 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 - `-show-sessions`: Display all conversation trees
 - `-show string`: Show specific session or message by ID/path
 - `-delete string`: Delete node (session/branch/message) and its descendants
-- `-no-session`: Disable session creation (automatically set for embed mode)
+- `-no-session`: Disable session creation (automatically set for embed mode). With `-tool`, the current tool loop is kept in memory but not persisted.
 - `-sessions-dir string`: Custom sessions directory (default: ~/.lmc/sessions)
 - `-skip-flock-check`: Skip file locking check
 
@@ -209,7 +209,11 @@ When tools are enabled with `-tool`:
 
 - **Approval flow**: Commands require approval based on whitelist/blacklist/auto-approve settings
 - **Execution tracking**: All tool calls and results are persisted in session history
+- **No-session loops**: When `-no-session` is used, tool calls and results stay in an in-memory loop store for the current invocation
 - **Continuation**: Tool execution can span multiple rounds (up to `-max-tool-rounds`)
+- **Streaming**: Tool follow-up responses stream for native OpenAI, Anthropic, Google, and Argo-compatible endpoints; only legacy Argo tool follow-ups are downgraded to non-streaming
+- **Parallel approval order**: For parallel tool calls, each command is approved or denied sequentially before any approved commands are launched concurrently
+- **Pending tools**: Resuming a session with unexecuted tool calls requires `-tool`; without it, LMC reports the pending tools and leaves them unexecuted
 - **Error handling**: Failed commands are recorded with error details
 - **Output truncation**: Large outputs are truncated to prevent memory issues
 - **Non-interactive mode**: Use `-tool-non-interactive` for scripted usage (requires whitelist or auto-approve)
@@ -321,6 +325,7 @@ When `-provider=argo`, routing is model-driven:
 When `-argo-legacy` is set:
 - All Argo chat traffic uses the legacy `/argoapi/api/v1/resource/chat/` and `/argoapi/api/v1/resource/streamchat/` endpoints
 - Proxy-side streaming simulation and token estimation remain in use where the legacy endpoints do not provide native support
+- Embedded Argo tool-call extraction is limited to legacy Argo responses; native Argo OpenAI/Anthropic-compatible responses use provider-native tool fields
 
 ### Endpoints
 

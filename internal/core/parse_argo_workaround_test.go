@@ -59,6 +59,35 @@ func TestParseArgoResponse_Workaround_OpenAIFunctionEmbeddedInContent(t *testing
 	}
 }
 
+func TestParseArgoResponse_LegacyOptionsExtractEmbeddedFunction(t *testing.T) {
+	resp := `{
+        "response": {
+            "content": "I'll run it:{'id':'call_123','type':'function','function':{'name':'universal_command','arguments':'{\"command\":[\"echo\",\"ok\"]}'}}",
+            "tool_calls": []
+        }
+    }`
+
+	text, tools, err := parseArgoResponseWithToolsOptions([]byte(resp), false, ArgoResponseParseOptions{
+		ExtractEmbeddedTools: true,
+		ToolDefs:             GetBuiltinUniversalCommandTool(),
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if strings.Contains(text, "universal_command") {
+		t.Fatalf("embedded tool should be removed from text, got %q", text)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("Expected 1 tool call, got %d", len(tools))
+	}
+	if tools[0].Name != "universal_command" {
+		t.Fatalf("tool name = %q, want universal_command", tools[0].Name)
+	}
+	if string(tools[0].Args) != `{"command":["echo","ok"]}` {
+		t.Fatalf("tool args = %s", tools[0].Args)
+	}
+}
+
 // Verifies Python-style embedded block is NOT extracted when no tool definitions are provided
 func TestParseArgoResponse_Workaround_PythonLiteralsAndTrailingComma(t *testing.T) {
 	resp := `{

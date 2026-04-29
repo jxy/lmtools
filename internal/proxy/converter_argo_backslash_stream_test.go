@@ -13,7 +13,7 @@ import (
 // converts to Anthropic blocks and streams input_json_delta that reconstructs
 // to JSON where the "content" string has actual newlines (not literal \n).
 func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
-	converter := &Converter{}
+	converter := newLegacyArgoTestConverter()
 
 	// Simulate Argo response (post JSON-decoding), with single-quoted embedded tool_use
 	embedded := "Intro:{'id': 'toolu_vrtx_01TsVcJnKKDvVtJdKqYCDKzr', 'input': {'content': 'package core\\n\\nimport (\\n\\t\"testing\"\\n)'}, 'name': 'Write', 'type': 'tool_use'}"

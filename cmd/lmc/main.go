@@ -74,14 +74,14 @@ func (rc *RequestController) handleRequest(inputStr string, sess *session.Sessio
 	}
 
 	// Handle response
-	response, err := rc.handleResponse(resp)
+	response, err := rc.handleResponse(resp, rb.ToolDefs)
 	if err != nil {
 		return err
 	}
 
 	// Process tool calls or save response
 	if len(response.ToolCalls) > 0 {
-		return rc.handleToolCalls(sess, response, rb)
+		return rc.handleToolCalls(sess, response, rb, inputStr)
 	}
 
 	return rc.handleNormalResponse(response, sess, rb.Model)
@@ -98,8 +98,11 @@ func (rc *RequestController) sendRequest(req *http.Request) (*http.Response, err
 }
 
 // handleResponse processes the HTTP response
-func (rc *RequestController) handleResponse(resp *http.Response) (*core.Response, error) {
-	response, err := core.HandleResponse(rc.ctx, rc.opts, resp, logger.From(rc.ctx), rc.notifier)
+func (rc *RequestController) handleResponse(resp *http.Response, toolDefs []core.ToolDefinition) (*core.Response, error) {
+	response, err := core.HandleResponseWithOptions(rc.ctx, rc.opts, resp, logger.From(rc.ctx), rc.notifier, core.ResponseParseOptions{
+		ArgoLegacy: rc.opts.IsArgoLegacy(),
+		ToolDefs:   toolDefs,
+	})
 	if err != nil {
 		return nil, errors.WrapError("handle response", err)
 	}
@@ -107,23 +110,22 @@ func (rc *RequestController) handleResponse(resp *http.Response) (*core.Response
 }
 
 // handleToolCalls processes responses with tool calls
-func (rc *RequestController) handleToolCalls(sess *session.Session, response *core.Response, rb core.RequestBuild) error {
+func (rc *RequestController) handleToolCalls(sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) error {
 	logger.From(rc.ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
 
 	// Build tool execution context
-	tc := rc.newToolContext(sess, response, rb)
+	tc := rc.newToolContext(sess, response, rb, inputStr)
 
 	// Execute tools and get the final response
 	result := core.HandleToolExecution(tc)
 
 	// Handle the result
-	return rc.finishToolExecution(result, rc.cfg.StreamChat)
+	return rc.finishToolExecution(result)
 }
 
 // newToolContext creates a tool execution context with all required dependencies
-func (rc *RequestController) newToolContext(sess *session.Session, response *core.Response, rb core.RequestBuild) core.ToolContext {
-	// Create session store
-	store := session.NewStore(sess, logger.From(rc.ctx))
+func (rc *RequestController) newToolContext(sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) core.ToolContext {
+	store, messageBuilder := rc.createToolStoreAndMessageBuilder(sess, inputStr)
 
 	// Create retry client for tool execution
 	retryClient := retry.NewClientWithRetries(rc.cfg.Timeout, rc.cfg.Retries, logger.From(rc.ctx))
@@ -140,27 +142,34 @@ func (rc *RequestController) newToolContext(sess *session.Session, response *cor
 
 	approver := NewCliApprover(rc.notifier)
 
-	// Create a cached message builder for efficient tool execution
-	messageBuilder := rc.createMessageBuilder(sess)
-
 	// Create CLI-specific UI for tool display
 	ui := tools.NewCLIToolUI(rc.notifier, rc.opts)
 
 	// Return the complete tool context
 	return core.ToolContext{
-		Ctx:          rc.ctx,
-		Cfg:          rc.opts,
-		Logger:       logger.From(rc.ctx),
-		Notifier:     rc.notifier,
-		Approver:     approver,
-		ExecCfg:      execCfg,
-		Model:        rb.Model,
-		ToolDefs:     rb.ToolDefs,
-		MessagesFn:   messageBuilder,
-		UI:           ui,
-		InitialText:  response.Text,
-		InitialCalls: response.ToolCalls,
+		Ctx:             rc.ctx,
+		Cfg:             rc.opts,
+		Logger:          logger.From(rc.ctx),
+		Notifier:        rc.notifier,
+		Approver:        approver,
+		ExecCfg:         execCfg,
+		Model:           rb.Model,
+		ToolDefs:        rb.ToolDefs,
+		MessagesFn:      messageBuilder,
+		UI:              ui,
+		InitialText:     response.Text,
+		InitialCalls:    response.ToolCalls,
+		InitialStreamed: response.Streamed,
 	}
+}
+
+func (rc *RequestController) createToolStoreAndMessageBuilder(sess *session.Session, inputStr string) (core.SessionStore, func(string) ([]core.TypedMessage, error)) {
+	if sess != nil {
+		return session.NewStore(sess, logger.From(rc.ctx)), rc.createMessageBuilder(sess)
+	}
+
+	store := core.NewMemorySessionStore(rc.opts.GetEffectiveSystem(), inputStr)
+	return store, store.Messages
 }
 
 // createMessageBuilder creates an appropriate message builder for the session
@@ -185,13 +194,13 @@ func (rc *RequestController) createMessageBuilder(sess *session.Session) func(st
 }
 
 // finishToolExecution handles the final result of tool execution
-func (rc *RequestController) finishToolExecution(result core.ToolExecutionResult, isStreaming bool) error {
+func (rc *RequestController) finishToolExecution(result core.ToolExecutionResult) error {
 	if result.Error != nil {
 		return result.Error
 	}
 
-	// Print the final text if not streaming
-	if result.FinalText != "" && !isStreaming {
+	// Print the final text only if it was not already streamed by HandleResponse.
+	if result.FinalText != "" && !result.FinalStreamed {
 		fmt.Print(result.FinalText)
 	}
 
@@ -206,7 +215,7 @@ func (rc *RequestController) handleNormalResponse(response *core.Response, sess 
 	}
 
 	// Print output if not streaming
-	if response.Text != "" && !rc.cfg.StreamChat {
+	if response.Text != "" && !response.Streamed {
 		fmt.Print(response.Text)
 	}
 	return nil

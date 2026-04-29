@@ -5,7 +5,7 @@ import (
 )
 
 // parseEmbeddedCall checks if a parsed JSON map represents a tool call.
-// validTools: Optional list of valid tool definitions for validation. Pass nil to skip validation.
+// validTools: list of valid tool definitions; empty disables extraction.
 // Returns the call and true if it's a valid tool call, nil and false otherwise.
 func parseEmbeddedCall(raw map[string]interface{}, validTools []ToolDefinition) (*EmbeddedCall, bool) {
 	// Try Anthropic format first (more common in Argo responses)

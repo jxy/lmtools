@@ -33,7 +33,7 @@ const (
 )
 
 // IsValidToolName checks if a tool name exists in the list of valid tool definitions.
-// If validTools is nil or empty, returns false (no valid tool names without definitions).
+// If validTools is nil or empty, returns false to avoid extracting unrequested tools.
 func IsValidToolName(name string, validTools []ToolDefinition) bool {
 	if len(validTools) == 0 {
 		return false
@@ -70,7 +70,7 @@ type EmbeddedSequence struct {
 // This is a specialized function for the proxy layer that needs access to the prefix/suffix structure.
 // Parameters:
 // - content: the text content to scan
-// - validTools: list of valid tool definitions (can be nil to skip validation)
+// - validTools: list of valid tool definitions; empty disables extraction
 // Returns:
 // - sequences: array of embedded sequences with prefix text and tool calls
 // - suffix: remaining text after all tool calls
@@ -93,7 +93,7 @@ func ExtractEmbeddedToolCallsWithSequence(content string, validTools []ToolDefin
 }
 
 // ExtractEmbeddedToolCalls extracts tool calls embedded in content strings by Argo.
-// validTools: Optional list of valid tool definitions for validation. Pass nil to skip validation.
+// validTools: list of valid tool definitions; empty disables extraction.
 // Returns:
 // - content: The text content with tool call JSON extracted
 // - toolCalls: Extracted tool calls in standard format
@@ -176,7 +176,7 @@ func tryUnwrapArgoResponse(content string) (string, bool) {
 }
 
 // parseEmbeddedToolCalls scans content for embedded tool call JSON objects.
-// validTools: Optional list of valid tool definitions for validation. Pass nil to skip validation.
+// validTools: list of valid tool definitions; empty disables extraction.
 // Returns a sequence of (prefix, call) pairs and the trailing suffix.
 // Returns an error if no embedded calls are found.
 func parseEmbeddedToolCalls(content string, validTools []ToolDefinition) ([]EmbeddedSequence, string, error) {

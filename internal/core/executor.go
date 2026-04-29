@@ -117,6 +117,12 @@ type commandArgs struct {
 	Timeout int
 }
 
+type preparedExecution struct {
+	index int
+	call  ToolCall
+	args  *commandArgs
+}
+
 // NewExecutor creates a new tool executor.
 func NewExecutor(cfg ToolConfig, log ExecLogger, notifier Notifier, approver Approver) (*Executor, error) {
 	e := &Executor{
@@ -205,33 +211,64 @@ func loadList(path string) ([][]string, error) {
 // ExecuteParallel executes multiple tool calls in parallel with a concurrency limit
 func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall) []ToolResult {
 	results := make([]ToolResult, len(calls))
-
-	// Get max parallel executions from config (default is 4)
-	maxParallel := DefaultMaxToolParallel
-	if e.maxParallel > 0 {
-		maxParallel = e.maxParallel
-	}
-
-	// Create a semaphore to limit concurrency
-	sem := make(chan struct{}, maxParallel)
-	var wg sync.WaitGroup
+	prepared := make([]preparedExecution, 0, minInt(len(calls), DefaultMaxToolCalls))
 
 	for i, call := range calls {
-		wg.Add(1)
-		go func(idx int, tc ToolCall) {
-			defer wg.Done()
+		if i >= DefaultMaxToolCalls {
+			results[i] = ToolResult{
+				ID:    call.ID,
+				Error: fmt.Sprintf("maximum tool calls per round exceeded (%d)", DefaultMaxToolCalls),
+				Code:  errors.ErrCodeInvalidInput,
+			}
+			continue
+		}
 
-			// Acquire semaphore
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Execute the tool call
-			results[idx] = e.executeSingle(ctx, tc)
-		}(i, call)
+		exec, result, ok := e.prepareSingle(ctx, call)
+		if !ok {
+			results[i] = result
+			continue
+		}
+		prepared = append(prepared, preparedExecution{
+			index: i,
+			call:  exec.call,
+			args:  exec.args,
+		})
 	}
+
+	if len(prepared) == 0 {
+		return results
+	}
+
+	maxParallel := e.effectiveMaxParallel()
+	workers := minInt(maxParallel, len(prepared))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				exec := prepared[idx]
+				results[exec.index] = e.executePrepared(ctx, exec)
+			}
+		}()
+	}
+
+	for idx := range prepared {
+		jobs <- idx
+	}
+	close(jobs)
 
 	wg.Wait()
 	return results
+}
+
+func (e *Executor) effectiveMaxParallel() int {
+	if e.maxParallel > 0 {
+		return e.maxParallel
+	}
+	return DefaultMaxToolParallel
 }
 
 // parseCommandArgs extracts and validates command arguments from tool call
@@ -278,100 +315,97 @@ func (e *Executor) executeCommand(ctx context.Context, cmdArgs *commandArgs) (st
 
 // executeSingle executes a single tool call
 func (e *Executor) executeSingle(ctx context.Context, call ToolCall) ToolResult {
-	result := ToolResult{
-		ID: call.ID,
+	exec, result, ok := e.prepareSingle(ctx, call)
+	if !ok {
+		return result
 	}
+	return e.executePrepared(ctx, exec)
+}
 
-	// Check context cancellation early
+func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedExecution, ToolResult, bool) {
+	result := ToolResult{ID: call.ID}
+
 	if ctx.Err() != nil {
 		result.Error = "execution cancelled"
 		result.Code = "CANCELLED"
-		return result
+		return preparedExecution{}, result, false
 	}
 
-	// Tool call header display moved to CLI layer
-
-	// Check if tool is supported
 	if call.Name != "universal_command" {
 		result.Error = fmt.Sprintf("unsupported tool: %s", call.Name)
-		return result
+		result.Code = errors.ErrCodeInvalidInput
+		return preparedExecution{}, result, false
 	}
 
-	// Parse command arguments
 	cmdArgs, err := e.parseCommandArgs(call)
 	if err != nil {
 		result.Error = err.Error()
-		return result
-	}
-
-	// Validate command is not empty before proceeding
-	if len(cmdArgs.Command) == 0 {
-		result.Error = "invalid tool input: empty command array"
 		result.Code = errors.ErrCodeInvalidInput
-		return result
+		return preparedExecution{}, result, false
 	}
 
-	// Check approval using pre-created policy
 	decision := e.policy.Decide(cmdArgs.Command)
-
-	// Handle the decision
 	switch decision {
 	case DecisionAllow:
-		// Command is approved, proceed with execution
-
+		return preparedExecution{call: call, args: cmdArgs}, result, true
 	case DecisionRequireApproval:
-		// Need to prompt the user
 		approved, err := e.promptUserApproval(ctx, cmdArgs.Command)
 		if err != nil {
-			// Check if it was due to context cancellation
 			if ctx.Err() != nil {
 				result.Error = "execution cancelled"
 				result.Code = "CANCELLED"
-				return result
+				return preparedExecution{}, result, false
 			}
 			result.Error = fmt.Sprintf("approval error: %v", err)
 			result.Code = errors.ErrCodeNotApproved
-			return result
+			return preparedExecution{}, result, false
 		}
 		if !approved {
 			result.Error = "command not approved"
 			result.Code = errors.ErrCodeNotApproved
-			return result
+			return preparedExecution{}, result, false
 		}
-
+		return preparedExecution{call: call, args: cmdArgs}, result, true
 	case DecisionDenyBlacklist:
-		// Log for debugging
 		if e.log != nil && e.log.IsDebugEnabled() {
 			e.log.Debugf("Command rejected: %s | Reason: blacklisted", cmdArgs.Command)
 		}
 		result.Error = "denied: blacklisted"
 		result.Code = errors.ErrCodeDeniedBlacklist
-		return result
-
+		return preparedExecution{}, result, false
 	case DecisionDenyNotWhitelisted:
-		// Log for debugging
 		if e.log != nil && e.log.IsDebugEnabled() {
 			e.log.Debugf("Command rejected: %s | Reason: not in whitelist", cmdArgs.Command)
 		}
 		cmdJSON, _ := json.Marshal(cmdArgs.Command)
 		result.Error = fmt.Sprintf("denied: not in whitelist\n%s", fmt.Sprintf(prompts.NotInWhitelistGuidance, string(cmdJSON)))
 		result.Code = errors.ErrCodeDeniedNotWhitelisted
-		return result
-
+		return preparedExecution{}, result, false
 	case DecisionDenyNonInteractive:
-		// Log for debugging
 		if e.log != nil && e.log.IsDebugEnabled() {
 			e.log.Debugf("Command rejected: %s | Reason: non-interactive mode", cmdArgs.Command)
 		}
-		// Include whitelist path in error message if available
-		var errorMsg string
 		if e.whitelistPath != "" {
-			errorMsg = fmt.Sprintf("command denied: non-interactive mode\nWhitelist: %s\n%s", e.whitelistPath, prompts.NonInteractiveDenialGuidance)
+			result.Error = fmt.Sprintf("command denied: non-interactive mode\nWhitelist: %s\n%s", e.whitelistPath, prompts.NonInteractiveDenialGuidance)
 		} else {
-			errorMsg = fmt.Sprintf("command denied: non-interactive mode\n%s", prompts.NonInteractiveDenialGuidance)
+			result.Error = fmt.Sprintf("command denied: non-interactive mode\n%s", prompts.NonInteractiveDenialGuidance)
 		}
-		result.Error = errorMsg
 		result.Code = errors.ErrCodeDeniedNonInteractive
+		return preparedExecution{}, result, false
+	}
+
+	result.Error = "unsupported approval decision"
+	result.Code = errors.ErrCodeInvalidInput
+	return preparedExecution{}, result, false
+}
+
+func (e *Executor) executePrepared(ctx context.Context, exec preparedExecution) ToolResult {
+	result := ToolResult{ID: exec.call.ID}
+	cmdArgs := exec.args
+
+	if ctx.Err() != nil {
+		result.Error = "execution cancelled"
+		result.Code = "CANCELLED"
 		return result
 	}
 
@@ -487,6 +521,13 @@ func commandHasPrefix(cmd, pattern []string) bool {
 	}
 
 	return true
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // isInteractive checks if the current environment supports interactive prompts
