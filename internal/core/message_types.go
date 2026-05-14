@@ -1,8 +1,6 @@
 package core
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
 // Block represents a content block in a message
 type Block interface {
@@ -11,18 +9,20 @@ type Block interface {
 
 // TextBlock represents a text content block
 type TextBlock struct {
-	Text             string
-	ThoughtSignature string
+	Text string
 }
 
 func (TextBlock) isBlock() {}
 
 // ToolUseBlock represents a tool use request block
 type ToolUseBlock struct {
-	ID               string
-	Name             string
-	Input            json.RawMessage
-	ThoughtSignature string
+	ID           string
+	Type         string
+	Namespace    string
+	OriginalName string
+	Name         string
+	Input        json.RawMessage
+	InputString  string
 }
 
 func (ToolUseBlock) isBlock() {}
@@ -30,6 +30,8 @@ func (ToolUseBlock) isBlock() {}
 // ToolResultBlock represents a tool execution result block
 type ToolResultBlock struct {
 	ToolUseID string
+	Type      string
+	Namespace string
 	Name      string // Function name (needed for Google's functionResponse)
 	Content   string
 	IsError   bool
@@ -37,14 +39,22 @@ type ToolResultBlock struct {
 
 func (ToolResultBlock) isBlock() {}
 
-// ThinkingBlock represents Anthropic reasoning content that must be preserved
-// for providers that support it, while being dropped by providers that do not.
-type ThinkingBlock struct {
-	Thinking  string
-	Signature string
+// ReasoningBlock represents provider reasoning artifacts that must be preserved
+// unmodified across provider calls when required by the provider protocol.
+type ReasoningBlock struct {
+	Provider         string
+	Type             string
+	ID               string
+	Status           string
+	Text             string
+	Summary          json.RawMessage
+	Content          json.RawMessage
+	Signature        string
+	EncryptedContent string
+	Raw              json.RawMessage
 }
 
-func (ThinkingBlock) isBlock() {}
+func (ReasoningBlock) isBlock() {}
 
 // ImageBlock represents an image content block
 type ImageBlock struct {

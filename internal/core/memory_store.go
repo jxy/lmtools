@@ -45,6 +45,16 @@ func (s *MemorySessionStore) SaveAssistant(ctx context.Context, text string, cal
 }
 
 func (s *MemorySessionStore) SaveAssistantWithThoughtSignature(ctx context.Context, text string, calls []ToolCall, _ string, thoughtSignature string) (string, string, error) {
+	response := Response{
+		Text:             text,
+		ToolCalls:        calls,
+		Blocks:           responseBlocksFromParts(strings.TrimSpace(text), calls, thoughtSignature),
+		ThoughtSignature: thoughtSignature,
+	}
+	return s.SaveAssistantResponse(ctx, response, "")
+}
+
+func (s *MemorySessionStore) SaveAssistantResponse(ctx context.Context, response Response, _ string) (string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", "", err
 	}
@@ -52,24 +62,15 @@ func (s *MemorySessionStore) SaveAssistantWithThoughtSignature(ctx context.Conte
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	blocks := response.Blocks
+	if len(blocks) == 0 {
+		blocks = responseBlocksFromParts(strings.TrimSpace(response.Text), response.ToolCalls, response.ThoughtSignature)
+	}
 	msg := TypedMessage{
 		Role:   string(RoleAssistant),
-		Blocks: make([]Block, 0, 1+len(calls)),
+		Blocks: cloneBlocks(blocks),
 	}
-	text = strings.TrimSpace(text)
-	if text != "" || thoughtSignature != "" {
-		msg.Blocks = append(msg.Blocks, TextBlock{
-			Text:             text,
-			ThoughtSignature: thoughtSignature,
-		})
-	}
-	for _, call := range calls {
-		msg.Blocks = append(msg.Blocks, ToolUseBlock{
-			ID:               call.ID,
-			Name:             call.Name,
-			Input:            append([]byte(nil), call.Args...),
-			ThoughtSignature: call.ThoughtSignature,
-		})
+	for _, call := range response.ToolCalls {
 		if call.ID != "" {
 			s.toolName[call.ID] = call.Name
 		}
@@ -143,7 +144,10 @@ func cloneBlocks(blocks []Block) []Block {
 			cloned = append(cloned, b)
 		case ToolResultBlock:
 			cloned = append(cloned, b)
-		case ThinkingBlock:
+		case ReasoningBlock:
+			b.Summary = append([]byte(nil), b.Summary...)
+			b.Content = append([]byte(nil), b.Content...)
+			b.Raw = append([]byte(nil), b.Raw...)
 			cloned = append(cloned, b)
 		case ImageBlock:
 			cloned = append(cloned, b)

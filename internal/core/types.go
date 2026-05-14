@@ -64,6 +64,10 @@ type OutputConfig interface {
 	GetJSONSchema() json.RawMessage
 }
 
+type OpenAIResponsesConfig interface {
+	UseOpenAIResponses() bool
+}
+
 type SessionResumeConfig interface {
 	GetResume() string
 	GetBranch() string
@@ -87,6 +91,7 @@ type RequestOptions struct {
 	Effort              string
 	JSONMode            bool
 	JSONSchema          json.RawMessage
+	OpenAIResponses     bool
 	ToolEnabled         bool
 	ToolTimeout         time.Duration
 	ToolWhitelist       string
@@ -124,7 +129,8 @@ func (o RequestOptions) IsJSONMode() bool            { return o.JSONMode }
 func (o RequestOptions) GetJSONSchema() json.RawMessage {
 	return append(json.RawMessage(nil), o.JSONSchema...)
 }
-func (o RequestOptions) IsToolEnabled() bool { return o.ToolEnabled }
+func (o RequestOptions) UseOpenAIResponses() bool { return o.OpenAIResponses }
+func (o RequestOptions) IsToolEnabled() bool      { return o.ToolEnabled }
 
 func (o RequestOptions) GetToolTimeout() time.Duration {
 	if o.ToolTimeout <= 0 {
@@ -236,6 +242,10 @@ type SessionStore interface {
 // specific assistant metadata persistence.
 type AssistantThoughtSignatureStore interface {
 	SaveAssistantWithThoughtSignature(ctx context.Context, text string, calls []ToolCall, model string, thoughtSignature string) (path, messageID string, err error)
+}
+
+type AssistantResponseStore interface {
+	SaveAssistantResponse(ctx context.Context, response Response, model string) (path, messageID string, err error)
 }
 
 // RequestBuild encapsulates the result of building an HTTP request

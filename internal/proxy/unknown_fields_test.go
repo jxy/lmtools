@@ -264,7 +264,7 @@ func TestWarnUnknownFieldsLogsNestedPaths(t *testing.T) {
 	}
 }
 
-func TestDecodeEndpointRequestWarnsBeforeRejectingUnknownFields(t *testing.T) {
+func TestDecodeEndpointRequestWarnsButAcceptsUnknownFields(t *testing.T) {
 	server := NewMinimalTestServer(t, &Config{})
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -279,15 +279,15 @@ func TestDecodeEndpointRequestWarnsBeforeRejectingUnknownFields(t *testing.T) {
 	logs := captureWarnLogs(t, func() {
 		var decoded OpenAIRequest
 		err := server.decodeEndpointRequest(req, &decoded)
-		if err == nil {
-			t.Fatal("decodeEndpointRequest() error = nil, want unknown field rejection")
+		if err != nil {
+			t.Fatalf("decodeEndpointRequest() error = %v, want success with warning", err)
 		}
-		if !strings.Contains(err.Error(), `unknown field "unknown_field"`) {
-			t.Fatalf("decodeEndpointRequest() error = %v, want unknown field rejection", err)
+		if decoded.Model != "gpt-5" {
+			t.Fatalf("decoded.Model = %q, want %q", decoded.Model, "gpt-5")
 		}
 	})
 
-	if !strings.Contains(logs, `Unknown JSON fields in client request (rejected): unknown_field`) {
+	if !strings.Contains(logs, `Unknown JSON fields in client request (ignored): unknown_field`) {
 		t.Fatalf("request warning not found in logs:\n%s", logs)
 	}
 }
@@ -317,5 +317,72 @@ func TestRewriteOpenAIResponseModelWarnsOnUnknownFields(t *testing.T) {
 
 	if !strings.Contains(logs, `Unknown JSON fields in OpenAI response (ignored): unexpected_top`) {
 		t.Fatalf("response warning not found in logs:\n%s", logs)
+	}
+}
+
+func TestArgoOpenAIResponseFieldsDoNotWarn(t *testing.T) {
+	logs := captureWarnLogs(t, func() {
+		warnUnknownFields(context.Background(), []byte(`{
+			"id":"chatcmpl_123",
+			"object":"chat.completion",
+			"created":123,
+			"model":"gpt-5.4-nano",
+			"choices":[{
+				"index":0,
+				"finish_reason":"stop",
+				"logprobs":null,
+				"content_filter_results":{"hate":{"filtered":false,"severity":"safe"}},
+				"message":{
+					"role":"assistant",
+					"content":"ok",
+					"function_call":null,
+					"tool_calls":null,
+					"refusal":null,
+					"annotations":[],
+					"audio":null
+				}
+			}],
+			"prompt_filter_results":[{"prompt_index":0,"content_filter_results":{}}],
+			"service_tier":"default",
+			"system_fingerprint":null,
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`), OpenAIResponse{}, "Argo OpenAI response")
+	})
+
+	if strings.Contains(logs, "Unknown JSON fields") {
+		t.Fatalf("unexpected unknown-field warning:\n%s", logs)
+	}
+}
+
+func TestArgoOpenAIStreamFieldsDoNotWarn(t *testing.T) {
+	logs := captureWarnLogs(t, func() {
+		warnUnknownFields(context.Background(), []byte(`{
+			"id":"chatcmpl_123",
+			"object":"chat.completion.chunk",
+			"created":123,
+			"model":"gpt-5.4-nano",
+			"choices":[{
+				"index":0,
+				"delta":{
+					"role":"assistant",
+					"content":"",
+					"function_call":null,
+					"tool_calls":null,
+					"refusal":null
+				},
+				"finish_reason":null,
+				"logprobs":null,
+				"content_filter_results":{"hate":{"filtered":false,"severity":"safe"}}
+			}],
+			"prompt_filter_results":[{"prompt_index":0,"content_filter_results":{}}],
+			"service_tier":"default",
+			"system_fingerprint":null,
+			"usage":null,
+			"obfuscation":"abc"
+		}`), OpenAIStreamChunk{}, "Argo OpenAI stream chunk")
+	})
+
+	if strings.Contains(logs, "Unknown JSON fields") {
+		t.Fatalf("unexpected unknown-field warning:\n%s", logs)
 	}
 }

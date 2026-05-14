@@ -1,0 +1,56 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_0877b9e12922ee460069f265aa2fe881a08b5779a2ba281199","object":"response","created_at":1777493418,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":"Use concise JSON values.","max_output_tokens":64,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"low","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"json_object"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{"fixture":"openai-responses-basic-json"}},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_0877b9e12922ee460069f265aa2fe881a08b5779a2ba281199","object":"response","created_at":1777493418,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":"Use concise JSON values.","max_output_tokens":64,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"low","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"json_object"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{"fixture":"openai-responses-basic-json"}},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"rs_0877b9e12922ee460069f265aad80881a09ac4596ee6711c87","type":"reasoning","summary":[]},"output_index":0,"sequence_number":2}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"rs_0877b9e12922ee460069f265aad80881a09ac4596ee6711c87","type":"reasoning","summary":[]},"output_index":0,"sequence_number":3}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","type":"message","status":"in_progress","content":[],"phase":"final_answer","role":"assistant"},"output_index":1,"sequence_number":4}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","output_index":1,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":5}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"{\"","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"x2LDeeau5z5R0a","output_index":1,"sequence_number":6}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"city","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"gAZchlSU4ssV","output_index":1,"sequence_number":7}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"\":\"","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"0H752niIvmouC","output_index":1,"sequence_number":8}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"Chicago","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"ZB2MPmHZq","output_index":1,"sequence_number":9}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"\",\"","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"2omlpQmCzIaEd","output_index":1,"sequence_number":10}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"state","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"HYun1vvkFZD","output_index":1,"sequence_number":11}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"\":\"","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"DedjNbgcdXtzk","output_index":1,"sequence_number":12}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"Illinois","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"QCycMNX7","output_index":1,"sequence_number":13}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"\"}","item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"obfuscation":"PQb10Ug4PYcDUF","output_index":1,"sequence_number":14}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","logprobs":[],"output_index":1,"sequence_number":15,"text":"{\"city\":\"Chicago\",\"state\":\"Illinois\"}"}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","output_index":1,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"{\"city\":\"Chicago\",\"state\":\"Illinois\"}"},"sequence_number":16}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"{\"city\":\"Chicago\",\"state\":\"Illinois\"}"}],"phase":"final_answer","role":"assistant"},"output_index":1,"sequence_number":17}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_0877b9e12922ee460069f265aa2fe881a08b5779a2ba281199","object":"response","created_at":1777493418,"status":"completed","background":false,"completed_at":1777493419,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":"Use concise JSON values.","max_output_tokens":64,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[{"id":"rs_0877b9e12922ee460069f265aad80881a09ac4596ee6711c87","type":"reasoning","summary":[]},{"id":"msg_0877b9e12922ee460069f265ab2eac81a0a60d14843f494744","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"{\"city\":\"Chicago\",\"state\":\"Illinois\"}"}],"phase":"final_answer","role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"low","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"json_object"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":29,"input_tokens_details":{"cached_tokens":0},"output_tokens":56,"output_tokens_details":{"reasoning_tokens":38},"total_tokens":85},"user":null,"metadata":{"fixture":"openai-responses-basic-json"}},"sequence_number":18}

@@ -27,6 +27,25 @@ func proxyOpenAIToolsFromCore(raw interface{}) []OpenAITool {
 
 	proxyTools := make([]OpenAITool, 0, len(tools))
 	for _, tool := range tools {
+		if tool.Type == "custom" {
+			if tool.Custom == nil {
+				continue
+			}
+			custom := map[string]interface{}{
+				"name": tool.Custom.Name,
+			}
+			if tool.Custom.Description != "" {
+				custom["description"] = tool.Custom.Description
+			}
+			if tool.Custom.Format != nil {
+				custom["format"] = chatCustomToolFormatFromResponses(tool.Custom.Format)
+			}
+			proxyTools = append(proxyTools, OpenAITool{
+				Type:   "custom",
+				Custom: custom,
+			})
+			continue
+		}
 		parameters := filterSchemaMetadata(rawJSONToInterface(tool.Function.Parameters))
 		proxyTools = append(proxyTools, OpenAITool{
 			Type: tool.Type,
@@ -34,6 +53,7 @@ func proxyOpenAIToolsFromCore(raw interface{}) []OpenAITool {
 				Name:        tool.Function.Name,
 				Description: tool.Function.Description,
 				Parameters:  parameters,
+				Strict:      tool.Function.Strict,
 			},
 		})
 	}
@@ -47,6 +67,14 @@ func proxyOpenAIToolChoiceFromCore(raw interface{}) interface{} {
 	case string:
 		return choice
 	case core.OpenAIToolChoice:
+		if choice.Custom != nil {
+			return map[string]interface{}{
+				"type": "custom",
+				"custom": map[string]string{
+					"name": choice.Custom.Name,
+				},
+			}
+		}
 		if choice.Function == nil {
 			return map[string]interface{}{"type": choice.Type}
 		}
@@ -78,6 +106,7 @@ func proxyAnthropicToolsFromCore(raw interface{}) []AnthropicTool {
 			Name:        tool.Name,
 			Description: tool.Description,
 			InputSchema: rawJSONToInterface(tool.InputSchema),
+			Strict:      tool.Strict,
 		})
 	}
 	return proxyTools
@@ -113,6 +142,9 @@ func proxyGoogleToolsFromCore(raw interface{}) []GoogleTool {
 
 	proxyTools := make([]GoogleTool, 0, len(tools))
 	for _, tool := range tools {
+		if len(tool.FunctionDeclarations) == 0 {
+			continue
+		}
 		declarations := make([]GoogleFunction, 0, len(tool.FunctionDeclarations))
 		for _, decl := range tool.FunctionDeclarations {
 			declarations = append(declarations, GoogleFunction{
@@ -124,6 +156,9 @@ func proxyGoogleToolsFromCore(raw interface{}) []GoogleTool {
 		proxyTools = append(proxyTools, GoogleTool{
 			FunctionDeclarations: declarations,
 		})
+	}
+	if len(proxyTools) == 0 {
+		return nil
 	}
 	return proxyTools
 }

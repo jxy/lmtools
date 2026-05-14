@@ -153,7 +153,7 @@ func TestToolMessageSequencing(t *testing.T) {
 	messageIDs := make(map[string]bool)
 	for _, file := range files {
 		name := file.Name()
-		if strings.HasSuffix(name, ".json") && !strings.Contains(name, "tools") {
+		if strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".tools.json") && !strings.HasSuffix(name, ".blocks.json") {
 			id := strings.TrimSuffix(name, ".json")
 			messageIDs[id] = true
 		}

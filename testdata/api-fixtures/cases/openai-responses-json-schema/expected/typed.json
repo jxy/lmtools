@@ -1,0 +1,39 @@
+{
+  "developer": "Return only data matching the requested schema.",
+  "max_tokens": 96,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Return JSON for Chicago with city and country fields.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "response_format": {
+    "json_schema": {
+      "name": "city_country",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    "type": "json_schema"
+  },
+  "stream": false
+}

@@ -1,0 +1,5 @@
+{
+  "id": "resp_upstream",
+  "object": "response.deleted",
+  "deleted": true
+}

@@ -9,16 +9,21 @@ import (
 )
 
 type typedRenderContext struct {
-	Model string
-	TopK  *int
-	User  string
+	Model                        string
+	TopK                         *int
+	User                         string
+	OpenAIChatCompatibilityTools bool
 }
 
 type argoMessageRenderer func([]core.TypedMessage) ([]ArgoMessage, error)
 
 var argoMessageRenderers = map[string]argoMessageRenderer{
 	constants.ProviderOpenAI: func(messages []core.TypedMessage) ([]ArgoMessage, error) {
-		return typedMessagesToArgoOpenAI(messages), nil
+		rendered := typedMessagesToArgoOpenAI(normalizeTypedMessagesForOpenAIChat(messages))
+		if err := validateArgoOpenAIChatToolSequence(rendered); err != nil {
+			return nil, err
+		}
+		return rendered, nil
 	},
 	constants.ProviderAnthropic: typedMessagesToArgoAnthropic,
 	constants.ProviderGoogle:    typedMessagesToArgoAnthropic,
@@ -41,6 +46,14 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*Op
 	if err != nil {
 		return nil, err
 	}
+	if ctx.OpenAIChatCompatibilityTools {
+		prepared.Messages = core.AdaptCustomToolBlocksForFunctionCompatibility(prepared.Messages)
+		if len(typed.Tools) > 0 {
+			converted := core.ConvertToolsForOpenAIChatCompatibility(typed.Tools, typed.ToolChoice)
+			prepared.Tools = converted.Tools
+			prepared.ToolChoice = converted.ToolChoice
+		}
+	}
 
 	openAIReq := &OpenAIRequest{
 		Model:           ctx.Model,
@@ -53,14 +66,19 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*Op
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:     serviceTierForOpenAI(typed.ServiceTier),
 	}
+	maxTokens := positiveIntPtr(typed.MaxTokens)
 	if openAIModelUsesMaxCompletionTokens(ctx.Model) {
-		openAIReq.MaxCompletionTokens = typed.MaxTokens
+		openAIReq.MaxCompletionTokens = maxTokens
 	} else {
-		openAIReq.MaxTokens = typed.MaxTokens
+		openAIReq.MaxTokens = maxTokens
 	}
 
 	messages := prependOpenAIInstructionMessages(prepared.Messages, typed.System, typed.Developer, ctx.Model)
+	messages = normalizeTypedMessagesForOpenAIChat(messages)
 	openAIReq.Messages = typedOpenAIMessagesToProxy(core.ToOpenAITyped(messages))
+	if err := validateOpenAIChatToolSequence(openAIReq.Messages); err != nil {
+		return nil, err
+	}
 	openAIReq.Tools = proxyOpenAIToolsFromCore(prepared.Tools)
 	if typed.ToolChoice != nil {
 		openAIReq.ToolChoice = proxyOpenAIToolChoiceFromCore(prepared.ToolChoice)
@@ -208,6 +226,8 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 	var typedMessages []core.TypedMessage
 	if providers.DetermineArgoModelProvider(ctx.Model) == constants.ProviderOpenAI {
 		typedMessages = prependOpenAIInstructionMessages(typed.Messages, typed.System, typed.Developer, ctx.Model)
+		typedMessages = core.AdaptCustomToolBlocksForFunctionCompatibility(typedMessages)
+		typedMessages = normalizeTypedMessagesForOpenAIChat(typedMessages)
 	} else {
 		system, messages := prepareOutOfBandInstructionMessages(typed.Messages, typed.System, typed.Developer)
 		typedMessages = core.PrependSystemMessage(messages, system)
@@ -223,6 +243,9 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 
 	if len(typed.Tools) > 0 {
 		converted := core.ConvertToolsForProvider(ctx.Model, typed.Tools, typed.ToolChoice)
+		if providers.DetermineArgoModelProvider(ctx.Model) == constants.ProviderOpenAI {
+			converted = core.ConvertToolsForOpenAIChatCompatibility(typed.Tools, typed.ToolChoice)
+		}
 		argoReq.Tools = converted.Tools
 		argoReq.ToolChoice = converted.ToolChoice
 	}

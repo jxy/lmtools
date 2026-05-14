@@ -58,8 +58,9 @@ type AnthropicMessage struct {
 
 // AnthropicContentBlock represents different types of content blocks.
 type AnthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type string          `json:"type"`
+	Text string          `json:"text"`
+	Raw  json.RawMessage `json:"-"`
 	// For thinking blocks (Claude 3 Opus 4.1+)
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
@@ -70,10 +71,14 @@ type AnthropicContentBlock struct {
 	// For file blocks
 	File map[string]interface{} `json:"file,omitempty"`
 	// For tool use
-	ID     string                 `json:"id,omitempty"`
-	Name   string                 `json:"name,omitempty"`
-	Input  map[string]interface{} `json:"input,omitempty"`
-	Caller interface{}            `json:"caller,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Namespace    string                 `json:"namespace,omitempty"`
+	OriginalName string                 `json:"-"`
+	Name         string                 `json:"name,omitempty"`
+	Input        map[string]interface{} `json:"input,omitempty"`
+	InputString  string                 `json:"-"`
+	ToolType     string                 `json:"-"`
+	Caller       interface{}            `json:"caller,omitempty"`
 	// For tool result
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
@@ -86,6 +91,20 @@ type AnthropicContentBlock struct {
 	Citations        []interface{}          `json:"citations,omitempty"`
 	CitationsEnabled *bool                  `json:"citations_enabled,omitempty"`
 	CacheControl     *AnthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+func (b *AnthropicContentBlock) UnmarshalJSON(data []byte) error {
+	type alias AnthropicContentBlock
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*b = AnthropicContentBlock(decoded)
+	switch b.Type {
+	case "thinking", "redacted_thinking":
+		b.Raw = append(json.RawMessage(nil), data...)
+	}
+	return nil
 }
 
 // MarshalJSON provides custom JSON encoding to match Anthropic's event schema.
@@ -193,6 +212,7 @@ type AnthropicTool struct {
 	Name         string                 `json:"name,omitempty"`
 	Description  string                 `json:"description,omitempty"`
 	InputSchema  interface{}            `json:"input_schema,omitempty"`
+	Strict       *bool                  `json:"strict,omitempty"`
 	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 }
 

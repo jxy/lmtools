@@ -42,6 +42,24 @@ func prependOpenAIInstructionMessages(messages []core.TypedMessage, system, deve
 	return out
 }
 
+func normalizeArgoOpenAIChatRequest(req *OpenAIRequest) {
+	if req == nil {
+		return
+	}
+	for i := range req.Messages {
+		req.Messages[i].Role = core.Role(argoOpenAIChatRole(string(req.Messages[i].Role)))
+	}
+}
+
+func argoOpenAIChatRole(role string) string {
+	// Argo's OpenAI chat/completions API does not support "developer" yet.
+	// Send those instructions as "system" until Argo adds native support.
+	if role == string(core.RoleDeveloper) {
+		return string(core.RoleSystem)
+	}
+	return role
+}
+
 func textInstructionMessage(role, text string) core.TypedMessage {
 	return core.TypedMessage{
 		Role: role,
@@ -341,6 +359,8 @@ func googleToolConfigFromChoice(choice *core.ToolChoice) *GoogleToolConfig {
 		switch choice.Type {
 		case "none":
 			config.Mode = "NONE"
+		case "required":
+			config.Mode = "ANY"
 		case "tool":
 			config.Mode = "ANY"
 			if choice.Name != "" {

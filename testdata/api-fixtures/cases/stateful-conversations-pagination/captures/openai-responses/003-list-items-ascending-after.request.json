@@ -1,0 +1,5 @@
+{
+  "method": "GET",
+  "path": "/v1/conversations/conv_69f3b68e5aa88194a0e52b4f3d593e2e019d9bb1112ec2d3/items?order=asc\u0026after=msg_69f3b68e5af081949004b2cf1ff414d9019d9bb1112ec2d3\u0026limit=2",
+  "url": "https://api.openai.com/v1/conversations/conv_69f3b68e5aa88194a0e52b4f3d593e2e019d9bb1112ec2d3/items?order=asc\u0026after=msg_69f3b68e5af081949004b2cf1ff414d9019d9bb1112ec2d3\u0026limit=2"
+}

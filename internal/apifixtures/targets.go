@@ -19,6 +19,10 @@ func ParseCaptureTarget(targetID string) (CaptureTarget, error) {
 		return CaptureTarget{ID: targetID, Provider: "openai", Host: "openai"}, nil
 	case "openai-stream":
 		return CaptureTarget{ID: targetID, Provider: "openai", Host: "openai", Stream: true}, nil
+	case "openai-responses":
+		return CaptureTarget{ID: targetID, Provider: "openai-responses", Host: "openai"}, nil
+	case "openai-responses-stream":
+		return CaptureTarget{ID: targetID, Provider: "openai-responses", Host: "openai", Stream: true}, nil
 	case "anthropic":
 		return CaptureTarget{ID: targetID, Provider: "anthropic", Host: "anthropic"}, nil
 	case "anthropic-stream":

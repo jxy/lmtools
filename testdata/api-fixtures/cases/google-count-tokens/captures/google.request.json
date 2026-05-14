@@ -1,0 +1,48 @@
+{
+  "body": {
+    "generateContentRequest": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Count the tokens in this Gemini fixture request."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "model": "models/gemini-3.1-flash-lite-preview",
+      "systemInstruction": {
+        "parts": [
+          {
+            "text": "You are a fixture for token counting."
+          }
+        ]
+      },
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "description": "Look up a fixture value.",
+              "name": "lookup_fixture",
+              "parameters": {
+                "properties": {
+                  "key": {
+                    "type": "STRING"
+                  }
+                },
+                "required": [
+                  "key"
+                ],
+                "type": "OBJECT"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "method": "POST",
+  "path": "/v1beta/models/gemini-3.1-flash-lite-preview:countTokens",
+  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:countTokens"
+}

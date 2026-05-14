@@ -1,0 +1,93 @@
+{
+  "provider": "openai",
+  "model": "gpt-test",
+  "steps": [
+    {
+      "id": "retrieve-response-upstream",
+      "method": "GET",
+      "path": "/v1/responses/resp_upstream",
+      "upstream": {
+        "body": "mock/openai-response.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "resp_upstream",
+          "object": "response",
+          "status": "completed",
+          "model": "gpt-backend"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "GET",
+          "path": "/responses/resp_upstream"
+        }
+      ]
+    },
+    {
+      "id": "cancel-response-upstream",
+      "method": "POST",
+      "path": "/v1/responses/resp_upstream/cancel",
+      "upstream": {
+        "body": "mock/openai-response-cancelled.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "resp_upstream",
+          "status": "cancelled"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/responses/resp_upstream/cancel"
+        }
+      ]
+    },
+    {
+      "id": "delete-response-upstream",
+      "method": "DELETE",
+      "path": "/v1/responses/resp_upstream",
+      "upstream": {
+        "body": "mock/openai-response-deleted.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "resp_upstream",
+          "object": "response.deleted",
+          "deleted": true
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "DELETE",
+          "path": "/responses/resp_upstream"
+        }
+      ]
+    },
+    {
+      "id": "retrieve-conversation-upstream",
+      "method": "GET",
+      "path": "/v1/conversations/conv_upstream",
+      "upstream": {
+        "body": "mock/openai-conversation.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "conv_upstream",
+          "object": "conversation"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "GET",
+          "path": "/conversations/conv_upstream"
+        }
+      ]
+    }
+  ]
+}

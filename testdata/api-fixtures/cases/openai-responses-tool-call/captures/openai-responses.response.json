@@ -1,0 +1,88 @@
+{
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1777569560,
+  "created_at": 1777569559,
+  "error": null,
+  "frequency_penalty": 0,
+  "id": "resp_0e72859c06ae671e0069f38f17e91481a0910956a723590d5f",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": 128,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "gpt-5.4-nano-2026-03-17",
+  "moderation": null,
+  "object": "response",
+  "output": [
+    {
+      "arguments": "{\"city\":\"Chicago\"}",
+      "call_id": "call_93dyZJgAxtZglo1W1N3Yl7KN",
+      "id": "fc_0e72859c06ae671e0069f38f1885d081a0adcf286a1ddf2bec",
+      "name": "lookup_city",
+      "status": "completed",
+      "type": "function_call"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "status": "completed",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": {
+    "name": "lookup_city",
+    "type": "function"
+  },
+  "tools": [
+    {
+      "description": "Look up structured information for a city.",
+      "name": "lookup_city",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "strict": true,
+      "type": "function"
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 54,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 18,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 72
+  },
+  "user": null
+}

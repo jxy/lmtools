@@ -1,0 +1,26 @@
+{
+  "id": "msg_stateful_reasoning_tool",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-test",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "I need a lookup.",
+      "signature": "sig_lookup_1"
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_lookup_1",
+      "name": "lookup",
+      "input": {
+        "query": "fixture"
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 18,
+    "output_tokens": 5
+  }
+}

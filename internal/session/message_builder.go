@@ -14,7 +14,11 @@ import (
 // This function is a convenience wrapper around CreateCachedMessageBuilder for one-shot use.
 // For multiple calls (e.g., in tool execution loops), use CreateCachedMessageBuilder directly.
 func BuildMessagesWithToolInteractions(ctx context.Context, sessionPath string) ([]core.TypedMessage, error) {
-	snapshot, err := newConversationSnapshot(sessionPath)
+	return BuildMessagesWithToolInteractionsWithManager(ctx, DefaultManager(), sessionPath)
+}
+
+func BuildMessagesWithToolInteractionsWithManager(ctx context.Context, manager *Manager, sessionPath string) ([]core.TypedMessage, error) {
+	snapshot, err := newConversationSnapshotWithManager(manager, sessionPath)
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +47,16 @@ func BuildMessagesWithIndex(ctx context.Context, messages []Message, messageInde
 			return nil, errors.WrapError("load tool interaction for message "+msg.ID, err)
 		}
 
+		if blocks, ok, err := loadMessageBlocks(msgDir, msg.ID); err != nil {
+			return nil, err
+		} else if ok {
+			result = append(result, core.TypedMessage{
+				Role:   string(msg.Role),
+				Blocks: applyToolNameIndex(blocks, toolNamesByID),
+			})
+			continue
+		}
+
 		result = append(result, buildTypedMessage(msg, toolInteraction, toolNamesByID))
 	}
 
@@ -64,10 +78,16 @@ func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction, toolN
 		Blocks: make([]core.Block, 0),
 	}
 
-	if msg.Content != "" || msg.ThoughtSignature != "" {
+	if msg.ThoughtSignature != "" {
+		typedMsg.Blocks = append(typedMsg.Blocks, core.ReasoningBlock{
+			Provider:  "google",
+			Type:      "thought_signature",
+			Signature: msg.ThoughtSignature,
+		})
+	}
+	if msg.Content != "" {
 		typedMsg.Blocks = append(typedMsg.Blocks, core.TextBlock{
-			Text:             msg.Content,
-			ThoughtSignature: msg.ThoughtSignature,
+			Text: msg.Content,
 		})
 	}
 
@@ -76,11 +96,17 @@ func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction, toolN
 	}
 
 	for _, call := range toolInteraction.Calls {
+		if call.ThoughtSignature != "" {
+			typedMsg.Blocks = append(typedMsg.Blocks, core.ReasoningBlock{
+				Provider:  "google",
+				Type:      "thought_signature",
+				Signature: call.ThoughtSignature,
+			})
+		}
 		typedMsg.Blocks = append(typedMsg.Blocks, core.ToolUseBlock{
-			ID:               call.ID,
-			Name:             call.Name,
-			Input:            call.Args,
-			ThoughtSignature: call.ThoughtSignature,
+			ID:    call.ID,
+			Name:  call.Name,
+			Input: call.Args,
 		})
 		if call.ID != "" {
 			toolNamesByID[call.ID] = call.Name
@@ -92,6 +118,23 @@ func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction, toolN
 	}
 
 	return typedMsg
+}
+
+func applyToolNameIndex(blocks []core.Block, toolNamesByID map[string]string) []core.Block {
+	for i, block := range blocks {
+		switch value := block.(type) {
+		case core.ToolUseBlock:
+			if value.ID != "" {
+				toolNamesByID[value.ID] = value.Name
+			}
+		case core.ToolResultBlock:
+			if value.Name == "" && value.ToolUseID != "" {
+				value.Name = toolNamesByID[value.ToolUseID]
+				blocks[i] = value
+			}
+		}
+	}
+	return blocks
 }
 
 // CheckForPendingToolCalls checks if the last message in a session has tool calls

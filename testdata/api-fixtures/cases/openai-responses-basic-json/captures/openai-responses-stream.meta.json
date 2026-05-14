@@ -1,0 +1,70 @@
+{
+  "case_id": "openai-responses-basic-json",
+  "target": "openai-responses-stream",
+  "url": "https://api.openai.com/v1/responses",
+  "status_code": 200,
+  "content_type": "text/event-stream; charset=utf-8",
+  "captured_at": "2026-04-29T15:10:19-05:00",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=86400"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9f40f3071e1b1156-ORD"
+    ],
+    "Content-Type": [
+      "text/event-stream; charset=utf-8"
+    ],
+    "Date": [
+      "Wed, 29 Apr 2026 20:10:18 GMT"
+    ],
+    "Openai-Organization": [
+      "user-luppstbuzesizhcpyp8mf8vl"
+    ],
+    "Openai-Processing-Ms": [
+      "575"
+    ],
+    "Openai-Project": [
+      "proj_LOtYBLbKh37UwfhEcM1rrSEn"
+    ],
+    "Openai-Version": [
+      "2020-10-01"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "__cf_bm=YK4n1SsJgsfx34hNcbZnvZwMZj.gDJuxdJVashN7XUY-1777493418.094611-1.0.1.1-bZWODwHgwq7GwY5TijyUgiKgIsOyGRm67FRmJSdWQe46_EcF5cfVjIWcjv1NDSUId7klXFkfFKaGsAyn9FKZkTf1jLEmsrL1X1sXYIy6j8QsmGht80Ic0a2dvDXDvQ06; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 29 Apr 2026 20:40:18 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Ratelimit-Limit-Requests": [
+      "5000"
+    ],
+    "X-Ratelimit-Limit-Tokens": [
+      "4000000"
+    ],
+    "X-Ratelimit-Remaining-Requests": [
+      "4999"
+    ],
+    "X-Ratelimit-Remaining-Tokens": [
+      "3999808"
+    ],
+    "X-Ratelimit-Reset-Requests": [
+      "12ms"
+    ],
+    "X-Ratelimit-Reset-Tokens": [
+      "2ms"
+    ],
+    "X-Request-Id": [
+      "req_42a20927c7f34755b3f0c02e68dedd93"
+    ]
+  }
+}

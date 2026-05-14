@@ -2,11 +2,16 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"lmtools/internal/constants"
+	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
@@ -223,6 +228,226 @@ func TestOpenAIChatCompletionsWithTools(t *testing.T) {
 
 	if resp.Choices[0].Message.ToolCalls[0].Function.Name != "get_weather" {
 		t.Errorf("Unexpected tool name: %s", resp.Choices[0].Message.ToolCalls[0].Function.Name)
+	}
+}
+
+func TestArgoOpenAIDirectOmitsZeroMaxCompletionTokens(t *testing.T) {
+	var captured map[string]interface{}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("Expected path /v1/chat/completions, got %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("Failed to decode upstream request: %v", err)
+		}
+
+		resp := OpenAIResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-5.4-nano",
+			Choices: []OpenAIChoice{
+				{
+					Index: 0,
+					Message: OpenAIMessage{
+						Role:    "assistant",
+						Content: "ok",
+					},
+					FinishReason: "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Logf("Failed to encode response: %v", err)
+		}
+	}))
+	defer mockServer.Close()
+
+	config := &Config{
+		ProviderURL:        mockServer.URL,
+		Provider:           constants.ProviderArgo,
+		ArgoUser:           "testuser",
+		Model:              "gpt-5.4-nano",
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}
+
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+
+	zero := 0
+	reqBody := OpenAIRequest{
+		Model: "gpt-5.4-nano",
+		Messages: []OpenAIMessage{
+			{
+				Role:    "user",
+				Content: "Hello!",
+			},
+		},
+		MaxCompletionTokens: &zero,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := captured["max_completion_tokens"]; ok {
+		t.Fatalf("max_completion_tokens should be omitted for zero value, got body: %v", captured)
+	}
+}
+
+func TestArgoOpenAIDirectConvertsDeveloperRoleToSystem(t *testing.T) {
+	var captured OpenAIRequest
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
+			t.Fatalf("upstream path = %q, want /v1/chat/completions suffix", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("json.Unmarshal(upstream request) error = %v, body = %s", err, string(body))
+		}
+
+		return jsonRoundTripResponse(http.StatusOK, OpenAIResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-5.4-nano",
+			Choices: []OpenAIChoice{{
+				Index: 0,
+				Message: OpenAIMessage{
+					Role:    "assistant",
+					Content: "ok",
+				},
+				FinishReason: "stop",
+			}},
+		}), nil
+	})
+
+	config := &Config{
+		ProviderURL:        "http://argo.local/v1",
+		Provider:           constants.ProviderArgo,
+		ArgoUser:           "testuser",
+		Model:              "gpt-5.4-nano",
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}
+
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	server := NewTestServerDirectWithClient(t, config, client)
+
+	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/chat/completions", map[string]interface{}{
+		"model": "gpt-5.4-nano",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "developer", "content": "Follow policy."},
+			map[string]interface{}{"role": "user", "content": "Hello!"},
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", code, string(body))
+	}
+	if len(captured.Messages) != 2 {
+		t.Fatalf("captured messages = %+v, want 2 messages", captured.Messages)
+	}
+	if captured.Messages[0].Role != "system" {
+		t.Fatalf("captured first role = %q, want system", captured.Messages[0].Role)
+	}
+	if captured.Messages[1].Role != "user" {
+		t.Fatalf("captured second role = %q, want user", captured.Messages[1].Role)
+	}
+}
+
+func TestArgoOpenAIDirectUsesArgoUserAuthFallback(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		stream bool
+	}{
+		{name: "non_streaming"},
+		{name: "streaming", stream: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotAuth string
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/chat/completions" {
+					t.Errorf("Expected path /v1/chat/completions, got %s", r.URL.Path)
+				}
+				gotAuth = r.Header.Get("Authorization")
+				if tt.stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = w.Write([]byte(`data: {"id":"chatcmpl-test","object":"chat.completion.chunk","model":"gpt-5.4-nano","choices":[{"index":0,"delta":{"content":"ok"}}]}` + "\n\n"))
+					_, _ = w.Write([]byte("data: [DONE]\n\n"))
+					return
+				}
+
+				resp := OpenAIResponse{
+					ID:      "chatcmpl-test",
+					Object:  "chat.completion",
+					Created: 1234567890,
+					Model:   "gpt-5.4-nano",
+					Choices: []OpenAIChoice{{
+						Index: 0,
+						Message: OpenAIMessage{
+							Role:    "assistant",
+							Content: "ok",
+						},
+						FinishReason: "stop",
+					}},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					t.Logf("Failed to encode response: %v", err)
+				}
+			}))
+			defer mockServer.Close()
+
+			config := &Config{
+				ProviderURL:        mockServer.URL,
+				Provider:           constants.ProviderArgo,
+				ArgoUser:           "argo-user-key",
+				Model:              "gpt-5.4-nano",
+				MaxRequestBodySize: 100 * 1024 * 1024,
+			}
+
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
+
+			reqBody := OpenAIRequest{
+				Model:  "gpt-5.4-nano",
+				Stream: tt.stream,
+				Messages: []OpenAIMessage{{
+					Role:    "user",
+					Content: "Hello!",
+				}},
+			}
+			body, err := json.Marshal(reqBody)
+			if err != nil {
+				t.Fatalf("Failed to marshal request: %v", err)
+			}
+
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+			}
+			if gotAuth != "Bearer argo-user-key" {
+				t.Fatalf("Authorization = %q, want Bearer argo-user-key", gotAuth)
+			}
+		})
 	}
 }
 

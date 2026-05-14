@@ -12,6 +12,7 @@ type EndpointSet struct {
 	Chat                 string
 	Stream               string
 	Embed                string
+	Responses            string
 	Models               string
 	OpenAIChat           string
 	AnthropicMessages    string
@@ -95,6 +96,20 @@ func ResolveEmbedURLWithArgoOptions(provider, providerURL, argoEnv string, _ boo
 		return endpoints.Embed, nil
 	default:
 		return "", fmt.Errorf("%s provider does not support embedding mode", DisplayName(provider))
+	}
+}
+
+func ResolveResponsesURL(provider, providerURL, argoEnv string) (string, error) {
+	endpoints, err := ResolveEndpoints(provider, providerURL, argoEnv)
+	if err != nil {
+		return "", err
+	}
+
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderOpenAI:
+		return endpoints.Responses, nil
+	default:
+		return "", fmt.Errorf("%s provider does not support responses", DisplayName(provider))
 	}
 }
 

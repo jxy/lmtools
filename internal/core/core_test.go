@@ -418,7 +418,7 @@ func TestBuildGoogleToolResultRequest(t *testing.T) {
 	system := "Test system prompt"
 
 	// Build the request using the unified builder
-	req, body, err := buildChatRequestFromTyped(cfg, typedMessages, model, system, nil, nil, false)
+	req, body, err := buildChatRequestFromTyped(cfg, typedMessages, model, system, system != "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

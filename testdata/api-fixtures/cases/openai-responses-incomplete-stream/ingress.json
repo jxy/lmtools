@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-nano",
+  "instructions": "Write a detailed answer with at least three full sentences. Do not stop early.",
+  "input": "Explain why API streaming clients must handle terminal incomplete events.",
+  "max_output_tokens": 16
+}

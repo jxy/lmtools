@@ -262,6 +262,98 @@ func TestVerifySuiteCheckCapturesSupportsArgoHostedTargets(t *testing.T) {
 	}
 }
 
+func TestVerifySuiteCheckCapturesSupportsNegativeRequestCases(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "negative-request")
+	if err := os.MkdirAll(filepath.Join(caseDir, "expected", "render"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(caseDir) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(caseDir, "captures"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(captures) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "negative-request",
+      "description": "negative request case",
+      "kinds": ["request", "negative"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "negative-request",
+  "description": "negative request case",
+  "kinds": ["request", "negative"],
+  "ingress_family": "anthropic",
+  "models": {
+    "anthropic": "claude-haiku-4-5"
+  },
+  "render_targets": ["anthropic"],
+  "capture_targets": ["anthropic"],
+  "expected_status": {
+    "anthropic": 400
+  }
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "ingress.json"), `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"bad","signature":"fake"}]}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "typed.json"), `{"messages":[{"role":"assistant","blocks":[{"type":"reasoning","provider":"anthropic","reasoning_type":"thinking","text":"bad","signature":"fake"}]}],"max_tokens":1,"stream":false}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "anthropic.request.json"), `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"bad","signature":"fake"}]}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "anthropic.meta.json"), `{"target":"anthropic","status_code":400}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "anthropic.response.json"), `{"type":"error","error":{"type":"invalid_request_error","message":"invalid signature"}}`)
+
+	if err := VerifySuite(root, VerifyOptions{CheckCaptures: true, Target: "anthropic"}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteRejectsNegativeRequestWithoutExpectedStatus(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "negative-request")
+	if err := os.MkdirAll(filepath.Join(caseDir, "expected", "render"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(caseDir) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "negative-request",
+      "description": "negative request case",
+      "kinds": ["request", "negative"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "negative-request",
+  "description": "negative request case",
+  "kinds": ["request", "negative"],
+  "ingress_family": "anthropic",
+  "models": {
+    "anthropic": "claude-haiku-4-5"
+  },
+  "render_targets": ["anthropic"],
+  "capture_targets": ["anthropic"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "ingress.json"), `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "typed.json"), `{"messages":[{"role":"user","blocks":[{"type":"text","text":"hi"}]}],"max_tokens":1,"stream":false}`)
+	writeTestFile(t, filepath.Join(caseDir, "expected", "render", "anthropic.request.json"), `{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+
+	err := VerifySuite(root, VerifyOptions{})
+	if err == nil {
+		t.Fatal("expected VerifySuite() error")
+	}
+	if !strings.Contains(err.Error(), "missing expected_status") {
+		t.Fatalf("error = %q, want missing expected_status", err)
+	}
+}
+
 func TestVerifySuiteSupportsModelsCases(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, SuiteDirName, "cases", "models-openai")
@@ -297,6 +389,188 @@ func TestVerifySuiteSupportsModelsCases(t *testing.T) {
 
 	if err := VerifySuite(root, VerifyOptions{}); err != nil {
 		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteSupportsTokenCountCases(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "anthropic-count-tokens")
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(caseDir) error = %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "anthropic-count-tokens",
+      "description": "Anthropic count tokens endpoint response",
+      "kinds": ["token-count"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "anthropic-count-tokens",
+  "description": "Anthropic count tokens endpoint response",
+  "kinds": ["token-count"],
+  "provider": "anthropic",
+  "models": {
+    "anthropic": "claude-haiku-4-5"
+  },
+  "capture_targets": ["anthropic"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "request.json"), `{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"count me"}]}`)
+
+	if err := VerifySuite(root, VerifyOptions{}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteSupportsStatefulCases(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "stateful-case")
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "stateful-case",
+      "description": "stateful case",
+      "kinds": ["stateful"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "stateful-case",
+  "description": "stateful case",
+  "kinds": ["stateful"],
+  "provider": "openai-responses"
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "mock", "response.json"), `{"id":"msg_1"}`)
+	writeTestFile(t, filepath.Join(caseDir, "scenario.json"), `{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {"model":"claude-test","input":"hi"},
+      "upstream": {"body":"mock/response.json"},
+      "expect": {"status":200}
+    }
+  ]
+}
+`)
+
+	if err := VerifySuite(root, VerifyOptions{}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteCheckCapturesSupportsStatefulCases(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "stateful-case")
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "stateful-case",
+      "description": "stateful case",
+      "kinds": ["stateful"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "stateful-case",
+  "description": "stateful case",
+  "kinds": ["stateful"],
+  "provider": "openai-responses",
+  "capture_targets": ["openai-responses"]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "scenario.json"), `{
+  "steps": [
+    {
+      "id": "create-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {"model":"gpt-live","input":"hi"},
+      "expect": {"status":200}
+    },
+    {
+      "id": "retrieve-missing",
+      "method": "GET",
+      "path": "/v1/responses/resp_missing",
+      "expect": {"status":404}
+    }
+  ]
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses.stateful.json"), `{"case_id":"stateful-case","target":"openai-responses","steps":[]}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses", "001-create-response.request.json"), `{"method":"POST","path":"/v1/responses","url":"https://api.openai.com/v1/responses","body":{"input":"hi"}}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses", "001-create-response.response.json"), `{"id":"resp_1","object":"response","status":"completed"}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses", "001-create-response.meta.json"), `{"target":"openai-responses","status_code":200}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses", "002-retrieve-missing.request.json"), `{"method":"GET","path":"/v1/responses/resp_missing","url":"https://api.openai.com/v1/responses/resp_missing"}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses", "002-retrieve-missing.response.json"), `{"error":{"message":"not found"}}`)
+	writeTestFile(t, filepath.Join(caseDir, "captures", "openai-responses", "002-retrieve-missing.meta.json"), `{"target":"openai-responses","status_code":404}`)
+
+	if err := VerifySuite(root, VerifyOptions{CheckCaptures: true, Target: "openai-responses"}); err != nil {
+		t.Fatalf("VerifySuite() error = %v", err)
+	}
+}
+
+func TestVerifySuiteRejectsBrokenStatefulCases(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, SuiteDirName, "cases", "stateful-case")
+
+	writeTestFile(t, filepath.Join(root, ManifestRel), `{
+  "version": 1,
+  "cases": [
+    {
+      "id": "stateful-case",
+      "description": "stateful case",
+      "kinds": ["stateful"]
+    }
+  ]
+}
+`)
+
+	writeTestFile(t, filepath.Join(caseDir, CaseMetaRel), `{
+  "id": "stateful-case",
+  "description": "stateful case",
+  "kinds": ["stateful"],
+  "provider": "openai-responses"
+}
+`)
+	writeTestFile(t, filepath.Join(caseDir, "scenario.json"), `{
+  "steps": [
+    {
+      "id": "create-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "upstream": {"body":"mock/missing.json"},
+      "expect": {"status":200}
+    }
+  ]
+}
+`)
+
+	err := VerifySuite(root, VerifyOptions{})
+	if err == nil {
+		t.Fatal("expected VerifySuite() error")
+	}
+	if !strings.Contains(err.Error(), "mock/missing.json") {
+		t.Fatalf("error = %q, want missing upstream body", err)
 	}
 }
 

@@ -1,0 +1,8 @@
+{
+  "id": "stateful-openai-passthrough-lifecycle",
+  "description": "OpenAI provider Responses and Conversations lifecycle routes are passed through upstream",
+  "kinds": [
+    "stateful"
+  ],
+  "provider": "openai-responses"
+}

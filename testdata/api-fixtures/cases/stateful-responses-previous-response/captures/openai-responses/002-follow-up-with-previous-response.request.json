@@ -1,0 +1,10 @@
+{
+  "body": {
+    "input": "next",
+    "model": "gpt-5.4-nano",
+    "previous_response_id": "resp_02b35ea5dfdac8f00069f38f1a341081a2bd490513ca855522"
+  },
+  "method": "POST",
+  "path": "/v1/responses",
+  "url": "https://api.openai.com/v1/responses"
+}

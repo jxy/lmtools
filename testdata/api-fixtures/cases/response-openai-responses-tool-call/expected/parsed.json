@@ -1,0 +1,12 @@
+{
+  "text": "Looking that up.",
+  "tool_calls": [
+    {
+      "id": "call_fixture_001",
+      "name": "lookup_city",
+      "args": {
+        "city": "Chicago"
+      }
+    }
+  ]
+}

@@ -2,45 +2,55 @@ package providers
 
 import "strings"
 
-func OpenAIURLs(base string) (string, string, error) {
+func OpenAIURLs(base string) (string, string, string, error) {
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
 
 	trimmed := strings.TrimRight(base, "/")
 	if strings.HasSuffix(trimmed, "/chat/completions") {
-		return trimmed, strings.TrimSuffix(trimmed, "/chat/completions") + "/models", nil
+		base = strings.TrimSuffix(trimmed, "/chat/completions")
+		return trimmed, base + "/responses", base + "/models", nil
+	}
+	if strings.HasSuffix(trimmed, "/responses") {
+		base = strings.TrimSuffix(trimmed, "/responses")
+		return base + "/chat/completions", trimmed, base + "/models", nil
 	}
 
 	chatURL, err := BuildProviderURL(base, "chat/completions")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
+	}
+	responsesURL, err := BuildProviderURL(base, "responses")
+	if err != nil {
+		return "", "", "", err
 	}
 	modelsURL, err := BuildProviderURL(base, "models")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return chatURL, modelsURL, nil
+	return chatURL, responsesURL, modelsURL, nil
 }
 
 func resolveOpenAIEndpoints(providerURL, _ string) (EndpointSet, error) {
 	trimmed := strings.TrimRight(providerURL, "/")
 	if strings.HasSuffix(trimmed, "/embeddings") {
 		base := strings.TrimSuffix(trimmed, "/embeddings")
-		chatURL, modelsURL, err := OpenAIURLs(base)
+		chatURL, responsesURL, modelsURL, err := OpenAIURLs(base)
 		if err != nil {
 			return EndpointSet{}, err
 		}
 		return EndpointSet{
-			Base:    strings.TrimSuffix(chatURL, "/chat/completions"),
-			APIBase: strings.TrimSuffix(chatURL, "/chat/completions"),
-			Chat:    chatURL,
-			Embed:   trimmed,
-			Models:  modelsURL,
+			Base:      strings.TrimSuffix(chatURL, "/chat/completions"),
+			APIBase:   strings.TrimSuffix(chatURL, "/chat/completions"),
+			Chat:      chatURL,
+			Responses: responsesURL,
+			Embed:     trimmed,
+			Models:    modelsURL,
 		}, nil
 	}
 
-	chatURL, modelsURL, err := OpenAIURLs(providerURL)
+	chatURL, responsesURL, modelsURL, err := OpenAIURLs(providerURL)
 	if err != nil {
 		return EndpointSet{}, err
 	}
@@ -51,10 +61,11 @@ func resolveOpenAIEndpoints(providerURL, _ string) (EndpointSet, error) {
 	}
 
 	return EndpointSet{
-		Base:    base,
-		APIBase: base,
-		Chat:    chatURL,
-		Embed:   embedURL,
-		Models:  modelsURL,
+		Base:      base,
+		APIBase:   base,
+		Chat:      chatURL,
+		Responses: responsesURL,
+		Embed:     embedURL,
+		Models:    modelsURL,
 	}, nil
 }

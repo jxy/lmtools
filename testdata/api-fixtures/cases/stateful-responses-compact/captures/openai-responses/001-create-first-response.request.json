@@ -1,0 +1,10 @@
+{
+  "body": {
+    "input": "Remember alpha and beta.",
+    "model": "gpt-5.4-nano",
+    "store": true
+  },
+  "method": "POST",
+  "path": "/v1/responses",
+  "url": "https://api.openai.com/v1/responses"
+}

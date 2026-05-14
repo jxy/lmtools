@@ -56,6 +56,10 @@ func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall
 						Name      string          `json:"name"`
 						Arguments json.RawMessage `json:"arguments"`
 					} `json:"function"`
+					Custom struct {
+						Name  string `json:"name"`
+						Input string `json:"input"`
+					} `json:"custom"`
 				} `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -83,8 +87,19 @@ func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall
 	var toolCalls []ToolCall
 
 	for _, tc := range msg.ToolCalls {
+		if tc.Type == "custom" {
+			toolCalls = append(toolCalls, ToolCall{
+				ID:    tc.ID,
+				Type:  "custom",
+				Name:  tc.Custom.Name,
+				Args:  jsonStringRawMessage(tc.Custom.Input),
+				Input: tc.Custom.Input,
+			})
+			continue
+		}
 		toolCalls = append(toolCalls, ToolCall{
 			ID:   tc.ID,
+			Type: "function",
 			Name: tc.Function.Name,
 			Args: normalizeOpenAIToolArguments(tc.Function.Arguments),
 		})

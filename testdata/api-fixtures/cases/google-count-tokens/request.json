@@ -1,0 +1,43 @@
+{
+  "generateContentRequest": {
+    "model": "models/gemini-3.1-flash-lite-preview",
+    "systemInstruction": {
+      "parts": [
+        {
+          "text": "You are a fixture for token counting."
+        }
+      ]
+    },
+    "contents": [
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Count the tokens in this Gemini fixture request."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "functionDeclarations": [
+          {
+            "name": "lookup_fixture",
+            "description": "Look up a fixture value.",
+            "parameters": {
+              "type": "OBJECT",
+              "properties": {
+                "key": {
+                  "type": "STRING"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

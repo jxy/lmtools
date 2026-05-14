@@ -6,6 +6,64 @@ import (
 	"strings"
 )
 
+// AdaptCustomToolBlocksForFunctionCompatibility rewrites custom tool-use
+// history into ordinary function-call history for compatibility backends.
+func AdaptCustomToolBlocksForFunctionCompatibility(messages []TypedMessage) []TypedMessage {
+	if len(messages) == 0 {
+		return messages
+	}
+	adapted := make([]TypedMessage, len(messages))
+	for i, msg := range messages {
+		adapted[i] = msg
+		if len(msg.Blocks) == 0 {
+			continue
+		}
+		blocks := make([]Block, len(msg.Blocks))
+		for j, block := range msg.Blocks {
+			switch b := block.(type) {
+			case ToolUseBlock:
+				blocks[j] = adaptCustomToolUseBlockForFunction(b)
+			case *ToolUseBlock:
+				if b == nil {
+					blocks[j] = block
+					continue
+				}
+				adaptedBlock := adaptCustomToolUseBlockForFunction(*b)
+				blocks[j] = &adaptedBlock
+			case ToolResultBlock:
+				if b.Type == "custom" {
+					b.Type = "function"
+				}
+				blocks[j] = b
+			case *ToolResultBlock:
+				if b == nil {
+					blocks[j] = block
+					continue
+				}
+				adaptedBlock := *b
+				if adaptedBlock.Type == "custom" {
+					adaptedBlock.Type = "function"
+				}
+				blocks[j] = &adaptedBlock
+			default:
+				blocks[j] = block
+			}
+		}
+		adapted[i].Blocks = blocks
+	}
+	return adapted
+}
+
+func adaptCustomToolUseBlockForFunction(block ToolUseBlock) ToolUseBlock {
+	if block.Type != "custom" {
+		return block
+	}
+	block.Type = "function"
+	block.Input = WrapCustomToolInput(CustomToolRawInput(block.InputString, block.Input))
+	block.InputString = ""
+	return block
+}
+
 // ToOpenAITyped converts TypedMessage to strongly typed OpenAI format.
 func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 	result := make([]OpenAIMessage, 0, len(messages))
@@ -98,6 +156,7 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 			typed.Blocks = []Block{
 				ToolResultBlock{
 					ToolUseID: msg.ToolCallID,
+					Name:      msg.Name,
 					Content:   content,
 					IsError:   false,
 				},
@@ -142,8 +201,25 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 			}
 
 			for _, tc := range msg.ToolCalls {
+				if tc.Type == "custom" {
+					name := ""
+					input := ""
+					if tc.Custom != nil {
+						name = tc.Custom.Name
+						input = tc.Custom.Input
+					}
+					typed.Blocks = append(typed.Blocks, ToolUseBlock{
+						ID:          tc.ID,
+						Type:        "custom",
+						Name:        name,
+						Input:       jsonStringRawMessage(input),
+						InputString: input,
+					})
+					continue
+				}
 				typed.Blocks = append(typed.Blocks, ToolUseBlock{
 					ID:    tc.ID,
+					Type:  "function",
 					Name:  tc.Function.Name,
 					Input: json.RawMessage(tc.Function.Arguments),
 				})
@@ -252,6 +328,18 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 			})
 
 		case ToolUseBlock:
+			if v.Type == "custom" {
+				toolCall := OpenAIToolCall{
+					ID:   v.ID,
+					Type: "custom",
+					Custom: &OpenAICustomCall{
+						Name:  v.Name,
+						Input: firstNonEmptyString(v.InputString, rawJSONStringValue(v.Input)),
+					},
+				}
+				toolCalls = append(toolCalls, toolCall)
+				continue
+			}
 			toolCall := OpenAIToolCall{
 				ID:   v.ID,
 				Type: "function",
@@ -290,4 +378,32 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 	}
 
 	return union, toolCalls
+}
+
+func jsonStringRawMessage(value string) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return json.RawMessage(`""`)
+	}
+	return data
+}
+
+func rawJSONStringValue(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return string(raw)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

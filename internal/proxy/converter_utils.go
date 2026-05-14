@@ -248,7 +248,7 @@ func typedMessagesToArgoOpenAI(messages []core.TypedMessage) []ArgoMessage {
 					ToolCallID: b.ToolUseID,
 					Content:    b.Content,
 				})
-			case core.ThinkingBlock:
+			case core.ReasoningBlock:
 				continue
 			default:
 				filteredBlocks = append(filteredBlocks, block)
@@ -268,7 +268,7 @@ func typedMessagesToArgoOpenAI(messages []core.TypedMessage) []ArgoMessage {
 		}
 
 		argoMessages = append(argoMessages, ArgoMessage{
-			Role:      msg.Role,
+			Role:      argoOpenAIChatRole(msg.Role),
 			Content:   content,
 			ToolCalls: typedOpenAIToolCallsToProxy(toolCalls),
 		})
@@ -454,6 +454,21 @@ func openAIToolCallsToTyped(toolCalls []ToolCall) []core.OpenAIToolCall {
 
 	typedCalls := make([]core.OpenAIToolCall, len(toolCalls))
 	for i, tc := range toolCalls {
+		if tc.Type == "custom" {
+			var custom *core.OpenAICustomCall
+			if tc.Custom != nil {
+				custom = &core.OpenAICustomCall{
+					Name:  tc.Custom.Name,
+					Input: tc.Custom.Input,
+				}
+			}
+			typedCalls[i] = core.OpenAIToolCall{
+				ID:     tc.ID,
+				Type:   "custom",
+				Custom: custom,
+			}
+			continue
+		}
 		typedCalls[i] = core.OpenAIToolCall{
 			ID:   tc.ID,
 			Type: tc.Type,
@@ -473,10 +488,21 @@ func openAIToolChoiceToTyped(toolChoice interface{}) *core.ToolChoice {
 
 	switch value := toolChoice.(type) {
 	case string:
-		if value == "auto" || value == "none" {
+		if value == "auto" || value == "none" || value == "required" {
 			return &core.ToolChoice{Type: value}
 		}
 	case map[string]interface{}:
+		if value["type"] == "custom" {
+			custom := openAICustomToolMap(value["custom"])
+			name, ok := custom["name"].(string)
+			if !ok || name == "" {
+				return nil
+			}
+			return &core.ToolChoice{
+				Type: "tool",
+				Name: name,
+			}
+		}
 		if value["type"] != "function" {
 			return nil
 		}
@@ -519,6 +545,21 @@ func typedOpenAIToolCallsToProxy(toolCalls []core.OpenAIToolCall) []ToolCall {
 
 	proxyCalls := make([]ToolCall, len(toolCalls))
 	for i, tc := range toolCalls {
+		if tc.Type == "custom" {
+			var custom *CustomToolCall
+			if tc.Custom != nil {
+				custom = &CustomToolCall{
+					Name:  tc.Custom.Name,
+					Input: tc.Custom.Input,
+				}
+			}
+			proxyCalls[i] = ToolCall{
+				ID:     tc.ID,
+				Type:   "custom",
+				Custom: custom,
+			}
+			continue
+		}
 		proxyCalls[i] = ToolCall{
 			ID:   tc.ID,
 			Type: tc.Type,
@@ -533,6 +574,10 @@ func typedOpenAIToolCallsToProxy(toolCalls []core.OpenAIToolCall) []ToolCall {
 
 // AnthropicBlocksToCore converts Anthropic content blocks to core.Block slice
 func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
+	return AnthropicBlocksToCoreWithToolNameRegistry(blocks, nil)
+}
+
+func AnthropicBlocksToCoreWithToolNameRegistry(blocks []AnthropicContentBlock, registry responseToolNameRegistry) []core.Block {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -542,21 +587,56 @@ func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
 		switch block.Type {
 		case "text":
 			coreBlocks = append(coreBlocks, core.TextBlock{Text: block.Text})
-		case "thinking":
-			coreBlocks = append(coreBlocks, core.ThinkingBlock{
-				Thinking:  block.Thinking,
+		case "thinking", "redacted_thinking":
+			raw := anthropicReasoningBlockRaw(block)
+			coreBlocks = append(coreBlocks, core.ReasoningBlock{
+				Provider:  "anthropic",
+				Type:      block.Type,
+				Text:      block.Thinking,
 				Signature: block.Signature,
+				Raw:       raw,
 			})
 		case "tool_use":
+			name := block.Name
+			namespace := block.Namespace
+			originalName := block.OriginalName
+			toolType := block.ToolType
+			if mapping, ok := registry.resolve(block.Name, ""); ok {
+				namespace = mapping.Namespace
+				originalName = mapping.Name
+				toolType = mapping.Type
+			}
+			if originalName == "" {
+				originalName = block.Name
+			}
+			if namespace != "" && name == originalName {
+				name = flattenNamespaceToolName(namespace, originalName)
+			}
+			if toolType == "custom" {
+				input := anthropicCustomToolInput(block.Input, block.InputString)
+				coreBlocks = append(coreBlocks, core.ToolUseBlock{
+					ID:           block.ID,
+					Type:         "custom",
+					Namespace:    namespace,
+					OriginalName: originalName,
+					Name:         name,
+					Input:        mustMarshalJSON(input),
+					InputString:  input,
+				})
+				continue
+			}
 			inputJSON, err := json.Marshal(block.Input)
 			if err != nil {
 				logger.GetLogger().Warnf("Failed to marshal tool_use input for tool %s: %v", block.Name, err)
 				inputJSON = []byte("{}")
 			}
 			coreBlocks = append(coreBlocks, core.ToolUseBlock{
-				ID:    block.ID,
-				Name:  block.Name,
-				Input: inputJSON,
+				ID:           block.ID,
+				Type:         "function",
+				Namespace:    namespace,
+				OriginalName: originalName,
+				Name:         name,
+				Input:        inputJSON,
 			})
 		case "tool_result":
 			coreBlocks = append(coreBlocks, core.ToolResultBlock{
@@ -591,6 +671,14 @@ func AnthropicBlocksToCore(blocks []AnthropicContentBlock) []core.Block {
 	return coreBlocks
 }
 
+func anthropicReasoningBlockRaw(block AnthropicContentBlock) json.RawMessage {
+	if len(block.Raw) > 0 {
+		return append(json.RawMessage(nil), block.Raw...)
+	}
+	raw, _ := json.Marshal(block)
+	return raw
+}
+
 // CoreBlocksToAnthropic converts core.Block slice to Anthropic content blocks
 func CoreBlocksToAnthropic(blocks []core.Block) []AnthropicContentBlock {
 	if len(blocks) == 0 {
@@ -623,11 +711,19 @@ func CoreBlocksToAnthropic(blocks []core.Block) []AnthropicContentBlock {
 func coreAnthropicContentsToProxyBlocks(contents []core.AnthropicContent) []AnthropicContentBlock {
 	blocks := make([]AnthropicContentBlock, 0, len(contents))
 	for _, content := range contents {
+		if len(content.Raw) > 0 {
+			var rawBlock AnthropicContentBlock
+			if err := json.Unmarshal(content.Raw, &rawBlock); err == nil && rawBlock.Type != "" {
+				blocks = append(blocks, rawBlock)
+				continue
+			}
+		}
 		block := AnthropicContentBlock{
 			Type:      content.Type,
 			Text:      content.Text,
 			Thinking:  content.Thinking,
 			Signature: content.Signature,
+			Data:      content.Data,
 			ID:        content.ID,
 			Name:      content.Name,
 			ToolUseID: content.ToolUseID,

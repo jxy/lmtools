@@ -22,7 +22,7 @@ func TestConvertAnthropicToOpenAI_DropsThinking(t *testing.T) {
 			{
 				Role: "assistant",
 				Content: json.RawMessage(`[
-					{"type": "thinking", "thinking": "Let me think about this greeting..."},
+					{"type": "thinking", "thinking": "Let me think about this greeting...", "signature": "sig_fixture"},
 					{"type": "text", "text": "Hello! How can I help you?"}
 				]`),
 			},
@@ -79,7 +79,7 @@ func TestConvertAnthropicToArgo_DropsThinkingForOpenAI(t *testing.T) {
 			{
 				Role: "assistant",
 				Content: json.RawMessage(`[
-					{"type": "thinking", "thinking": "Let me think about this greeting..."},
+					{"type": "thinking", "thinking": "Let me think about this greeting...", "signature": "sig_fixture"},
 					{"type": "text", "text": "Hello! How can I help you?"}
 				]`),
 			},
@@ -133,7 +133,7 @@ func TestConvertAnthropicToArgo_PreservesThinkingForClaude(t *testing.T) {
 			{
 				Role: "assistant",
 				Content: json.RawMessage(`[
-					{"type": "thinking", "thinking": "Let me think about this greeting..."},
+					{"type": "thinking", "thinking": "Let me think about this greeting...", "signature": "sig_fixture"},
 					{"type": "text", "text": "Hello! How can I help you?"}
 				]`),
 			},

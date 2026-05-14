@@ -1,0 +1,75 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Answer with the country for Chicago using the provided lookup result."
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "functionCall": {
+            "name": "lookup_city",
+            "args": {
+              "city": "Chicago"
+            }
+          },
+          "thoughtSignature": "context_engineering_is_the_way_to_go"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "lookup_city",
+            "response": {
+              "content": "{\"city\":\"Chicago\",\"country\":\"United States\"}"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "Use the function result already present in the input. Do not call tools again."
+      }
+    ]
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "lookup_city",
+          "description": "Look up structured information for a city.",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "city": {
+                "type": "STRING"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "NONE"
+    }
+  },
+  "generationConfig": {
+    "maxOutputTokens": 128
+  }
+}

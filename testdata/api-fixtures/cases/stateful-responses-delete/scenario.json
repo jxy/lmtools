@@ -1,0 +1,62 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": "delete me"
+      },
+      "upstream": {
+        "body": "mock/anthropic-delete.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "status": "completed",
+          "output.0.content.0.text": "delete target"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "delete me"
+          ]
+        }
+      ],
+      "bind": {
+        "response_id": "id"
+      }
+    },
+    {
+      "id": "delete-response",
+      "method": "DELETE",
+      "path": "/v1/responses/${response_id}",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${response_id}",
+          "object": "response.deleted",
+          "deleted": true
+        }
+      }
+    },
+    {
+      "id": "retrieve-deleted-response",
+      "method": "GET",
+      "path": "/v1/responses/${response_id}",
+      "expect": {
+        "status": 404,
+        "json_fields": {
+          "error.code": "not_found",
+          "error.type": "invalid_request_error"
+        }
+      }
+    }
+  ]
+}

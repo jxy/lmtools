@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "messages.1.content.0: Invalid `signature` in `thinking` block",
+    "type": "invalid_request_error"
+  },
+  "request_id": "req_011CajjD7qukD46QkrCakZUq",
+  "type": "error"
+}

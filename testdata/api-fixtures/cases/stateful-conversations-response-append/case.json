@@ -1,0 +1,14 @@
+{
+  "id": "stateful-conversations-response-append",
+  "description": "Stateful Responses API appends requests and assistant outputs to a conversation",
+  "kinds": [
+    "stateful"
+  ],
+  "provider": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "capture_targets": [
+    "openai-responses"
+  ]
+}

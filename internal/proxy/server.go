@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/logger"
 	"lmtools/internal/retry"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -54,11 +55,18 @@ const (
 // while credentials and configuration use s.config.*. Endpoints are always
 // derived from Config via NewEndpoints() in NewServer.
 type Server struct {
-	config    *Config
-	endpoints *Endpoints
-	mapper    *ModelMapper
-	converter *Converter
-	client    *retry.Client
+	config         *Config
+	endpoints      *Endpoints
+	mapper         *ModelMapper
+	converter      *Converter
+	client         *retry.Client
+	responsesState *responsesState
+	// responsesModelAliases maps OpenAI response IDs to client-visible model aliases.
+	// It is process-local and intentionally not persisted.
+	responsesModelAliasMu sync.RWMutex
+	responsesModelAliases map[string]string
+	backgroundMu          sync.Mutex
+	backgroundCancel      map[string]context.CancelFunc
 }
 
 // NewServer creates a new API proxy server.
@@ -72,11 +80,14 @@ func NewServer(config *Config) (http.Handler, error) {
 
 	mapper := NewModelMapper(config)
 	server := &Server{
-		config:    config,
-		endpoints: endpoints,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    retry.NewClientWithOptions(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
+		config:                config,
+		endpoints:             endpoints,
+		mapper:                mapper,
+		converter:             NewConverter(mapper),
+		client:                retry.NewClientWithOptions(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
+		responsesState:        newResponsesState(config.SessionsDir),
+		responsesModelAliases: make(map[string]string),
+		backgroundCancel:      make(map[string]context.CancelFunc),
 	}
 
 	// Wrap with consolidated middleware

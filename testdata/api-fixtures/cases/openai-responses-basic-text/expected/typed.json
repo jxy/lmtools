@@ -1,0 +1,16 @@
+{
+  "developer": "Answer in one short sentence.",
+  "max_tokens": 64,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Say hello to the fixture runner.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false
+}

@@ -1,0 +1,19 @@
+{
+  "body": {
+    "items": [
+      {
+        "content": [
+          {
+            "text": "seed",
+            "type": "input_text"
+          }
+        ],
+        "role": "user",
+        "type": "message"
+      }
+    ]
+  },
+  "method": "POST",
+  "path": "/v1/conversations",
+  "url": "https://api.openai.com/v1/conversations"
+}

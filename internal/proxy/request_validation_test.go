@@ -46,6 +46,53 @@ func TestValidateOpenAIAllowsWarnOnlyFieldsForConvertedProviders(t *testing.T) {
 	}
 }
 
+func TestValidateParsedOpenAIResponsesRequestInputSources(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     OpenAIResponsesRequest
+		wantErr string
+	}{
+		{
+			name: "input",
+			req:  OpenAIResponsesRequest{Model: "gpt-test", Input: "hi"},
+		},
+		{
+			name: "prompt",
+			req: OpenAIResponsesRequest{
+				Model:  "gpt-test",
+				Prompt: map[string]interface{}{"id": "pmpt_123"},
+			},
+		},
+		{
+			name: "previous response",
+			req:  OpenAIResponsesRequest{Model: "gpt-test", PreviousResponseID: "resp_123"},
+		},
+		{
+			name:    "missing source",
+			req:     OpenAIResponsesRequest{Model: "gpt-test"},
+			wantErr: "input, prompt, or previous_response_id is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateParsedOpenAIResponsesRequest(&tt.req)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateParsedOpenAIResponsesRequest() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateOpenAIRejectsAnthropicOutputConfigFeaturesOnNonOpusTarget(t *testing.T) {
 	req := &OpenAIRequest{
 		Model:           "claude-test",

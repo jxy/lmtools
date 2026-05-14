@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-responses-error",
+  "description": "OpenAI Responses API failed response with structured error",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai-responses"
+}

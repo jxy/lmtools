@@ -1,0 +1,107 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-tool-call-with-reasoning",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": "Use lookup for the fixture id.",
+        "tools": [
+          {
+            "type": "function",
+            "name": "lookup",
+            "description": "Look up a fixture value.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ]
+            }
+          }
+        ],
+        "tool_choice": {
+          "type": "function",
+          "name": "lookup"
+        }
+      },
+      "upstream": {
+        "body": "mock/anthropic-reasoning-tool.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "status": "completed",
+          "output.0.type": "reasoning",
+          "output.0.summary.0.type": "summary_text",
+          "output.0.summary.0.text": "I need a lookup.",
+          "output.1.type": "function_call",
+          "output.1.call_id": "toolu_lookup_1",
+          "output.1.name": "lookup"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "Use lookup for the fixture id.",
+            "lookup"
+          ]
+        }
+      ],
+      "bind": {
+        "response_id": "id",
+        "tool_call_id": "output.1.call_id"
+      },
+      "capture_bind": {
+        "tool_call_id": "output.0.call_id"
+      }
+    },
+    {
+      "id": "submit-tool-result",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "previous_response_id": "${response_id}",
+        "input": [
+          {
+            "type": "function_call_output",
+            "call_id": "${tool_call_id}",
+            "output": "lookup result"
+          }
+        ]
+      },
+      "upstream": {
+        "body": "mock/anthropic-after-tool.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "status": "completed",
+          "output.0.content.0.text": "done"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "I need a lookup.",
+            "sig_lookup_1",
+            "toolu_lookup_1",
+            "lookup result"
+          ]
+        }
+      ]
+    }
+  ]
+}

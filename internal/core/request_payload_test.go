@@ -62,6 +62,116 @@ func TestPrepareRequestPayloadAnthropicStripsInlineSystemAndConvertsTools(t *tes
 	}
 }
 
+func TestPrepareRequestPayloadAnthropicConvertsCustomToolChoice(t *testing.T) {
+	payload, err := PrepareRequestPayload(
+		"anthropic",
+		"claude-opus-4-1-20250805",
+		[]TypedMessage{NewTextMessage(string(RoleUser), "patch")},
+		"",
+		[]ToolDefinition{{
+			Type:        "custom",
+			Name:        "apply_patch",
+			Description: "Apply a patch.",
+		}},
+		&ToolChoice{Type: "tool", Name: "apply_patch"},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PrepareRequestPayload() error = %v", err)
+	}
+
+	tools, ok := payload.Tools.([]AnthropicTool)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("Tools = %T len=%d, want one Anthropic tool", payload.Tools, len(tools))
+	}
+	if tools[0].Name != "apply_patch" || len(tools[0].InputSchema) == 0 {
+		t.Fatalf("Tools = %+v, want wrapped custom tool", tools)
+	}
+	choice, ok := payload.ToolChoice.(AnthropicToolChoice)
+	if !ok || choice.Type != "tool" || choice.Name != "apply_patch" {
+		t.Fatalf("ToolChoice = %#v, want forced apply_patch tool", payload.ToolChoice)
+	}
+}
+
+func TestPrepareRequestPayloadAnthropicDropsMissingToolChoice(t *testing.T) {
+	payload, err := PrepareRequestPayload(
+		"anthropic",
+		"claude-opus-4-1-20250805",
+		[]TypedMessage{NewTextMessage(string(RoleUser), "lookup")},
+		"",
+		[]ToolDefinition{{
+			Type:        "function",
+			Name:        "lookup",
+			Description: "Lookup.",
+			InputSchema: map[string]interface{}{"type": "object"},
+		}},
+		&ToolChoice{Type: "tool", Name: "missing"},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PrepareRequestPayload() error = %v", err)
+	}
+	if payload.ToolChoice != nil {
+		t.Fatalf("ToolChoice = %#v, want nil for missing converted tool", payload.ToolChoice)
+	}
+}
+
+func TestPrepareRequestPayloadOutOfBandPrefersInlineSystemWhenConfigNotExplicit(t *testing.T) {
+	payload, err := PrepareRequestPayloadWithSystemExplicit(
+		"anthropic",
+		"claude-opus-4-1-20250805",
+		[]TypedMessage{
+			NewTextMessage(string(RoleSystem), "session system"),
+			NewTextMessage(string(RoleUser), "hello"),
+		},
+		"default system",
+		false,
+		nil,
+		nil,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PrepareRequestPayloadWithSystemExplicit() error = %v", err)
+	}
+	if got := payload.System; got != "session system" {
+		t.Fatalf("System = %q, want session system", got)
+	}
+	if got := len(payload.Messages); got != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", got)
+	}
+	if got := payload.Messages[0].Role; got != string(RoleUser) {
+		t.Fatalf("remaining role = %q, want user", got)
+	}
+}
+
+func TestPrepareRequestPayloadOutOfBandExplicitEmptySystemRemovesInlineSystem(t *testing.T) {
+	payload, err := PrepareRequestPayloadWithSystemExplicit(
+		"anthropic",
+		"claude-opus-4-1-20250805",
+		[]TypedMessage{
+			NewTextMessage(string(RoleSystem), "session system"),
+			NewTextMessage(string(RoleUser), "hello"),
+		},
+		"",
+		true,
+		nil,
+		nil,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PrepareRequestPayloadWithSystemExplicit() error = %v", err)
+	}
+	if payload.System != "" {
+		t.Fatalf("System = %q, want empty", payload.System)
+	}
+	if got := len(payload.Messages); got != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", got)
+	}
+	if got := payload.Messages[0].Role; got != string(RoleUser) {
+		t.Fatalf("remaining role = %q, want user", got)
+	}
+}
+
 func TestPrependSystemMessage(t *testing.T) {
 	messages := []TypedMessage{
 		{
@@ -163,6 +273,7 @@ func TestPrepareRequestPayloadArgoRejectsAudioBlocks(t *testing.T) {
 		},
 		"gpt5mini",
 		"",
+		false,
 		nil,
 		nil,
 		false,

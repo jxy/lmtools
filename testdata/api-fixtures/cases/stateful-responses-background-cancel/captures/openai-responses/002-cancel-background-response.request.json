@@ -1,0 +1,5 @@
+{
+  "method": "POST",
+  "path": "/v1/responses/resp_0433cb831317c3ba0069f38f2225c8819fb9d95370569fa9d5/cancel",
+  "url": "https://api.openai.com/v1/responses/resp_0433cb831317c3ba0069f38f2225c8819fb9d95370569fa9d5/cancel"
+}

@@ -1,0 +1,23 @@
+{
+  "developer": "Use concise JSON values.",
+  "max_tokens": 64,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Return JSON with the city and state for Lake Michigan's Illinois shoreline.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "metadata": {
+    "fixture": "openai-responses-basic-json"
+  },
+  "reasoning_effort": "low",
+  "response_format": {
+    "type": "json_object"
+  },
+  "stream": false
+}

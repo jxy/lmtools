@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/core"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -106,6 +107,96 @@ func TestForkSessionWithDifferentSystemMessage(t *testing.T) {
 			t.Errorf("First message in empty fork should be user, got %q", emptyLineage[0].Role)
 		}
 	})
+}
+
+func TestForkSessionWithManagerUsesConfiguredRoot(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(t.TempDir())
+	originalSession, err := manager.CreateSession("original system", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := AppendMessageWithToolInteraction(ctx, originalSession, Message{
+		Role:      core.RoleUser,
+		Content:   "hello from manager root",
+		Timestamp: time.Now(),
+	}, nil, nil); err != nil {
+		t.Fatalf("AppendMessageWithToolInteraction() error = %v", err)
+	}
+
+	forkedSession, err := ForkSessionWithManager(ctx, manager, originalSession.Path, nil)
+	if err != nil {
+		t.Fatalf("ForkSessionWithManager() error = %v", err)
+	}
+	rel, err := filepath.Rel(manager.SessionsDir(), forkedSession.Path)
+	if err != nil {
+		t.Fatalf("filepath.Rel() error = %v", err)
+	}
+	if rel == "." || rel == "" || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("forked session path %q is not under manager root %q", forkedSession.Path, manager.SessionsDir())
+	}
+
+	messages, err := BuildMessagesWithToolInteractionsWithManager(ctx, manager, forkedSession.Path)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractionsWithManager() error = %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("forked messages = %+v, want one copied user message", messages)
+	}
+	text, ok := messages[0].Blocks[0].(core.TextBlock)
+	if !ok || text.Text != "hello from manager root" {
+		t.Fatalf("forked message block = %#v, want copied text", messages[0].Blocks[0])
+	}
+}
+
+func TestForkSessionWithManagerPreservesExplicitBlocks(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(t.TempDir())
+	originalSession, err := manager.CreateSession("original system", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	blocks := []core.Block{
+		core.ReasoningBlock{
+			Provider:  "anthropic",
+			Type:      "thinking",
+			Text:      "keep this reasoning",
+			Signature: "sig-1",
+		},
+		core.TextBlock{Text: "visible answer"},
+	}
+	if _, err := AppendMessageWithBlocks(ctx, originalSession, Message{
+		Role:      core.RoleAssistant,
+		Content:   "visible answer",
+		Timestamp: time.Now(),
+		Model:     "test-model",
+	}, nil, nil, blocks); err != nil {
+		t.Fatalf("AppendMessageWithBlocks() error = %v", err)
+	}
+
+	forkedSession, err := ForkSessionWithManager(ctx, manager, originalSession.Path, nil)
+	if err != nil {
+		t.Fatalf("ForkSessionWithManager() error = %v", err)
+	}
+	messages, err := BuildMessagesWithToolInteractionsWithManager(ctx, manager, forkedSession.Path)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractionsWithManager() error = %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("forked messages = %+v, want one copied assistant message", messages)
+	}
+	if len(messages[0].Blocks) != 2 {
+		t.Fatalf("forked blocks = %#v, want reasoning plus text", messages[0].Blocks)
+	}
+	reasoning, ok := messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok || reasoning.Text != "keep this reasoning" || reasoning.Signature != "sig-1" {
+		t.Fatalf("forked reasoning block = %#v, want copied reasoning", messages[0].Blocks[0])
+	}
+	text, ok := messages[0].Blocks[1].(core.TextBlock)
+	if !ok || text.Text != "visible answer" {
+		t.Fatalf("forked text block = %#v, want copied text", messages[0].Blocks[1])
+	}
 }
 
 func TestForkSessionWithToolInteractions(t *testing.T) {

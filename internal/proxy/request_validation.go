@@ -24,6 +24,19 @@ func validateParsedOpenAIRequest(req *OpenAIRequest) error {
 	if len(req.Messages) == 0 {
 		return fmt.Errorf("messages array cannot be empty")
 	}
+	if err := validateOpenAIChatToolSequence(req.Messages); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateParsedOpenAIResponsesRequest(req *OpenAIResponsesRequest) error {
+	if req.Model == "" {
+		return fmt.Errorf("model is required")
+	}
+	if req.Input == nil && req.PreviousResponseID == "" && req.Prompt == nil {
+		return fmt.Errorf("input, prompt, or previous_response_id is required")
+	}
 	return nil
 }
 

@@ -1,0 +1,31 @@
+{
+  "body": {
+    "input": "Use lookup for the fixture id.",
+    "model": "gpt-5.4-nano",
+    "tool_choice": {
+      "name": "lookup",
+      "type": "function"
+    },
+    "tools": [
+      {
+        "description": "Look up a fixture value.",
+        "name": "lookup",
+        "parameters": {
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      }
+    ]
+  },
+  "method": "POST",
+  "path": "/v1/responses",
+  "url": "https://api.openai.com/v1/responses"
+}

@@ -1,0 +1,62 @@
+{
+  "developer": "Use the function result already present in the input. Do not call tools again.",
+  "max_tokens": 128,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Answer with the country for Chicago using the provided lookup result.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "blocks": [
+        {
+          "id": "call_lookup_city_1",
+          "input": {
+            "city": "Chicago"
+          },
+          "name": "lookup_city",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "blocks": [
+        {
+          "content": "{\"city\":\"Chicago\",\"country\":\"United States\"}",
+          "is_error": false,
+          "name": "lookup_city",
+          "tool_use_id": "call_lookup_city_1",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false,
+  "tool_choice": {
+    "type": "none"
+  },
+  "tools": [
+    {
+      "description": "Look up structured information for a city.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "name": "lookup_city"
+    }
+  ]
+}

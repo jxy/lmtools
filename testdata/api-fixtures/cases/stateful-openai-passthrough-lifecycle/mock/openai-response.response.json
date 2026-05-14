@@ -1,0 +1,21 @@
+{
+  "id": "resp_upstream",
+  "object": "response",
+  "created_at": 1777493000,
+  "status": "completed",
+  "model": "gpt-backend",
+  "output": [
+    {
+      "id": "msg_upstream",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "upstream response"
+        }
+      ]
+    }
+  ]
+}

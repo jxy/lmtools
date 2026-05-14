@@ -1,0 +1,13 @@
+{
+  "id": "resp_fixture_error",
+  "object": "response",
+  "created_at": 1760000001,
+  "status": "failed",
+  "model": "gpt-5",
+  "output": [],
+  "error": {
+    "code": "server_error",
+    "message": "The model failed to produce a response.",
+    "type": "server_error"
+  }
+}

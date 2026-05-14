@@ -1,0 +1,17 @@
+{
+  "id": "msg_alpha",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-test",
+  "content": [
+    {
+      "type": "text",
+      "text": "stored alpha"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 8,
+    "output_tokens": 2
+  }
+}

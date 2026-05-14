@@ -1,0 +1,17 @@
+{
+  "id": "msg_stateful_conversation_answer",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-test",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "conversation answer"
+    }
+  ],
+  "usage": {
+    "input_tokens": 6,
+    "output_tokens": 2
+  }
+}

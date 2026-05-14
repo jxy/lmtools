@@ -157,6 +157,7 @@ func (rc *RequestController) newToolContext(sess *session.Session, response *cor
 		ToolDefs:        rb.ToolDefs,
 		MessagesFn:      messageBuilder,
 		UI:              ui,
+		InitialResponse: *response,
 		InitialText:     response.Text,
 		InitialCalls:    response.ToolCalls,
 		InitialStreamed: response.Streamed,
@@ -534,11 +535,11 @@ func logWireHTTPResponseHeaders(ctx context.Context, resp *http.Response) {
 // persistAssistantOnly saves assistant response when there are no tool calls
 func persistAssistantOnly(ctx context.Context, response core.Response, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) error {
 	// Save assistant response to session if enabled (but NOT when there are tool calls - HandleToolExecution will do it)
-	if sess != nil && (response.Text != "" || response.ThoughtSignature != "") {
+	if sess != nil && (response.Text != "" || response.ThoughtSignature != "" || len(response.Blocks) > 0) {
 		logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(response.Text), cfg.StreamChat)
 		store := session.NewStore(sess, logger.From(ctx))
 		previousPath := sess.Path
-		path, messageID, err := store.SaveAssistantWithThoughtSignature(ctx, response.Text, nil, model, response.ThoughtSignature)
+		path, messageID, err := store.SaveAssistantResponse(ctx, response, model)
 		if err != nil {
 			// Log error but don't fail the request
 			notifier.Warnf("Warning: failed to save response to session: %v", err)

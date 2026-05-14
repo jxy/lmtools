@@ -524,6 +524,15 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model: "gpto3",
 				Messages: []AnthropicMessage{
 					{
+						Role: core.RoleAssistant,
+						Content: json.RawMessage(`[{
+							"type": "tool_use",
+							"id": "call_PqB38FjnsQbA0cYOp0Af6Bbj",
+							"name": "Read",
+							"input": {"file_path": "/tmp/test.txt"}
+						}]`),
+					},
+					{
 						Role: core.RoleUser,
 						Content: json.RawMessage(`[{
 							"type": "tool_result",
@@ -540,6 +549,20 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 				Model:               "gpto3",
 				MaxCompletionTokens: 1000,
 				Messages: []ArgoMessage{
+					{
+						Role:    "assistant",
+						Content: "",
+						ToolCalls: []ToolCall{
+							{
+								ID:   "call_PqB38FjnsQbA0cYOp0Af6Bbj",
+								Type: "function",
+								Function: FunctionCall{
+									Name:      "Read",
+									Arguments: `{"file_path":"/tmp/test.txt"}`,
+								},
+							},
+						},
+					},
 					{
 						Role:       "tool",
 						ToolCallID: "call_PqB38FjnsQbA0cYOp0Af6Bbj",
@@ -599,6 +622,14 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 							}
 						}]`),
 					},
+					{
+						Role: core.RoleUser,
+						Content: json.RawMessage(`[{
+							"type": "tool_result",
+							"tool_use_id": "call_47BSzK51qN5Fq0hMJT1HXx5j",
+							"content": "file contents"
+						}]`),
+					},
 				},
 				MaxTokens: 1000,
 			},
@@ -622,6 +653,11 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 							},
 						},
 					},
+					{
+						Role:       "tool",
+						ToolCallID: "call_47BSzK51qN5Fq0hMJT1HXx5j",
+						Content:    "file contents",
+					},
 				},
 			},
 		},
@@ -640,6 +676,14 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 							"id": "call_123",
 							"name": "Read",
 							"input": {"file_path": "/tmp/test.txt"}
+						}]`),
+					},
+					{
+						Role: core.RoleUser,
+						Content: json.RawMessage(`[{
+							"type": "tool_result",
+							"tool_use_id": "call_123",
+							"content": "file contents"
 						}]`),
 					},
 				},
@@ -662,6 +706,11 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 								},
 							},
 						},
+					},
+					{
+						Role:       "tool",
+						ToolCallID: "call_123",
+						Content:    "file contents",
 					},
 				},
 			},

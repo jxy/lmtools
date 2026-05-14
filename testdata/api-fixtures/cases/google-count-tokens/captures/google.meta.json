@@ -1,0 +1,39 @@
+{
+  "case_id": "google-count-tokens",
+  "target": "google",
+  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:countTokens",
+  "status_code": 200,
+  "content_type": "application/json; charset=UTF-8",
+  "captured_at": "2026-04-30T22:03:11-05:00",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+    ],
+    "Content-Type": [
+      "application/json; charset=UTF-8"
+    ],
+    "Date": [
+      "Fri, 01 May 2026 03:03:11 GMT"
+    ],
+    "Server": [
+      "scaffolding on HTTPServer2"
+    ],
+    "Server-Timing": [
+      "gfet4t7; dur=72"
+    ],
+    "Vary": [
+      "Origin",
+      "X-Origin",
+      "Referer"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Frame-Options": [
+      "SAMEORIGIN"
+    ],
+    "X-Xss-Protection": [
+      "0"
+    ]
+  }
+}

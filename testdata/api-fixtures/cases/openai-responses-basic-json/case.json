@@ -1,0 +1,20 @@
+{
+  "id": "openai-responses-basic-json",
+  "description": "OpenAI Responses API request with instructions, reasoning effort, and JSON output",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano",
+    "openai": "gpt-5.4-nano"
+  },
+  "render_targets": [
+    "openai-responses",
+    "openai"
+  ],
+  "capture_targets": [
+    "openai-responses",
+    "openai-responses-stream"
+  ]
+}

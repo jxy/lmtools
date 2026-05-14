@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"lmtools/internal/core"
 	"os"
@@ -17,7 +18,11 @@ import (
 func TestCommitMessageWithRetriesSiblingRestaging(t *testing.T) {
 	// Create a temporary session directory
 	tempDir := t.TempDir()
-	sessionPath := filepath.Join(tempDir, "test-session")
+	sessionsDir := filepath.Join(tempDir, "sessions")
+	oldSessionsDir := GetSessionsDir()
+	SetSessionsDir(sessionsDir)
+	t.Cleanup(func() { SetSessionsDir(oldSessionsDir) })
+	sessionPath := filepath.Join(sessionsDir, "test-session")
 	if err := os.MkdirAll(sessionPath, 0o755); err != nil {
 		t.Fatalf("Failed to create session directory: %v", err)
 	}
@@ -56,24 +61,25 @@ func TestCommitMessageWithRetriesSiblingRestaging(t *testing.T) {
 		}
 	}
 
-	// Now we'll manually create a conflict to test the sibling restaging
-	// Get the next message ID that would be used
-	nextID, err := GetNextMessageID(sessionPath)
-	if err != nil {
-		t.Fatalf("Failed to get next message ID: %v", err)
+	var conflictID string
+	conflictWritten := false
+	afterGetNextMessageIDForTest = func(path, msgID string) {
+		if conflictWritten || path != sessionPath {
+			return
+		}
+		conflictWritten = true
+		conflictID = msgID
+		conflictMsg := Message{
+			ID:        msgID,
+			Role:      core.RoleUser,
+			Content:   "Conflicting message",
+			Timestamp: time.Now(),
+		}
+		if err := writeMessage(path, msgID, conflictMsg); err != nil {
+			t.Fatalf("Failed to create conflict message: %v", err)
+		}
 	}
-
-	// Manually create a conflicting message with this ID
-	// This simulates another process writing at the same time
-	conflictMsg := Message{
-		ID:        nextID,
-		Role:      core.RoleUser,
-		Content:   "Conflicting message",
-		Timestamp: time.Now(),
-	}
-	if err := writeMessage(sessionPath, conflictMsg.ID, conflictMsg); err != nil {
-		t.Fatalf("Failed to create conflict message: %v", err)
-	}
+	t.Cleanup(func() { afterGetNextMessageIDForTest = nil })
 
 	// Now try to save a new message - it should detect the conflict and create a sibling
 	testMsg := Message{
@@ -81,39 +87,30 @@ func TestCommitMessageWithRetriesSiblingRestaging(t *testing.T) {
 		Content:   "This should go to a sibling",
 		Timestamp: time.Now(),
 	}
+	testBlocks := []core.Block{
+		core.ReasoningBlock{
+			Provider: "anthropic",
+			Type:     "thinking",
+			ID:       "rs_1",
+			Text:     "preserved reasoning",
+			Raw:      json.RawMessage(`{"type":"thinking","id":"rs_1"}`),
+		},
+		core.TextBlock{Text: testMsg.Content},
+	}
 
-	result, err := committer.CommitMessageWithRetries(ctx, testMsg, toolInteraction)
+	result, err := committer.CommitMessageWithBlocksWithRetries(ctx, testMsg, toolInteraction, testBlocks)
 	if err != nil {
 		t.Fatalf("Failed to save message: %v", err)
+	}
+	if !conflictWritten {
+		t.Fatal("test hook did not create a conflict")
 	}
 
 	// The message should have been saved to a sibling directory
 	if result.Path == sessionPath {
-		// This might happen if the conflict was resolved differently
-		// Let's check if it got a different ID instead
 		t.Logf("Message was saved to original path with ID: %s", result.MessageID)
-		t.Logf("Expected conflict with ID: %s", nextID)
-
-		// Check if the message ID is different from the conflict ID
-		if result.MessageID == nextID {
-			t.Fatal("Message should not have the same ID as the conflict")
-		}
-
-		// Even if it didn't create a sibling, the restaging logic should still work
-		// Let's verify the files exist
-		jsonPath := filepath.Join(result.Path, result.MessageID+".json")
-		txtPath := filepath.Join(result.Path, result.MessageID+".txt")
-		toolsPath := filepath.Join(result.Path, result.MessageID+".tools.json")
-
-		if _, err := os.Stat(jsonPath); err != nil {
-			t.Fatalf("JSON file should exist: %v", err)
-		}
-		if _, err := os.Stat(txtPath); err != nil {
-			t.Fatalf("TXT file should exist: %v", err)
-		}
-		if _, err := os.Stat(toolsPath); err != nil {
-			t.Fatalf("Tools file should exist: %v", err)
-		}
+		t.Logf("Expected conflict with ID: %s", conflictID)
+		t.Fatal("Message should have been restaged into a sibling path")
 	} else {
 		// Verify it's a sibling directory
 		if !strings.Contains(result.Path, ".s.") {
@@ -124,6 +121,7 @@ func TestCommitMessageWithRetriesSiblingRestaging(t *testing.T) {
 		siblingJsonPath := filepath.Join(result.Path, result.MessageID+".json")
 		siblingTxtPath := filepath.Join(result.Path, result.MessageID+".txt")
 		siblingToolsPath := filepath.Join(result.Path, result.MessageID+".tools.json")
+		siblingBlocksPath := filepath.Join(result.Path, result.MessageID+".blocks.json")
 
 		if _, err := os.Stat(siblingJsonPath); err != nil {
 			t.Fatalf("Sibling .json file should exist: %v", err)
@@ -133,6 +131,20 @@ func TestCommitMessageWithRetriesSiblingRestaging(t *testing.T) {
 		}
 		if _, err := os.Stat(siblingToolsPath); err != nil {
 			t.Fatalf("Sibling .tools.json file should exist: %v", err)
+		}
+		if _, err := os.Stat(siblingBlocksPath); err != nil {
+			t.Fatalf("Sibling .blocks.json file should exist: %v", err)
+		}
+		blocks, ok, err := loadMessageBlocks(result.Path, result.MessageID)
+		if err != nil {
+			t.Fatalf("Failed to load sibling blocks: %v", err)
+		}
+		if !ok || len(blocks) != len(testBlocks) {
+			t.Fatalf("Sibling blocks = %#v, want %d explicit blocks", blocks, len(testBlocks))
+		}
+		reasoning, ok := blocks[0].(core.ReasoningBlock)
+		if !ok || reasoning.ID != "rs_1" || reasoning.Text != "preserved reasoning" {
+			t.Fatalf("Sibling first block = %#v, want preserved reasoning block", blocks[0])
 		}
 
 		// Verify content

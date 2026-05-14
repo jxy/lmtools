@@ -85,6 +85,9 @@ func validateOutputFlags(cfg *Config) error {
 	if cfg.Embed && (cfg.Effort != "" || cfg.JSONMode || cfg.JSONSchemaPath != "") {
 		return fmt.Errorf("invalid flag combination: -effort, -json, and -json-schema are only supported in chat mode")
 	}
+	if cfg.OpenAIResponses && cfg.Embed {
+		return fmt.Errorf("invalid flag combination: -openai-responses is only supported in chat mode")
+	}
 
 	if cfg.Effort != "" && !isValidEffortFlag(cfg.Effort) {
 		return fmt.Errorf("-effort must be one of: none, minimal, low, medium, high, xhigh, max")
@@ -153,6 +156,9 @@ func normalizeAndValidateProvider(cfg *Config) error {
 	}
 	if cfg.Provider == "" {
 		cfg.Provider = constants.ProviderArgo
+	}
+	if cfg.OpenAIResponses && cfg.Provider != constants.ProviderOpenAI {
+		return fmt.Errorf("invalid flag combination: -openai-responses requires -provider openai")
 	}
 	return nil
 }

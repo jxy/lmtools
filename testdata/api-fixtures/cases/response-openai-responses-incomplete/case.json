@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-responses-incomplete",
+  "description": "OpenAI Responses API incomplete response with max output token details",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai-responses"
+}

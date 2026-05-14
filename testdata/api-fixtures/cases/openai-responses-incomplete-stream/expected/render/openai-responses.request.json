@@ -1,0 +1,17 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Explain why API streaming clients must handle terminal incomplete events.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "instructions": "Write a detailed answer with at least three full sentences. Do not stop early.",
+  "max_output_tokens": 16,
+  "model": "gpt-5.4-nano"
+}

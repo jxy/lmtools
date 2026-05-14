@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "content": [
+        {
+          "text": "hello",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_02b35ea5dfdac8f00069f38f1a377c81a282c981a83fd1e0f6",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "first_id": "msg_02b35ea5dfdac8f00069f38f1a377c81a282c981a83fd1e0f6",
+  "has_more": false,
+  "last_id": "msg_02b35ea5dfdac8f00069f38f1a377c81a282c981a83fd1e0f6",
+  "object": "list"
+}

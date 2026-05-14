@@ -1,0 +1,46 @@
+{
+  "data": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "logprobs": [],
+          "text": "Sure — what do you want me to answer?\n\n“seed” could mean a few things. Please tell me:\n1) What question/problem you want solved (paste it), and  \n2) What context you mean by “seed” (e.g., programming randomness seed, planting, game “seed,” or something else).",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_025c99d51e88a4a00069f38fa1d3408193b37f8ba832049555",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    },
+    {
+      "content": [
+        {
+          "text": "answer this",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_025c99d51e88a4a00069f38fa1a12081939dd464a241a30084",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    },
+    {
+      "content": [
+        {
+          "text": "seed",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_69f38fa1164481939fc2dd4edc77f022025c99d51e88a4a0",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "first_id": "msg_025c99d51e88a4a00069f38fa1d3408193b37f8ba832049555",
+  "has_more": false,
+  "last_id": "msg_69f38fa1164481939fc2dd4edc77f022025c99d51e88a4a0",
+  "object": "list"
+}

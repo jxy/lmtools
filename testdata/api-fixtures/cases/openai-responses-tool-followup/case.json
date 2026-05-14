@@ -1,0 +1,21 @@
+{
+  "id": "openai-responses-tool-followup",
+  "description": "OpenAI Responses API request with function call output returned to the model",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano",
+    "google": "gemini-3.1-flash-lite-preview"
+  },
+  "render_targets": [
+    "openai-responses",
+    "google"
+  ],
+  "capture_targets": [
+    "openai-responses",
+    "openai-responses-stream",
+    "google"
+  ]
+}

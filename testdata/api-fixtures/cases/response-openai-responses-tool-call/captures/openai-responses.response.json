@@ -1,0 +1,34 @@
+{
+  "id": "resp_fixture_001",
+  "object": "response",
+  "created_at": 1760000000,
+  "status": "completed",
+  "model": "gpt-5.4-nano",
+  "output": [
+    {
+      "id": "msg_fixture_001",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Looking that up."
+        }
+      ]
+    },
+    {
+      "id": "fc_fixture_001",
+      "type": "function_call",
+      "status": "completed",
+      "call_id": "call_fixture_001",
+      "name": "lookup_city",
+      "arguments": "{\"city\":\"Chicago\"}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 8,
+    "total_tokens": 20
+  }
+}

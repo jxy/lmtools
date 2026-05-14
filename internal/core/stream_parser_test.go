@@ -67,6 +67,21 @@ func (m *MockLogger) GetLogDir() string {
 	return "/tmp"
 }
 
+func TestParseOpenAIStreamChunkTopLevelErrorIsFatal(t *testing.T) {
+	_, err := ParseOpenAIStreamChunk([]byte(`{"error":{"message":"quota exceeded","type":"insufficient_quota","code":"billing_hard_limit_reached"}}`))
+	if err == nil {
+		t.Fatal("ParseOpenAIStreamChunk() error = nil, want provider stream error")
+	}
+	if !isFatalStreamError(err) {
+		t.Fatalf("ParseOpenAIStreamChunk() error is not fatal: %v", err)
+	}
+	for _, want := range []string{"upstream stream error", "quota exceeded", "insufficient_quota", "billing_hard_limit_reached"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ParseOpenAIStreamChunk() error = %q, want %q", err.Error(), want)
+		}
+	}
+}
+
 // TestStreamingParseErrorThreshold tests the parse error threshold behavior
 // for streaming responses across different providers
 func TestStreamingParseErrorThreshold(t *testing.T) {
@@ -375,6 +390,74 @@ data: [DONE]
 	}
 }
 
+func TestOpenAIResponsesStreamingFailedEventReturnsError(t *testing.T) {
+	tests := []struct {
+		name         string
+		responseBody string
+	}{
+		{
+			name: "failed event flushed by blank line",
+			responseBody: `data: {"type":"response.output_text.delta","delta":"partial"}
+
+data: {"type":"response.failed","response":{"error":{"message":"quota exceeded","type":"insufficient_quota","code":"billing_hard_limit_reached"}}}
+
+`,
+		},
+		{
+			name: "failed event flushed at EOF",
+			responseBody: `data: {"type":"response.output_text.delta","delta":"partial"}
+
+data: {"type":"response.failed","response":{"error":{"message":"quota exceeded","type":"insufficient_quota","code":"billing_hard_limit_reached"}}}`,
+		},
+		{
+			name: "top-level error event flushed by blank line",
+			responseBody: `data: {"type":"response.output_text.delta","delta":"partial"}
+
+data: {"type":"error","error":{"message":"quota exceeded","type":"insufficient_quota","code":"billing_hard_limit_reached"}}
+
+`,
+		},
+		{
+			name: "top-level error envelope flushed at EOF",
+			responseBody: `data: {"type":"response.output_text.delta","delta":"partial"}
+
+data: {"error":{"message":"quota exceeded","type":"insufficient_quota","code":"billing_hard_limit_reached"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.responseBody))
+			}))
+			defer server.Close()
+
+			resp, err := http.Get(server.URL)
+			if err != nil {
+				t.Fatalf("http.Get() error = %v", err)
+			}
+
+			cfg := newStreamTestRequestConfig("openai", true, false, "")
+			cfg.OpenAIResponses = true
+
+			response, err := HandleResponse(context.Background(), cfg, resp, &MockLogger{logDir: t.TempDir()}, &MockNotifier{})
+			if err == nil {
+				t.Fatalf("HandleResponse() error = nil, want provider failure; response = %#v", response)
+			}
+			for _, want := range []string{"quota exceeded", "insufficient_quota", "billing_hard_limit_reached"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("HandleResponse() error = %q, want %q", err.Error(), want)
+				}
+			}
+			if response.Text != "" || len(response.ToolCalls) != 0 || len(response.Blocks) != 0 || response.Streamed {
+				t.Fatalf("HandleResponse() response = %#v, want zero value on error", response)
+			}
+		})
+	}
+}
+
 // TestStreamParserToolCallHandling tests that streaming parsers correctly handle tool calls
 func TestStreamParserToolCallHandling(t *testing.T) {
 	tests := []struct {
@@ -472,6 +555,137 @@ data: [DONE]
 				t.Errorf("Expected %d tool calls, got %d", tt.expectedToolCalls, len(response.ToolCalls))
 			}
 		})
+	}
+}
+
+func TestOpenAIStreamStatePreservesCustomToolInputDeltasWithoutRepeatedType(t *testing.T) {
+	state := NewOpenAIStreamState()
+	lines := []string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_custom","type":"custom","custom":{"name":"apply_patch","input":""}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"custom":{"input":"*** Begin"}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"custom":{"input":" Patch\n*** End Patch\n"}}]}}]}`,
+		`data: [DONE]`,
+	}
+
+	var finalCalls []ToolCall
+	for _, line := range lines {
+		_, calls, done, err := state.ParseLine(line)
+		if err != nil {
+			t.Fatalf("ParseLine(%q) error = %v", line, err)
+		}
+		if done {
+			finalCalls = calls
+		}
+	}
+
+	if len(finalCalls) != 1 {
+		t.Fatalf("len(finalCalls) = %d, want 1: %#v", len(finalCalls), finalCalls)
+	}
+	call := finalCalls[0]
+	if call.ID != "call_custom" || call.Type != "custom" || call.Name != "apply_patch" {
+		t.Fatalf("custom call metadata = %+v", call)
+	}
+	wantInput := "*** Begin Patch\n*** End Patch\n"
+	if call.Input != wantInput {
+		t.Fatalf("custom input = %q, want %q", call.Input, wantInput)
+	}
+	if len(call.Args) != 0 {
+		t.Fatalf("custom args = %s, want empty args", string(call.Args))
+	}
+}
+
+func TestAnthropicStreamingPreservesSignedThinkingBeforeToolCall(t *testing.T) {
+	responseBody := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[]}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"I should inspect the tool output."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"fixture"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_123","name":"lookup","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"weather\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("http.Get() error = %v", err)
+	}
+
+	response, err := HandleResponse(context.Background(), newStreamTestRequestConfig("anthropic", true, false, ""), resp, &MockLogger{logDir: t.TempDir()}, &MockNotifier{})
+	if err != nil {
+		t.Fatalf("HandleResponse() error = %v", err)
+	}
+	if len(response.ToolCalls) != 1 || response.ToolCalls[0].ID != "tool_123" {
+		t.Fatalf("tool calls = %+v, want tool_123", response.ToolCalls)
+	}
+	if len(response.Blocks) != 2 {
+		t.Fatalf("blocks = %#v, want thinking plus tool_use", response.Blocks)
+	}
+	reasoning, ok := response.Blocks[0].(ReasoningBlock)
+	if !ok {
+		t.Fatalf("first block = %T, want ReasoningBlock", response.Blocks[0])
+	}
+	if reasoning.Provider != "anthropic" || reasoning.Type != "thinking" || reasoning.Text != "I should inspect the tool output." || reasoning.Signature != "sig_fixture" {
+		t.Fatalf("reasoning block = %#v", reasoning)
+	}
+	toolUse, ok := response.Blocks[1].(ToolUseBlock)
+	if !ok || toolUse.ID != "tool_123" || toolUse.Name != "lookup" || string(toolUse.Input) != `{"query":"weather"}` {
+		t.Fatalf("second block = %#v, want lookup tool_use", response.Blocks[1])
+	}
+
+	anthropic := ToAnthropicTyped([]TypedMessage{{
+		Role:   string(RoleAssistant),
+		Blocks: response.Blocks,
+	}})
+	marshaled := MarshalAnthropicMessagesForRequest(anthropic)
+	if len(marshaled) != 1 {
+		t.Fatalf("marshaled messages = %#v, want one message", marshaled)
+	}
+	msg, ok := marshaled[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("marshaled message = %T, want map", marshaled[0])
+	}
+	content, ok := msg["content"].([]interface{})
+	if !ok || len(content) != 2 {
+		t.Fatalf("marshaled content = %#v, want thinking plus tool_use", msg["content"])
+	}
+	replayedThinking, ok := content[0].(map[string]interface{})
+	if !ok || replayedThinking["type"] != "thinking" || replayedThinking["thinking"] != "I should inspect the tool output." || replayedThinking["signature"] != "sig_fixture" {
+		t.Fatalf("replayed thinking = %#v", content[0])
+	}
+	replayedTool, ok := content[1].(map[string]interface{})
+	if !ok || replayedTool["type"] != "tool_use" || replayedTool["id"] != "tool_123" {
+		t.Fatalf("replayed tool = %#v", content[1])
 	}
 }
 

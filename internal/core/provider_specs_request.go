@@ -39,8 +39,8 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 	if payload.System != "" {
 		reqMap["systemInstruction"] = googleSystemInstruction(payload.System)
 	}
-	if payload.Tools != nil {
-		reqMap["tools"] = payload.Tools
+	if tools, ok := payload.Tools.([]GoogleTool); ok && len(tools) > 0 {
+		reqMap["tools"] = tools
 		reqMap["toolConfig"] = googleAutoToolConfig()
 	}
 	addGoogleOutputFields(reqMap, payload)
@@ -275,6 +275,17 @@ func convertOpenAITools(tools []ToolDefinition, toolChoice *ToolChoice) Converte
 	openAITools := ConvertToolsToOpenAITyped(tools)
 	if toolChoice != nil {
 		if toolChoice.Type == "tool" && toolChoice.Name != "" {
+			if toolDefinitionType(tools, toolChoice.Name) == "custom" {
+				return ConvertedTools{
+					Tools: openAITools,
+					ToolChoice: OpenAIToolChoice{
+						Type: "custom",
+						Custom: &OpenAIToolChoiceCustom{
+							Name: toolChoice.Name,
+						},
+					},
+				}
+			}
 			return ConvertedTools{
 				Tools: openAITools,
 				ToolChoice: OpenAIToolChoice{
@@ -294,14 +305,65 @@ func convertOpenAITools(tools []ToolDefinition, toolChoice *ToolChoice) Converte
 	return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
 }
 
+// ConvertToolsForOpenAIChatCompatibility adapts native/custom tool definitions
+// to ordinary OpenAI Chat function tools for compatibility backends.
+func ConvertToolsForOpenAIChatCompatibility(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
+	openAITools := ConvertToolsToOpenAIChatCompatibleTyped(tools)
+	if len(openAITools) == 0 {
+		return ConvertedTools{}
+	}
+	if toolChoice != nil {
+		if toolChoice.Type == "tool" && toolChoice.Name != "" {
+			return ConvertedTools{
+				Tools: openAITools,
+				ToolChoice: OpenAIToolChoice{
+					Type: "function",
+					Function: &OpenAIToolChoiceFunction{
+						Name: toolChoice.Name,
+					},
+				},
+			}
+		}
+		return ConvertedTools{
+			Tools:      openAITools,
+			ToolChoice: toolChoice.Type,
+		}
+	}
+
+	return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+}
+
+func toolDefinitionType(tools []ToolDefinition, name string) string {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return tool.Type
+		}
+	}
+	return ""
+}
+
 func convertAnthropicTools(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
 	anthropicTools := ConvertToolsToAnthropicTyped(tools)
+	if len(anthropicTools) == 0 {
+		return ConvertedTools{}
+	}
 	if toolChoice != nil {
+		choiceType := toolChoice.Type
+		if choiceType == "required" {
+			choiceType = "any"
+		}
+		name := ""
+		if choiceType == "tool" {
+			if !anthropicToolExists(anthropicTools, toolChoice.Name) {
+				return ConvertedTools{Tools: anthropicTools}
+			}
+			name = toolChoice.Name
+		}
 		return ConvertedTools{
 			Tools: anthropicTools,
 			ToolChoice: AnthropicToolChoice{
-				Type: toolChoice.Type,
-				Name: toolChoice.Name,
+				Type: choiceType,
+				Name: name,
 			},
 		}
 	}
@@ -311,6 +373,15 @@ func convertAnthropicTools(tools []ToolDefinition, toolChoice *ToolChoice) Conve
 			Type: "auto",
 		},
 	}
+}
+
+func anthropicToolExists(tools []AnthropicTool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func convertGoogleTools(tools []ToolDefinition, _ *ToolChoice) ConvertedTools {

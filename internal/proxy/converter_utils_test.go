@@ -264,6 +264,67 @@ func TestAnthropicBlocksToCorePreservesToolResultError(t *testing.T) {
 	}
 }
 
+func TestAnthropicBlocksToCoreReasoningRawOmitsSyntheticText(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		manual AnthropicContentBlock
+		want   map[string]interface{}
+	}{
+		{
+			name:   "thinking",
+			raw:    `{"type":"thinking","thinking":"hidden reasoning","signature":"sig_hidden"}`,
+			manual: AnthropicContentBlock{Type: "thinking", Thinking: "hidden reasoning", Signature: "sig_hidden"},
+			want: map[string]interface{}{
+				"type":      "thinking",
+				"thinking":  "hidden reasoning",
+				"signature": "sig_hidden",
+			},
+		},
+		{
+			name:   "redacted_thinking",
+			raw:    `{"type":"redacted_thinking","data":"redacted-payload"}`,
+			manual: AnthropicContentBlock{Type: "redacted_thinking", Data: "redacted-payload"},
+			want: map[string]interface{}{
+				"type": "redacted_thinking",
+				"data": "redacted-payload",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var decoded AnthropicContentBlock
+			if err := json.Unmarshal([]byte(tt.raw), &decoded); err != nil {
+				t.Fatalf("unmarshal block: %v", err)
+			}
+
+			for _, block := range []AnthropicContentBlock{decoded, tt.manual} {
+				converted := AnthropicBlocksToCore([]AnthropicContentBlock{block})
+				if len(converted) != 1 {
+					t.Fatalf("len(converted) = %d, want 1", len(converted))
+				}
+				reasoning, ok := converted[0].(core.ReasoningBlock)
+				if !ok {
+					t.Fatalf("converted[0] type = %T, want core.ReasoningBlock", converted[0])
+				}
+				var replay map[string]interface{}
+				if err := json.Unmarshal(reasoning.Raw, &replay); err != nil {
+					t.Fatalf("unmarshal raw reasoning: %v; raw = %s", err, string(reasoning.Raw))
+				}
+				if _, ok := replay["text"]; ok {
+					t.Fatalf("raw reasoning includes synthetic text field: %s", string(reasoning.Raw))
+				}
+				for key, value := range tt.want {
+					if replay[key] != value {
+						t.Fatalf("replay[%q] = %#v, want %#v in %#v", key, replay[key], value, replay)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestCoreBlocksToAnthropicPreservesToolResultError(t *testing.T) {
 	blocks := []core.Block{
 		core.ToolResultBlock{

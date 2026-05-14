@@ -192,6 +192,7 @@ func TestQuotedBraceInProse(t *testing.T) {
 	call := seq[0].Call
 	if call == nil {
 		t.Fatalf("Call is nil")
+		return
 	}
 	if call.ID != "toolu_vrtx_01TjCdtZQwUxvJCYxsJqCfEr" {
 		t.Errorf("Unexpected ID: %s", call.ID)
@@ -433,6 +434,7 @@ func TestParseEmbeddedToolCalls_DeeplyNestedEscapes(t *testing.T) {
 	call := seq[0].Call
 	if call == nil {
 		t.Fatalf("Extracted call is nil")
+		return
 	}
 
 	// 1. Verify ID matches exactly

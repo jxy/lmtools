@@ -20,15 +20,19 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	defaultOpenAIURL    = "https://api.openai.com/v1/chat/completions"
-	defaultAnthropicURL = "https://api.anthropic.com/v1/messages"
-	defaultGoogleBase   = "https://generativelanguage.googleapis.com/v1beta/models"
-	defaultArgoBase     = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
+	defaultOpenAIURL          = "https://api.openai.com/v1/chat/completions"
+	defaultOpenAIResponsesURL = "https://api.openai.com/v1/responses"
+	defaultAnthropicURL       = "https://api.anthropic.com/v1/messages"
+	defaultGoogleBase         = "https://generativelanguage.googleapis.com/v1beta/models"
+	defaultArgoBase           = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
 )
 
 type targetConfig = apifixtures.CaptureTarget
@@ -41,6 +45,26 @@ type captureMetadata struct {
 	ContentType    string              `json:"content_type,omitempty"`
 	CapturedAt     string              `json:"captured_at"`
 	ResponseHeader map[string][]string `json:"response_headers,omitempty"`
+}
+
+type statefulCaptureMetadata struct {
+	CaseID         string              `json:"case_id"`
+	Target         string              `json:"target"`
+	StepID         string              `json:"step_id"`
+	Method         string              `json:"method"`
+	Path           string              `json:"path"`
+	URL            string              `json:"url"`
+	StatusCode     int                 `json:"status_code"`
+	ContentType    string              `json:"content_type,omitempty"`
+	CapturedAt     string              `json:"captured_at"`
+	ResponseHeader map[string][]string `json:"response_headers,omitempty"`
+}
+
+type statefulCaptureSummary struct {
+	CaseID     string                    `json:"case_id"`
+	Target     string                    `json:"target"`
+	CapturedAt string                    `json:"captured_at"`
+	Steps      []statefulCaptureMetadata `json:"steps"`
 }
 
 func main() {
@@ -121,7 +145,7 @@ func runList() error {
 func runVerify(args []string) error {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	caseID := fs.String("case", "", "optional fixture case id")
-	checkCaptures := fs.Bool("check-captures", false, "require capture metadata and successful capture status")
+	checkCaptures := fs.Bool("check-captures", false, "require capture metadata and expected capture status")
 	provider := fs.String("provider", "", "optional source provider filter (anthropic|openai|google|argo)")
 	target := fs.String("target", "", "optional capture target filter")
 	if err := fs.Parse(args); err != nil {
@@ -192,7 +216,7 @@ func runCaptureAll(args []string) error {
 
 		targets := meta.CaptureTargets
 		if *targetID != "" {
-			if !apifixtures.StringSliceContains(meta.Kinds, "request") && !apifixtures.StringSliceContains(meta.Kinds, "models") {
+			if !isCaptureCapableCase(meta) {
 				continue
 			}
 			if !apifixtures.StringSliceContains(meta.CaptureTargets, *targetID) {
@@ -238,11 +262,95 @@ func captureCase(root, caseID, targetID string) error {
 	if apifixtures.StringSliceContains(meta.Kinds, "models") {
 		return captureModelsCase(root, meta, target)
 	}
+	if apifixtures.StringSliceContains(meta.Kinds, "token-count") {
+		return captureTokenCountCase(root, meta, target)
+	}
+	if apifixtures.StringSliceContains(meta.Kinds, "stateful") {
+		return captureStatefulCase(root, meta, target)
+	}
 	if !apifixtures.StringSliceContains(meta.Kinds, "request") {
 		return fmt.Errorf("case %q is not capture-capable", caseID)
 	}
 
 	return captureRequestCase(root, meta, target)
+}
+
+func isCaptureCapableCase(meta apifixtures.CaseMeta) bool {
+	return apifixtures.StringSliceContains(meta.Kinds, "request") ||
+		apifixtures.StringSliceContains(meta.Kinds, "models") ||
+		apifixtures.StringSliceContains(meta.Kinds, "token-count") ||
+		apifixtures.StringSliceContains(meta.Kinds, "stateful")
+}
+
+func captureTokenCountCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
+	return captureTokenCountCaseWithClient(root, meta, target, &http.Client{Timeout: 2 * time.Minute})
+}
+
+func captureTokenCountCaseWithClient(root string, meta apifixtures.CaseMeta, target targetConfig, client *http.Client) error {
+	if target.Stream {
+		return fmt.Errorf("token-count capture target %q must not be a stream target", target.ID)
+	}
+	if target.Provider != meta.Provider {
+		return fmt.Errorf("token-count capture target %q must match provider %q", target.ID, meta.Provider)
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Minute}
+	}
+
+	body, err := loadTokenCountRequestBody(root, meta, target)
+	if err != nil {
+		return err
+	}
+	url, headers, err := tokenCountEndpointForTarget(target, meta)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, data, err := doCaptureRequest(context.Background(), client, req, body, targetHost(target), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	metaOut := captureMetadata{
+		CaseID:         meta.ID,
+		Target:         target.ID,
+		URL:            url,
+		StatusCode:     resp.StatusCode,
+		ContentType:    resp.Header.Get("Content-Type"),
+		CapturedAt:     time.Now().Format(time.RFC3339),
+		ResponseHeader: resp.Header,
+	}
+
+	capturesDir := filepath.Join(apifixtures.CaseDir(root, meta.ID), "captures")
+	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeTokenCountCaptureRequest(root, meta.ID, filepath.Join("captures", target.ID+".request.json"), url, body); err != nil {
+		return err
+	}
+	metaBytes, err := json.MarshalIndent(metaOut, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".meta.json"), append(metaBytes, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("captures", target.ID+".response.json"), data); err != nil {
+		return err
+	}
+
+	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
+	return nil
 }
 
 func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
@@ -312,6 +420,376 @@ func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetCon
 
 	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
 	return nil
+}
+
+func captureStatefulCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
+	return captureStatefulCaseWithClient(root, meta, target, &http.Client{Timeout: 2 * time.Minute})
+}
+
+func captureStatefulCaseWithClient(root string, meta apifixtures.CaseMeta, target targetConfig, client *http.Client) error {
+	if target.Provider != "openai-responses" || target.Stream {
+		return fmt.Errorf("stateful capture only supports openai-responses target, got %q", target.ID)
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Minute}
+	}
+
+	var scenario apifixtures.StatefulScenario
+	data, err := apifixtures.ReadCaseFile(root, meta.ID, "scenario.json")
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &scenario); err != nil {
+		return err
+	}
+
+	baseURL, headers, err := endpointForTarget(target, meta)
+	if err != nil {
+		return err
+	}
+
+	vars := map[string]string{}
+	capturedAt := time.Now().Format(time.RFC3339)
+	summary := statefulCaptureSummary{
+		CaseID:     meta.ID,
+		Target:     target.ID,
+		CapturedAt: capturedAt,
+		Steps:      make([]statefulCaptureMetadata, 0, len(scenario.Steps)),
+	}
+
+	for i, step := range scenario.Steps {
+		captured, err := captureStatefulStep(root, meta, target, scenario, step, i, baseURL, headers, client, vars)
+		if err != nil {
+			return err
+		}
+		summary.Steps = append(summary.Steps, captured)
+	}
+
+	summaryBytes, err := json.Marshal(summary)
+	if err != nil {
+		return err
+	}
+	if err := apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("captures", target.ID+".stateful.json"), summaryBytes); err != nil {
+		return err
+	}
+
+	fmt.Printf("captured %s -> %s (%d steps)\n", meta.ID, target.ID, len(summary.Steps))
+	return nil
+}
+
+func captureStatefulStep(root string, meta apifixtures.CaseMeta, target targetConfig, scenario apifixtures.StatefulScenario, step apifixtures.StatefulStep, index int, baseURL string, headers map[string]string, client *http.Client, vars map[string]string) (statefulCaptureMetadata, error) {
+	method := strings.ToUpper(substituteStatefulCaptureString(step.Method, vars))
+	path := substituteStatefulCaptureString(step.Path, vars)
+	body, err := statefulCaptureRequestBody(step.Body, scenario, meta, target, vars)
+	if err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+	url, err := statefulCaptureURL(baseURL, path)
+	if err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+
+	resp, respBody, err := doStatefulCaptureRequest(context.Background(), client, method, url, headers, body, targetHost(target))
+	if err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+	defer resp.Body.Close()
+
+	pollUntil := statefulCapturePollUntil(step)
+	if len(pollUntil) > 0 {
+		resp, respBody, err = pollStatefulCapture(context.Background(), client, method, url, headers, body, targetHost(target), pollUntil, vars)
+		if err != nil {
+			return statefulCaptureMetadata{}, err
+		}
+		defer resp.Body.Close()
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
+		return statefulCaptureMetadata{}, fmt.Errorf("parse stateful capture response for step %s: %w", step.ID, err)
+	}
+	for name, jsonPath := range statefulCaptureBindings(step) {
+		value, ok := lookupStatefulCaptureJSONPath(decoded, jsonPath)
+		if !ok {
+			return statefulCaptureMetadata{}, fmt.Errorf("stateful capture step %s missing bind path %q", step.ID, jsonPath)
+		}
+		vars[name] = fmt.Sprint(value)
+	}
+
+	captured := statefulCaptureMetadata{
+		CaseID:         meta.ID,
+		Target:         target.ID,
+		StepID:         step.ID,
+		Method:         method,
+		Path:           path,
+		URL:            url,
+		StatusCode:     resp.StatusCode,
+		ContentType:    resp.Header.Get("Content-Type"),
+		CapturedAt:     time.Now().Format(time.RFC3339),
+		ResponseHeader: resp.Header,
+	}
+
+	prefix := statefulCaptureStepPrefix(target.ID, index, step.ID)
+	if err := writeStatefulCaptureRequest(root, meta.ID, prefix+".request.json", method, path, url, body); err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+	if err := apifixtures.CanonicalizeToFile(root, meta.ID, prefix+".response.json", respBody); err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+	metaBytes, err := json.Marshal(captured)
+	if err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+	if err := apifixtures.CanonicalizeToFile(root, meta.ID, prefix+".meta.json", metaBytes); err != nil {
+		return statefulCaptureMetadata{}, err
+	}
+	return captured, nil
+}
+
+func doStatefulCaptureRequest(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte, provider string) (*http.Response, []byte, error) {
+	var reader io.Reader
+	if len(body) > 0 {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	return doCaptureRequest(ctx, client, req, body, provider, nil)
+}
+
+func pollStatefulCapture(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte, provider string, fields map[string]interface{}, vars map[string]string) (*http.Response, []byte, error) {
+	deadline := time.Now().Add(2 * time.Minute)
+	var lastResp *http.Response
+	var lastBody []byte
+	for {
+		resp, data, err := doStatefulCaptureRequest(ctx, client, method, url, headers, body, provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		if lastResp != nil {
+			lastResp.Body.Close()
+		}
+		lastResp = resp
+		lastBody = data
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(data, &decoded); err == nil && statefulCaptureFieldsMatch(decoded, fields, vars) {
+			return lastResp, lastBody, nil
+		}
+		if time.Now().After(deadline) {
+			return lastResp, lastBody, nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func statefulCaptureBindings(step apifixtures.StatefulStep) map[string]string {
+	if len(step.CaptureBind) == 0 {
+		return step.Bind
+	}
+	bindings := make(map[string]string, len(step.Bind)+len(step.CaptureBind))
+	for name, path := range step.Bind {
+		bindings[name] = path
+	}
+	for name, path := range step.CaptureBind {
+		bindings[name] = path
+	}
+	return bindings
+}
+
+func statefulCapturePollUntil(step apifixtures.StatefulStep) map[string]interface{} {
+	if len(step.CapturePollUntil) > 0 {
+		return step.CapturePollUntil
+	}
+	return step.PollUntil
+}
+
+func statefulCaptureRequestBody(body interface{}, scenario apifixtures.StatefulScenario, meta apifixtures.CaseMeta, target targetConfig, vars map[string]string) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	substituted := substituteStatefulCaptureValue(body, vars)
+	if bodyMap, ok := substituted.(map[string]interface{}); ok {
+		if _, hasModel := bodyMap["model"]; hasModel {
+			model := strings.TrimSpace(meta.Models[target.ID])
+			if model == "" {
+				model = strings.TrimSpace(meta.Models[target.Provider])
+			}
+			if model == "" {
+				model = captureModelForTarget(meta, target)
+			}
+			if model == "" {
+				model = scenario.Model
+			}
+			if model == "" {
+				return nil, fmt.Errorf("case %s is missing model for target %s", meta.ID, target.ID)
+			}
+			bodyMap["model"] = model
+		}
+	}
+	return json.Marshal(substituted)
+}
+
+func statefulCaptureURL(baseResponsesURL, path string) (string, error) {
+	base := strings.TrimRight(baseResponsesURL, "/")
+	switch {
+	case path == "/v1/responses":
+		return base, nil
+	case strings.HasPrefix(path, "/v1/responses/"):
+		return base + strings.TrimPrefix(path, "/v1/responses"), nil
+	case path == "/v1/conversations":
+		return strings.TrimSuffix(base, "/responses") + "/conversations", nil
+	case strings.HasPrefix(path, "/v1/conversations/"):
+		return strings.TrimSuffix(base, "/responses") + strings.TrimPrefix(path, "/v1"), nil
+	default:
+		return "", fmt.Errorf("stateful capture path %q is not a Responses or Conversations path", path)
+	}
+}
+
+func writeStatefulCaptureRequest(root, caseID, rel, method, path, url string, body []byte) error {
+	envelope := map[string]interface{}{
+		"method": method,
+		"path":   path,
+		"url":    url,
+	}
+	if len(body) > 0 {
+		var decoded interface{}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			return err
+		}
+		envelope["body"] = decoded
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	return apifixtures.CanonicalizeToFile(root, caseID, rel, data)
+}
+
+func statefulCaptureStepPrefix(targetID string, index int, stepID string) string {
+	return filepath.Join("captures", targetID, fmt.Sprintf("%03d-%s", index+1, sanitizeStatefulCaptureStepID(stepID)))
+}
+
+func sanitizeStatefulCaptureStepID(stepID string) string {
+	stepID = strings.TrimSpace(stepID)
+	if stepID == "" {
+		return "step"
+	}
+	var b strings.Builder
+	for _, r := range stepID {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
+var statefulCapturePlaceholderPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
+
+func substituteStatefulCaptureValue(value interface{}, vars map[string]string) interface{} {
+	switch typed := value.(type) {
+	case string:
+		return substituteStatefulCaptureString(typed, vars)
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for i := range typed {
+			out[i] = substituteStatefulCaptureValue(typed[i], vars)
+		}
+		return out
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			out[key] = substituteStatefulCaptureValue(item, vars)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func substituteStatefulCaptureString(value string, vars map[string]string) string {
+	return statefulCapturePlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
+		name := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+		if replacement, ok := vars[name]; ok {
+			return replacement
+		}
+		return match
+	})
+}
+
+func statefulCaptureFieldsMatch(decoded map[string]interface{}, fields map[string]interface{}, vars map[string]string) bool {
+	for path, rawWant := range fields {
+		want := substituteStatefulCaptureValue(rawWant, vars)
+		got, ok := lookupStatefulCaptureJSONPath(decoded, path)
+		if !ok || !statefulCaptureValuesEqual(got, want) {
+			return false
+		}
+	}
+	return true
+}
+
+func lookupStatefulCaptureJSONPath(decoded interface{}, path string) (interface{}, bool) {
+	current := decoded
+	for _, part := range strings.Split(path, ".") {
+		switch typed := current.(type) {
+		case map[string]interface{}:
+			value, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			current = value
+		case []interface{}:
+			if part == "length" {
+				current = float64(len(typed))
+				continue
+			}
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil, false
+			}
+			current = typed[index]
+		default:
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func statefulCaptureValuesEqual(got, want interface{}) bool {
+	gotNumber, gotIsNumber := statefulCaptureNumber(got)
+	wantNumber, wantIsNumber := statefulCaptureNumber(want)
+	if gotIsNumber && wantIsNumber {
+		return gotNumber == wantNumber
+	}
+	return reflect.DeepEqual(got, want)
+}
+
+func statefulCaptureNumber(value interface{}) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func normalizeStreamCapture(data []byte) []byte {
@@ -725,6 +1203,65 @@ func loadCaptureRequestBody(root, caseID string, meta apifixtures.CaseMeta, targ
 	return prepareCaptureRequestBody(meta, target, body)
 }
 
+func loadTokenCountRequestBody(root string, meta apifixtures.CaseMeta, target targetConfig) ([]byte, error) {
+	body, err := apifixtures.ReadCaseFile(root, meta.ID, "request.json")
+	if err != nil {
+		return nil, err
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, err
+	}
+	if target.Provider == "anthropic" {
+		model := strings.TrimSpace(meta.Models[target.Provider])
+		if model == "" {
+			return nil, fmt.Errorf("case %s is missing models.%s", meta.ID, target.Provider)
+		}
+		if _, hasModel := decoded["model"]; hasModel {
+			decoded["model"] = model
+		}
+	}
+	if target.Provider == "google" {
+		model := strings.TrimSpace(meta.Models[target.Provider])
+		if model == "" {
+			return nil, fmt.Errorf("case %s is missing models.%s", meta.ID, target.Provider)
+		}
+		if request, ok := decoded["generateContentRequest"].(map[string]interface{}); ok {
+			request["model"] = googleFixtureModelResourceName(model)
+		}
+	}
+	return json.Marshal(decoded)
+}
+
+func googleFixtureModelResourceName(model string) string {
+	if strings.HasPrefix(model, "models/") {
+		return model
+	}
+	return "models/" + model
+}
+
+func writeTokenCountCaptureRequest(root, caseID, rel, rawURL string, body []byte) error {
+	envelope := map[string]interface{}{
+		"method": http.MethodPost,
+		"url":    rawURL,
+	}
+	if parsedURL, err := url.Parse(rawURL); err == nil {
+		envelope["path"] = parsedURL.Path
+	}
+	if len(body) > 0 {
+		var decoded interface{}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			return err
+		}
+		envelope["body"] = decoded
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	return apifixtures.CanonicalizeToFile(root, caseID, rel, data)
+}
+
 func captureRequestRel(root, caseID string, target targetConfig) string {
 	candidates := []string{
 		fmt.Sprintf("expected/render/%s.capture.request.json", target.ID),
@@ -759,7 +1296,7 @@ func prepareCaptureRequestBody(meta apifixtures.CaseMeta, target targetConfig, b
 	}
 
 	switch target.Provider {
-	case "openai", "anthropic":
+	case "openai", "openai-responses", "anthropic":
 		if target.Stream {
 			decoded["stream"] = true
 		}
@@ -778,6 +1315,39 @@ func parseTarget(targetID string) (targetConfig, error) {
 	return apifixtures.ParseCaptureTarget(targetID)
 }
 
+func tokenCountEndpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, map[string]string, error) {
+	headers := map[string]string{}
+
+	switch targetHost(target) {
+	case "anthropic":
+		apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+		if apiKey == "" {
+			return "", nil, fmt.Errorf("ANTHROPIC_API_KEY is required for target %s", target.ID)
+		}
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
+		url, err := providers.ResolveCountTokensURL("anthropic", envOrDefault("ANTHROPIC_API_FIXTURE_URL", defaultAnthropicURL), "", strings.TrimSpace(meta.Models["anthropic"]))
+		return url, headers, err
+
+	case "google":
+		apiKey := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY"))
+		if apiKey == "" {
+			return "", nil, fmt.Errorf("GOOGLE_API_KEY is required for target %s", target.ID)
+		}
+		headers["x-goog-api-key"] = apiKey
+		model := strings.TrimSpace(meta.Models["google"])
+		if model == "" {
+			return "", nil, fmt.Errorf("case %s is missing models.google", meta.ID)
+		}
+		base := strings.TrimRight(envOrDefault("GOOGLE_API_FIXTURE_URL", defaultGoogleBase), "/")
+		url, err := providers.BuildGoogleModelURL(base, model, "countTokens")
+		return url, headers, err
+
+	default:
+		return "", nil, fmt.Errorf("token-count capture is not supported for target %q", target.ID)
+	}
+}
+
 func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, map[string]string, error) {
 	headers := map[string]string{}
 
@@ -790,6 +1360,9 @@ func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, 
 		headers["Authorization"] = "Bearer " + apiKey
 		if target.Stream {
 			headers["Accept"] = "text/event-stream"
+		}
+		if target.Provider == "openai-responses" {
+			return envOrDefault("OPENAI_RESPONSES_API_FIXTURE_URL", defaultOpenAIResponsesURL), headers, nil
 		}
 		return envOrDefault("OPENAI_API_FIXTURE_URL", defaultOpenAIURL), headers, nil
 

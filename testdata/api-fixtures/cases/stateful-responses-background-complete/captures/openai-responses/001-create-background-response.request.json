@@ -1,0 +1,10 @@
+{
+  "body": {
+    "background": true,
+    "input": "background work",
+    "model": "gpt-5.4-nano"
+  },
+  "method": "POST",
+  "path": "/v1/responses",
+  "url": "https://api.openai.com/v1/responses"
+}

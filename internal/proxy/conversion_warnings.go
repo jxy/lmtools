@@ -19,6 +19,20 @@ func warnConvertedFieldLoss(ctx context.Context, source, target, field, reason s
 	logger.From(ctx).Warnf("Converting %s field %q to %s with limited fidelity: %s", source, field, target, reason)
 }
 
+func warnDroppedResponsesTool(ctx context.Context, index int, toolType string) {
+	if ctx == nil {
+		return
+	}
+	logger.From(ctx).Warnf("Dropping unsupported Responses tool type %q at index %d; only function and custom tools are converted by compatibility provider paths", toolType, index)
+}
+
+func warnDroppedResponsesToolChoice(ctx context.Context, choiceType string) {
+	if ctx == nil {
+		return
+	}
+	logger.From(ctx).Warnf("Dropping unsupported Responses tool_choice type %q; only function and custom tool choices are converted by compatibility provider paths", choiceType)
+}
+
 func warnOpenAIRequestDropsForAnthropic(ctx context.Context, req *OpenAIRequest) {
 	if req == nil {
 		return
@@ -124,11 +138,12 @@ func warnOpenAIRequestDropsForAnthropic(ctx context.Context, req *OpenAIRequest)
 		}
 	}
 	for _, tool := range req.Tools {
-		if tool.Type != "" && tool.Type != "function" {
-			warnDroppedField(ctx, "OpenAI", "Anthropic", "tools[]."+tool.Type, "only function tools are converted")
-		}
-		if tool.Function.Strict != nil {
-			warnConvertedFieldLoss(ctx, "OpenAI", "Anthropic", "tools[].function.strict", "Anthropic tool input_schema does not expose OpenAI strict tool enforcement")
+		switch tool.Type {
+		case "", "function":
+		case "custom":
+			warnConvertedFieldLoss(ctx, "OpenAI", "Anthropic", "tools[].custom", "custom tool input is wrapped in an Anthropic object schema and grammar validation is not enforced upstream")
+		default:
+			warnDroppedField(ctx, "OpenAI", "Anthropic", "tools[]."+tool.Type, "only function and custom tools are converted")
 		}
 	}
 	warnOpenAIInstructionRoleConversions(ctx, "Anthropic", req)
@@ -225,6 +240,10 @@ func warnOpenAIRequestDropsForGoogle(ctx context.Context, req *OpenAIRequest) {
 		}
 	}
 	for _, tool := range req.Tools {
+		if tool.Type == "custom" {
+			warnConvertedFieldLoss(ctx, "OpenAI", "Google", "tools[].custom", "custom tool input is wrapped in a Google function declaration and grammar validation is not enforced upstream")
+			continue
+		}
 		if tool.Type != "" && tool.Type != "function" {
 			warnDroppedField(ctx, "OpenAI", "Google", "tools[]."+tool.Type, "only function tools are converted")
 		}

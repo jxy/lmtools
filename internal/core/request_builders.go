@@ -87,13 +87,13 @@ func buildProviderRequest(cfg ProviderConfig, url string, body []byte, provider 
 	return httpReq, body, nil
 }
 
-func buildToolAwareRequest(cfg ChatRequestConfig, provider string, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildToolAwareRequest(cfg ChatRequestConfig, provider string, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	spec, err := requireProviderRequestSpec(provider)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	payload, err := PrepareRequestPayload(provider, model, typedMessages, system, toolDefs, toolChoice, stream)
+	payload, err := PrepareRequestPayloadWithSystemExplicit(provider, model, typedMessages, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -109,7 +109,7 @@ func buildToolAwareRequest(cfg ChatRequestConfig, provider string, typedMessages
 
 // buildChatRequestFromTyped builds a unified chat request from typed messages
 // This function handles both initial requests and tool result follow-ups
-func buildChatRequestFromTyped(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildChatRequestFromTyped(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	if model == "" {
 		return nil, nil, fmt.Errorf("model is required for building request")
 	}
@@ -129,5 +129,5 @@ func buildChatRequestFromTyped(cfg ChatRequestConfig, typedMessages []TypedMessa
 		return nil, nil, err
 	}
 
-	return buildChat(cfg, typedMessages, model, system, toolDefs, toolChoice, stream)
+	return buildChat(cfg, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 }

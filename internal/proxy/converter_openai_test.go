@@ -3,9 +3,61 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/core"
 	"strings"
 	"testing"
 )
+
+func TestConvertAnthropicToOpenAI_OmitsZeroMaxCompletionTokens(t *testing.T) {
+	converter := &Converter{}
+	req := &AnthropicRequest{
+		Model: "gpt-5.4-nano",
+		Messages: []AnthropicMessage{
+			{
+				Role:    "user",
+				Content: json.RawMessage(`"Hello"`),
+			},
+		},
+	}
+
+	openAIReq, err := converter.ConvertAnthropicToOpenAI(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
+	}
+	if openAIReq.MaxCompletionTokens != nil {
+		t.Fatalf("MaxCompletionTokens = %v, want nil", openAIReq.MaxCompletionTokens)
+	}
+}
+
+func TestConvertAnthropicResponseToOpenAIUsesCustomToolRegistry(t *testing.T) {
+	converter := &Converter{}
+	registry := responseToolNameRegistryFromCoreTools([]core.ToolDefinition{{
+		Type: "custom",
+		Name: "apply_patch",
+	}})
+	resp := &AnthropicResponse{
+		ID:         "msg_1",
+		Type:       "message",
+		Role:       core.RoleAssistant,
+		Model:      "claude-test",
+		StopReason: "tool_use",
+		Content: []AnthropicContentBlock{{
+			Type:  "tool_use",
+			ID:    "toolu_1",
+			Name:  "apply_patch",
+			Input: map[string]interface{}{core.CustomToolInputField: "raw patch"},
+		}},
+	}
+
+	got := converter.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp, "gpt-public", registry)
+	calls := got.Choices[0].Message.ToolCalls
+	if len(calls) != 1 || calls[0].Type != "custom" || calls[0].Custom == nil {
+		t.Fatalf("tool calls = %+v, want one custom call", calls)
+	}
+	if calls[0].Custom.Name != "apply_patch" || calls[0].Custom.Input != "raw patch" {
+		t.Fatalf("custom call = %+v", calls[0].Custom)
+	}
+}
 
 func TestConvertAnthropicToOpenAI_LoggingRegression(t *testing.T) {
 	SetupTestLogger(t)
@@ -84,13 +136,13 @@ func TestConvertAnthropicToOpenAI_LoggingRegression(t *testing.T) {
 	}
 }
 
-func TestConvertAnthropicToOpenAI_ThinkingBlock(t *testing.T) {
+func TestConvertAnthropicToOpenAI_ReasoningBlock(t *testing.T) {
 	SetupTestLogger(t)
 
 	converter := &Converter{}
 	ctx := context.Background()
 
-	// Request with thinking block
+	// Request with Anthropic reasoning content
 	req := &AnthropicRequest{
 		Model:     "gpt-4o",
 		MaxTokens: 100,
@@ -113,7 +165,7 @@ func TestConvertAnthropicToOpenAI_ThinkingBlock(t *testing.T) {
 		t.Fatal("ConvertAnthropicToOpenAI() returned nil")
 	}
 
-	// Verify the thinking block was dropped from the output
+	// Verify the reasoning block was dropped from the OpenAI Chat output
 	if len(result.Messages) != 1 {
 		t.Errorf("Expected 1 message, got %d", len(result.Messages))
 	}
@@ -361,6 +413,12 @@ func TestToolCallConversion(t *testing.T) {
 					{"type":"tool_use","id":"call_123","name":"calculator","input":{"expression":"2+2"}}
 				]`),
 			},
+			{
+				Role: "user",
+				Content: json.RawMessage(`[
+					{"type":"tool_result","tool_use_id":"call_123","content":"4"}
+				]`),
+			},
 		},
 	}
 
@@ -369,8 +427,8 @@ func TestToolCallConversion(t *testing.T) {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
 
-	if len(result.Messages) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(result.Messages))
+	if len(result.Messages) != 2 {
+		t.Fatalf("Expected 2 messages, got %d", len(result.Messages))
 	}
 
 	msg := result.Messages[0]
@@ -390,6 +448,9 @@ func TestToolCallConversion(t *testing.T) {
 	}
 	if !strings.Contains(toolCall.Function.Arguments, "expression") {
 		t.Errorf("Tool call arguments should contain 'expression', got %s", toolCall.Function.Arguments)
+	}
+	if result.Messages[1].Role != "tool" || result.Messages[1].ToolCallID != "call_123" {
+		t.Fatalf("Expected matching tool message after tool_calls, got %#v", result.Messages[1])
 	}
 }
 

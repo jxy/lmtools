@@ -76,7 +76,7 @@ if [[ -n "$provider_id" ]]; then
   export LMTOOLS_API_FIXTURE_PROVIDER="$provider_id"
 fi
 
-go test -count=1 ./cmd/apifixtures ./internal/apifixtures ./internal/auth ./internal/core ./internal/modelcatalog ./internal/proxy -run 'TestVerifySuite|TestAPIFixture|TestCaptureRequestRel|TestLoadCaptureRequestBody|TestEndpointForTarget|TestRefreshDerivedArtifacts|TestCompare|TestProviderSpecStreamingRequestBehavior|TestApplyProviderCredentialsGoogleUsesHeader|TestPrepareRequestPayloadArgoRejectsAudioBlocks|TestTypedToArgoRequestRejectsAudioBlocks|TestDecodeStrictJSONRejectsUnknownField|TestHandleMessagesRejectsUnsupportedMetadataForArgo|TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo'
+go test -count=1 ./cmd/apifixtures ./internal/apifixtures ./internal/auth ./internal/core ./internal/modelcatalog ./internal/proxy -run 'TestVerifySuite|TestAPIFixture|TestCaptureRequestRel|TestCaptureStateful|TestStatefulCaptureURL|TestLoadCaptureRequestBody|TestEndpointForTarget|TestRefreshDerivedArtifacts|TestCompare|TestProviderSpecStreamingRequestBehavior|TestApplyProviderCredentialsGoogleUsesHeader|TestPrepareRequestPayloadArgoRejectsAudioBlocks|TestTypedToArgoRequestRejectsAudioBlocks|TestDecodeStrictJSONRejectsUnknownField|TestHandleMessagesRejectsUnsupportedMetadataForArgo|TestHandleOpenAIRejectsUnsupportedResponseFormatForArgo'
 
 if (( refresh )); then
   if ! git diff --quiet -- testdata/api-fixtures || [[ -n "$(git status --short --untracked-files=all -- testdata/api-fixtures)" ]]; then

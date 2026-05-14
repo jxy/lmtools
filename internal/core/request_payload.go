@@ -24,6 +24,14 @@ type PreparedRequestPayload struct {
 // PrepareRequestPayload applies provider-specific request normalization,
 // including out-of-band system prompt handling and tool conversion.
 func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (PreparedRequestPayload, error) {
+	return PrepareRequestPayloadWithSystemExplicit(provider, model, typedMessages, system, system != "", toolDefs, toolChoice, stream)
+}
+
+// PrepareRequestPayloadWithSystemExplicit applies provider-specific request
+// normalization while distinguishing explicit caller system prompts from
+// default/effective prompts. Explicit prompts override a leading session system
+// message; non-explicit prompts yield to the leading session system message.
+func PrepareRequestPayloadWithSystemExplicit(provider, model string, typedMessages []TypedMessage, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (PreparedRequestPayload, error) {
 	spec, err := requireProviderRequestSpec(provider)
 	if err != nil {
 		return PreparedRequestPayload{}, err
@@ -42,12 +50,12 @@ func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage,
 
 	if spec.usesOutOfBandSystemPrompt() {
 		inlineSystem, rest := splitSystem(typedMessages)
-		if payload.System == "" {
+		if !systemExplicit && inlineSystem != "" {
 			payload.System = inlineSystem
 		}
 		payload.Messages = rest
 	} else {
-		payload.Messages = PrependSystemMessage(typedMessages, payload.System)
+		payload.Messages = normalizeInlineSystemMessages(typedMessages, payload.System, systemExplicit)
 	}
 
 	if len(toolDefs) > 0 {
@@ -57,6 +65,17 @@ func PrepareRequestPayload(provider, model string, typedMessages []TypedMessage,
 	}
 
 	return payload, nil
+}
+
+func normalizeInlineSystemMessages(messages []TypedMessage, system string, systemExplicit bool) []TypedMessage {
+	if systemExplicit {
+		_, rest := splitSystem(messages)
+		return PrependSystemMessage(rest, system)
+	}
+	if inlineSystem, _ := splitSystem(messages); inlineSystem != "" {
+		return messages
+	}
+	return PrependSystemMessage(messages, system)
 }
 
 // ValidateMessagesForProvider rejects message block shapes that the target

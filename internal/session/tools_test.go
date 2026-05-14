@@ -68,6 +68,7 @@ func TestSaveAssistantResponseWithTools(t *testing.T) {
 
 		if interaction == nil {
 			t.Fatal("Expected non-nil tool interaction")
+			return
 		}
 
 		if len(interaction.Calls) != 1 {
@@ -218,16 +219,90 @@ func TestSaveAssistantResponseWithThoughtSignature(t *testing.T) {
 		if len(typedMessages) != 1 {
 			t.Fatalf("len(typedMessages) = %d, want 1", len(typedMessages))
 		}
-		if len(typedMessages[0].Blocks) != 1 {
-			t.Fatalf("len(blocks) = %d, want 1", len(typedMessages[0].Blocks))
+		if len(typedMessages[0].Blocks) != 2 {
+			t.Fatalf("len(blocks) = %d, want 2", len(typedMessages[0].Blocks))
 		}
 
-		textBlock, ok := typedMessages[0].Blocks[0].(core.TextBlock)
+		reasoningBlock, ok := typedMessages[0].Blocks[0].(core.ReasoningBlock)
 		if !ok {
-			t.Fatalf("block type = %T, want core.TextBlock", typedMessages[0].Blocks[0])
+			t.Fatalf("block type = %T, want core.ReasoningBlock", typedMessages[0].Blocks[0])
 		}
-		if got := textBlock.ThoughtSignature; got != "sig-text-123" {
-			t.Fatalf("TextBlock.ThoughtSignature = %q, want %q", got, "sig-text-123")
+		if got := reasoningBlock.Signature; got != "sig-text-123" {
+			t.Fatalf("ReasoningBlock.Signature = %q, want %q", got, "sig-text-123")
+		}
+		textBlock, ok := typedMessages[0].Blocks[1].(core.TextBlock)
+		if !ok {
+			t.Fatalf("block type = %T, want core.TextBlock", typedMessages[0].Blocks[1])
+		}
+		if got := textBlock.Text; got != "Hello from Gemini." {
+			t.Fatalf("TextBlock.Text = %q, want %q", got, "Hello from Gemini.")
+		}
+	})
+}
+
+func TestSaveAssistantResponsePreservesThoughtSignatureWithoutExplicitBlocks(t *testing.T) {
+	WithTestSessionDir(t, func(sessionsDir string) {
+		sess := &Session{
+			Path: filepath.Join(sessionsDir, "test-session"),
+		}
+		if err := os.MkdirAll(sess.Path, constants.DirPerm); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := SaveAssistantResponse(
+			context.Background(),
+			sess,
+			core.Response{
+				Text:             "Hello from Gemini.",
+				ThoughtSignature: "sig-response-789",
+			},
+			"gemini-3.1-flash-lite-preview",
+		)
+		if err != nil {
+			t.Fatalf("SaveAssistantResponse() error = %v", err)
+		}
+
+		metaPath := filepath.Join(sess.Path, result.MessageID+".json")
+		metaData, err := os.ReadFile(metaPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%q) error = %v", metaPath, err)
+		}
+
+		var metadata MessageMetadata
+		if err := json.Unmarshal(metaData, &metadata); err != nil {
+			t.Fatalf("json.Unmarshal() error = %v", err)
+		}
+		if metadata.ThoughtSignature == nil {
+			t.Fatal("metadata thought_signature = nil, want non-nil")
+		}
+		if got := *metadata.ThoughtSignature; got != "sig-response-789" {
+			t.Fatalf("metadata thought_signature = %q, want %q", got, "sig-response-789")
+		}
+
+		typedMessages, err := BuildMessagesWithToolInteractions(context.Background(), sess.Path)
+		if err != nil {
+			t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+		}
+		if len(typedMessages) != 1 {
+			t.Fatalf("len(typedMessages) = %d, want 1", len(typedMessages))
+		}
+		if len(typedMessages[0].Blocks) != 2 {
+			t.Fatalf("len(blocks) = %d, want 2", len(typedMessages[0].Blocks))
+		}
+
+		reasoningBlock, ok := typedMessages[0].Blocks[0].(core.ReasoningBlock)
+		if !ok {
+			t.Fatalf("block type = %T, want core.ReasoningBlock", typedMessages[0].Blocks[0])
+		}
+		if got := reasoningBlock.Signature; got != "sig-response-789" {
+			t.Fatalf("ReasoningBlock.Signature = %q, want %q", got, "sig-response-789")
+		}
+		textBlock, ok := typedMessages[0].Blocks[1].(core.TextBlock)
+		if !ok {
+			t.Fatalf("block type = %T, want core.TextBlock", typedMessages[0].Blocks[1])
+		}
+		if got := textBlock.Text; got != "Hello from Gemini." {
+			t.Fatalf("TextBlock.Text = %q, want %q", got, "Hello from Gemini.")
 		}
 	})
 }
@@ -263,15 +338,12 @@ func TestBuildMessagesWithThoughtSignatureOnlyMessage(t *testing.T) {
 			t.Fatalf("len(blocks) = %d, want 1", len(typedMessages[0].Blocks))
 		}
 
-		textBlock, ok := typedMessages[0].Blocks[0].(core.TextBlock)
+		reasoningBlock, ok := typedMessages[0].Blocks[0].(core.ReasoningBlock)
 		if !ok {
-			t.Fatalf("block type = %T, want core.TextBlock", typedMessages[0].Blocks[0])
+			t.Fatalf("block type = %T, want core.ReasoningBlock", typedMessages[0].Blocks[0])
 		}
-		if got := textBlock.Text; got != "" {
-			t.Fatalf("TextBlock.Text = %q, want empty string", got)
-		}
-		if got := textBlock.ThoughtSignature; got != "sig-only-456" {
-			t.Fatalf("TextBlock.ThoughtSignature = %q, want %q", got, "sig-only-456")
+		if got := reasoningBlock.Signature; got != "sig-only-456" {
+			t.Fatalf("ReasoningBlock.Signature = %q, want %q", got, "sig-only-456")
 		}
 	})
 }

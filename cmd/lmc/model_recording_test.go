@@ -8,6 +8,7 @@ import (
 	"lmtools/internal/session"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -102,6 +103,11 @@ func TestModelRecordingInSessions(t *testing.T) {
 			// Find the assistant message file
 			var assistantMsgPath string
 			for _, msgFile := range msgFiles {
+				name := filepath.Base(msgFile)
+				if strings.HasSuffix(name, ".tools.json") || strings.HasSuffix(name, ".blocks.json") {
+					continue
+				}
+
 				data, err := os.ReadFile(msgFile)
 				if err != nil {
 					continue

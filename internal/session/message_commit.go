@@ -33,7 +33,8 @@ type CommitResult struct {
 // Files are committed in a specific order to maintain atomicity:
 //  1. .txt file (message content)
 //  2. .tools.json file (tool interaction data)
-//  3. .json file (message metadata)
+//  3. .blocks.json file (lossless typed block data)
+//  4. .json file (message metadata)
 //
 // LOCKING REQUIREMENT:
 // This function MUST be called while holding the session lock (via WithSessionLock).
@@ -74,12 +75,14 @@ func commitFiles(ctx context.Context, files []filePair) (CommitResult, error) {
 			if log := logger.From(ctx); log != nil {
 				log.Debugf("Destination exists: %s", f.Final)
 			}
-			if strings.HasSuffix(f.Final, ".txt") || strings.HasSuffix(f.Final, ".tools.json") {
+			if strings.HasSuffix(f.Final, ".txt") || strings.HasSuffix(f.Final, ".tools.json") || strings.HasSuffix(f.Final, ".blocks.json") {
 				basePath := f.Final
 				if strings.HasSuffix(f.Final, ".txt") {
 					basePath = strings.TrimSuffix(f.Final, ".txt")
 				} else if strings.HasSuffix(f.Final, ".tools.json") {
 					basePath = strings.TrimSuffix(f.Final, ".tools.json")
+				} else if strings.HasSuffix(f.Final, ".blocks.json") {
+					basePath = strings.TrimSuffix(f.Final, ".blocks.json")
 				}
 
 				jsonPath := basePath + ".json"
@@ -119,9 +122,10 @@ func commitFiles(ctx context.Context, files []filePair) (CommitResult, error) {
 
 // MessageStaging represents staged message files before atomic commit.
 type MessageStaging struct {
-	TxtPath   string
-	JsonPath  string
-	ToolsPath string
+	TxtPath    string
+	JsonPath   string
+	ToolsPath  string
+	BlocksPath string
 }
 
 // Close removes all staged files (cleanup on error or after successful commit).
@@ -135,12 +139,19 @@ func (s *MessageStaging) Close() {
 	if s.ToolsPath != "" {
 		_ = os.Remove(s.ToolsPath)
 	}
+	if s.BlocksPath != "" {
+		_ = os.Remove(s.BlocksPath)
+	}
 }
 
 // stageMessageFiles creates temporary files for atomic message placement.
 func stageMessageFiles(sessionPath string, msg Message, toolInteraction *core.ToolInteraction) (*MessageStaging, error) {
+	return stageMessageFilesWithBlocks(sessionPath, msg, toolInteraction, nil)
+}
+
+func stageMessageFilesWithBlocks(sessionPath string, msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (*MessageStaging, error) {
 	staging := &MessageStaging{}
-	fileSet, err := buildMessageFileSet(msg, toolInteraction)
+	fileSet, err := buildMessageFileSetWithBlocks(msg, toolInteraction, blocks)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +180,14 @@ func stageMessageFiles(sessionPath string, msg Message, toolInteraction *core.To
 		}
 	}
 
+	if len(fileSet.Blocks) > 0 {
+		staging.BlocksPath, err = writeStagedTempFile(dir, ".tmp-*.blocks.json", fileSet.Blocks)
+		if err != nil {
+			staging.Close()
+			return nil, errors.WrapError("stage typed blocks", err)
+		}
+	}
+
 	return staging, nil
 }
 
@@ -177,6 +196,7 @@ func buildCommitTriplet(sessionPath, msgID string, staging *MessageStaging) []fi
 	return []filePair{
 		{Tmp: staging.TxtPath, Final: paths.TxtPath},
 		{Tmp: staging.ToolsPath, Final: paths.ToolsPath},
+		{Tmp: staging.BlocksPath, Final: paths.BlocksPath},
 		{Tmp: staging.JsonPath, Final: paths.JSONPath},
 	}
 }
@@ -186,6 +206,8 @@ type messageCommitter struct {
 	sessionPath string
 }
 
+var afterGetNextMessageIDForTest func(sessionPath, msgID string)
+
 // newMessageCommitter creates a new message committer for the given session path.
 func newMessageCommitter(sessionPath string) *messageCommitter {
 	return &messageCommitter{sessionPath: sessionPath}
@@ -194,6 +216,10 @@ func newMessageCommitter(sessionPath string) *messageCommitter {
 // Stage prepares temporary files for a message with optional tool interaction.
 func (mc *messageCommitter) Stage(msg Message, toolInteraction *core.ToolInteraction) (*MessageStaging, error) {
 	return stageMessageFiles(mc.sessionPath, msg, toolInteraction)
+}
+
+func (mc *messageCommitter) StageWithBlocks(msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (*MessageStaging, error) {
+	return stageMessageFilesWithBlocks(mc.sessionPath, msg, toolInteraction, blocks)
 }
 
 // Commit atomically commits staged message files to the session.
@@ -209,6 +235,9 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 		msgID, err = GetNextMessageID(mc.sessionPath)
 		if err != nil {
 			return errors.WrapError("get next message ID", err)
+		}
+		if afterGetNextMessageIDForTest != nil {
+			afterGetNextMessageIDForTest(mc.sessionPath, msgID)
 		}
 
 		paths := buildMessageFilePaths(mc.sessionPath, msgID)
@@ -246,9 +275,13 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 
 // CommitMessageWithRetries handles the complete message commit flow with retry logic.
 func (mc *messageCommitter) CommitMessageWithRetries(ctx context.Context, msg Message, toolInteraction *core.ToolInteraction) (SaveResult, error) {
+	return mc.CommitMessageWithBlocksWithRetries(ctx, msg, toolInteraction, nil)
+}
+
+func (mc *messageCommitter) CommitMessageWithBlocksWithRetries(ctx context.Context, msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (SaveResult, error) {
 	const maxRetries = core.MaxRetries
 
-	staged, err := mc.Stage(msg, toolInteraction)
+	staged, err := mc.StageWithBlocks(msg, toolInteraction, blocks)
 	if err != nil {
 		return SaveResult{}, err
 	}
@@ -306,7 +339,7 @@ func (mc *messageCommitter) CommitMessageWithRetries(ctx context.Context, msg Me
 
 		staged.Close()
 		mc = newMessageCommitter(siblingPath)
-		staged, err = mc.Stage(msg, toolInteraction)
+		staged, err = mc.StageWithBlocks(msg, toolInteraction, blocks)
 		if err != nil {
 			return SaveResult{}, errors.WrapError("restage in sibling directory", err)
 		}

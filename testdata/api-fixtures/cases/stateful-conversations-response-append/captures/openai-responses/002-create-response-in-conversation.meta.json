@@ -1,0 +1,73 @@
+{
+  "captured_at": "2026-04-30T12:21:38-05:00",
+  "case_id": "stateful-conversations-response-append",
+  "content_type": "application/json",
+  "method": "POST",
+  "path": "/v1/responses",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=86400"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9f48394fabf44fa9-ORD"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 30 Apr 2026 17:21:38 GMT"
+    ],
+    "Openai-Organization": [
+      "user-luppstbuzesizhcpyp8mf8vl"
+    ],
+    "Openai-Processing-Ms": [
+      "1464"
+    ],
+    "Openai-Project": [
+      "proj_LOtYBLbKh37UwfhEcM1rrSEn"
+    ],
+    "Openai-Version": [
+      "2020-10-01"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "__cf_bm=O3DmyG_tjE8GGc6JYCiLlpJzgGInsiUIlV6S9TZMs3Y-1777569697.224812-1.0.1.1-mAsNetz67KoyNuWeXMkcUcSRZBcvouk3uc2pc6M8TwsIVBGay2snVb4EavHQ8KCOFJwBYZgtfnq_7IVPZ0jcuotzvA7ZwYj5MIGr.5NFje7FSNM5Gah6lYIXAPh7wGUT; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 30 Apr 2026 17:51:38 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Ratelimit-Limit-Requests": [
+      "5000"
+    ],
+    "X-Ratelimit-Limit-Tokens": [
+      "4000000"
+    ],
+    "X-Ratelimit-Remaining-Requests": [
+      "4999"
+    ],
+    "X-Ratelimit-Remaining-Tokens": [
+      "4000000"
+    ],
+    "X-Ratelimit-Reset-Requests": [
+      "12ms"
+    ],
+    "X-Ratelimit-Reset-Tokens": [
+      "0s"
+    ],
+    "X-Request-Id": [
+      "req_4b55157bb30f4c07a2b5e6a1155635bc"
+    ]
+  },
+  "status_code": 200,
+  "step_id": "create-response-in-conversation",
+  "target": "openai-responses",
+  "url": "https://api.openai.com/v1/responses"
+}

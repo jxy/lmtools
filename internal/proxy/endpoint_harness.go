@@ -35,15 +35,38 @@ type endpointErrorHandlers struct {
 }
 
 func (s *Server) decodeEndpointRequest(r *http.Request, dst interface{}) error {
+	_, err := s.decodeEndpointRequestWithDisposition(r, dst, "ignored")
+	return err
+}
+
+func (s *Server) decodeEndpointRequestWithDisposition(r *http.Request, dst interface{}, unknownFieldDisposition string) ([]byte, error) {
 	body, err := s.readRequestBody(r)
 	if err != nil {
-		return fmt.Errorf("failed to read request body: %w", err)
+		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 	logWireHTTPRequest(r.Context(), "WIRE CLIENT REQUEST", r, body)
-	warnUnknownFieldsWithDisposition(r.Context(), body, dst, "client request", "rejected")
-	if err := decodeStrictJSON(body, dst); err != nil {
-		return err
+	warnUnknownFieldsWithDisposition(r.Context(), body, dst, "client request", unknownFieldDisposition)
+	if err := decodeLenientJSON(body, dst); err != nil {
+		return nil, err
 	}
+	return body, nil
+}
+
+func decodeLenientJSON(body []byte, dst interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+
+	if err := decoder.Decode(dst); err != nil {
+		return normalizeJSONDecodeError(err)
+	}
+
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("invalid JSON in request body: unexpected trailing data")
+		}
+		return normalizeJSONDecodeError(err)
+	}
+
 	return nil
 }
 

@@ -1,0 +1,92 @@
+{
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1777569561,
+  "created_at": 1777569561,
+  "error": null,
+  "frequency_penalty": 0,
+  "id": "resp_030357eccb56f4790069f38f190bbc8197bd4554a9c442242d",
+  "incomplete_details": null,
+  "instructions": "Use the function result already present in the input. Do not call tools again.",
+  "max_output_tokens": 128,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "gpt-5.4-nano-2026-03-17",
+  "moderation": null,
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "logprobs": [],
+          "text": "Chicago is in **United States**.",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_030357eccb56f4790069f38f199ac48197926226d0d1fee9b1",
+      "phase": "final_answer",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "status": "completed",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "none",
+  "tools": [
+    {
+      "description": "Look up structured information for a city.",
+      "name": "lookup_city",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "strict": true,
+      "type": "function"
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 115,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 12,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 127
+  },
+  "user": null
+}

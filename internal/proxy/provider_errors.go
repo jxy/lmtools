@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	stdErrors "errors"
 	"fmt"
 	"lmtools/internal/logger"
 	"net/http"
@@ -74,6 +75,11 @@ func logErrorResponse(ctx context.Context, provider string, statusCode int, body
 
 // buildProviderErrorMessage constructs a consistent error message from a provider error
 func buildProviderErrorMessage(err error, provider string) (int, string) {
+	var validationErr *requestValidationError
+	if stdErrors.As(err, &validationErr) {
+		return http.StatusBadRequest, validationErr.Error()
+	}
+
 	// Default status and message
 	statusCode := http.StatusInternalServerError
 	errorMsg := fmt.Sprintf("Upstream %s error", provider)

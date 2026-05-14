@@ -112,7 +112,8 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Convert Anthropic response back to OpenAI format
-	openAIResp := s.converter.ConvertAnthropicResponseToOpenAI(anthResp, route.OriginalModel)
+	registry := responseToolNameRegistryFromCoreTools(OpenAIRequestToTyped(openAIReq).Tools)
+	openAIResp := s.converter.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, route.OriginalModel, registry)
 
 	// Log the complete OpenAI response before sending (only if debug enabled)
 	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
@@ -122,6 +123,11 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) sendOpenAICompatibleRequest(ctx context.Context, url, apiKey, requestName, provider string, openAIReq *OpenAIRequest, stream bool) (*http.Response, error) {
+	omitNonPositiveOpenAITokenLimits(openAIReq)
+	if constants.NormalizeProvider(provider) == constants.ProviderArgo {
+		normalizeArgoOpenAIChatRequest(openAIReq)
+	}
+
 	extraHeaders := map[string]string{}
 	if stream {
 		extraHeaders["Accept"] = "text/event-stream"
@@ -212,7 +218,7 @@ func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, o
 }
 
 func (s *Server) forwardArgoOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
-	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.ArgoOpenAI, s.config.ArgoAPIKey, "Argo OpenAI", constants.ProviderArgo)
+	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.ArgoOpenAI, s.argoAPIKey(), "Argo OpenAI", constants.ProviderArgo)
 }
 
 func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, mappedModel, originalModel string) {
@@ -249,8 +255,9 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 		return
 	}
 
-	anthResp := s.converter.ConvertGoogleToAnthropic(&googleResp, originalModel)
-	openAIResp := s.converter.ConvertAnthropicResponseToOpenAI(anthResp, originalModel)
+	registry := responseToolNameRegistryFromCoreTools(typed.Tools)
+	anthResp := s.converter.ConvertGoogleToAnthropicWithToolNameRegistry(&googleResp, originalModel, registry)
+	openAIResp := s.converter.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, originalModel, registry)
 	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
 	_ = s.sendJSONResponse(ctx, w, openAIResp)
 }

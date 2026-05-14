@@ -42,9 +42,13 @@ type CaseMeta struct {
 	ArgoUser       string            `json:"argo_user,omitempty"`
 	RenderTargets  []string          `json:"render_targets,omitempty"`
 	CaptureTargets []string          `json:"capture_targets,omitempty"`
+	ExpectedStatus map[string]int    `json:"expected_status,omitempty"`
 }
 
-var fixtureProviders = []string{"openai", "anthropic", "google", "argo"}
+var (
+	fixtureProviders     = []string{"openai", "anthropic", "google", "argo"}
+	fixtureRenderTargets = []string{"openai", "openai-responses", "anthropic", "google", "argo"}
+)
 
 type Suite struct {
 	Root     string
@@ -177,15 +181,28 @@ func PrimaryEndpoint(meta CaseMeta) string {
 	switch {
 	case StringSliceContains(meta.Kinds, "models"):
 		return "/v1/models"
+	case StringSliceContains(meta.Kinds, "token-count"):
+		switch meta.Provider {
+		case "anthropic":
+			return "/v1/messages/count_tokens"
+		case "google":
+			return "models/{model}:countTokens"
+		default:
+			return "token count"
+		}
 	case StringSliceContains(meta.Kinds, "stream"):
 		if meta.StreamSource != "" && meta.StreamTarget != "" {
 			return meta.StreamSource + "->" + meta.StreamTarget + " stream"
 		}
 		return "stream"
+	case StringSliceContains(meta.Kinds, "stateful"):
+		return "/v1/responses stateful"
 	case meta.IngressFamily == "anthropic":
 		return "/v1/messages"
 	case meta.IngressFamily == "openai":
 		return "/v1/chat/completions"
+	case meta.IngressFamily == "openai-responses":
+		return "/v1/responses"
 	case meta.Provider != "":
 		return meta.Provider + " response"
 	default:
@@ -240,6 +257,21 @@ func MatchesFilters(meta CaseMeta, caseID, provider string) bool {
 		return false
 	}
 	return true
+}
+
+func ExpectedCaptureStatus(meta CaseMeta, target CaptureTarget) (int, bool) {
+	if len(meta.ExpectedStatus) == 0 {
+		return 0, false
+	}
+	for _, key := range []string{target.ID, target.Provider, target.Host, "default"} {
+		if key == "" {
+			continue
+		}
+		if status, ok := meta.ExpectedStatus[key]; ok {
+			return status, true
+		}
+	}
+	return 0, false
 }
 
 func expandJSONFixtureFiles(caseDir string, data []byte) ([]byte, error) {

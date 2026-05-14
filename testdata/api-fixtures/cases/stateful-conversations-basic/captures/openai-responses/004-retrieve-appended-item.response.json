@@ -1,0 +1,12 @@
+{
+  "content": [
+    {
+      "text": "second",
+      "type": "input_text"
+    }
+  ],
+  "id": "msg_69f39d8ed98481948b425c80098f69cd0ed757a4b8c29824",
+  "role": "user",
+  "status": "completed",
+  "type": "message"
+}

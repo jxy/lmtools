@@ -17,6 +17,8 @@ func ParseResponseProjection(provider string, data []byte) (map[string]interface
 	switch provider {
 	case "openai":
 		text, toolCalls, err = parseOpenAIResponseWithTools(data, false)
+	case "openai-responses":
+		return parseOpenAIResponsesFixtureProjection(data)
 	case "anthropic":
 		text, toolCalls, err = parseAnthropicResponseWithTools(data, false)
 	case "google":
@@ -31,6 +33,50 @@ func ParseResponseProjection(provider string, data []byte) (map[string]interface
 	}
 
 	return projectParsedResponse(provider, text, toolCalls), nil
+}
+
+func parseOpenAIResponsesFixtureProjection(data []byte) (map[string]interface{}, error) {
+	var envelope struct {
+		Status            string          `json:"status"`
+		Error             json.RawMessage `json:"error"`
+		IncompleteDetails json.RawMessage `json:"incomplete_details"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, err
+	}
+
+	if len(envelope.Error) > 0 && string(envelope.Error) != "null" {
+		projected := projectParsedResponse("openai-responses", "", nil)
+		if envelope.Status != "" {
+			projected["status"] = envelope.Status
+		}
+		projected["error"] = rawFixtureJSON(envelope.Error)
+		if len(envelope.IncompleteDetails) > 0 && string(envelope.IncompleteDetails) != "null" {
+			projected["incomplete_details"] = rawFixtureJSON(envelope.IncompleteDetails)
+		}
+		return projected, nil
+	}
+
+	text, toolCalls, err := parseOpenAIResponsesWithTools(data)
+	if err != nil {
+		return nil, err
+	}
+	projected := projectParsedResponse("openai-responses", text, toolCalls)
+	if envelope.Status != "" && envelope.Status != "completed" {
+		projected["status"] = envelope.Status
+	}
+	if len(envelope.IncompleteDetails) > 0 && string(envelope.IncompleteDetails) != "null" {
+		projected["incomplete_details"] = rawFixtureJSON(envelope.IncompleteDetails)
+	}
+	return projected, nil
+}
+
+func rawFixtureJSON(raw json.RawMessage) interface{} {
+	var decoded interface{}
+	if err := json.Unmarshal(raw, &decoded); err == nil {
+		return decoded
+	}
+	return string(raw)
 }
 
 func projectParsedResponse(provider, text string, toolCalls []ToolCall) map[string]interface{} {

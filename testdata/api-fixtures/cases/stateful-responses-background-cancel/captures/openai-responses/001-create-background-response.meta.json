@@ -1,0 +1,55 @@
+{
+  "captured_at": "2026-04-30T12:19:30-05:00",
+  "case_id": "stateful-responses-background-cancel",
+  "content_type": "application/json",
+  "method": "POST",
+  "path": "/v1/responses",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=86400"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9f4836350c774fa9-ORD"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Thu, 30 Apr 2026 17:19:30 GMT"
+    ],
+    "Openai-Organization": [
+      "user-luppstbuzesizhcpyp8mf8vl"
+    ],
+    "Openai-Processing-Ms": [
+      "462"
+    ],
+    "Openai-Project": [
+      "proj_LOtYBLbKh37UwfhEcM1rrSEn"
+    ],
+    "Openai-Version": [
+      "2020-10-01"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Set-Cookie": [
+      "__cf_bm=xs4RZG.ZwVvSl2wNpEEKqtacfVII1b2tupuHhxvgbTM-1777569570.089113-1.0.1.1-u68ZKUaBm05psTo6emb.lSpwIvL6qk7DSmmKjUcMHthjnD4RjWAwYbBCWowH9J3j0UTHQLYnSzInlznR3JnM0EkPesuQR8e_5c_J2A4R_eh1cdgnWHQtoRUnlJfonmmd; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 30 Apr 2026 17:49:30 GMT"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Request-Id": [
+      "req_44257e7f835c4e4ca4c433dedcc3056e"
+    ]
+  },
+  "status_code": 200,
+  "step_id": "create-background-response",
+  "target": "openai-responses",
+  "url": "https://api.openai.com/v1/responses"
+}

@@ -1,0 +1,129 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-first-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": "Remember alpha and beta.",
+        "store": true
+      },
+      "upstream": {
+        "body": "mock/anthropic-first.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response",
+          "status": "completed",
+          "output.0.content.0.text": "first answer"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "Remember alpha and beta."
+          ]
+        }
+      ],
+      "bind": {
+        "first_response_id": "id"
+      }
+    },
+    {
+      "id": "compact-previous-response",
+      "method": "POST",
+      "path": "/v1/responses/compact",
+      "body": {
+        "model": "claude-test",
+        "previous_response_id": "${first_response_id}",
+        "input": "The latest user asks for gamma."
+      },
+      "upstream": {
+        "body": "mock/anthropic-compact.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response.compaction",
+          "output.2.type": "compaction",
+          "output.2.encrypted_content": "compacted alpha beta gamma"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "Remember alpha and beta.",
+            "first answer",
+            "The latest user asks for gamma.",
+            "Compact the conversation state"
+          ]
+        }
+      ],
+      "bind": {
+        "compact_encrypted_content": "output.2.encrypted_content"
+      }
+    },
+    {
+      "id": "follow-up-from-compaction",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": "Remember alpha and beta."
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": "The latest user asks for gamma."
+          },
+          {
+            "type": "compaction",
+            "encrypted_content": "${compact_encrypted_content}"
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": "Continue."
+          }
+        ]
+      },
+      "upstream": {
+        "body": "mock/anthropic-followup.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response",
+          "status": "completed",
+          "output.0.content.0.text": "continued from compacted state"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "compacted alpha beta gamma",
+            "Remember alpha and beta.",
+            "Continue."
+          ],
+          "body_not_contains": [
+            "first answer"
+          ]
+        }
+      ]
+    }
+  ]
+}

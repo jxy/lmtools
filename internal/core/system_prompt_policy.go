@@ -18,6 +18,13 @@ func resolvedSystemPrompt(cfg SystemConfig, override string) string {
 	return cfg.GetEffectiveSystem()
 }
 
+func resolvedBuildSystemPrompt(cfg SystemConfig, override string, overrideSet bool) (string, bool) {
+	if overrideSet || override != "" {
+		return override, true
+	}
+	return cfg.GetEffectiveSystem(), cfg.IsSystemExplicitlySet()
+}
+
 // providerUsesOutOfBandSystemPrompt reports whether a provider expects system
 // prompts outside the inline message list.
 func providerUsesOutOfBandSystemPrompt(provider string) bool {

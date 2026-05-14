@@ -118,6 +118,123 @@ func TestOpenAIRequestToTypedKeepsLegacyTolerantProjection(t *testing.T) {
 	}
 }
 
+func TestOpenAIRequestToTypedStrictConvertsLegacyFunctionCallHistory(t *testing.T) {
+	req := &OpenAIRequest{
+		Messages: []OpenAIMessage{
+			{
+				Role:    core.RoleUser,
+				Content: "Check the weather.",
+			},
+			{
+				Role: core.RoleAssistant,
+				FunctionCall: &FunctionCall{
+					Name:      "lookup_weather",
+					Arguments: `{"city":"Chicago"}`,
+				},
+			},
+			{
+				Role:    core.Role("function"),
+				Name:    "lookup_weather",
+				Content: "snow",
+			},
+		},
+	}
+
+	typed, err := OpenAIRequestToTypedStrict(req)
+	if err != nil {
+		t.Fatalf("OpenAIRequestToTypedStrict() error = %v", err)
+	}
+	if len(typed.Messages) != 3 {
+		t.Fatalf("len(Messages) = %d, want 3", len(typed.Messages))
+	}
+	toolUse, ok := typed.Messages[1].Blocks[0].(core.ToolUseBlock)
+	if !ok {
+		t.Fatalf("Messages[1].Blocks[0] = %T, want ToolUseBlock", typed.Messages[1].Blocks[0])
+	}
+	if toolUse.ID != "call_legacy_1" || toolUse.Name != "lookup_weather" || string(toolUse.Input) != `{"city":"Chicago"}` {
+		t.Fatalf("tool use = %#v", toolUse)
+	}
+	toolResult, ok := typed.Messages[2].Blocks[0].(core.ToolResultBlock)
+	if !ok {
+		t.Fatalf("Messages[2].Blocks[0] = %T, want ToolResultBlock", typed.Messages[2].Blocks[0])
+	}
+	if toolResult.ToolUseID != "call_legacy_1" || toolResult.Name != "lookup_weather" || toolResult.Content != "snow" {
+		t.Fatalf("tool result = %#v", toolResult)
+	}
+}
+
+func TestOpenAIRequestToTypedStrictRejectsUnmatchedLegacyFunctionCall(t *testing.T) {
+	req := &OpenAIRequest{
+		Messages: []OpenAIMessage{
+			{
+				Role:    core.RoleUser,
+				Content: "Check the weather.",
+			},
+			{
+				Role: core.RoleAssistant,
+				FunctionCall: &FunctionCall{
+					Name:      "lookup_weather",
+					Arguments: `{"city":"Chicago"}`,
+				},
+			},
+		},
+	}
+
+	_, err := OpenAIRequestToTypedStrict(req)
+	if err == nil {
+		t.Fatal("OpenAIRequestToTypedStrict() error = nil, want unmatched legacy function_call error")
+	}
+	if !strings.Contains(err.Error(), `messages[1].function_call`) || !strings.Contains(err.Error(), `legacy function_call "lookup_weather" has no matching function result`) {
+		t.Fatalf("OpenAIRequestToTypedStrict() error = %q, want unmatched legacy function_call error", err)
+	}
+}
+
+func TestOpenAIRequestToTypedKeepsUnmatchedLegacyFunctionCallTolerant(t *testing.T) {
+	req := &OpenAIRequest{
+		Messages: []OpenAIMessage{
+			{
+				Role: core.RoleAssistant,
+				FunctionCall: &FunctionCall{
+					Name:      "lookup_weather",
+					Arguments: `{"city":"Chicago"}`,
+				},
+			},
+		},
+	}
+
+	typed := OpenAIRequestToTyped(req)
+	if len(typed.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(typed.Messages))
+	}
+	toolUse, ok := typed.Messages[0].Blocks[0].(core.ToolUseBlock)
+	if !ok {
+		t.Fatalf("Messages[0].Blocks[0] = %T, want ToolUseBlock", typed.Messages[0].Blocks[0])
+	}
+	if toolUse.ID != "call_legacy_0" || toolUse.Name != "lookup_weather" || string(toolUse.Input) != `{"city":"Chicago"}` {
+		t.Fatalf("tool use = %#v", toolUse)
+	}
+}
+
+func TestOpenAIRequestToTypedStrictRejectsUnmatchedLegacyFunctionResult(t *testing.T) {
+	req := &OpenAIRequest{
+		Messages: []OpenAIMessage{
+			{
+				Role:    core.Role("function"),
+				Name:    "lookup_weather",
+				Content: "snow",
+			},
+		},
+	}
+
+	_, err := OpenAIRequestToTypedStrict(req)
+	if err == nil {
+		t.Fatal("OpenAIRequestToTypedStrict() error = nil, want unmatched legacy function result error")
+	}
+	if !strings.Contains(err.Error(), "has no matching function_call") {
+		t.Fatalf("OpenAIRequestToTypedStrict() error = %q, want matching function_call error", err)
+	}
+}
+
 func TestConvertOpenAIRequestToAnthropicRejectsMalformedContentPart(t *testing.T) {
 	converter := NewConverter(NewModelMapper(&Config{Provider: "anthropic"}))
 	req := &OpenAIRequest{

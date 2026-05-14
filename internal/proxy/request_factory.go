@@ -13,6 +13,7 @@ type providerJSONRequest struct {
 	Provider     string
 	RequestName  string
 	Payload      interface{}
+	RawBody      []byte
 	ExtraHeaders map[string]string
 	Configure    func(*http.Request) error
 }
@@ -33,9 +34,15 @@ func buildProviderJSONRequest(ctx context.Context, spec providerJSONRequest) (*h
 		requestName = spec.Provider
 	}
 
-	reqBody, err := json.Marshal(spec.Payload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal %s request: %w", requestName, err)
+	var reqBody []byte
+	if spec.RawBody != nil {
+		reqBody = append([]byte(nil), spec.RawBody...)
+	} else {
+		var err error
+		reqBody, err = json.Marshal(spec.Payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal %s request: %w", requestName, err)
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, spec.URL, bytes.NewReader(reqBody))

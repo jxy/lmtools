@@ -1,0 +1,83 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-first-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": "remember alpha",
+        "store": true
+      },
+      "upstream": {
+        "body": "mock/anthropic-first.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response",
+          "status": "completed",
+          "output.0.content.0.text": "stored alpha"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "remember alpha"
+          ]
+        }
+      ],
+      "bind": {
+        "first_response_id": "id"
+      }
+    },
+    {
+      "id": "count-follow-up-input-tokens",
+      "method": "POST",
+      "path": "/v1/responses/input_tokens",
+      "body": {
+        "model": "claude-test",
+        "previous_response_id": "${first_response_id}",
+        "input": "count this follow-up"
+      },
+      "upstream": {
+        "body": "mock/anthropic-count-tokens.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response.input_tokens"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages/count_tokens",
+          "body_contains": [
+            "remember alpha",
+            "stored alpha",
+            "count this follow-up"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "retrieve-first-response-after-count",
+      "method": "GET",
+      "path": "/v1/responses/${first_response_id}",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${first_response_id}",
+          "object": "response",
+          "status": "completed",
+          "output.0.content.0.text": "stored alpha"
+        }
+      }
+    }
+  ]
+}

@@ -2,12 +2,27 @@ package proxy
 
 // GoogleRequest represents a request to the Google AI API.
 type GoogleRequest struct {
+	Model             string                   `json:"model,omitempty"`
 	Contents          []GoogleContent          `json:"contents"`
 	SystemInstruction *GoogleSystemInstruction `json:"systemInstruction,omitempty"`
 	Tools             []GoogleTool             `json:"tools,omitempty"`
 	ToolConfig        *GoogleToolConfig        `json:"toolConfig,omitempty"`
 	SafetySettings    []GoogleSafety           `json:"safetySettings,omitempty"`
 	GenerationConfig  *GoogleGenConfig         `json:"generationConfig,omitempty"`
+}
+
+// GoogleCountTokensRequest represents a Gemini models.countTokens request.
+type GoogleCountTokensRequest struct {
+	Contents               []GoogleContent `json:"contents,omitempty"`
+	GenerateContentRequest *GoogleRequest  `json:"generateContentRequest,omitempty"`
+}
+
+// GoogleCountTokensResponse represents a Gemini models.countTokens response.
+type GoogleCountTokensResponse struct {
+	TotalTokens             int                  `json:"totalTokens"`
+	CachedContentTokenCount int                  `json:"cachedContentTokenCount,omitempty"`
+	PromptTokensDetails     []GoogleTokenDetails `json:"promptTokensDetails,omitempty"`
+	CacheTokensDetails      []GoogleTokenDetails `json:"cacheTokensDetails,omitempty"`
 }
 
 // GoogleSystemInstruction represents Google's out-of-band system prompt field.

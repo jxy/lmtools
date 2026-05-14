@@ -140,6 +140,7 @@ func TestConvertArgoToAnthropicWithRequest_EmbeddedToolIgnoredOutsideLegacy(t *t
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 	if len(result.Content) != 1 || result.Content[0].Type != "text" {
 		t.Fatalf("expected embedded content to remain text outside legacy, got %#v", result.Content)
@@ -167,6 +168,7 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedIn
 	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 
 	// Expect first block to be trimmed text, second to be tool_use
@@ -397,7 +399,7 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 					]`),
 				},
 			},
-			checkParts: false, // Argo uses OpenAI-style format for tool messages
+			wantError: true, // OpenAI-compatible Argo chat requires matching tool results.
 		},
 		{
 			name: "user with tool_result for Google",
@@ -504,6 +506,12 @@ func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
 				Content: json.RawMessage(`[
 					{"type": "text", "text": "Hi! I'll help you."},
 					{"type": "tool_use", "id": "tool_123", "name": "get_info", "input": {"query": "test"}}
+				]`),
+			},
+			{
+				Role: core.RoleUser,
+				Content: json.RawMessage(`[
+					{"type": "tool_result", "tool_use_id": "tool_123", "content": "done"}
 				]`),
 			},
 		},

@@ -1,0 +1,66 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-background-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": "slow work",
+        "background": true
+      },
+      "upstream": {
+        "body": "mock/anthropic-slow.response.json",
+        "delay_ms": 5000
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response",
+          "status": "queued",
+          "output.length": 0
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "slow work"
+          ]
+        }
+      ],
+      "bind": {
+        "response_id": "id"
+      }
+    },
+    {
+      "id": "cancel-background-response",
+      "method": "POST",
+      "path": "/v1/responses/${response_id}/cancel",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${response_id}",
+          "status": "cancelled",
+          "error.code": "cancelled"
+        }
+      }
+    },
+    {
+      "id": "retrieve-cancelled-response",
+      "method": "GET",
+      "path": "/v1/responses/${response_id}",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${response_id}",
+          "status": "cancelled",
+          "error.code": "cancelled"
+        }
+      }
+    }
+  ]
+}

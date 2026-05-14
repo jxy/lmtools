@@ -31,7 +31,7 @@
       "parts": [
         {
           "functionResponse": {
-            "name": "call_weather_1",
+            "name": "get_weather",
             "response": {
               "content": "{\"temperature_c\":18,\"condition\":\"Cloudy\"}"
             }

@@ -17,9 +17,10 @@ type Endpoints struct {
 	Provider string
 
 	// Chat/Completions endpoints (for request forwarding)
-	OpenAI    string // OpenAI chat completions URL
-	Google    string // Google Gemini base URL
-	Anthropic string // Anthropic messages URL
+	OpenAI          string // OpenAI chat completions URL
+	OpenAIResponses string // OpenAI responses URL
+	Google          string // Google Gemini base URL
+	Anthropic       string // Anthropic messages URL
 
 	// Argo-specific endpoints
 	ArgoBase                 string // Argo base resource URL
@@ -31,10 +32,11 @@ type Endpoints struct {
 	ArgoAnthropicCountTokens string // Argo Anthropic count_tokens endpoint
 
 	// Models endpoints (for /v1/models proxy)
-	OpenAIModels    string
-	GoogleModels    string
-	AnthropicModels string
-	ArgoModels      string
+	OpenAIModels         string
+	GoogleModels         string
+	AnthropicModels      string
+	AnthropicCountTokens string
+	ArgoModels           string
 }
 
 // NewEndpoints constructs Endpoints from a Config.
@@ -64,6 +66,7 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 	switch provider {
 	case constants.ProviderOpenAI:
 		endpoints.OpenAI = resolved.Chat
+		endpoints.OpenAIResponses = resolved.Responses
 		endpoints.OpenAIModels = resolved.Models
 	case constants.ProviderGoogle:
 		endpoints.Google = resolved.Base
@@ -71,6 +74,7 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 	case constants.ProviderAnthropic:
 		endpoints.Anthropic = resolved.Chat
 		endpoints.AnthropicModels = resolved.Models
+		endpoints.AnthropicCountTokens = resolved.AnthropicCountTokens
 	case constants.ProviderArgo:
 		endpoints.ArgoBase = resolved.Base
 		endpoints.ArgoChat = resolved.Chat

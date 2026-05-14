@@ -1,6 +1,11 @@
 package core
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // ParsedStreamUsage captures token counts when providers include them in stream chunks.
 type ParsedStreamUsage struct {
@@ -12,8 +17,10 @@ type ParsedStreamUsage struct {
 type ParsedOpenAIStreamToolCall struct {
 	Index     int
 	ID        string
+	Type      string
 	Name      string
 	Arguments string
+	Input     string
 }
 
 // ParsedOpenAIStreamChunk is the normalized shape of an OpenAI stream chunk.
@@ -24,8 +31,62 @@ type ParsedOpenAIStreamChunk struct {
 	ToolCalls    []ParsedOpenAIStreamToolCall
 }
 
+// ParseOpenAIStreamErrorChunk detects OpenAI-compatible SSE error payloads.
+func ParseOpenAIStreamErrorChunk(data []byte) error {
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil
+	}
+	if len(envelope.Error) == 0 || bytes.Equal(envelope.Error, []byte("null")) {
+		return nil
+	}
+	return newFatalStreamError(fmt.Errorf("upstream stream error: %s", formatOpenAIStreamError(envelope.Error)))
+}
+
+func formatOpenAIStreamError(raw json.RawMessage) string {
+	var details struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &details); err == nil {
+		message := strings.TrimSpace(details.Message)
+		var fields []string
+		if details.Type != "" {
+			fields = append(fields, "type: "+details.Type)
+		}
+		if details.Code != "" {
+			fields = append(fields, "code: "+details.Code)
+		}
+		if message != "" && len(fields) > 0 {
+			return message + " (" + strings.Join(fields, ", ") + ")"
+		}
+		if message != "" {
+			return message
+		}
+		if len(fields) > 0 {
+			return strings.Join(fields, ", ")
+		}
+	}
+	var message string
+	if err := json.Unmarshal(raw, &message); err == nil && strings.TrimSpace(message) != "" {
+		return strings.TrimSpace(message)
+	}
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, raw); err == nil && compacted.Len() > 0 {
+		return compacted.String()
+	}
+	return "unknown upstream error"
+}
+
 // ParseOpenAIStreamChunk decodes the common fields used by both core and proxy stream parsers.
 func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
+	if err := ParseOpenAIStreamErrorChunk(data); err != nil {
+		return ParsedOpenAIStreamChunk{}, err
+	}
+
 	var raw struct {
 		Usage struct {
 			PromptTokens     *int `json:"prompt_tokens"`
@@ -38,10 +99,15 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 				ToolCalls []struct {
 					Index    int    `json:"index"`
 					ID       string `json:"id"`
-					Function struct {
+					Type     string `json:"type"`
+					Function *struct {
 						Name      string `json:"name"`
 						Arguments string `json:"arguments"`
 					} `json:"function"`
+					Custom *struct {
+						Name  string `json:"name"`
+						Input string `json:"input"`
+					} `json:"custom"`
 				} `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
@@ -69,11 +135,35 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 
 	parsed.ToolCalls = make([]ParsedOpenAIStreamToolCall, 0, len(choice.Delta.ToolCalls))
 	for _, toolCall := range choice.Delta.ToolCalls {
+		toolType := toolCall.Type
+		if toolType == "" {
+			switch {
+			case toolCall.Custom != nil:
+				toolType = "custom"
+			case toolCall.Function != nil:
+				toolType = "function"
+			}
+		}
+		name := ""
+		arguments := ""
+		if toolCall.Function != nil {
+			name = toolCall.Function.Name
+			arguments = toolCall.Function.Arguments
+		}
+		input := ""
+		if toolType == "custom" {
+			if toolCall.Custom != nil {
+				name = toolCall.Custom.Name
+				input = toolCall.Custom.Input
+			}
+		}
 		parsed.ToolCalls = append(parsed.ToolCalls, ParsedOpenAIStreamToolCall{
 			Index:     toolCall.Index,
 			ID:        toolCall.ID,
-			Name:      toolCall.Function.Name,
-			Arguments: toolCall.Function.Arguments,
+			Type:      toolType,
+			Name:      name,
+			Arguments: arguments,
+			Input:     input,
 		})
 	}
 

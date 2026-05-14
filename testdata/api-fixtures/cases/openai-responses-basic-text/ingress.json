@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-nano",
+  "instructions": "Answer in one short sentence.",
+  "input": "Say hello to the fixture runner.",
+  "max_output_tokens": 64
+}

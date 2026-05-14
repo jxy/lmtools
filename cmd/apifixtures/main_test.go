@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"lmtools/internal/apifixtures"
 	"lmtools/internal/retry"
 	"net/http"
@@ -197,6 +199,229 @@ func TestCaptureCaseRejectsUnsupportedTarget(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `does not support capture target "anthropic"`) {
 		t.Fatalf("captureCase() error = %q, want unsupported target message", err)
+	}
+}
+
+func TestCaptureTokenCountCaseWritesArtifacts(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+	t.Setenv("ANTHROPIC_API_FIXTURE_URL", "https://api.anthropic.com/v1/messages")
+
+	root := t.TempDir()
+	caseID := "anthropic-count-tokens"
+	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", caseID)
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "request.json"), []byte(`{"model":"placeholder","messages":[{"role":"user","content":"count me"}]}`+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(request.json) error = %v", err)
+	}
+
+	client := &http.Client{Transport: captureRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if r.Method != http.MethodPost {
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"bad method"}`), nil
+		}
+		if r.URL.Path != "/v1/messages/count_tokens" {
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"bad path"}`), nil
+		}
+		if got := r.Header.Get("x-api-key"); got != "anthropic-key" {
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"bad key"}`), nil
+		}
+		if !bytes.Contains(body, []byte(`"model":"claude-live"`)) || !bytes.Contains(body, []byte("count me")) {
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"bad body"}`), nil
+		}
+		return captureJSONResponse(http.StatusOK, `{"input_tokens":12}`), nil
+	})}
+
+	meta := apifixtures.CaseMeta{
+		ID:       caseID,
+		Kinds:    []string{"token-count"},
+		Provider: "anthropic",
+		Models:   map[string]string{"anthropic": "claude-live"},
+	}
+	target := targetConfig{ID: "anthropic", Provider: "anthropic", Host: "anthropic"}
+	if err := captureTokenCountCaseWithClient(root, meta, target, client); err != nil {
+		t.Fatalf("captureTokenCountCaseWithClient() error = %v", err)
+	}
+
+	requestBytes, err := os.ReadFile(filepath.Join(caseDir, "captures", "anthropic.request.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(request capture) error = %v", err)
+	}
+	if !bytes.Contains(requestBytes, []byte(`"path": "/v1/messages/count_tokens"`)) {
+		t.Fatalf("request capture = %s, want count_tokens path", requestBytes)
+	}
+	responseBytes, err := os.ReadFile(filepath.Join(caseDir, "captures", "anthropic.response.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(response capture) error = %v", err)
+	}
+	if !bytes.Contains(responseBytes, []byte(`"input_tokens": 12`)) {
+		t.Fatalf("response capture = %s, want input_tokens", responseBytes)
+	}
+}
+
+func TestCaptureStatefulCaseWritesStepArtifacts(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "openai-key")
+	t.Setenv("OPENAI_RESPONSES_API_FIXTURE_URL", "https://example.test/v1/responses")
+
+	root := t.TempDir()
+	caseID := "stateful-case"
+	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", caseID)
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "scenario.json"), []byte(`{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-response",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {"model":"claude-test","input":"hi"},
+      "expect": {"status":200},
+      "bind": {"response_id":"id"}
+    },
+    {
+      "id": "retrieve-response",
+      "method": "GET",
+      "path": "/v1/responses/${response_id}",
+      "expect": {"status":200}
+    }
+  ]
+}
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(scenario.json) error = %v", err)
+	}
+
+	requests := make([]captureTestRequest, 0, 2)
+	client := &http.Client{Transport: captureRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, captureTestRequest{method: r.Method, path: r.URL.Path, body: string(body)})
+		switch len(requests) {
+		case 1:
+			return captureJSONResponse(http.StatusOK, `{"id":"resp_live","object":"response","status":"completed","model":"gpt-live","output":[]}`), nil
+		case 2:
+			return captureJSONResponse(http.StatusOK, `{"id":"resp_live","object":"response","status":"completed","model":"gpt-live","output":[]}`), nil
+		default:
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"unexpected"}`), nil
+		}
+	})}
+
+	meta := apifixtures.CaseMeta{
+		ID:       caseID,
+		Provider: "openai-responses",
+		Models:   map[string]string{"openai-responses": "gpt-live"},
+	}
+	if err := captureStatefulCaseWithClient(root, meta, targetConfig{ID: "openai-responses", Provider: "openai-responses", Host: "openai"}, client); err != nil {
+		t.Fatalf("captureStatefulCaseWithClient() error = %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	if requests[0].method != http.MethodPost || requests[0].path != "/v1/responses" {
+		t.Fatalf("first request = %+v", requests[0])
+	}
+	if !strings.Contains(requests[0].body, `"model":"gpt-live"`) {
+		t.Fatalf("first request body = %s, want capture model rewrite", requests[0].body)
+	}
+	if requests[1].method != http.MethodGet || requests[1].path != "/v1/responses/resp_live" {
+		t.Fatalf("second request = %+v, want bound response id", requests[1])
+	}
+
+	for _, rel := range []string{
+		"captures/openai-responses.stateful.json",
+		"captures/openai-responses/001-create-response.request.json",
+		"captures/openai-responses/001-create-response.response.json",
+		"captures/openai-responses/001-create-response.meta.json",
+		"captures/openai-responses/002-retrieve-response.request.json",
+		"captures/openai-responses/002-retrieve-response.response.json",
+		"captures/openai-responses/002-retrieve-response.meta.json",
+	} {
+		if _, err := os.Stat(filepath.Join(caseDir, rel)); err != nil {
+			t.Fatalf("expected capture artifact %s: %v", rel, err)
+		}
+	}
+}
+
+func TestStatefulCaptureURLMapsResponsesAndConversations(t *testing.T) {
+	base := "https://api.openai.com/v1/responses"
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/v1/responses", want: "https://api.openai.com/v1/responses"},
+		{path: "/v1/responses/resp_123/input_items", want: "https://api.openai.com/v1/responses/resp_123/input_items"},
+		{path: "/v1/conversations", want: "https://api.openai.com/v1/conversations"},
+		{path: "/v1/conversations/conv_123/items", want: "https://api.openai.com/v1/conversations/conv_123/items"},
+	}
+	for _, tt := range tests {
+		got, err := statefulCaptureURL(base, tt.path)
+		if err != nil {
+			t.Fatalf("statefulCaptureURL(%q) error = %v", tt.path, err)
+		}
+		if got != tt.want {
+			t.Fatalf("statefulCaptureURL(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestStatefulCaptureOverridesBindAndPoll(t *testing.T) {
+	step := apifixtures.StatefulStep{
+		Bind: map[string]string{
+			"response_id":  "id",
+			"tool_call_id": "output.1.call_id",
+		},
+		CaptureBind: map[string]string{
+			"tool_call_id": "output.0.call_id",
+		},
+		PollUntil: map[string]interface{}{
+			"status":      "completed",
+			"output_text": "mock answer",
+		},
+		CapturePollUntil: map[string]interface{}{
+			"status": "completed",
+		},
+	}
+
+	bindings := statefulCaptureBindings(step)
+	if bindings["response_id"] != "id" {
+		t.Fatalf("response_id binding = %q, want id", bindings["response_id"])
+	}
+	if bindings["tool_call_id"] != "output.0.call_id" {
+		t.Fatalf("tool_call_id binding = %q, want capture override", bindings["tool_call_id"])
+	}
+
+	pollUntil := statefulCapturePollUntil(step)
+	if len(pollUntil) != 1 || pollUntil["status"] != "completed" {
+		t.Fatalf("capture poll_until = %#v, want status-only override", pollUntil)
+	}
+}
+
+type captureTestRequest struct {
+	method string
+	path   string
+	body   string
+}
+
+type captureRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f captureRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func captureJSONResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader([]byte(body))),
 	}
 }
 
@@ -421,6 +646,28 @@ func TestLoadCaptureRequestBodyLeavesGoogleStreamingBodyUntouched(t *testing.T) 
 	}
 }
 
+func TestLoadTokenCountRequestBodyAddsGoogleGenerateContentModel(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", "google-count-tokens")
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "request.json"), []byte(`{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(request.json) error = %v", err)
+	}
+
+	body, err := loadTokenCountRequestBody(root, apifixtures.CaseMeta{
+		ID:     "google-count-tokens",
+		Models: map[string]string{"google": "gemini-test"},
+	}, targetConfig{ID: "google", Provider: "google", Host: "google"})
+	if err != nil {
+		t.Fatalf("loadTokenCountRequestBody() error = %v", err)
+	}
+	if !bytes.Contains(body, []byte(`"model":"models/gemini-test"`)) {
+		t.Fatalf("body = %s, want nested generateContentRequest model", body)
+	}
+}
+
 func TestLoadCaptureRequestBodyInjectsArgoAPIKey(t *testing.T) {
 	t.Setenv("ARGO_API_KEY", "secret-argo-token")
 
@@ -562,6 +809,42 @@ func TestEndpointForTargetUsesStreamingEndpoint(t *testing.T) {
 		}
 		if got := headers["Accept"]; got != "text/event-stream" {
 			t.Fatalf("Accept = %q, want text/event-stream", got)
+		}
+	})
+}
+
+func TestTokenCountEndpointForTarget(t *testing.T) {
+	t.Run("anthropic", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+		url, headers, err := tokenCountEndpointForTarget(targetConfig{ID: "anthropic", Provider: "anthropic", Host: "anthropic"}, apifixtures.CaseMeta{
+			ID:     "anthropic-count-tokens",
+			Models: map[string]string{"anthropic": "claude-haiku-4-5"},
+		})
+		if err != nil {
+			t.Fatalf("tokenCountEndpointForTarget() error = %v", err)
+		}
+		if got, want := url, "https://api.anthropic.com/v1/messages/count_tokens"; got != want {
+			t.Fatalf("url = %q, want %q", got, want)
+		}
+		if got := headers["x-api-key"]; got != "test-anthropic-key" {
+			t.Fatalf("x-api-key = %q, want test-anthropic-key", got)
+		}
+	})
+
+	t.Run("google", func(t *testing.T) {
+		t.Setenv("GOOGLE_API_KEY", "test-google-key")
+		url, headers, err := tokenCountEndpointForTarget(targetConfig{ID: "google", Provider: "google", Host: "google"}, apifixtures.CaseMeta{
+			ID:     "google-count-tokens",
+			Models: map[string]string{"google": "gemini-3.1-flash-lite-preview"},
+		})
+		if err != nil {
+			t.Fatalf("tokenCountEndpointForTarget() error = %v", err)
+		}
+		if got, want := url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:countTokens"; got != want {
+			t.Fatalf("url = %q, want %q", got, want)
+		}
+		if got := headers["x-goog-api-key"]; got != "test-google-key" {
+			t.Fatalf("x-goog-api-key = %q, want test-google-key", got)
 		}
 	})
 }

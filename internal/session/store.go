@@ -53,6 +53,19 @@ func (s *Store) SaveAssistantWithThoughtSignature(ctx context.Context, text stri
 	return s.finalizeSave(result, "Response saved to sibling branch %s as message %s")
 }
 
+func (s *Store) SaveAssistantResponse(ctx context.Context, response core.Response, model string) (string, string, error) {
+	if s.session == nil {
+		return "", "", fmt.Errorf("session is nil")
+	}
+
+	result, err := SaveAssistantResponse(ctx, s.session, response, model)
+	if err != nil {
+		return "", "", err
+	}
+
+	return s.finalizeSave(result, "Response saved to sibling branch %s as message %s")
+}
+
 // SaveToolResults saves tool execution results with optional additional text
 func (s *Store) SaveToolResults(ctx context.Context, results []core.ToolResult, additionalText string) (string, string, error) {
 	if s.session == nil {

@@ -1,0 +1,32 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_042010bb64d4b1750069f265b1a06c81a38b9a3f8cfc7feb7a","object":"response","created_at":1777493425,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":128,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"none","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"lookup_city"},"tools":[{"type":"function","description":"Look up structured information for a city.","name":"lookup_city","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_042010bb64d4b1750069f265b1a06c81a38b9a3f8cfc7feb7a","object":"response","created_at":1777493425,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":128,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"none","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"lookup_city"},"tools":[{"type":"function","description":"Look up structured information for a city.","name":"lookup_city","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","type":"function_call","status":"in_progress","arguments":"","call_id":"call_kmqTD5NEutipzzhbHSiAKDBb","name":"lookup_city"},"output_index":0,"sequence_number":2}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{\"","item_id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","obfuscation":"nEQAKcX4QWtWni","output_index":0,"sequence_number":3}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"city","item_id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","obfuscation":"ybz1gpqFGv6J","output_index":0,"sequence_number":4}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","obfuscation":"szk6XFStEn9G8","output_index":0,"sequence_number":5}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Chicago","item_id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","obfuscation":"XPsTgLhTr","output_index":0,"sequence_number":6}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"}","item_id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","obfuscation":"5XSxtCLhJOeoV1","output_index":0,"sequence_number":7}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","arguments":"{\"city\":\"Chicago\"}","item_id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","output_index":0,"sequence_number":8}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","type":"function_call","status":"completed","arguments":"{\"city\":\"Chicago\"}","call_id":"call_kmqTD5NEutipzzhbHSiAKDBb","name":"lookup_city"},"output_index":0,"sequence_number":9}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_042010bb64d4b1750069f265b1a06c81a38b9a3f8cfc7feb7a","object":"response","created_at":1777493425,"status":"completed","background":false,"completed_at":1777493426,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":128,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[{"id":"fc_042010bb64d4b1750069f265b242c881a3946f466b1efe2c96","type":"function_call","status":"completed","arguments":"{\"city\":\"Chicago\"}","call_id":"call_kmqTD5NEutipzzhbHSiAKDBb","name":"lookup_city"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"none","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"lookup_city"},"tools":[{"type":"function","description":"Look up structured information for a city.","name":"lookup_city","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":54,"input_tokens_details":{"cached_tokens":0},"output_tokens":18,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":72},"user":null,"metadata":{}},"sequence_number":10}

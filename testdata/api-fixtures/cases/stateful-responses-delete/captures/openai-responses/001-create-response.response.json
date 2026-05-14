@@ -1,0 +1,73 @@
+{
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1777569569,
+  "created_at": 1777569568,
+  "error": null,
+  "frequency_penalty": 0,
+  "id": "resp_0562028a4fca4dab0069f38f206208819fbf454f8ec84d0e57",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "gpt-5.4-nano-2026-03-17",
+  "moderation": null,
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "logprobs": [],
+          "text": "I can’t delete you (and I don’t have access to your accounts or identity).\n\nIf you meant **delete your account/data on a specific service**, tell me which service (e.g., Instagram, Google, OpenAI, a website/app) and I’ll walk you through the steps.\n\nIf you meant **remove yourself from a list** (email/newsletter/contacts), tell me where and I’ll help you unsubscribe/block.\n\nIf you meant something else, what exactly do you want deleted and from where?",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_0562028a4fca4dab0069f38f20d100819fa9aaa51c804ade4f",
+      "phase": "final_answer",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "status": "completed",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 8,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 107,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 115
+  },
+  "user": null
+}

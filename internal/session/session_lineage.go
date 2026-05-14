@@ -56,11 +56,18 @@ func CreateSibling(ctx context.Context, sessionPath, messageID string) (string, 
 
 // GetLineage returns all messages in the conversation path, handling sibling branches correctly.
 func GetLineage(sessionPath string) ([]Message, error) {
-	sessionPath = DefaultManager().ResolveSessionPath(sessionPath)
+	return GetLineageWithManager(DefaultManager(), sessionPath)
+}
+
+func GetLineageWithManager(manager *Manager, sessionPath string) ([]Message, error) {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	sessionPath = manager.ResolveSessionPath(sessionPath)
 
 	// Split the path into "root dir" and the list of sibling-components that
 	// were traversed to arrive at sessionPath.
-	rootDir, components := ParseSessionPath(sessionPath)
+	rootDir, components := manager.ParseSessionPath(sessionPath)
 
 	// Helper that loads messages in a dir and returns them sorted.
 	load := func(dir string) ([]Message, error) {

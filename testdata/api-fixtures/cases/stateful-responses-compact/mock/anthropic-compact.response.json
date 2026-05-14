@@ -1,0 +1,17 @@
+{
+  "id": "msg_compact",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-test",
+  "content": [
+    {
+      "type": "text",
+      "text": "compacted alpha beta gamma"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 32,
+    "output_tokens": 5
+  }
+}

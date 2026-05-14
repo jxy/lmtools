@@ -1,0 +1,16 @@
+{
+  "developer": "Write a detailed answer with at least three full sentences. Do not stop early.",
+  "max_tokens": 16,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Explain why API streaming clients must handle terminal incomplete events.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false
+}

@@ -35,6 +35,21 @@ func SaveAssistantResponseWithMetadata(ctx context.Context, sess *Session, text 
 	return AppendMessageWithToolInteraction(ctx, sess, msg, toolCalls, nil)
 }
 
+func SaveAssistantResponse(ctx context.Context, sess *Session, response core.Response, model string) (SaveResult, error) {
+	if sess == nil {
+		return SaveResult{}, errors.WrapError("validate session", stdErrors.New("session is nil"))
+	}
+
+	msg := Message{
+		Role:             core.RoleAssistant,
+		Content:          response.Text,
+		ThoughtSignature: response.ThoughtSignature,
+		Timestamp:        time.Now(),
+		Model:            model,
+	}
+	return AppendMessageWithBlocks(ctx, sess, msg, response.ToolCalls, nil, response.Blocks)
+}
+
 // SaveToolResults saves tool execution results to the session
 // This function uses proper locking via AppendMessageWithToolInteraction to ensure thread safety
 func SaveToolResults(ctx context.Context, sess *Session, results []core.ToolResult, additionalText string) (SaveResult, error) {
@@ -96,6 +111,10 @@ func SaveToolInteraction(sessionPath, msgID string, interaction *core.ToolIntera
 // AppendMessageWithToolInteraction appends a message with tool calls and/or results using proper locking
 // This function ensures thread safety for concurrent session operations
 func AppendMessageWithToolInteraction(ctx context.Context, session *Session, msg Message, toolCalls []core.ToolCall, toolResults []core.ToolResult) (SaveResult, error) {
+	return AppendMessageWithBlocks(ctx, session, msg, toolCalls, toolResults, nil)
+}
+
+func AppendMessageWithBlocks(ctx context.Context, session *Session, msg Message, toolCalls []core.ToolCall, toolResults []core.ToolResult, blocks []core.Block) (SaveResult, error) {
 	// Create message committer
 	mc := newMessageCommitter(session.Path)
 
@@ -109,5 +128,5 @@ func AppendMessageWithToolInteraction(ctx context.Context, session *Session, msg
 	}
 
 	// Use the unified commit method
-	return mc.CommitMessageWithRetries(ctx, msg, toolInteraction)
+	return mc.CommitMessageWithBlocksWithRetries(ctx, msg, toolInteraction, blocks)
 }

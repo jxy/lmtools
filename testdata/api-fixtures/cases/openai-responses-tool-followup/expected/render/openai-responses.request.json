@@ -1,0 +1,48 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Answer with the country for Chicago using the provided lookup result.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "arguments": "{\"city\":\"Chicago\"}",
+      "call_id": "call_lookup_city_1",
+      "name": "lookup_city",
+      "type": "function_call"
+    },
+    {
+      "call_id": "call_lookup_city_1",
+      "output": "{\"city\":\"Chicago\",\"country\":\"United States\"}",
+      "type": "function_call_output"
+    }
+  ],
+  "instructions": "Use the function result already present in the input. Do not call tools again.",
+  "max_output_tokens": 128,
+  "model": "gpt-5.4-nano",
+  "tool_choice": "none",
+  "tools": [
+    {
+      "description": "Look up structured information for a city.",
+      "name": "lookup_city",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    }
+  ]
+}

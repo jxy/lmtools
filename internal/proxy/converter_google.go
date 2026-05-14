@@ -28,6 +28,12 @@ func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *Anthropic
 
 // ConvertGoogleToAnthropic converts a Google AI response to Anthropic format
 func (c *Converter) ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel string) *AnthropicResponse {
+	return c.ConvertGoogleToAnthropicWithToolNameRegistry(resp, originalModel, nil)
+}
+
+// ConvertGoogleToAnthropicWithToolNameRegistry converts a Google AI response to
+// Anthropic format while restoring original custom-tool metadata when known.
+func (c *Converter) ConvertGoogleToAnthropicWithToolNameRegistry(resp *GoogleResponse, originalModel string, registry responseToolNameRegistry) *AnthropicResponse {
 	anthResp := &AnthropicResponse{
 		Type:  "message",
 		Model: originalModel,
@@ -60,12 +66,31 @@ func (c *Converter) ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel
 				if toolID == "" {
 					toolID = generateToolUseID()
 				}
-				content = append(content, AnthropicContentBlock{
-					Type:  "tool_use",
-					ID:    toolID,
-					Name:  part.FunctionCall.Name,
-					Input: part.FunctionCall.Args,
-				})
+				name := part.FunctionCall.Name
+				namespace := ""
+				originalName := name
+				toolType := ""
+				if mapping, ok := registry.resolve(name, ""); ok {
+					namespace = mapping.Namespace
+					originalName = mapping.Name
+					toolType = mapping.Type
+					name = mapping.Name
+				}
+				block := AnthropicContentBlock{
+					Type:         "tool_use",
+					ID:           toolID,
+					Namespace:    namespace,
+					OriginalName: originalName,
+					Name:         name,
+					Input:        part.FunctionCall.Args,
+				}
+				if toolType == "custom" {
+					input := anthropicCustomToolInput(part.FunctionCall.Args, "")
+					block.ToolType = "custom"
+					block.Input = map[string]interface{}{core.CustomToolInputField: input}
+					block.InputString = input
+				}
+				content = append(content, block)
 			}
 		}
 

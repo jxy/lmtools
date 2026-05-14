@@ -69,6 +69,14 @@
       ]
     },
     {
+      "id": "anthropic-unsigned-thinking-replay-probe",
+      "description": "Anthropic negative probe for replaying a thinking block with a forged signature",
+      "kinds": [
+        "request",
+        "negative"
+      ]
+    },
+    {
       "id": "openai-tool-followup",
       "description": "OpenAI ingress with assistant tool call and tool follow-up message",
       "kinds": [
@@ -83,6 +91,48 @@
       ]
     },
     {
+      "id": "openai-responses-basic-json",
+      "description": "OpenAI Responses API request with instructions, reasoning effort, and JSON output",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-responses-basic-text",
+      "description": "OpenAI Responses API plain text request and response",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-responses-incomplete-stream",
+      "description": "OpenAI Responses API stream ending with response.incomplete after max output tokens",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-responses-json-schema",
+      "description": "OpenAI Responses API request with JSON schema structured output",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-responses-tool-call",
+      "description": "OpenAI Responses API request that forces a function tool call",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-responses-tool-followup",
+      "description": "OpenAI Responses API request with function call output returned to the model",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
       "id": "anthropic-modern-output-config",
       "description": "Anthropic ingress with output_config format and modern metadata rendered to OpenAI and Google",
       "kinds": [
@@ -90,10 +140,129 @@
       ]
     },
     {
+      "id": "anthropic-count-tokens",
+      "description": "Anthropic Messages count_tokens endpoint response",
+      "kinds": [
+        "token-count"
+      ]
+    },
+    {
+      "id": "google-count-tokens",
+      "description": "Google Gemini countTokens endpoint response",
+      "kinds": [
+        "token-count"
+      ]
+    },
+    {
       "id": "response-openai-tool-call",
       "description": "OpenAI response with text and function tool call",
       "kinds": [
         "response"
+      ]
+    },
+    {
+      "id": "response-openai-responses-tool-call",
+      "description": "OpenAI Responses API response with text and function call output items",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-openai-responses-incomplete",
+      "description": "OpenAI Responses API incomplete response with max output token details",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-openai-responses-error",
+      "description": "OpenAI Responses API failed response with structured error",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "stateful-responses-previous-response",
+      "description": "Stateful Responses API previous_response_id replay, retrieve, and input item listing",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-delete",
+      "description": "Stateful Responses API delete tombstones local response records",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-background-cancel",
+      "description": "Stateful Responses API background response can be cancelled and retrieved",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-background-complete",
+      "description": "Stateful Responses API background response completes and can be retrieved",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-conversations-basic",
+      "description": "Stateful Conversations API create, append, retrieve item, list, and delete behavior",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-conversations-response-append",
+      "description": "Stateful Responses API appends requests and assistant outputs to a conversation",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-reasoning-tool-followup",
+      "description": "Stateful Responses API preserves reasoning blocks across tool-call follow-up",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-input-tokens",
+      "description": "Stateful Responses API input token counting is read-only and includes previous response context",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-compact",
+      "description": "Stateful Responses API compaction creates a compacted continuation response",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-responses-input-items-pagination",
+      "description": "Stateful Responses API input item listing supports after, limit, and order pagination",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-conversations-pagination",
+      "description": "Stateful Conversations API item listing supports after, limit, and order pagination",
+      "kinds": [
+        "stateful"
+      ]
+    },
+    {
+      "id": "stateful-openai-passthrough-lifecycle",
+      "description": "OpenAI provider Responses and Conversations lifecycle routes are passed through upstream",
+      "kinds": [
+        "stateful"
       ]
     },
     {

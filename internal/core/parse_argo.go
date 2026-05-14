@@ -91,6 +91,7 @@ func parseArgoResponseWithToolsOptions(data []byte, isEmbed bool, opts ArgoRespo
 
 				// Parse tool call (Anthropic format as shown in the example)
 				var toolCall ToolCall
+				toolCall.Type = "function"
 
 				// Store the assistant's content for context
 				toolCall.AssistantContent = content

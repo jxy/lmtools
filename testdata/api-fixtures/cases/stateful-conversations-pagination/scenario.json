@@ -1,0 +1,91 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-conversation-with-three-items",
+      "method": "POST",
+      "path": "/v1/conversations",
+      "body": {
+        "items": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": "one"
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": "two"
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": "three"
+          }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "conversation"
+        }
+      },
+      "bind": {
+        "conversation_id": "id"
+      }
+    },
+    {
+      "id": "list-items-ascending-first-page",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items?order=asc&limit=2",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0000",
+          "last_id": "item_0001",
+          "has_more": true,
+          "data.length": 2,
+          "data.0.id": "item_0000",
+          "data.1.id": "item_0001"
+        }
+      },
+      "bind": {
+        "second_item_id": "data.1.id"
+      }
+    },
+    {
+      "id": "list-items-ascending-after",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items?order=asc&after=${second_item_id}&limit=2",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0002",
+          "last_id": "item_0002",
+          "has_more": false,
+          "data.length": 1,
+          "data.0.id": "item_0002"
+        }
+      }
+    },
+    {
+      "id": "list-items-default-desc",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items?limit=1",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0002",
+          "last_id": "item_0002",
+          "has_more": true,
+          "data.length": 1,
+          "data.0.id": "item_0002"
+        }
+      }
+    }
+  ]
+}

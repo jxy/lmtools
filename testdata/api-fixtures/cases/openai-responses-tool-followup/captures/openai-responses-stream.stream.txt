@@ -1,0 +1,47 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_0d3a46cdfea584ed0069f265b51db88193be18924a09c6d8b8","object":"response","created_at":1777493429,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":"Use the function result already present in the input. Do not call tools again.","max_output_tokens":128,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"none","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"none","tools":[{"type":"function","description":"Look up structured information for a city.","name":"lookup_city","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_0d3a46cdfea584ed0069f265b51db88193be18924a09c6d8b8","object":"response","created_at":1777493429,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":"Use the function result already present in the input. Do not call tools again.","max_output_tokens":128,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"none","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"none","tools":[{"type":"function","description":"Look up structured information for a city.","name":"lookup_city","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","type":"message","status":"in_progress","content":[],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":2}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"Chicago","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"2Penv1Raf","output_index":0,"sequence_number":4}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":" is","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"t0bIwrppwaQSj","output_index":0,"sequence_number":5}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":" in","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"EVxKoTJbjaOgZ","output_index":0,"sequence_number":6}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":" **","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"rhOmMZqWMoKww","output_index":0,"sequence_number":7}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"United","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"19mki7UlTA","output_index":0,"sequence_number":8}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":" States","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"NXvuTC9Ev","output_index":0,"sequence_number":9}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"**","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"z6n7YvkWtwY5Bj","output_index":0,"sequence_number":10}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":".","item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"obfuscation":"T8YB4dNG0EhKVfJ","output_index":0,"sequence_number":11}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","logprobs":[],"output_index":0,"sequence_number":12,"text":"Chicago is in **United States**."}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"Chicago is in **United States**."},"sequence_number":13}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"Chicago is in **United States**."}],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":14}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_0d3a46cdfea584ed0069f265b51db88193be18924a09c6d8b8","object":"response","created_at":1777493429,"status":"completed","background":false,"completed_at":1777493429,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":"Use the function result already present in the input. Do not call tools again.","max_output_tokens":128,"max_tool_calls":null,"model":"gpt-5.4-nano-2026-03-17","moderation":null,"output":[{"id":"msg_0d3a46cdfea584ed0069f265b5cc508193bc17ef55409cd238","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"Chicago is in **United States**."}],"phase":"final_answer","role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":"none","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"none","tools":[{"type":"function","description":"Look up structured information for a city.","name":"lookup_city","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":115,"input_tokens_details":{"cached_tokens":0},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":127},"user":null,"metadata":{}},"sequence_number":15}

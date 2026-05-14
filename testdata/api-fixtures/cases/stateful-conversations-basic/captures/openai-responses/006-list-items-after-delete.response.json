@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "content": [
+        {
+          "text": "seed",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_69f39d8dccd88194bee808779cc217000ed757a4b8c29824",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "first_id": "msg_69f39d8dccd88194bee808779cc217000ed757a4b8c29824",
+  "has_more": false,
+  "last_id": "msg_69f39d8dccd88194bee808779cc217000ed757a4b8c29824",
+  "object": "list"
+}

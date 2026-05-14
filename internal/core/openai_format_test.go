@@ -198,6 +198,7 @@ func TestBuildArgoToolResultRequestOpenAIFormat(t *testing.T) {
 
 	if req == nil {
 		t.Fatal("Expected non-nil request")
+		return
 	}
 
 	// Parse the request body

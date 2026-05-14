@@ -1,0 +1,17 @@
+{
+  "id": "msg_followup",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-test",
+  "content": [
+    {
+      "type": "text",
+      "text": "continued from compacted state"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 14,
+    "output_tokens": 4
+  }
+}

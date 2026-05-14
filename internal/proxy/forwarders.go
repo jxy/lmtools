@@ -9,6 +9,7 @@ import (
 	"lmtools/internal/logger"
 	"lmtools/internal/providers"
 	"net/http"
+	"strings"
 )
 
 // forwardToOpenAI forwards a request to the OpenAI API
@@ -38,15 +39,27 @@ func (s *Server) useLegacyArgo() bool {
 	return s != nil && s.config != nil && s.config.ArgoLegacy
 }
 
-func (s *Server) configureArgoOpenAIRequest(req *http.Request) {
+func (s *Server) argoAPIKey() string {
+	if s == nil || s.config == nil {
+		return ""
+	}
 	if s.config.ArgoAPIKey != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.config.ArgoAPIKey))
+		return s.config.ArgoAPIKey
+	}
+	// Argo currently expects -argo-user to act as the native API key; keep this
+	// fallback until Argo changes authentication.
+	return s.config.ArgoUser
+}
+
+func (s *Server) configureArgoOpenAIRequest(req *http.Request) {
+	if apiKey := s.argoAPIKey(); apiKey != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	}
 }
 
 func (s *Server) configureArgoAnthropicRequest(req *http.Request) {
-	if s.config.ArgoAPIKey != "" {
-		req.Header.Set("x-api-key", s.config.ArgoAPIKey)
+	if apiKey := s.argoAPIKey(); apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
 	}
 	req.Header.Set("anthropic-version", "2023-06-01")
 }
@@ -62,6 +75,7 @@ func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequ
 	if err != nil {
 		return nil, fmt.Errorf("convert to Argo OpenAI format: %w", err)
 	}
+	normalizeArgoOpenAIChatRequest(openAIReq)
 
 	var openAIResp OpenAIResponse
 	err = s.doJSON(ctx, s.endpoints.ArgoOpenAI, openAIReq, s.configureArgoOpenAIRequest, &openAIResp, "Argo OpenAI")
@@ -86,8 +100,9 @@ func (s *Server) forwardToArgoAnthropic(ctx context.Context, anthReq *AnthropicR
 }
 
 func (s *Server) argoOpenAIStreamingRequest(ctx context.Context, openAIReq *OpenAIRequest) (*http.Response, error) {
-	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", openAIReq)
+	normalizeArgoOpenAIChatRequest(openAIReq)
 	openAIReq.Stream = true
+	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", openAIReq)
 	return s.sendStreamingJSONRequest(
 		ctx,
 		constants.ProviderArgo,
@@ -154,6 +169,34 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	return &googleResp, nil
+}
+
+func (s *Server) forwardGoogleCountTokens(ctx context.Context, googleReq *GoogleRequest, model string) (*GoogleCountTokensResponse, error) {
+	url, err := buildGoogleModelURL(s.endpoints.Google, model, "countTokens")
+	if err != nil {
+		return nil, fmt.Errorf("build Google countTokens URL: %w", err)
+	}
+	if googleReq != nil && googleReq.Model == "" {
+		googleReq.Model = googleModelResourceName(model)
+	}
+	payload := &GoogleCountTokensRequest{GenerateContentRequest: googleReq}
+	var googleResp GoogleCountTokensResponse
+	err = s.doJSON(ctx, url, payload, func(req *http.Request) {
+		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.GoogleAPIKey); err != nil {
+			logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
+		}
+	}, &googleResp, "Google countTokens")
+	if err != nil {
+		return nil, err
+	}
+	return &googleResp, nil
+}
+
+func googleModelResourceName(model string) string {
+	if strings.HasPrefix(model, "models/") {
+		return model
+	}
+	return "models/" + model
 }
 
 // forwardToArgo forwards a request to the Argo API

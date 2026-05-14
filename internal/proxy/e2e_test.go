@@ -702,6 +702,16 @@ func TestE2EComplexContent(t *testing.T) {
 		MaxTokens: 200,
 		Messages: []AnthropicMessage{
 			{
+				Role:    core.RoleUser,
+				Content: json.RawMessage(`"Please calculate 25 times 4"`),
+			},
+			{
+				Role: core.RoleAssistant,
+				Content: json.RawMessage(`[
+					{"type": "tool_use", "id": "calc_123", "name": "calculator", "input": {"expression": "25 * 4"}}
+				]`),
+			},
+			{
 				Role: core.RoleUser,
 				Content: json.RawMessage(`[
 					{"type": "text", "text": "I used the calculator tool."},

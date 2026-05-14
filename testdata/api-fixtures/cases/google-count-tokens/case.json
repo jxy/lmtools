@@ -1,0 +1,14 @@
+{
+  "id": "google-count-tokens",
+  "description": "Google Gemini countTokens endpoint response",
+  "kinds": [
+    "token-count"
+  ],
+  "provider": "google",
+  "models": {
+    "google": "gemini-3.1-flash-lite-preview"
+  },
+  "capture_targets": [
+    "google"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "model": "claude-haiku-4-5",
+  "system": "You are a fixture for token counting.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Count the tokens in this Anthropic fixture request."
+    }
+  ],
+  "tools": [
+    {
+      "name": "lookup_fixture",
+      "description": "Look up a fixture value.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    }
+  ]
+}

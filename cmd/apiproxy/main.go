@@ -24,6 +24,8 @@ for Anthropic, OpenAI, Google, and Argo providers.
 Server Options:
   -host string               Host to bind the server to (default: "127.0.0.1")
   -port int                  Port to bind the server to (default: 8082)
+  -sessions-dir string       Stateful Responses API sessions directory
+                            (default: ~/.apiproxy/sessions)
 
 Provider Options:
   -provider string           Provider: argo, anthropic, openai, google (default: "argo")
@@ -31,7 +33,7 @@ Provider Options:
   -api-key-file string       Path to file containing API key for the selected provider
                             (required for openai/google/anthropic unless using custom URL;
                              also accepted for argo)
-  -argo-user string          Argo user (optional if -api-key-file is provided)
+  -argo-user string          Argo user/API key (optional if -api-key-file is provided)
   -argo-dev                  Use the Argo dev environment instead of prod
   -argo-test                 Use the Argo test environment instead of prod
   -argo-legacy               Use legacy Argo /api/v1/resource chat endpoints
@@ -102,6 +104,7 @@ func main() {
 		model              string
 		smallModel         string
 		maxRequestBodySize int64
+		sessionsDir        string
 
 		// Logging
 		logLevel  string
@@ -116,7 +119,7 @@ func main() {
 	flag.StringVar(&apiKeyFile, "api-key-file", "", "Path to file containing API key for the selected provider (required for openai/google/anthropic unless using custom URL; also accepted for argo)")
 
 	// Configuration flags
-	flag.StringVar(&argoUser, "argo-user", "", "Argo user (or use -api-key-file)")
+	flag.StringVar(&argoUser, "argo-user", "", "Argo user/API key (or use -api-key-file)")
 	flag.BoolVar(&argoDev, "argo-dev", false, "Use the Argo dev environment instead of prod")
 	flag.BoolVar(&argoTest, "argo-test", false, "Use the Argo test environment instead of prod")
 	flag.BoolVar(&argoLegacy, "argo-legacy", false, "Use legacy Argo /api/v1/resource chat endpoints")
@@ -125,6 +128,7 @@ func main() {
 	flag.StringVar(&model, "model", "", "Model to use (default varies by provider)")
 	flag.StringVar(&smallModel, "small-model", "", "Small model to use")
 	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", 10, "Maximum request body size in MB")
+	flag.StringVar(&sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
 
 	// Logging flags
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (DEBUG, INFO, WARN, ERROR)")
@@ -178,6 +182,7 @@ func main() {
 		Model:              model,
 		SmallModel:         smallModel,
 		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
+		SessionsDir:        sessionsDir,
 	}
 
 	// Apply dynamic model defaults based on provider

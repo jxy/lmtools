@@ -46,12 +46,13 @@ func indexMessageDirectories(sessionPath string) (map[string]string, error) {
 	return index, nil
 }
 
-// indexMessagesAlongPath indexes only the directories on the active lineage path.
-// Later directories override earlier ones for the same message ID.
-func indexMessagesAlongPath(sessionPath string) (map[string]string, error) {
-	sessionPath = DefaultManager().ResolveSessionPath(sessionPath)
+func indexMessagesAlongPathWithManager(manager *Manager, sessionPath string) (map[string]string, error) {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	sessionPath = manager.ResolveSessionPath(sessionPath)
 
-	rootDir, components := ParseSessionPath(sessionPath)
+	rootDir, components := manager.ParseSessionPath(sessionPath)
 	index := make(map[string]string)
 	currentDir := rootDir
 

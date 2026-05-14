@@ -52,9 +52,9 @@ func OpenAIRequestToTypedStrict(req *OpenAIRequest) (TypedRequest, error) {
 }
 
 func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error) {
-	maxTokens := req.MaxTokens
-	if maxTokens == nil && req.MaxCompletionTokens != nil {
-		maxTokens = req.MaxCompletionTokens
+	maxTokens := positiveIntPtr(req.MaxTokens)
+	if maxTokens == nil {
+		maxTokens = positiveIntPtr(req.MaxCompletionTokens)
 	}
 
 	typed := TypedRequest{
@@ -69,19 +69,9 @@ func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error)
 		ServiceTier:     req.ServiceTier,
 	}
 
-	// Convert OpenAI messages to typed OpenAI messages first
-	openAITypedMessages := make([]core.OpenAIMessage, len(req.Messages))
-	for i, msg := range req.Messages {
-		content, err := openAIContentToTypedUnionForMode(msg.Content, strict)
-		if err != nil {
-			return TypedRequest{}, fmt.Errorf("messages[%d].content: %w", i, err)
-		}
-		openAITypedMessages[i] = core.OpenAIMessage{
-			Role:       string(msg.Role),
-			Content:    content,
-			ToolCalls:  openAIToolCallsToTyped(msg.ToolCalls),
-			ToolCallID: msg.ToolCallID,
-		}
+	openAITypedMessages, err := openAIProxyMessagesToCore(req.Messages, strict)
+	if err != nil {
+		return TypedRequest{}, err
 	}
 
 	// Convert messages using typed function
@@ -91,16 +81,30 @@ func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error)
 	if len(req.Tools) > 0 {
 		typed.Tools = make([]core.ToolDefinition, 0, len(req.Tools))
 		for _, tool := range req.Tools {
-			if tool.Type != "" && tool.Type != "function" {
+			if tool.Type == "custom" {
+				custom := openAICustomToolMap(tool.Custom)
+				name, _ := custom["name"].(string)
+				if name == "" {
+					continue
+				}
+				description, _ := custom["description"].(string)
+				typed.Tools = append(typed.Tools, core.ToolDefinition{
+					Type:        "custom",
+					Name:        name,
+					Description: description,
+					Format:      responsesCustomToolFormatFromChat(custom["format"]),
+				})
 				continue
 			}
-			if tool.Function.Name == "" {
+			if tool.Type != "" && tool.Type != "function" || tool.Function.Name == "" {
 				continue
 			}
 			typed.Tools = append(typed.Tools, core.ToolDefinition{
+				Type:        "function",
 				Name:        tool.Function.Name,
 				Description: tool.Function.Description,
 				InputSchema: tool.Function.Parameters,
+				Strict:      tool.Function.Strict,
 			})
 		}
 	}
@@ -109,6 +113,143 @@ func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error)
 	typed.ToolChoice = openAIToolChoiceToTyped(req.ToolChoice)
 
 	return typed, nil
+}
+
+func openAIProxyMessagesToCore(messages []OpenAIMessage, strict bool) ([]core.OpenAIMessage, error) {
+	result := make([]core.OpenAIMessage, 0, len(messages))
+	pendingLegacyCalls := make(map[string][]pendingLegacyFunctionCall)
+	var pendingLegacyOrder []pendingLegacyFunctionCall
+
+	for i, msg := range messages {
+		content, err := openAIContentToTypedUnionForMode(msg.Content, strict)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d].content: %w", i, err)
+		}
+
+		if msg.FunctionCall != nil {
+			if strict && msg.Role != core.RoleAssistant {
+				return nil, fmt.Errorf("messages[%d].function_call: only assistant messages can contain legacy function_call", i)
+			}
+			if strict && len(msg.ToolCalls) > 0 {
+				return nil, fmt.Errorf("messages[%d]: cannot mix function_call and tool_calls", i)
+			}
+			if strings.TrimSpace(msg.FunctionCall.Name) == "" {
+				if strict {
+					return nil, fmt.Errorf("messages[%d].function_call.name: required", i)
+				}
+			} else if len(msg.ToolCalls) == 0 {
+				callID := syntheticLegacyFunctionCallID(i)
+				pending := pendingLegacyFunctionCall{
+					MessageIndex: i,
+					Name:         msg.FunctionCall.Name,
+					ID:           callID,
+				}
+				pendingLegacyCalls[msg.FunctionCall.Name] = append(pendingLegacyCalls[msg.FunctionCall.Name], pending)
+				pendingLegacyOrder = append(pendingLegacyOrder, pending)
+				args := msg.FunctionCall.Arguments
+				if strings.TrimSpace(args) == "" {
+					args = "{}"
+				}
+				msg.ToolCalls = []ToolCall{{
+					ID:   callID,
+					Type: "function",
+					Function: FunctionCall{
+						Name:      msg.FunctionCall.Name,
+						Arguments: args,
+					},
+				}}
+			}
+		}
+
+		role := string(msg.Role)
+		toolCallID := msg.ToolCallID
+		if role == "function" {
+			if strings.TrimSpace(msg.Name) == "" {
+				if strict {
+					return nil, fmt.Errorf("messages[%d].name: required for legacy function result", i)
+				}
+			}
+			if toolCallID == "" {
+				if id, ok := popPendingLegacyFunctionCallID(pendingLegacyCalls, msg.Name); ok {
+					toolCallID = id
+				} else if strict {
+					return nil, fmt.Errorf("messages[%d]: legacy function result %q has no matching function_call", i, msg.Name)
+				} else {
+					toolCallID = syntheticLegacyFunctionResultID(i)
+				}
+			}
+			role = string(core.RoleTool)
+		}
+
+		result = append(result, core.OpenAIMessage{
+			Role:       role,
+			Content:    content,
+			ToolCalls:  openAIToolCallsToTyped(msg.ToolCalls),
+			ToolCallID: toolCallID,
+			Name:       msg.Name,
+		})
+	}
+	if strict {
+		if pending, ok := firstPendingLegacyFunctionCall(pendingLegacyCalls, pendingLegacyOrder); ok {
+			return nil, fmt.Errorf("messages[%d].function_call: legacy function_call %q has no matching function result", pending.MessageIndex, pending.Name)
+		}
+	}
+
+	return result, nil
+}
+
+type pendingLegacyFunctionCall struct {
+	MessageIndex int
+	Name         string
+	ID           string
+}
+
+func syntheticLegacyFunctionCallID(index int) string {
+	return fmt.Sprintf("call_legacy_%d", index)
+}
+
+func syntheticLegacyFunctionResultID(index int) string {
+	return fmt.Sprintf("call_legacy_unmatched_%d", index)
+}
+
+func popPendingLegacyFunctionCallID(pending map[string][]pendingLegacyFunctionCall, name string) (string, bool) {
+	ids := pending[name]
+	if len(ids) == 0 {
+		return "", false
+	}
+	id := ids[0]
+	if len(ids) == 1 {
+		delete(pending, name)
+	} else {
+		pending[name] = ids[1:]
+	}
+	return id.ID, true
+}
+
+func firstPendingLegacyFunctionCall(pending map[string][]pendingLegacyFunctionCall, order []pendingLegacyFunctionCall) (pendingLegacyFunctionCall, bool) {
+	for _, candidate := range order {
+		for _, item := range pending[candidate.Name] {
+			if item.ID == candidate.ID {
+				return item, true
+			}
+		}
+	}
+	return pendingLegacyFunctionCall{}, false
+}
+
+func positiveIntPtr(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func omitNonPositiveOpenAITokenLimits(req *OpenAIRequest) {
+	if req == nil {
+		return
+	}
+	req.MaxTokens = positiveIntPtr(req.MaxTokens)
+	req.MaxCompletionTokens = positiveIntPtr(req.MaxCompletionTokens)
 }
 
 // AnthropicRequestToTyped converts an Anthropic request to TypedRequest
@@ -173,9 +314,11 @@ func AnthropicRequestToTyped(req *AnthropicRequest) TypedRequest {
 				continue
 			}
 			typed.Tools = append(typed.Tools, core.ToolDefinition{
+				Type:        tool.Type,
 				Name:        tool.Name,
 				Description: tool.Description,
 				InputSchema: tool.InputSchema,
+				Strict:      tool.Strict,
 			})
 		}
 	}

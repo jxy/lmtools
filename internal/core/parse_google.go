@@ -21,13 +21,14 @@ func generateGoogleToolCallID() string {
 }
 
 func parseGoogleResponseDetailed(data []byte, isEmbed bool) (Response, error) {
-	text, toolCalls, thoughtSignature, err := parseGoogleResponseWithMetadata(data, isEmbed)
+	text, toolCalls, thoughtSignature, blocks, err := parseGoogleResponseWithMetadata(data, isEmbed)
 	if err != nil {
 		return Response{}, err
 	}
 	return Response{
 		Text:             text,
 		ToolCalls:        toolCalls,
+		Blocks:           blocks,
 		ThoughtSignature: thoughtSignature,
 	}, nil
 }
@@ -35,14 +36,14 @@ func parseGoogleResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 // parseGoogleResponseWithTools parses Google responses that may contain tool calls
 // This parses Google-format responses for both direct Google usage and Argo-routed Google models.
 func parseGoogleResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
-	text, toolCalls, _, err := parseGoogleResponseWithMetadata(data, isEmbed)
+	text, toolCalls, _, _, err := parseGoogleResponseWithMetadata(data, isEmbed)
 	return text, toolCalls, err
 }
 
-func parseGoogleResponseWithMetadata(data []byte, isEmbed bool) (string, []ToolCall, string, error) {
+func parseGoogleResponseWithMetadata(data []byte, isEmbed bool) (string, []ToolCall, string, []Block, error) {
 	if isEmbed {
 		// Google AI doesn't support embeddings through this interface
-		return "", nil, "", fmt.Errorf("google provider does not support embedding mode")
+		return "", nil, "", nil, fmt.Errorf("google provider does not support embedding mode")
 	}
 
 	var resp struct {
@@ -68,25 +69,34 @@ func parseGoogleResponseWithMetadata(data []byte, isEmbed bool) (string, []ToolC
 	}
 
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return "", nil, "", fmt.Errorf("failed to decode response: %w", err)
+		return "", nil, "", nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if resp.Error != nil {
-		return "", nil, "", fmt.Errorf("API error: %s (code: %d, status: %s)",
+		return "", nil, "", nil, fmt.Errorf("API error: %s (code: %d, status: %s)",
 			resp.Error.Message, resp.Error.Code, resp.Error.Status)
 	}
 
 	if len(resp.Candidates) == 0 {
-		return "", nil, "", fmt.Errorf("no candidates in response")
+		return "", nil, "", nil, fmt.Errorf("no candidates in response")
 	}
 
 	var text string
 	var toolCalls []ToolCall
 	var thoughtSignature string
+	var blocks []Block
 
 	for _, part := range resp.Candidates[0].Content.Parts {
+		if part.ThoughtSignature != "" {
+			blocks = append(blocks, ReasoningBlock{
+				Provider:  "google",
+				Type:      "thought_signature",
+				Signature: part.ThoughtSignature,
+			})
+		}
 		if part.Text != "" {
 			text += part.Text
+			blocks = append(blocks, TextBlock{Text: part.Text})
 		}
 		if part.ThoughtSignature != "" && part.FunctionCall == nil {
 			thoughtSignature = part.ThoughtSignature
@@ -100,8 +110,13 @@ func parseGoogleResponseWithMetadata(data []byte, isEmbed bool) (string, []ToolC
 				Args:             argsJSON,
 				ThoughtSignature: part.ThoughtSignature,
 			})
+			blocks = append(blocks, ToolUseBlock{
+				ID:    toolCalls[len(toolCalls)-1].ID,
+				Name:  part.FunctionCall.Name,
+				Input: argsJSON,
+			})
 		}
 	}
 
-	return text, toolCalls, thoughtSignature, nil
+	return text, toolCalls, thoughtSignature, blocks, nil
 }

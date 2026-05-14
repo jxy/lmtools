@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "content": [
+        {
+          "text": "third",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_0fd4705f6ffb76580069f3b68c01e081a2bf99211253f9cddc",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "first_id": "msg_0fd4705f6ffb76580069f3b68c01e081a2bf99211253f9cddc",
+  "has_more": false,
+  "last_id": "msg_0fd4705f6ffb76580069f3b68c01e081a2bf99211253f9cddc",
+  "object": "list"
+}

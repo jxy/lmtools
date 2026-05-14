@@ -242,8 +242,21 @@ func captureArtifact(root string, meta apifixtures.CaseMeta, target targetConfig
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	expectedStatus, hasExpectedStatus := apifixtures.ExpectedCaptureStatus(meta, target)
+	if hasExpectedStatus {
+		if resp.StatusCode != expectedStatus {
+			return compareArtifact{}, fmt.Errorf("live target %q returned status %d, want %d%s", target.ID, resp.StatusCode, expectedStatus, summarizeHTTPErrorBody(data))
+		}
+	} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return compareArtifact{}, fmt.Errorf("live target %q returned status %d%s", target.ID, resp.StatusCode, summarizeHTTPErrorBody(data))
+	}
+	if hasExpectedStatus && (expectedStatus < 200 || expectedStatus >= 300) {
+		return compareArtifact{
+			Kind:   artifactKind(target),
+			Target: target,
+			Source: "live:" + target.ID,
+			Data:   data,
+		}, nil
 	}
 	if target.Stream && !looksLikeSSE(data) {
 		return compareArtifact{}, fmt.Errorf("live target %q returned non-SSE payload%s", target.ID, summarizeHTTPErrorBody(data))

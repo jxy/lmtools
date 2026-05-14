@@ -1,0 +1,42 @@
+{
+  "case_id": "openai-responses-tool-followup",
+  "target": "google",
+  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent",
+  "status_code": 200,
+  "content_type": "application/json; charset=UTF-8",
+  "captured_at": "2026-05-12T22:36:10-05:00",
+  "response_headers": {
+    "Alt-Svc": [
+      "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+    ],
+    "Content-Type": [
+      "application/json; charset=UTF-8"
+    ],
+    "Date": [
+      "Wed, 13 May 2026 03:36:10 GMT"
+    ],
+    "Server": [
+      "scaffolding on HTTPServer2"
+    ],
+    "Server-Timing": [
+      "gfet4t7; dur=5006"
+    ],
+    "Vary": [
+      "Origin",
+      "X-Origin",
+      "Referer"
+    ],
+    "X-Content-Type-Options": [
+      "nosniff"
+    ],
+    "X-Frame-Options": [
+      "SAMEORIGIN"
+    ],
+    "X-Gemini-Service-Tier": [
+      "standard"
+    ],
+    "X-Xss-Protection": [
+      "0"
+    ]
+  }
+}

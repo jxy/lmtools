@@ -1,0 +1,32 @@
+{
+  "body": {
+    "messages": [
+      {
+        "content": "Count the tokens in this Anthropic fixture request.",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5",
+    "system": "You are a fixture for token counting.",
+    "tools": [
+      {
+        "description": "Look up a fixture value.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup_fixture"
+      }
+    ]
+  },
+  "method": "POST",
+  "path": "/v1/messages/count_tokens",
+  "url": "https://api.anthropic.com/v1/messages/count_tokens"
+}

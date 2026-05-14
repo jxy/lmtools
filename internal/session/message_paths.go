@@ -7,17 +7,19 @@ import (
 )
 
 type messageFilePaths struct {
-	TxtPath   string
-	JSONPath  string
-	ToolsPath string
+	TxtPath    string
+	JSONPath   string
+	ToolsPath  string
+	BlocksPath string
 }
 
 func buildMessageFilePaths(sessionPath, msgID string) messageFilePaths {
 	basePath := filepath.Join(sessionPath, msgID)
 	return messageFilePaths{
-		TxtPath:   basePath + ".txt",
-		JSONPath:  basePath + ".json",
-		ToolsPath: basePath + ".tools.json",
+		TxtPath:    basePath + ".txt",
+		JSONPath:   basePath + ".json",
+		ToolsPath:  basePath + ".tools.json",
+		BlocksPath: basePath + ".blocks.json",
 	}
 }
 

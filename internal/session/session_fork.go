@@ -81,22 +81,31 @@ func GetSystemMessage(sessionPath string) (*string, error) {
 
 // ForkSessionWithSystemMessage creates a new session by copying an existing one with a new system message.
 func ForkSessionWithSystemMessage(ctx context.Context, originalPath string, newSystemPrompt *string) (*Session, error) {
-	originalPath = DefaultManager().ResolveSessionPath(originalPath)
+	return ForkSessionWithManager(ctx, DefaultManager(), originalPath, newSystemPrompt)
+}
+
+// ForkSessionWithManager creates a new session in manager's session tree by copying
+// the lineage of an existing session with an optional replacement system message.
+func ForkSessionWithManager(ctx context.Context, manager *Manager, originalPath string, newSystemPrompt *string) (*Session, error) {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	originalPath = manager.ResolveSessionPath(originalPath)
 
 	var (
 		newSession *Session
 		err        error
 	)
 	if newSystemPrompt != nil {
-		newSession, err = CreateSession(*newSystemPrompt, logger.From(ctx))
+		newSession, err = manager.CreateSession(*newSystemPrompt, logger.From(ctx))
 	} else {
-		newSession, err = CreateSession("", logger.From(ctx))
+		newSession, err = manager.CreateSession("", logger.From(ctx))
 	}
 	if err != nil {
 		return nil, errors.WrapError("create new session", err)
 	}
 
-	if err := copyForkLineage(ctx, originalPath, newSession); err != nil {
+	if err := copyForkLineageWithManager(ctx, manager, originalPath, newSession); err != nil {
 		os.RemoveAll(newSession.Path)
 		return nil, err
 	}
@@ -104,13 +113,16 @@ func ForkSessionWithSystemMessage(ctx context.Context, originalPath string, newS
 	return newSession, nil
 }
 
-func copyForkLineage(ctx context.Context, originalPath string, newSession *Session) error {
-	messages, err := GetLineage(originalPath)
+func copyForkLineageWithManager(ctx context.Context, manager *Manager, originalPath string, newSession *Session) error {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	messages, err := GetLineageWithManager(manager, originalPath)
 	if err != nil {
 		return errors.WrapError("get lineage from original session", err)
 	}
 
-	msgIndex, err := indexMessagesAlongPath(originalPath)
+	msgIndex, err := indexMessagesAlongPathWithManager(manager, originalPath)
 	if err != nil {
 		return errors.WrapError("index lineage messages", err)
 	}
@@ -123,6 +135,7 @@ func copyForkLineage(ctx context.Context, originalPath string, newSession *Sessi
 		}
 
 		var toolInteraction *core.ToolInteraction
+		var blocks []core.Block
 		originalMsgPath := msgIndex[msg.ID]
 		logger.From(ctx).Debugf("Processing message %s (role=%s) from path %s", msg.ID, msg.Role, originalMsgPath)
 
@@ -137,6 +150,14 @@ func copyForkLineage(ctx context.Context, originalPath string, newSession *Sessi
 			} else {
 				logger.From(ctx).Debugf("No tool file found for message %s at %s", msg.ID, buildMessageFilePaths(originalMsgPath, msg.ID).ToolsPath)
 			}
+
+			loadedBlocks, ok, err := loadMessageBlocks(originalMsgPath, msg.ID)
+			if err != nil {
+				logger.From(ctx).Debugf("Failed to load typed blocks for message %s: %v", msg.ID, err)
+			} else if ok {
+				blocks = loadedBlocks
+				logger.From(ctx).Debugf("Loaded %d typed blocks for message %s", len(blocks), msg.ID)
+			}
 		}
 
 		newMsg := Message{
@@ -146,7 +167,7 @@ func copyForkLineage(ctx context.Context, originalPath string, newSession *Sessi
 			Model:     msg.Model,
 		}
 
-		staged, err := mc.Stage(newMsg, toolInteraction)
+		staged, err := mc.StageWithBlocks(newMsg, toolInteraction, blocks)
 		if err != nil {
 			return errors.WrapError("stage message", err)
 		}

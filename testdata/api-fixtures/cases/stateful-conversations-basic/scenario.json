@@ -1,0 +1,143 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-conversation",
+      "method": "POST",
+      "path": "/v1/conversations",
+      "body": {
+        "metadata": {
+          "topic": "fixtures"
+        },
+        "items": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "seed"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "conversation",
+          "metadata.topic": "fixtures"
+        }
+      },
+      "bind": {
+        "conversation_id": "id"
+      }
+    },
+    {
+      "id": "list-seeded-items",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0000",
+          "last_id": "item_0000",
+          "data.length": 1,
+          "data.0.id": "item_0000",
+          "data.0.role": "user",
+          "data.0.content.0.text": "seed"
+        }
+      }
+    },
+    {
+      "id": "append-item",
+      "method": "POST",
+      "path": "/v1/conversations/${conversation_id}/items",
+      "body": {
+        "items": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "second"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0001",
+          "last_id": "item_0001",
+          "data.length": 1,
+          "data.0.id": "item_0001",
+          "data.0.content.0.text": "second"
+        }
+      },
+      "bind": {
+        "second_item_id": "data.0.id"
+      }
+    },
+    {
+      "id": "retrieve-appended-item",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items/${second_item_id}",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${second_item_id}",
+          "role": "user",
+          "content.0.text": "second"
+        }
+      }
+    },
+    {
+      "id": "delete-appended-item",
+      "method": "DELETE",
+      "path": "/v1/conversations/${conversation_id}/items/${second_item_id}",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${conversation_id}",
+          "object": "conversation",
+          "metadata.topic": "fixtures"
+        }
+      }
+    },
+    {
+      "id": "list-items-after-delete",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0000",
+          "last_id": "item_0000",
+          "data.length": 1,
+          "data.0.id": "item_0000",
+          "data.0.content.0.text": "seed"
+        }
+      }
+    },
+    {
+      "id": "delete-conversation",
+      "method": "DELETE",
+      "path": "/v1/conversations/${conversation_id}",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "id": "${conversation_id}",
+          "object": "conversation.deleted",
+          "deleted": true
+        }
+      }
+    }
+  ]
+}

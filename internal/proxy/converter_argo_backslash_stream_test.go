@@ -26,6 +26,7 @@ func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
 	anth := converter.ConvertArgoToAnthropicWithRequest(argo, req.Model, req)
 	if anth == nil {
 		t.Fatal("converter returned nil")
+		return
 	}
 
 	// Ensure we have a tool_use block and that input.content decodes to real newlines

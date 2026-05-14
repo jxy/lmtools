@@ -1,0 +1,8 @@
+{
+  "text": "Partial answer",
+  "tool_calls": [],
+  "status": "incomplete",
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  }
+}

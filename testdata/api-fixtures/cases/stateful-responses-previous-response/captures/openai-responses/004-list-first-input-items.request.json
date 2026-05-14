@@ -1,0 +1,5 @@
+{
+  "method": "GET",
+  "path": "/v1/responses/resp_02b35ea5dfdac8f00069f38f1a341081a2bd490513ca855522/input_items",
+  "url": "https://api.openai.com/v1/responses/resp_02b35ea5dfdac8f00069f38f1a341081a2bd490513ca855522/input_items"
+}

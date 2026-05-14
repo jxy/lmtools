@@ -1,0 +1,17 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Say hello to the fixture runner.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "instructions": "Answer in one short sentence.",
+  "max_output_tokens": 64,
+  "model": "gpt-5.4-nano"
+}

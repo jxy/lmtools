@@ -94,7 +94,6 @@ func TestOpenAIConversionWarningsForDroppedFields(t *testing.T) {
 		`Converting OpenAI field "response_format.json_schema.name" to Anthropic with limited fidelity`,
 		`Converting OpenAI field "response_format.json_schema.description" to Anthropic with limited fidelity`,
 		`Converting OpenAI field "response_format.json_schema.strict" to Anthropic with limited fidelity`,
-		`Converting OpenAI field "tools[].function.strict" to Anthropic with limited fidelity`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("warning %q not found in logs:\n%s", want, logs)
@@ -149,7 +148,7 @@ func TestOpenAIToGoogleWarningsForDroppedModernFields(t *testing.T) {
 		`Dropping OpenAI field "extra_body" while converting to Google`,
 		`Converting OpenAI field "response_format.json_schema.strict" to Google with limited fidelity`,
 		`Dropping OpenAI field "messages[].name" while converting to Google`,
-		`Dropping OpenAI field "tools[].custom" while converting to Google`,
+		`Converting OpenAI field "tools[].custom" to Google with limited fidelity`,
 		`Converting OpenAI field "tools[].function.strict" to Google with limited fidelity`,
 	} {
 		if !strings.Contains(logs, want) {

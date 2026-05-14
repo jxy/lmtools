@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"lmtools/internal/core"
 	"testing"
 )
@@ -123,5 +124,52 @@ func TestTypedToAnthropicRequestAllowsOutputConfigForIntermediateNonAnthropicMod
 	}
 	if req.OutputConfig == nil || req.OutputConfig.Format == nil || req.OutputConfig.Effort != "high" {
 		t.Fatalf("OutputConfig = %+v, want preserved intermediate output_config", req.OutputConfig)
+	}
+}
+
+func TestTypedToAnthropicRequestPreservesStrictToolUse(t *testing.T) {
+	trueValue := true
+	req, err := TypedToAnthropicRequest(TypedRequest{
+		MaxTokens: intPtr(32),
+		Messages: []core.TypedMessage{
+			{
+				Role: string(core.RoleUser),
+				Blocks: []core.Block{
+					core.TextBlock{Text: "lookup"},
+				},
+			},
+		},
+		Tools: []core.ToolDefinition{
+			{
+				Name:        "lookup",
+				Description: "Lookup a value.",
+				InputSchema: map[string]interface{}{
+					"type":                 "object",
+					"properties":           map[string]interface{}{},
+					"additionalProperties": false,
+				},
+				Strict: &trueValue,
+			},
+		},
+	}, "claude-opus-4-7")
+	if err != nil {
+		t.Fatalf("TypedToAnthropicRequest() error = %v", err)
+	}
+	if len(req.Tools) != 1 {
+		t.Fatalf("len(Tools) = %d, want 1", len(req.Tools))
+	}
+	if req.Tools[0].Strict == nil || *req.Tools[0].Strict != trueValue {
+		t.Fatalf("Anthropic tool strict = %#v, want true", req.Tools[0].Strict)
+	}
+	data, err := json.Marshal(req.Tools[0])
+	if err != nil {
+		t.Fatalf("json.Marshal(tool) error = %v", err)
+	}
+	var rendered map[string]interface{}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("json.Unmarshal(tool) error = %v", err)
+	}
+	if rendered["strict"] != true {
+		t.Fatalf("serialized Anthropic tool strict = %#v, want true; json = %s", rendered["strict"], data)
 	}
 }

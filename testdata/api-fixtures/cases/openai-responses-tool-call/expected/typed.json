@@ -1,0 +1,37 @@
+{
+  "max_tokens": 128,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Use lookup_city to return the country for Chicago.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false,
+  "tool_choice": {
+    "name": "lookup_city",
+    "type": "tool"
+  },
+  "tools": [
+    {
+      "description": "Look up structured information for a city.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "name": "lookup_city"
+    }
+  ]
+}

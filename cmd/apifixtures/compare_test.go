@@ -152,6 +152,41 @@ func TestCompareCaseMatchesCheckedInCaptureByJSONShape(t *testing.T) {
 	}
 }
 
+func TestCompareCaseAllowsExpectedNegativeStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"live invalid signature"}}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+	t.Setenv("ANTHROPIC_API_FIXTURE_URL", server.URL)
+
+	root := writeCompareFixtureCase(t, `{
+  "id": "fixture-case",
+  "description": "negative fixture case",
+  "kinds": ["request", "negative"],
+  "ingress_family": "anthropic",
+  "models": {
+    "anthropic": "claude-haiku-4-5"
+  },
+  "render_targets": ["anthropic"],
+  "capture_targets": ["anthropic"],
+  "expected_status": {
+    "anthropic": 400
+  }
+}
+`, `{"model":"claude-haiku-4-5","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"bad","signature":"fake"}]}]}`+"\n")
+
+	writeCompareRenderFile(t, root, "anthropic.request.json", `{"model":"claude-haiku-4-5","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"bad","signature":"fake"}]}]}`+"\n")
+	writeCompareCaptureFile(t, root, "anthropic.response.json", `{"type":"error","error":{"type":"invalid_request_error","message":"saved invalid signature"}}`+"\n")
+
+	if _, err := compareCase(root, "fixture-case", "anthropic", "", false); err != nil {
+		t.Fatalf("compareCase() error = %v", err)
+	}
+}
+
 func TestCompareCaseDefaultsArgoHostedOpenAIAgainstUpstreamCapture(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

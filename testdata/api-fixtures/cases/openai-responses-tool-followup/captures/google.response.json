@@ -1,0 +1,31 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "The country for Chicago is the United States.",
+            "thoughtSignature": "EjQKMgEMOdbHcDjsn/y0kBdwGsiD05OkQuY0fPsbM+SelR7REZAiP+E8oNjftY//Pm+7Kr9f"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-3.1-flash-lite",
+  "responseId": "pfEDaqGGE_-i1MkPqNT5wAU",
+  "usageMetadata": {
+    "candidatesTokenCount": 9,
+    "promptTokenCount": 113,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 113
+      }
+    ],
+    "serviceTier": "standard",
+    "totalTokenCount": 122
+  }
+}

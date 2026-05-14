@@ -1,0 +1,39 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Use lookup_city to return the country for Chicago.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "max_output_tokens": 128,
+  "model": "gpt-5.4-nano",
+  "tool_choice": {
+    "name": "lookup_city",
+    "type": "function"
+  },
+  "tools": [
+    {
+      "description": "Look up structured information for a city.",
+      "name": "lookup_city",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    }
+  ]
+}

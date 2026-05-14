@@ -1,0 +1,18 @@
+{
+  "id": "openai-responses-tool-call",
+  "description": "OpenAI Responses API request that forces a function tool call",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "render_targets": [
+    "openai-responses"
+  ],
+  "capture_targets": [
+    "openai-responses",
+    "openai-responses-stream"
+  ]
+}

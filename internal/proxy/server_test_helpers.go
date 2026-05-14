@@ -49,6 +49,7 @@ import (
 	"context"
 	"lmtools/internal/retry"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,6 +81,7 @@ func WithTransport(transport *http.Transport) ServerOption {
 // This is an internal helper used by NewTestServer.
 func newServerWithOptionsT(t *testing.T, config *Config, opts ...ServerOption) (http.Handler, func()) {
 	t.Helper()
+	defaultTestResponsesSessionsDir(t, config)
 
 	// Create endpoints - fail via test API for better debugging
 	endpoints, err := NewEndpoints(config)
@@ -121,11 +123,13 @@ func newServerWithOptionsT(t *testing.T, config *Config, opts ...ServerOption) (
 	// Create server
 	mapper := NewModelMapper(config)
 	server := &Server{
-		config:    config,
-		endpoints: endpoints,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    client,
+		config:           config,
+		endpoints:        endpoints,
+		mapper:           mapper,
+		converter:        NewConverter(mapper),
+		client:           client,
+		responsesState:   newResponsesState(config.SessionsDir),
+		backgroundCancel: make(map[string]context.CancelFunc),
 	}
 
 	// Wrap with consolidated middleware
@@ -156,6 +160,7 @@ func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
 // Use this for tests that exercise error handling and retry logic.
 func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 	t.Helper()
+	defaultTestResponsesSessionsDir(t, config)
 
 	// Create endpoints - fail via test API for better debugging
 	endpoints, err := NewEndpoints(config)
@@ -175,11 +180,13 @@ func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 	)
 
 	server := &Server{
-		config:    config,
-		endpoints: endpoints,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    testRetryClient,
+		config:           config,
+		endpoints:        endpoints,
+		mapper:           mapper,
+		converter:        NewConverter(mapper),
+		client:           testRetryClient,
+		responsesState:   newResponsesState(config.SessionsDir),
+		backgroundCancel: make(map[string]context.CancelFunc),
 	}
 
 	// Wrap with middleware
@@ -193,6 +200,7 @@ func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 // Use this for tests that need specific client configurations.
 func NewTestServerDirectWithClient(t *testing.T, config *Config, client *retry.Client) *Server {
 	t.Helper()
+	defaultTestResponsesSessionsDir(t, config)
 
 	// Create endpoints - fail via test API for better debugging
 	endpoints, err := NewEndpoints(config)
@@ -202,11 +210,13 @@ func NewTestServerDirectWithClient(t *testing.T, config *Config, client *retry.C
 
 	mapper := NewModelMapper(config)
 	server := &Server{
-		config:    config,
-		endpoints: endpoints,
-		mapper:    mapper,
-		converter: NewConverter(mapper),
-		client:    client,
+		config:           config,
+		endpoints:        endpoints,
+		mapper:           mapper,
+		converter:        NewConverter(mapper),
+		client:           client,
+		responsesState:   newResponsesState(config.SessionsDir),
+		backgroundCancel: make(map[string]context.CancelFunc),
 	}
 
 	return server
@@ -218,8 +228,21 @@ func NewTestServerDirectWithClient(t *testing.T, config *Config, client *retry.C
 // For tests that need full server functionality, use NewTestServer instead.
 func NewMinimalTestServer(t *testing.T, config *Config) *Server {
 	t.Helper()
+	defaultTestResponsesSessionsDir(t, config)
 	return &Server{
-		config: config,
-		mapper: NewModelMapper(config),
+		config:           config,
+		mapper:           NewModelMapper(config),
+		responsesState:   newResponsesState(config.SessionsDir),
+		backgroundCancel: make(map[string]context.CancelFunc),
+	}
+}
+
+func defaultTestResponsesSessionsDir(t *testing.T, config *Config) {
+	t.Helper()
+	if config == nil {
+		return
+	}
+	if strings.TrimSpace(config.SessionsDir) == "" {
+		config.SessionsDir = t.TempDir()
 	}
 }

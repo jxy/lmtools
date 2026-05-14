@@ -1,0 +1,40 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Return JSON for Chicago with city and country fields.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "instructions": "Return only data matching the requested schema.",
+  "max_output_tokens": 96,
+  "model": "gpt-5.4-nano",
+  "text": {
+    "format": {
+      "name": "city_country",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+    }
+  }
+}

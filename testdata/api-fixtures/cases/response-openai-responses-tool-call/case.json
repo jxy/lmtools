@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-responses-tool-call",
+  "description": "OpenAI Responses API response with text and function call output items",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai-responses"
+}

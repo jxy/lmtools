@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"net/http"
 	"time"
 )
@@ -119,6 +121,9 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	// Map model to provider
 	mappedModel := s.mapper.MapModel(req.Model)
+	if mappedModel == "" {
+		mappedModel = req.Model
+	}
 	provider := s.config.Provider // Provider always comes from config
 	if provider == "" {
 		// For count_tokens, we can provide an estimate even for unknown providers
@@ -130,8 +135,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	log.Infof("Token counting: model=%s, provider=%s", req.Model, provider)
 
-	if provider == constants.ProviderArgo && !s.useLegacyArgo() {
-		resp, err := s.forwardArgoCountTokens(ctx, req)
+	if resp, handled, err := s.countAnthropicTokensWithProvider(ctx, req, provider, mappedModel); handled {
 		if err != nil {
 			s.sendProviderErrorAsAnthropic(ctx, w, provider, err)
 			return
@@ -177,6 +181,29 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		len(req.Messages), len(req.Tools), http.StatusOK, false, time.Since(start))
 }
 
+func (s *Server) countAnthropicTokensWithProvider(ctx context.Context, req *AnthropicTokenCountRequest, provider, mappedModel string) (*AnthropicTokenCountResponse, bool, error) {
+	if req.Model == "" || mappedModel == "" {
+		return nil, false, nil
+	}
+
+	switch provider {
+	case constants.ProviderAnthropic:
+		resp, err := s.forwardAnthropicCountTokens(ctx, req)
+		return resp, true, err
+	case constants.ProviderArgo:
+		if s.useLegacyArgo() || providers.DetermineArgoModelProvider(mappedModel) != constants.ProviderAnthropic {
+			return nil, false, nil
+		}
+		resp, err := s.forwardArgoCountTokens(ctx, req)
+		return resp, true, err
+	case constants.ProviderGoogle:
+		resp, err := s.forwardGoogleTokenCount(ctx, req, mappedModel)
+		return resp, true, err
+	default:
+		return nil, false, nil
+	}
+}
+
 func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info bool) {
 	log := logger.From(ctx)
 	for _, block := range content {
@@ -214,6 +241,38 @@ func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicToken
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (s *Server) forwardAnthropicCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
+	var resp AnthropicTokenCountResponse
+	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) {
+		_ = auth.ApplyProviderCredentials(httpReq, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+	}, &resp, "Anthropic count_tokens")
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (s *Server) forwardGoogleTokenCount(ctx context.Context, req *AnthropicTokenCountRequest, model string) (*AnthropicTokenCountResponse, error) {
+	typed := AnthropicRequestToTyped(&AnthropicRequest{
+		Model:    model,
+		System:   req.System,
+		Messages: req.Messages,
+		Tools:    req.Tools,
+	})
+	typed.MaxTokens = nil
+
+	googleReq, err := TypedToGoogleRequest(typed, model, nil)
+	if err != nil {
+		return nil, err
+	}
+	googleResp, err := s.forwardGoogleCountTokens(ctx, googleReq, model)
+	if err != nil {
+		return nil, err
+	}
+	return &AnthropicTokenCountResponse{InputTokens: googleResp.TotalTokens}, nil
 }
 
 // handleNonStreamingRequest processes non-streaming requests

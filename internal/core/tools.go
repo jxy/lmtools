@@ -11,16 +11,89 @@ import (
 
 // ToolDefinition is the standard tool definition format (Anthropic format)
 type ToolDefinition struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema interface{} `json:"input_schema"`
+	Type                 string      `json:"type,omitempty"`
+	Namespace            string      `json:"namespace,omitempty"`
+	NamespaceDescription string      `json:"namespace_description,omitempty"`
+	OriginalName         string      `json:"original_name,omitempty"`
+	OriginalDescription  string      `json:"original_description,omitempty"`
+	Name                 string      `json:"name"`
+	Description          string      `json:"description"`
+	InputSchema          interface{} `json:"input_schema"`
+	Format               interface{} `json:"format,omitempty"`
+	Strict               *bool       `json:"strict,omitempty"`
+}
+
+const CustomToolInputField = "input"
+
+func CustomToolInputSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			CustomToolInputField: map[string]interface{}{
+				"type":        "string",
+				"description": "Exact raw input text for the adapted custom tool.",
+			},
+		},
+		"required":             []string{CustomToolInputField},
+		"additionalProperties": false,
+	}
+}
+
+func CustomToolRawInput(inputString string, input json.RawMessage) string {
+	if inputString != "" {
+		return inputString
+	}
+	if rawInput, ok := UnwrapCustomToolInput(input); ok {
+		return rawInput
+	}
+	return rawJSONStringValue(input)
+}
+
+func WrapCustomToolInput(rawInput string) json.RawMessage {
+	data, err := json.Marshal(map[string]string{CustomToolInputField: rawInput})
+	if err != nil {
+		return json.RawMessage(`{"input":""}`)
+	}
+	return data
+}
+
+func UnwrapCustomToolInput(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var wrapped map[string]interface{}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return "", false
+	}
+	return UnwrapCustomToolInputValue(wrapped)
+}
+
+func UnwrapCustomToolInputValue(value interface{}) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		input, ok := typed[CustomToolInputField].(string)
+		return input, ok
+	case map[string]string:
+		input, ok := typed[CustomToolInputField]
+		return input, ok
+	case json.RawMessage:
+		return UnwrapCustomToolInput(typed)
+	case []byte:
+		return UnwrapCustomToolInput(json.RawMessage(typed))
+	default:
+		return "", false
+	}
 }
 
 // ToolCall represents a tool invocation request from the LLM
 type ToolCall struct {
 	ID               string          `json:"id"`
+	Type             string          `json:"type,omitempty"`
+	Namespace        string          `json:"namespace,omitempty"`
+	OriginalName     string          `json:"original_name,omitempty"`
 	Name             string          `json:"name"`
 	Args             json.RawMessage `json:"args"`
+	Input            string          `json:"input,omitempty"`
 	AssistantContent string          `json:"assistant_content,omitempty"` // The text content from assistant alongside tool calls
 	ThoughtSignature string          `json:"thought_signature,omitempty"`
 }
@@ -68,6 +141,7 @@ type ToolContext struct {
 	ToolDefs        []ToolDefinition
 	MessagesFn      func(string) ([]TypedMessage, error)
 	UI              ToolUI
+	InitialResponse Response
 	InitialText     string
 	InitialCalls    []ToolCall
 	InitialStreamed bool
@@ -101,12 +175,12 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 	}
 
 	rounds := 0
-	response := Response{
-		Text:      tc.InitialText,
-		ToolCalls: tc.InitialCalls,
-	}
+	response := initialToolResponse(tc)
 	finalText := tc.InitialText
-	finalStreamed := tc.InitialStreamed
+	if response.Text != "" {
+		finalText = response.Text
+	}
+	finalStreamed := response.Streamed
 
 	for rounds < maxRounds && len(response.ToolCalls) > 0 {
 		rounds++
@@ -161,7 +235,7 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 		}
 
 		// Save response if we have content, tool calls, or provider metadata to preserve.
-		if response.Text != "" || len(response.ToolCalls) > 0 || response.ThoughtSignature != "" {
+		if response.Text != "" || len(response.ToolCalls) > 0 || response.ThoughtSignature != "" || len(response.Blocks) > 0 {
 			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
 				return finalText, finalStreamed, err
 			}
@@ -174,6 +248,18 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 	}
 
 	return finalText, finalStreamed, nil
+}
+
+func initialToolResponse(tc ToolContext) Response {
+	response := tc.InitialResponse
+	if response.Text != "" || len(response.ToolCalls) > 0 || len(response.Blocks) > 0 || response.ThoughtSignature != "" {
+		return response
+	}
+	return Response{
+		Text:      tc.InitialText,
+		ToolCalls: tc.InitialCalls,
+		Streamed:  tc.InitialStreamed,
+	}
 }
 
 // HandleToolExecution manages the tool execution loop for a conversation.
@@ -203,12 +289,14 @@ func HandleToolExecution(tc ToolContext) ToolExecutionResult {
 
 // persistAssistantRound saves an assistant message with optional tool calls
 func persistAssistantRound(ctx context.Context, store SessionStore, response Response, model string, logger Logger) error {
-	if response.Text == "" && len(response.ToolCalls) == 0 && response.ThoughtSignature == "" {
+	if response.Text == "" && len(response.ToolCalls) == 0 && response.ThoughtSignature == "" && len(response.Blocks) == 0 {
 		return nil
 	}
 
 	var err error
-	if thoughtStore, ok := store.(AssistantThoughtSignatureStore); ok {
+	if responseStore, ok := store.(AssistantResponseStore); ok {
+		_, _, err = responseStore.SaveAssistantResponse(ctx, response, model)
+	} else if thoughtStore, ok := store.(AssistantThoughtSignatureStore); ok {
 		_, _, err = thoughtStore.SaveAssistantWithThoughtSignature(ctx, response.Text, response.ToolCalls, model, response.ThoughtSignature)
 	} else {
 		_, _, err = store.SaveAssistant(ctx, response.Text, response.ToolCalls, model)

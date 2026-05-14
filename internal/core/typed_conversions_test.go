@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -459,6 +460,175 @@ func TestContentUnionMarshalFails(t *testing.T) {
 	})
 }
 
+func TestMarshalAnthropicMessagesForRequestReplaysRawRedactedThinking(t *testing.T) {
+	messages := ToAnthropicTyped([]TypedMessage{{
+		Role: string(RoleAssistant),
+		Blocks: []Block{
+			ReasoningBlock{
+				Provider: "anthropic",
+				Type:     "redacted_thinking",
+				Raw:      json.RawMessage(`{"type":"redacted_thinking","data":"redacted-payload"}`),
+			},
+			TextBlock{Text: "visible"},
+		},
+	}})
+	payload := MarshalAnthropicMessagesForRequest(messages)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	var parsed []map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	content, ok := parsed[0]["content"].([]interface{})
+	if !ok || len(content) != 2 {
+		t.Fatalf("content = %#v, want two blocks", parsed[0]["content"])
+	}
+	reasoning, ok := content[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasoning block = %T", content[0])
+	}
+	if reasoning["type"] != "redacted_thinking" || reasoning["data"] != "redacted-payload" {
+		t.Fatalf("reasoning block = %#v, want redacted data replayed", reasoning)
+	}
+	if _, exists := reasoning["thinking"]; exists {
+		t.Fatalf("reasoning block includes reconstructed thinking: %#v", reasoning)
+	}
+}
+
+func TestMarshalAnthropicMessagesForRequestDropsSyntheticThinkingText(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+		want map[string]interface{}
+	}{
+		{
+			name: "thinking",
+			raw:  json.RawMessage(`{"type":"thinking","text":"","thinking":"hidden","signature":"sig_hidden"}`),
+			want: map[string]interface{}{
+				"type":      "thinking",
+				"thinking":  "hidden",
+				"signature": "sig_hidden",
+			},
+		},
+		{
+			name: "redacted_thinking",
+			raw:  json.RawMessage(`{"type":"redacted_thinking","text":"","data":"redacted-payload"}`),
+			want: map[string]interface{}{
+				"type": "redacted_thinking",
+				"data": "redacted-payload",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages := ToAnthropicTyped([]TypedMessage{{
+				Role: string(RoleAssistant),
+				Blocks: []Block{
+					ReasoningBlock{
+						Provider: "anthropic",
+						Type:     tt.name,
+						Raw:      tt.raw,
+					},
+					TextBlock{Text: "visible"},
+				},
+			}})
+			payload := MarshalAnthropicMessagesForRequest(messages)
+			data, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+
+			var parsed []map[string]interface{}
+			if err := json.Unmarshal(data, &parsed); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			content, ok := parsed[0]["content"].([]interface{})
+			if !ok || len(content) != 2 {
+				t.Fatalf("content = %#v, want two blocks", parsed[0]["content"])
+			}
+			reasoning, ok := content[0].(map[string]interface{})
+			if !ok {
+				t.Fatalf("reasoning block = %T", content[0])
+			}
+			if _, exists := reasoning["text"]; exists {
+				t.Fatalf("reasoning block includes synthetic text: %#v", reasoning)
+			}
+			for key, value := range tt.want {
+				if reasoning[key] != value {
+					t.Fatalf("reasoning[%q] = %#v, want %#v in %#v", key, reasoning[key], value, reasoning)
+				}
+			}
+		})
+	}
+}
+
+func TestToAnthropicTypedProjectsOpenAIReasoningSummaryToText(t *testing.T) {
+	messages := ToAnthropicTyped([]TypedMessage{{
+		Role: string(RoleAssistant),
+		Blocks: []Block{
+			ReasoningBlock{
+				Provider: "openai",
+				Type:     "reasoning",
+				Summary:  json.RawMessage(`[{"type":"summary_text","text":"Checked the account status."}]`),
+			},
+		},
+	}})
+	payload := MarshalAnthropicMessagesForRequest(messages)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	var parsed []map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	content, ok := parsed[0]["content"].([]interface{})
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %#v, want one text block", parsed[0]["content"])
+	}
+	block, ok := content[0].(map[string]interface{})
+	if !ok || block["type"] != "text" || block["text"] != "Checked the account status." {
+		t.Fatalf("reasoning projection = %#v, want text block", content[0])
+	}
+}
+
+func TestToAnthropicTypedDropsOpaqueReasoningOnlyMessages(t *testing.T) {
+	messages := ToAnthropicTyped([]TypedMessage{{
+		Role: string(RoleAssistant),
+		Blocks: []Block{
+			ReasoningBlock{
+				Provider:         "openai",
+				Type:             "reasoning",
+				EncryptedContent: "enc_1",
+			},
+		},
+	}})
+	if len(messages) != 0 {
+		t.Fatalf("len(messages) = %d, want opaque reasoning-only message dropped: %#v", len(messages), messages)
+	}
+}
+
+func TestToAnthropicTypedDropsUnsignedAnthropicThinking(t *testing.T) {
+	messages := ToAnthropicTyped([]TypedMessage{{
+		Role: string(RoleAssistant),
+		Blocks: []Block{
+			ReasoningBlock{
+				Provider: "anthropic",
+				Type:     "thinking",
+				Text:     "private chain of thought without a signature",
+			},
+		},
+	}})
+	if len(messages) != 0 {
+		t.Fatalf("len(messages) = %d, want unsigned thinking-only message dropped: %#v", len(messages), messages)
+	}
+}
+
 func TestConvertToolsTypedDefaultsEmptySchema(t *testing.T) {
 	tools := []ToolDefinition{
 		{
@@ -482,6 +652,108 @@ func TestConvertToolsTypedDefaultsEmptySchema(t *testing.T) {
 
 	if got := string(googleTools[0].FunctionDeclarations[0].Parameters); got != want {
 		t.Fatalf("Google schema = %s, want %s", got, want)
+	}
+}
+
+func TestConvertToolsToAnthropicTypedWrapsCustomTools(t *testing.T) {
+	tools := []ToolDefinition{{
+		Type:        "custom",
+		Name:        "apply_patch",
+		Description: "Apply a patch.",
+		Format: map[string]interface{}{
+			"type":       "grammar",
+			"syntax":     "lark",
+			"definition": "start: /.+/",
+		},
+	}}
+
+	anthropicTools := ConvertToolsToAnthropicTyped(tools)
+	if len(anthropicTools) != 1 {
+		t.Fatalf("len(anthropicTools) = %d, want 1", len(anthropicTools))
+	}
+	if anthropicTools[0].Name != "apply_patch" {
+		t.Fatalf("tool name = %q, want apply_patch", anthropicTools[0].Name)
+	}
+	if !strings.Contains(anthropicTools[0].Description, "raw custom-tool input text") ||
+		!strings.Contains(anthropicTools[0].Description, "definition:\nstart: /.+/") {
+		t.Fatalf("custom tool description = %q", anthropicTools[0].Description)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal(anthropicTools[0].InputSchema, &schema); err != nil {
+		t.Fatalf("json.Unmarshal(input_schema) error = %v", err)
+	}
+	properties, _ := schema["properties"].(map[string]interface{})
+	if _, ok := properties[CustomToolInputField]; !ok || schema["additionalProperties"] != false {
+		t.Fatalf("custom input schema = %#v", schema)
+	}
+}
+
+func TestConvertToolsToGoogleTypedWrapsCustomTools(t *testing.T) {
+	tools := []ToolDefinition{{
+		Type:        "custom",
+		Name:        "apply_patch",
+		Description: "Apply a patch.",
+		Format: map[string]interface{}{
+			"type":       "grammar",
+			"syntax":     "lark",
+			"definition": "start: /.+/",
+		},
+	}}
+
+	googleTools := ConvertToolsToGoogleTyped(tools)
+	if len(googleTools) != 1 || len(googleTools[0].FunctionDeclarations) != 1 {
+		t.Fatalf("google tools = %#v, want one declaration", googleTools)
+	}
+	decl := googleTools[0].FunctionDeclarations[0]
+	if decl.Name != "apply_patch" || !strings.Contains(decl.Description, "raw custom-tool input text") || !strings.Contains(decl.Description, "definition:\nstart: /.+/") {
+		t.Fatalf("google declaration = %#v", decl)
+	}
+	var schema map[string]interface{}
+	if err := json.Unmarshal(decl.Parameters, &schema); err != nil {
+		t.Fatalf("json.Unmarshal(parameters) error = %v", err)
+	}
+	properties, _ := schema["properties"].(map[string]interface{})
+	if _, ok := properties[CustomToolInputField]; !ok {
+		t.Fatalf("custom input schema = %#v", schema)
+	}
+}
+
+func TestToAnthropicTypedWrapsCustomToolUseInput(t *testing.T) {
+	anthropic := ToAnthropicTyped([]TypedMessage{{
+		Role: string(RoleAssistant),
+		Blocks: []Block{ToolUseBlock{
+			ID:          "call_1",
+			Type:        "custom",
+			Name:        "apply_patch",
+			InputString: "*** Begin Patch\n*** End Patch\n",
+		}},
+	}})
+	if len(anthropic) != 1 || len(anthropic[0].Content.Contents) != 1 {
+		t.Fatalf("anthropic messages = %#v", anthropic)
+	}
+	input, ok := UnwrapCustomToolInput(anthropic[0].Content.Contents[0].Input)
+	if !ok || input != "*** Begin Patch\n*** End Patch\n" {
+		t.Fatalf("wrapped input = %q, %v", input, ok)
+	}
+}
+
+func TestToGoogleTypedWrapsCustomToolUseInput(t *testing.T) {
+	google := ToGoogleTyped([]TypedMessage{{
+		Role: string(RoleAssistant),
+		Blocks: []Block{ToolUseBlock{
+			ID:          "call_1",
+			Type:        "custom",
+			Name:        "apply_patch",
+			InputString: "*** Begin Patch\n*** End Patch\n",
+		}},
+	}})
+	if len(google) != 1 || len(google[0].Parts) != 1 || google[0].Parts[0].FunctionCall == nil {
+		t.Fatalf("google messages = %#v", google)
+	}
+	input, ok := UnwrapCustomToolInput(google[0].Parts[0].FunctionCall.Args)
+	if !ok || input != "*** Begin Patch\n*** End Patch\n" {
+		t.Fatalf("wrapped input = %q, %v", input, ok)
 	}
 }
 

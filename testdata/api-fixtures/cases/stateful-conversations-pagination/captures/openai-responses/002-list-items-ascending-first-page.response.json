@@ -1,0 +1,32 @@
+{
+  "data": [
+    {
+      "content": [
+        {
+          "text": "one",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_69f3b68e5ac88194a676b2ca4c9f2d33019d9bb1112ec2d3",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    },
+    {
+      "content": [
+        {
+          "text": "two",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_69f3b68e5af081949004b2cf1ff414d9019d9bb1112ec2d3",
+      "role": "user",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "first_id": "msg_69f3b68e5ac88194a676b2ca4c9f2d33019d9bb1112ec2d3",
+  "has_more": true,
+  "last_id": "msg_69f3b68e5af081949004b2cf1ff414d9019d9bb1112ec2d3",
+  "object": "list"
+}

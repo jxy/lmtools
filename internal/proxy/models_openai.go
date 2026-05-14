@@ -57,14 +57,15 @@ type OpenAIAudioConfig struct {
 
 // OpenAIMessage represents a message in the OpenAI format.
 type OpenAIMessage struct {
-	Role        core.Role     `json:"role"`
-	Content     interface{}   `json:"content"`
-	Name        string        `json:"name,omitempty"`
-	ToolCalls   []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID  string        `json:"tool_call_id,omitempty"`
-	Refusal     *string       `json:"refusal,omitempty"`
-	Annotations []interface{} `json:"annotations,omitempty"`
-	Audio       interface{}   `json:"audio,omitempty"`
+	Role         core.Role     `json:"role"`
+	Content      interface{}   `json:"content"`
+	Name         string        `json:"name,omitempty"`
+	FunctionCall *FunctionCall `json:"function_call,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	Refusal      *string       `json:"refusal,omitempty"`
+	Annotations  []interface{} `json:"annotations,omitempty"`
+	Audio        interface{}   `json:"audio,omitempty"`
 }
 
 // OpenAIContent represents content in multimodal messages.
@@ -117,15 +118,41 @@ type OpenAIFunc struct {
 
 // ToolCall represents a tool call in OpenAI format.
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Function FunctionCall    `json:"function"`
+	Custom   *CustomToolCall `json:"custom,omitempty"`
 }
 
 // FunctionCall represents a function call.
 type FunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+// CustomToolCall represents an OpenAI Chat custom tool call.
+type CustomToolCall struct {
+	Name  string `json:"name"`
+	Input string `json:"input,omitempty"`
+}
+
+// MarshalJSON omits the function field for custom tool calls.
+func (tc ToolCall) MarshalJSON() ([]byte, error) {
+	m := map[string]interface{}{
+		"id":   tc.ID,
+		"type": tc.Type,
+	}
+	if tc.Type == "custom" {
+		if tc.Custom != nil {
+			m["custom"] = tc.Custom
+		}
+		return json.Marshal(m)
+	}
+	m["function"] = tc.Function
+	if tc.Custom != nil {
+		m["custom"] = tc.Custom
+	}
+	return json.Marshal(m)
 }
 
 // ResponseFormat specifies the format of the response.
@@ -144,22 +171,24 @@ type OpenAIJSONSchema struct {
 
 // OpenAIResponse represents a response from the OpenAI API.
 type OpenAIResponse struct {
-	ID                string         `json:"id"`
-	Object            string         `json:"object"`
-	Created           int64          `json:"created"`
-	Model             string         `json:"model"`
-	Choices           []OpenAIChoice `json:"choices"`
-	Usage             *OpenAIUsage   `json:"usage,omitempty"`
-	ServiceTier       string         `json:"service_tier,omitempty"`
-	SystemFingerprint string         `json:"system_fingerprint,omitempty"`
+	ID                  string         `json:"id"`
+	Object              string         `json:"object"`
+	Created             int64          `json:"created"`
+	Model               string         `json:"model"`
+	Choices             []OpenAIChoice `json:"choices"`
+	Usage               *OpenAIUsage   `json:"usage,omitempty"`
+	ServiceTier         string         `json:"service_tier,omitempty"`
+	SystemFingerprint   string         `json:"system_fingerprint,omitempty"`
+	PromptFilterResults interface{}    `json:"prompt_filter_results,omitempty"`
 }
 
 // OpenAIChoice represents a choice in the response.
 type OpenAIChoice struct {
-	Index        int           `json:"index"`
-	Message      OpenAIMessage `json:"message"`
-	FinishReason string        `json:"finish_reason,omitempty"`
-	Logprobs     interface{}   `json:"logprobs,omitempty"`
+	Index                int           `json:"index"`
+	Message              OpenAIMessage `json:"message"`
+	FinishReason         string        `json:"finish_reason,omitempty"`
+	Logprobs             interface{}   `json:"logprobs,omitempty"`
+	ContentFilterResults interface{}   `json:"content_filter_results,omitempty"`
 }
 
 // OpenAIUsage represents token usage.
@@ -187,32 +216,36 @@ type OpenAICompletionTokenDetails struct {
 
 // OpenAIStreamChunk represents a chunk in the streaming response.
 type OpenAIStreamChunk struct {
-	ID                string              `json:"id"`
-	Object            string              `json:"object"`
-	Created           int64               `json:"created"`
-	Model             string              `json:"model"`
-	Choices           []OpenAIStreamDelta `json:"choices"`
-	ServiceTier       string              `json:"service_tier,omitempty"`
-	SystemFingerprint string              `json:"system_fingerprint,omitempty"`
-	Obfuscation       string              `json:"obfuscation,omitempty"`
+	ID                  string              `json:"id"`
+	Object              string              `json:"object"`
+	Created             int64               `json:"created"`
+	Model               string              `json:"model"`
+	Choices             []OpenAIStreamDelta `json:"choices"`
+	ServiceTier         string              `json:"service_tier,omitempty"`
+	SystemFingerprint   string              `json:"system_fingerprint,omitempty"`
+	Obfuscation         string              `json:"obfuscation,omitempty"`
+	PromptFilterResults interface{}         `json:"prompt_filter_results,omitempty"`
 	// Always include usage key; nil encodes as null to match OpenAI include_usage behavior.
 	Usage *OpenAIUsage `json:"usage"`
 }
 
 // OpenAIStreamDelta represents a delta in streaming.
 type OpenAIStreamDelta struct {
-	Index int         `json:"index"`
-	Delta OpenAIDelta `json:"delta"`
+	Index                int         `json:"index"`
+	Delta                OpenAIDelta `json:"delta"`
+	Logprobs             interface{} `json:"logprobs,omitempty"`
+	ContentFilterResults interface{} `json:"content_filter_results,omitempty"`
 	// Always include finish_reason key; nil encodes as null for consistent schema.
 	FinishReason *string `json:"finish_reason"`
 }
 
 // OpenAIDelta represents the delta content.
 type OpenAIDelta struct {
-	Role    *core.Role  `json:"role,omitempty"`
-	Content *string     `json:"content,omitempty"`
-	Refusal *string     `json:"refusal,omitempty"`
-	Audio   interface{} `json:"audio,omitempty"`
+	Role         *core.Role         `json:"role,omitempty"`
+	Content      *string            `json:"content,omitempty"`
+	FunctionCall *FunctionCallDelta `json:"function_call,omitempty"`
+	Refusal      *string            `json:"refusal,omitempty"`
+	Audio        interface{}        `json:"audio,omitempty"`
 	// ContentNull forces encoding of `"content": null` when true.
 	ContentNull bool            `json:"-"`
 	ToolCalls   []ToolCallDelta `json:"tool_calls,omitempty"`
@@ -232,6 +265,9 @@ func (d OpenAIDelta) MarshalJSON() ([]byte, error) {
 	}
 	if len(d.ToolCalls) > 0 {
 		m["tool_calls"] = d.ToolCalls
+	}
+	if d.FunctionCall != nil {
+		m["function_call"] = d.FunctionCall
 	}
 	if d.Refusal != nil {
 		m["refusal"] = *d.Refusal

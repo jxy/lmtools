@@ -16,16 +16,16 @@ type argoChatRequestPlan struct {
 	Legacy       bool
 }
 
-func buildArgoChatRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildArgoChatRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	if err := ValidateMessagesForProvider(constants.ProviderArgo, messages); err != nil {
 		return nil, nil, err
 	}
-	plan, err := newArgoChatRequestPlan(cfg, messages, model, system, toolDefs, toolChoice, stream)
+	plan, err := newArgoChatRequestPlan(cfg, messages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {
 		return nil, nil, err
 	}
 	if plan.Legacy {
-		return buildLegacyArgoChatRequest(cfg, plan.Model, messages, system, toolDefs, toolChoice, stream)
+		return buildLegacyArgoChatRequest(cfg, plan.Model, messages, system, systemExplicit, toolDefs, toolChoice, stream)
 	}
 	spec, err := requireProviderRequestSpec(plan.WireProvider)
 	if err != nil {
@@ -40,15 +40,23 @@ func buildArgoChatRequest(cfg ChatRequestConfig, messages []TypedMessage, model 
 	return buildProviderRequest(cfg, plan.Endpoint, body, plan.WireProvider, plan.Payload.Stream)
 }
 
-func newArgoChatRequestPlan(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (argoChatRequestPlan, error) {
+func newArgoChatRequestPlan(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (argoChatRequestPlan, error) {
 	if model == "" {
 		model = GetDefaultChatModel(constants.ProviderArgo)
 	}
 
 	wireProvider := providers.DetermineArgoModelProvider(model)
-	payload, err := PrepareRequestPayload(wireProvider, model, messages, system, toolDefs, toolChoice, stream)
+	payload, err := PrepareRequestPayloadWithSystemExplicit(wireProvider, model, messages, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {
 		return argoChatRequestPlan{}, err
+	}
+	if wireProvider == constants.ProviderOpenAI {
+		payload.Messages = AdaptCustomToolBlocksForFunctionCompatibility(payload.Messages)
+		if len(toolDefs) > 0 {
+			converted := ConvertToolsForOpenAIChatCompatibility(toolDefs, toolChoice)
+			payload.Tools = converted.Tools
+			payload.ToolChoice = converted.ToolChoice
+		}
 	}
 	applyOutputOptionsFromConfig(&payload, cfg)
 
@@ -75,14 +83,17 @@ func isArgoLegacyMode(cfg interface{}) bool {
 	return ok && v.IsArgoLegacy()
 }
 
-func buildLegacyArgoChatRequest(cfg ChatRequestConfig, model string, messages []TypedMessage, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildLegacyArgoChatRequest(cfg ChatRequestConfig, model string, messages []TypedMessage, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	actualStream := stream && len(toolDefs) == 0
 	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.GetProviderURL(), cfg.GetEnv(), model, actualStream, true)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	requestMessages := PrependSystemMessage(messages, system)
+	requestMessages := normalizeInlineSystemMessages(messages, system, systemExplicit)
+	if providers.DetermineArgoModelProvider(model) == constants.ProviderOpenAI {
+		requestMessages = AdaptCustomToolBlocksForFunctionCompatibility(requestMessages)
+	}
 	bodyMap := map[string]interface{}{
 		"user":     cfg.GetUser(),
 		"model":    model,
@@ -90,6 +101,9 @@ func buildLegacyArgoChatRequest(cfg ChatRequestConfig, model string, messages []
 	}
 	if len(toolDefs) > 0 {
 		converted := ConvertToolsForProvider(model, toolDefs, toolChoice)
+		if providers.DetermineArgoModelProvider(model) == constants.ProviderOpenAI {
+			converted = ConvertToolsForOpenAIChatCompatibility(toolDefs, toolChoice)
+		}
 		if converted.Tools != nil {
 			bodyMap["tools"] = converted.Tools
 		}

@@ -1,0 +1,97 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-response-with-three-inputs",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "input": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": "first"
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": "second"
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": "third"
+          }
+        ],
+        "store": true
+      },
+      "upstream": {
+        "body": "mock/anthropic-pagination.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "response",
+          "status": "completed"
+        }
+      },
+      "bind": {
+        "response_id": "id"
+      }
+    },
+    {
+      "id": "list-input-items-ascending-first-page",
+      "method": "GET",
+      "path": "/v1/responses/${response_id}/input_items?order=asc&limit=2",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0000",
+          "last_id": "item_0001",
+          "has_more": true,
+          "data.length": 2,
+          "data.0.id": "item_0000",
+          "data.1.id": "item_0001"
+        }
+      },
+      "bind": {
+        "second_item_id": "data.1.id"
+      }
+    },
+    {
+      "id": "list-input-items-ascending-after",
+      "method": "GET",
+      "path": "/v1/responses/${response_id}/input_items?order=asc&after=${second_item_id}&limit=2",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0002",
+          "last_id": "item_0002",
+          "has_more": false,
+          "data.length": 1,
+          "data.0.id": "item_0002"
+        }
+      }
+    },
+    {
+      "id": "list-input-items-default-desc",
+      "method": "GET",
+      "path": "/v1/responses/${response_id}/input_items?limit=1",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "first_id": "item_0002",
+          "last_id": "item_0002",
+          "has_more": true,
+          "data.length": 1,
+          "data.0.id": "item_0002"
+        }
+      }
+    }
+  ]
+}

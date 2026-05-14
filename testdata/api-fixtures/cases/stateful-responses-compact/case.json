@@ -1,0 +1,15 @@
+{
+  "id": "stateful-responses-compact",
+  "description": "Stateful Responses API compaction creates a compacted continuation response",
+  "kinds": [
+    "stateful"
+  ],
+  "provider": "openai-responses",
+  "models": {
+    "anthropic": "claude-test",
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "capture_targets": [
+    "openai-responses"
+  ]
+}

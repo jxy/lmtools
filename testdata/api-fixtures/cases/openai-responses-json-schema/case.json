@@ -1,0 +1,18 @@
+{
+  "id": "openai-responses-json-schema",
+  "description": "OpenAI Responses API request with JSON schema structured output",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "render_targets": [
+    "openai-responses"
+  ],
+  "capture_targets": [
+    "openai-responses",
+    "openai-responses-stream"
+  ]
+}

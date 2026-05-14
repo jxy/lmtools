@@ -25,6 +25,7 @@ type TestRequestConfig struct {
 	JSONSchema          json.RawMessage
 	IsEmbedMode         bool
 	IsStreamChatMode    bool
+	OpenAIResponses     bool
 	IsToolEnabledFlag   bool
 	ToolTimeout         time.Duration
 	ToolWhitelist       string
@@ -59,8 +60,11 @@ func (c *TestRequestConfig) IsJSONMode() bool            { return c.JSONMode }
 func (c *TestRequestConfig) GetJSONSchema() json.RawMessage {
 	return append(json.RawMessage(nil), c.JSONSchema...)
 }
-func (c *TestRequestConfig) IsEmbed() bool       { return c.IsEmbedMode }
-func (c *TestRequestConfig) IsStreamChat() bool  { return c.IsStreamChatMode }
+func (c *TestRequestConfig) IsEmbed() bool      { return c.IsEmbedMode }
+func (c *TestRequestConfig) IsStreamChat() bool { return c.IsStreamChatMode }
+func (c *TestRequestConfig) UseOpenAIResponses() bool {
+	return c.OpenAIResponses
+}
 func (c *TestRequestConfig) IsToolEnabled() bool { return c.IsToolEnabledFlag }
 func (c *TestRequestConfig) GetToolTimeout() time.Duration {
 	if c.ToolTimeout > 0 {

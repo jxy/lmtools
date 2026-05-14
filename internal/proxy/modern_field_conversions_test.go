@@ -66,6 +66,22 @@ func TestDecodeStrictJSONAcceptsModernOpenAIChatFields(t *testing.T) {
 	}
 }
 
+func TestTypedMessagesToArgoOpenAIConvertsDeveloperRoleToSystem(t *testing.T) {
+	got := typedMessagesToArgoOpenAI([]core.TypedMessage{
+		core.NewTextMessage(string(core.RoleDeveloper), "developer instructions"),
+		core.NewTextMessage(string(core.RoleUser), "hello"),
+	})
+	if len(got) != 2 {
+		t.Fatalf("messages = %+v, want 2 messages", got)
+	}
+	if got[0].Role != string(core.RoleSystem) {
+		t.Fatalf("first role = %q, want system", got[0].Role)
+	}
+	if got[1].Role != string(core.RoleUser) {
+		t.Fatalf("second role = %q, want user", got[1].Role)
+	}
+}
+
 func TestDecodeStrictJSONAcceptsModernAnthropicFields(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-opus-4-7",

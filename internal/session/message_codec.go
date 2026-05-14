@@ -58,9 +58,14 @@ type messageFileSet struct {
 	Content  []byte
 	Metadata []byte
 	Tools    []byte
+	Blocks   []byte
 }
 
 func buildMessageFileSet(msg Message, toolInteraction *core.ToolInteraction) (*messageFileSet, error) {
+	return buildMessageFileSetWithBlocks(msg, toolInteraction, nil)
+}
+
+func buildMessageFileSetWithBlocks(msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (*messageFileSet, error) {
 	metaData, err := marshalMessageMetadata(msg)
 	if err != nil {
 		return nil, err
@@ -70,11 +75,22 @@ func buildMessageFileSet(msg Message, toolInteraction *core.ToolInteraction) (*m
 	if err != nil {
 		return nil, err
 	}
+	blockData, err := marshalMessageBlocks(msg, toolInteraction)
+	if err != nil {
+		return nil, err
+	}
+	if len(blocks) > 0 {
+		blockData, err = marshalExplicitMessageBlocks(msg.Role, blocks)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return &messageFileSet{
 		Content:  []byte(msg.Content),
 		Metadata: metaData,
 		Tools:    toolData,
+		Blocks:   blockData,
 	}, nil
 }
 

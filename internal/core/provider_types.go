@@ -145,14 +145,40 @@ type OpenAIImageURL struct {
 // OpenAIToolCall represents a tool call in OpenAI format
 type OpenAIToolCall struct {
 	ID       string             `json:"id"`
-	Type     string             `json:"type"` // Always "function"
+	Type     string             `json:"type"`
 	Function OpenAIFunctionCall `json:"function"`
+	Custom   *OpenAICustomCall  `json:"custom,omitempty"`
 }
 
 // OpenAIFunctionCall represents a function call in OpenAI format
 type OpenAIFunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"` // JSON string
+}
+
+// OpenAICustomCall represents a custom tool call in OpenAI chat format.
+type OpenAICustomCall struct {
+	Name  string `json:"name"`
+	Input string `json:"input"`
+}
+
+// MarshalJSON omits the function payload for custom tool calls.
+func (tc OpenAIToolCall) MarshalJSON() ([]byte, error) {
+	m := map[string]interface{}{
+		"id":   tc.ID,
+		"type": tc.Type,
+	}
+	if tc.Type == "custom" {
+		if tc.Custom != nil {
+			m["custom"] = tc.Custom
+		}
+		return json.Marshal(m)
+	}
+	m["function"] = tc.Function
+	if tc.Custom != nil {
+		m["custom"] = tc.Custom
+	}
+	return json.Marshal(m)
 }
 
 // AnthropicMessage represents a message in Anthropic format
@@ -218,6 +244,8 @@ type AnthropicContent struct {
 	Text       string                `json:"text,omitempty"`
 	Thinking   string                `json:"thinking,omitempty"`
 	Signature  string                `json:"signature,omitempty"`
+	Data       string                `json:"data,omitempty"`
+	Raw        json.RawMessage       `json:"-"`
 	Source     *AnthropicImageSource `json:"source,omitempty"`
 	ID         string                `json:"id,omitempty"`          // For tool_use
 	Name       string                `json:"name,omitempty"`        // For tool_use
@@ -231,6 +259,13 @@ type AnthropicContent struct {
 
 // ToMap converts AnthropicContent to map[string]interface{} for request marshaling
 func (c AnthropicContent) ToMap() map[string]interface{} {
+	if len(c.Raw) > 0 {
+		var raw map[string]interface{}
+		if err := json.Unmarshal(c.Raw, &raw); err == nil && raw["type"] != nil {
+			return raw
+		}
+	}
+
 	m := map[string]interface{}{"type": c.Type}
 
 	if c.Text != "" {
@@ -243,6 +278,10 @@ func (c AnthropicContent) ToMap() map[string]interface{} {
 
 	if c.Signature != "" {
 		m["signature"] = c.Signature
+	}
+
+	if c.Data != "" {
+		m["data"] = c.Data
 	}
 
 	if c.Source != nil {
@@ -411,8 +450,9 @@ type GoogleInlineData struct {
 
 // OpenAITool represents a tool definition in OpenAI format
 type OpenAITool struct {
-	Type     string             `json:"type"` // Always "function"
+	Type     string             `json:"type"`
 	Function OpenAIToolFunction `json:"function"`
+	Custom   *OpenAICustomTool  `json:"custom,omitempty"`
 }
 
 // OpenAIToolFunction represents a function definition in OpenAI format
@@ -420,6 +460,32 @@ type OpenAIToolFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"` // JSON Schema
+	Strict      *bool           `json:"strict,omitempty"`
+}
+
+// OpenAICustomTool represents a custom tool definition in OpenAI chat format.
+type OpenAICustomTool struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Format      interface{} `json:"format,omitempty"`
+}
+
+// MarshalJSON omits the function payload for custom tools.
+func (t OpenAITool) MarshalJSON() ([]byte, error) {
+	m := map[string]interface{}{
+		"type": t.Type,
+	}
+	if t.Type == "custom" {
+		if t.Custom != nil {
+			m["custom"] = t.Custom
+		}
+		return json.Marshal(m)
+	}
+	m["function"] = t.Function
+	if t.Custom != nil {
+		m["custom"] = t.Custom
+	}
+	return json.Marshal(m)
 }
 
 // AnthropicTool represents a tool definition in Anthropic format
@@ -427,6 +493,7 @@ type AnthropicTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"` // JSON Schema
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 // GoogleTool represents a tool definition in Google format
@@ -445,10 +512,16 @@ type GoogleFunctionDeclaration struct {
 type OpenAIToolChoice struct {
 	Type     string                    `json:"type"` // "none", "auto", "function"
 	Function *OpenAIToolChoiceFunction `json:"function,omitempty"`
+	Custom   *OpenAIToolChoiceCustom   `json:"custom,omitempty"`
 }
 
 // OpenAIToolChoiceFunction specifies a specific function to call
 type OpenAIToolChoiceFunction struct {
+	Name string `json:"name"`
+}
+
+// OpenAIToolChoiceCustom specifies a specific custom tool to call.
+type OpenAIToolChoiceCustom struct {
 	Name string `json:"name"`
 }
 

@@ -1,0 +1,10 @@
+{
+  "body": {
+    "conversation": "conv_69f38fa116108193a8d7b4f825353369025c99d51e88a4a0",
+    "input": "answer this",
+    "model": "gpt-5.4-nano"
+  },
+  "method": "POST",
+  "path": "/v1/responses",
+  "url": "https://api.openai.com/v1/responses"
+}

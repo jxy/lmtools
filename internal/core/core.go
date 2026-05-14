@@ -183,6 +183,7 @@ func buildOpenAIEmbedRequest(cfg EmbedRequestConfig, input string) (*http.Reques
 type Response struct {
 	Text             string
 	ToolCalls        []ToolCall
+	Blocks           []Block
 	ThoughtSignature string
 	Streamed         bool
 }
@@ -273,6 +274,25 @@ func shouldHandleStreamingResponse(cfg ResponseConfig, provider string, resp *ht
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
 func handleStreamingResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
+	if provider == constants.ProviderOpenAI && useOpenAIResponses(cfg) {
+		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
+		if err != nil {
+			return Response{}, fmt.Errorf("failed to create log file: %w", err)
+		}
+		defer func() {
+			if closeErr := f.Close(); closeErr != nil {
+				notifier.Warnf("Failed to close log file %s: %v", path, closeErr)
+			}
+		}()
+		state := NewOpenAIResponsesStreamState()
+		text, toolCalls, err := RunStream(ctx, resp.Body, f, os.Stdout, notifier, state, constants.ProviderOpenAI)
+		blocks := state.Blocks()
+		if len(blocks) == 0 {
+			blocks = responseBlocksFromParts(text, toolCalls, "")
+		}
+		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks}, err
+	}
+
 	spec, err := providerSpecForName(provider)
 	if err != nil {
 		spec = unknownProviderSpec(provider)
@@ -312,6 +332,9 @@ func handleNonStreamingResponse(cfg ResponseConfig, resp *http.Response, provide
 		})
 		return Response{Text: text, ToolCalls: toolCalls}, err
 	}
+	if provider == constants.ProviderOpenAI && useOpenAIResponses(cfg) {
+		return parseOpenAIResponses(data, cfg.IsEmbed())
+	}
 	return spec.parseResponseData(data, cfg.IsEmbed())
 }
 
@@ -340,10 +363,11 @@ func ConvertToolsForProvider(model string, tools []ToolDefinition, toolChoice *T
 
 // ChatBuildOptions contains options for building chat requests
 type ChatBuildOptions struct {
-	ModelOverride  string           // Override the model from config
-	SystemOverride string           // Override the system prompt from config
-	ToolDefs       []ToolDefinition // Tool definitions to include
-	Stream         bool             // Whether to stream the response
+	ModelOverride     string           // Override the model from config
+	SystemOverride    string           // Override the system prompt from config
+	SystemOverrideSet bool             // Whether SystemOverride was intentionally set, including empty
+	ToolDefs          []ToolDefinition // Tool definitions to include
+	Stream            bool             // Whether to stream the response
 }
 
 // BuildChatRequest is the unified entry point for building chat requests
@@ -360,7 +384,7 @@ func BuildChatRequest(cfg ChatRequestConfig, typedMessages []TypedMessage, opts 
 	}
 
 	// Determine system prompt
-	system := resolvedSystemPrompt(cfg, opts.SystemOverride)
+	system, systemExplicit := resolvedBuildSystemPrompt(cfg, opts.SystemOverride, opts.SystemOverrideSet)
 
 	// Validate tool support if tools are requested
 	if len(opts.ToolDefs) > 0 {
@@ -370,7 +394,7 @@ func BuildChatRequest(cfg ChatRequestConfig, typedMessages []TypedMessage, opts 
 	}
 
 	// Use the existing unified builder
-	return buildChatRequestFromTyped(cfg, typedMessages, model, system, opts.ToolDefs, nil, opts.Stream)
+	return buildChatRequestFromTyped(cfg, typedMessages, model, system, systemExplicit, opts.ToolDefs, nil, opts.Stream)
 }
 
 // BuildToolResultRequest builds a request containing tool execution results
@@ -383,10 +407,11 @@ func BuildToolResultRequest(cfg ChatRequestConfig, model string, system string, 
 
 	// Use the new unified BuildChatRequest
 	opts := ChatBuildOptions{
-		ModelOverride:  model,
-		SystemOverride: system,
-		ToolDefs:       toolDefs,
-		Stream:         cfg.IsStreamChat(),
+		ModelOverride:     model,
+		SystemOverride:    system,
+		SystemOverrideSet: system != "",
+		ToolDefs:          toolDefs,
+		Stream:            cfg.IsStreamChat(),
 	}
 	return BuildChatRequest(cfg, typedMessages, opts)
 }
@@ -474,6 +499,9 @@ func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.Fi
 		if err != nil {
 			// Log parsing error to file
 			_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
+			if isFatalStreamError(err) {
+				return false, err
+			}
 			parseErrorCount++
 
 			// Emit warning via notifier if we hit the threshold
@@ -509,7 +537,11 @@ scanLoop:
 			// Handle different SSE line types
 			if line == "" {
 				// Empty line signals end of SSE event
-				if done, _ := flushSSE(); done {
+				done, err := flushSSE()
+				if err != nil {
+					return accumulated.String(), allToolCalls, err
+				}
+				if done {
 					break scanLoop
 				}
 				continue
@@ -535,6 +567,9 @@ scanLoop:
 				if err != nil {
 					// Log parsing error to file
 					_, _ = fmt.Fprintf(logFile, "# parsing error: %v\n", err)
+					if isFatalStreamError(err) {
+						return accumulated.String(), allToolCalls, err
+					}
 					parseErrorCount++
 
 					// Emit warning via notifier if we hit the threshold
@@ -564,7 +599,9 @@ scanLoop:
 	}
 
 	// Flush any remaining SSE data
-	_, _ = flushSSE()
+	if _, err := flushSSE(); err != nil {
+		return accumulated.String(), allToolCalls, err
+	}
 
 	if err := scanner.Err(); err != nil {
 		return accumulated.String(), allToolCalls, err

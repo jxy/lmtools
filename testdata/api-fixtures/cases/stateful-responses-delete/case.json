@@ -1,0 +1,14 @@
+{
+  "id": "stateful-responses-delete",
+  "description": "Stateful Responses API delete tombstones local response records",
+  "kinds": [
+    "stateful"
+  ],
+  "provider": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "capture_targets": [
+    "openai-responses"
+  ]
+}

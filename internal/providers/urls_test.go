@@ -7,30 +7,43 @@ func TestOpenAIURLsAcceptsBaseAndChatEndpoint(t *testing.T) {
 		name       string
 		base       string
 		wantChat   string
+		wantResp   string
 		wantModels string
 	}{
 		{
 			name:       "base url",
 			base:       "https://api.openai.com/v1",
 			wantChat:   "https://api.openai.com/v1/chat/completions",
+			wantResp:   "https://api.openai.com/v1/responses",
 			wantModels: "https://api.openai.com/v1/models",
 		},
 		{
 			name:       "chat endpoint",
 			base:       "https://api.openai.com/v1/chat/completions",
 			wantChat:   "https://api.openai.com/v1/chat/completions",
+			wantResp:   "https://api.openai.com/v1/responses",
+			wantModels: "https://api.openai.com/v1/models",
+		},
+		{
+			name:       "responses endpoint",
+			base:       "https://api.openai.com/v1/responses",
+			wantChat:   "https://api.openai.com/v1/chat/completions",
+			wantResp:   "https://api.openai.com/v1/responses",
 			wantModels: "https://api.openai.com/v1/models",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotChat, gotModels, err := OpenAIURLs(tt.base)
+			gotChat, gotResp, gotModels, err := OpenAIURLs(tt.base)
 			if err != nil {
 				t.Fatalf("OpenAIURLs() error = %v", err)
 			}
 			if gotChat != tt.wantChat {
 				t.Fatalf("chat URL = %q, want %q", gotChat, tt.wantChat)
+			}
+			if gotResp != tt.wantResp {
+				t.Fatalf("responses URL = %q, want %q", gotResp, tt.wantResp)
 			}
 			if gotModels != tt.wantModels {
 				t.Fatalf("models URL = %q, want %q", gotModels, tt.wantModels)

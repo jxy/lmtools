@@ -43,6 +43,10 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 
 // ConvertOpenAIToAnthropic converts an OpenAI response to Anthropic format
 func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel string) *AnthropicResponse {
+	return c.ConvertOpenAIToAnthropicWithToolNameRegistry(resp, originalModel, nil)
+}
+
+func (c *Converter) ConvertOpenAIToAnthropicWithToolNameRegistry(resp *OpenAIResponse, originalModel string, registry responseToolNameRegistry) *AnthropicResponse {
 	if len(resp.Choices) == 0 {
 		return &AnthropicResponse{
 			Type:  "message",
@@ -96,6 +100,32 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 	// Add tool calls if present
 	if len(choice.Message.ToolCalls) > 0 {
 		for _, toolCall := range choice.Message.ToolCalls {
+			if toolCall.Type == "custom" {
+				name := ""
+				input := ""
+				if toolCall.Custom != nil {
+					name = toolCall.Custom.Name
+					input = toolCall.Custom.Input
+				}
+				namespace := ""
+				originalName := name
+				if mapping, ok := registry.resolve(name, "custom"); ok {
+					namespace = mapping.Namespace
+					originalName = mapping.Name
+					name = mapping.Name
+				}
+				content = append(content, AnthropicContentBlock{
+					Type:         "tool_use",
+					ToolType:     "custom",
+					ID:           toolCall.ID,
+					Namespace:    namespace,
+					OriginalName: originalName,
+					Name:         name,
+					Input:        map[string]interface{}{core.CustomToolInputField: input},
+					InputString:  input,
+				})
+				continue
+			}
 			// Parse arguments back to map[string]interface{}
 			var args map[string]interface{}
 			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
@@ -105,11 +135,35 @@ func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel
 				}
 			}
 
+			name := toolCall.Function.Name
+			namespace := ""
+			originalName := name
+			if mapping, ok := registry.resolve(name, ""); ok {
+				namespace = mapping.Namespace
+				originalName = mapping.Name
+				name = mapping.Name
+				if mapping.Type == "custom" {
+					input := anthropicCustomToolInput(args, "")
+					content = append(content, AnthropicContentBlock{
+						Type:         "tool_use",
+						ToolType:     "custom",
+						ID:           toolCall.ID,
+						Namespace:    namespace,
+						OriginalName: originalName,
+						Name:         name,
+						Input:        map[string]interface{}{core.CustomToolInputField: input},
+						InputString:  input,
+					})
+					continue
+				}
+			}
 			block := AnthropicContentBlock{
-				Type:  "tool_use",
-				ID:    toolCall.ID,
-				Name:  toolCall.Function.Name,
-				Input: args,
+				Type:         "tool_use",
+				ID:           toolCall.ID,
+				Namespace:    namespace,
+				OriginalName: originalName,
+				Name:         name,
+				Input:        args,
 			}
 			content = append(content, block)
 		}
@@ -166,6 +220,10 @@ func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *Op
 
 // ConvertAnthropicResponseToOpenAI converts an Anthropic response to OpenAI format
 func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, originalModel string) *OpenAIResponse {
+	return c.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp, originalModel, nil)
+}
+
+func (c *Converter) ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp *AnthropicResponse, originalModel string, registry responseToolNameRegistry) *OpenAIResponse {
 	// Generate ID if missing
 	responseID := resp.ID
 	if responseID == "" {
@@ -190,7 +248,7 @@ func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, or
 	}
 
 	// Convert Anthropic blocks to core.Blocks using centralized converter
-	coreBlocks := AnthropicBlocksToCore(resp.Content)
+	coreBlocks := AnthropicBlocksToCoreWithToolNameRegistry(resp.Content, registry)
 
 	// Use typed converter to get OpenAI content and tool calls
 	contentUnion, typedToolCalls := core.ConvertBlocksToOpenAIContentTyped(coreBlocks)

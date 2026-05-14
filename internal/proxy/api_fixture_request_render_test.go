@@ -46,6 +46,15 @@ func TestAPIFixtureRequestRendering(t *testing.T) {
 					t.Fatalf("unmarshal OpenAI ingress: %v", err)
 				}
 				typed = OpenAIRequestToTyped(&req)
+			case "openai-responses":
+				var req OpenAIResponsesRequest
+				if err := json.Unmarshal(ingress, &req); err != nil {
+					t.Fatalf("unmarshal OpenAI Responses ingress: %v", err)
+				}
+				typed, err = OpenAIResponsesRequestToTypedStrict(&req)
+				if err != nil {
+					t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+				}
 			case "anthropic":
 				var req AnthropicRequest
 				if err := json.Unmarshal(ingress, &req); err != nil {
@@ -66,6 +75,12 @@ func TestAPIFixtureRequestRendering(t *testing.T) {
 						t.Fatalf("TypedToOpenAIRequest() error = %v", err)
 					}
 					assertFixtureJSONEqual(t, suite.Root, meta.ID, "expected/render/openai.request.json", openAIReq)
+				case "openai-responses":
+					responsesReq, err := TypedToOpenAIResponsesRequest(typed, meta.Models["openai-responses"])
+					if err != nil {
+						t.Fatalf("TypedToOpenAIResponsesRequest() error = %v", err)
+					}
+					assertFixtureJSONEqual(t, suite.Root, meta.ID, "expected/render/openai-responses.request.json", responsesReq)
 				case "anthropic":
 					anthReq, err := TypedToAnthropicRequest(typed, meta.Models["anthropic"])
 					if err != nil {
@@ -301,11 +316,14 @@ func projectBlocks(blocks []core.Block) []map[string]interface{} {
 				blockMap["name"] = value.Name
 			}
 			projected = append(projected, blockMap)
-		case core.ThinkingBlock:
+		case core.ReasoningBlock:
 			projected = append(projected, map[string]interface{}{
-				"type":      "thinking",
-				"thinking":  value.Thinking,
-				"signature": value.Signature,
+				"type":              "reasoning",
+				"provider":          value.Provider,
+				"reasoning_type":    value.Type,
+				"text":              value.Text,
+				"signature":         value.Signature,
+				"encrypted_content": value.EncryptedContent,
 			})
 		case core.ImageBlock:
 			projected = append(projected, map[string]interface{}{

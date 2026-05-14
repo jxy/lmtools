@@ -34,6 +34,9 @@ type Config struct {
 
 	// Streaming Configuration
 	PingInterval time.Duration // Ping interval (0 = use default of 15 seconds)
+
+	// Stateful Responses API storage. Empty means ~/.apiproxy/sessions.
+	SessionsDir string
 }
 
 // ApplyDynamicModelDefaults applies provider-specific model defaults

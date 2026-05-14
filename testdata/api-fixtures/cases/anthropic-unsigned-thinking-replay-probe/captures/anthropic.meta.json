@@ -1,0 +1,58 @@
+{
+  "case_id": "anthropic-unsigned-thinking-replay-probe",
+  "target": "anthropic",
+  "url": "https://api.anthropic.com/v1/messages",
+  "status_code": 400,
+  "content_type": "application/json",
+  "captured_at": "2026-05-05T11:21:35-05:00",
+  "response_headers": {
+    "Anthropic-Organization-Id": [
+      "ff99ea6f-4abc-487d-b0a5-070732273637"
+    ],
+    "Cf-Cache-Status": [
+      "DYNAMIC"
+    ],
+    "Cf-Ray": [
+      "9f71143fc9a6eb08-ORD"
+    ],
+    "Content-Security-Policy": [
+      "default-src 'none'; frame-ancestors 'none'"
+    ],
+    "Content-Type": [
+      "application/json"
+    ],
+    "Date": [
+      "Tue, 05 May 2026 16:21:35 GMT"
+    ],
+    "Request-Id": [
+      "req_011CajjD7qukD46QkrCakZUq"
+    ],
+    "Server": [
+      "cloudflare"
+    ],
+    "Server-Timing": [
+      "x-originResponse;dur=27"
+    ],
+    "Set-Cookie": [
+      "_cfuvid=jU_tjuoDOvVHQv1jeHuFsw9shgsGXFmvbp8P3G9_A3U-1777998095.327607-1.0.1.1-4uMIWTO_RlAz_d.YzQR7bHh2h4KALfRUXAeBCEJImzg; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com"
+    ],
+    "Strict-Transport-Security": [
+      "max-age=31536000; includeSubDomains; preload"
+    ],
+    "Traceresponse": [
+      "00-b03c44c26844e5832c198b9f4be0bd4c-554f5067d1ffe1d5-01"
+    ],
+    "Vary": [
+      "Accept-Encoding"
+    ],
+    "X-Envoy-Upstream-Service-Time": [
+      "25"
+    ],
+    "X-Robots-Tag": [
+      "none"
+    ],
+    "X-Should-Retry": [
+      "false"
+    ]
+  }
+}

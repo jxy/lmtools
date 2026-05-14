@@ -12,15 +12,6 @@ Requires Go 1.21+
 make build   # builds ./bin/lmc and ./bin/apiproxy
 ```
 
-For the shared API request/response/models fixture corpus used by proxy tests:
-
-```bash
-make verify-fixtures
-bash ./scripts/api_fixtures_compare_all.sh -target argo-openai
-```
-
-This validates the checked-in fixture files and runs targeted fixture-driven tests for request rendering, models parsing, response parsing, and stream translation. Use the compare script for non-mutating live drift or parity checks. For `argo-openai*` and `argo-anthropic*`, compare defaults to the matching upstream baseline unless you override it with `--against`.
-
 ## Quick Start
 
 - Chat (streaming) via Argo
@@ -32,7 +23,7 @@ This validates the checked-in fixture files and runs targeted fixture-driven tes
   echo "sk-..." > ~/.openai-key && chmod 600 ~/.openai-key
   ./bin/apiproxy -provider openai -api-key-file "$HOME/.openai-key"
   ```
-More details: [CLAUDE.md](CLAUDE.md)
+More usage examples are below.
 
 ## lmc usage
 
@@ -116,7 +107,7 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 ## Command-line Flags
 
 ### Required
-- `-argo-user string`: User identifier for Argo (or use `-api-key-file`)
+- `-argo-user string`: Argo user/credential (or use `-api-key-file`)
 - `-api-key-file string`: Path to API key file (required for OpenAI, Google, and Anthropic unless using `-provider-url`; also accepted for Argo)
 
 ### Model Selection
@@ -126,6 +117,7 @@ echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt 
 
 ### Chat Options
 - `-stream`: Use streaming chat mode for real-time responses. Tool follow-up requests keep streaming except on `-argo-legacy`, where tool loops fall back to non-streaming for compatibility.
+- `-openai-responses`: With `-provider openai`, use OpenAI's `/v1/responses` endpoint instead of `/v1/chat/completions`.
 - `-s string`: System prompt for chat mode (default: "You are a brilliant assistant.")
 - `-effort string`: Reasoning effort hint (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
 - `-json`: Request JSON object output
@@ -259,9 +251,7 @@ The lmtools suite includes an API proxy that translates between Anthropic's Mess
 - **Model Mapping**: Automatically maps model names between providers
 - **Multi-Provider Support**: Route requests to different providers based on configuration
 - **Streaming Support**: Real-time Server-Sent Events for all providers
-- **Token Counting**: Uses Argo's native count-tokens support when running against Argo; other providers use proxy-side estimation
-
-For implementation details and architecture, see [CLAUDE.md](CLAUDE.md#api-proxy-architecture).
+- **Token Counting**: Uses native count APIs for Anthropic, Gemini, and Argo Claude models where available, with proxy-side estimation as the fallback
 
 ## API Proxy Quick Start
 
@@ -290,6 +280,8 @@ go build -o ./bin/apiproxy ./cmd/apiproxy
 - Argo endpoint mode: native compatible endpoints by default, `-argo-legacy` for legacy `/api/v1/resource/*`
 - Provider: `-provider` (argo|anthropic|openai|google), `-provider-url`
 - Server: `-host` (default 127.0.0.1), `-port` (default 8082)
+- Responses state: `-sessions-dir` for the stateful Responses API store (default `~/.apiproxy/sessions`)
+- Request size: `-max-request-body-size` in MB (default 10)
 
 ### Run
 
@@ -339,7 +331,24 @@ Anthropic-compatible
 
 OpenAI-compatible
 - `POST /v1/chat/completions` - Chat completions (OpenAI format)
+- `POST /v1/responses` - Responses API (OpenAI format)
+- `POST /v1/responses/input_tokens` - Responses input-token counting
+- `POST /v1/responses/compact` - Responses conversation compaction
+- `GET /v1/responses/{id}` / `POST /v1/responses/{id}/cancel` / `DELETE /v1/responses/{id}` - Responses lifecycle
+- `GET /v1/responses/{id}/input_items` - Responses input-item listing
+- `POST /v1/conversations`, `GET/POST/DELETE /v1/conversations/{id}`, and `/v1/conversations/{id}/items` - local conversation state for translated Responses requests
 - `GET /v1/models` - List available models
+
+Translated Responses requests preserve portable function tools. OpenAI-only
+Responses tool types are passed through only when `-provider openai` is used;
+other provider paths log a warning and drop those tools.
+
+When `-provider openai` is used, Responses request bodies are forwarded to
+OpenAI after applying configured model mapping, and forwarded Responses or
+conversation request bodies still use the configured request-size limit. When
+translating Responses requests to another provider, `store` defaults to true;
+stored successful or failed streamed responses can be retrieved by id, and
+`store:false` disables local persistence.
 
 ### With Claude Code
 
@@ -425,17 +434,6 @@ curl -X POST http://localhost:8082/v1/chat/completions \
 curl -X GET http://localhost:8082/v1/models
 ```
 
-### Test
-
-Use the Go test targets and fixture verification workflow instead of ad hoc shell test scripts:
-
-```bash
-make test
-make test-e2e
-make verify-fixtures
-bash ./scripts/api_fixtures_compare.sh -case anthropic-messages-basic-text -target openai
-```
-
 ### Model mapping
 
 The proxy automatically maps model names to appropriate providers:
@@ -486,6 +484,7 @@ Default small models for cost optimization:
 
 ```bash
 # Run proxy with Argo (use either -argo-user or -api-key-file)
+# Native Argo currently treats -argo-user as the API key until Argo changes authentication.
 ./bin/apiproxy \
   -argo-user="username"
 # Uses default models: claudeopus4 for big, claudesonnet4 for small
@@ -560,9 +559,27 @@ The proxy supports Server-Sent Events (SSE) streaming for real-time responses:
 
 - **Anthropic Format** (`/v1/messages`): Native Anthropic SSE format
 - **OpenAI Format** (`/v1/chat/completions`): Native OpenAI SSE format
+- **OpenAI Responses Format** (`/v1/responses`): Responses API SSE events, with direct pass-through for OpenAI and converted terminal streams for other providers
 - **Automatic Conversion**: Seamlessly converts between streaming formats
 - **Argo Native Streaming**: Uses Argo's upstream SSE streams directly instead of proxy-side simulation
 - **Keep-Alive**: Automatic ping events prevent timeouts on slow responses
+
+### OpenAI Chat SSE Details
+
+When the proxy streams in OpenAI SSE format (`/v1/chat/completions`):
+
+- Order
+  - First: `delta { role:"assistant", content:null }`, `finish_reason:null`
+  - Second: `delta.tool_calls[0]` intro with `id`, `type:"function"`, `function.name`, `arguments:""`
+  - Next: only `delta.tool_calls[0].function.arguments` fragments
+  - Final: `delta {}`, `finish_reason:"tool_calls"|"stop"`, then `[DONE]`
+- Finish reason
+  - Intermediate chunks include `"finish_reason": null`.
+  - The final chunk sets `"finish_reason"` to a concrete value (`"tool_calls"` or `"stop"`).
+- Usage
+  - If `stream_options.include_usage` is set, chunks include `usage:null`; a final chunk includes `usage:{...}` before `[DONE]`.
+
+All SSE messages are `data: <json>\n\n`.
 
 ## Thinking Field Support
 
@@ -598,7 +615,7 @@ The thinking structure is automatically converted to `reasoning_effort: "high"`:
 
 ## API Proxy Limitations
 
-- `POST /v1/messages/count_tokens` uses Argo's native endpoint when provider=argo and `-argo-legacy` is not set; other providers, and legacy Argo mode, use proxy-side estimation
+- Token counting uses native provider APIs where available. Anthropic and Argo Claude-routed models use Anthropic `count_tokens`; Gemini uses `countTokens`; non-Claude Argo models and legacy Argo mode use proxy-side estimation.
 - Some advanced features may not be fully supported across all providers
 - Error messages from providers are passed through with minimal modification
 
@@ -622,30 +639,3 @@ Set log level for more verbose output:
 # JSON formatted logs for parsing
 ./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key" -log-format="json" -log-level="DEBUG"
 ```
-
-## Development
-
-For development documentation, see [CLAUDE.md](CLAUDE.md), which includes:
-
-- Repository structure and architecture
-- Build and test instructions
-- Development workflow
-- Testing guidelines
-- Issue management
-- Contributing guidelines
-### Streaming (OpenAI format)
-
-When the proxy streams in OpenAI SSE format (`/v1/chat/completions`):
-
-- Order
-  - First: `delta { role:"assistant", content:null }`, `finish_reason:null`
-  - Second: `delta.tool_calls[0]` intro with `id`, `type:"function"`, `function.name`, `arguments:""`
-  - Next: only `delta.tool_calls[0].function.arguments` fragments
-  - Final: `delta {}`, `finish_reason:"tool_calls"|"stop"`, then `[DONE]`
-- Finish reason
-  - Intermediate chunks include `"finish_reason": null`.
-  - The final chunk sets `"finish_reason"` to a concrete value (`"tool_calls"` or `"stop"`).
-- Usage
-  - If `stream_options.include_usage` is set, chunks include `usage:null`; a final chunk includes `usage:{...}` before `[DONE]`.
-
-All SSE messages are `data: <json>\n\n`.

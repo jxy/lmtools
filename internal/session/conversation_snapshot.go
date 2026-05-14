@@ -10,17 +10,26 @@ import (
 // lineage so repeated conversation reconstruction does not rebuild indexes.
 type conversationSnapshot struct {
 	sessionPath  string
+	manager      *Manager
 	messageIndex map[string]string
 }
 
 func newConversationSnapshot(sessionPath string) (*conversationSnapshot, error) {
-	messageIndex, err := indexMessagesAlongPath(sessionPath)
+	return newConversationSnapshotWithManager(DefaultManager(), sessionPath)
+}
+
+func newConversationSnapshotWithManager(manager *Manager, sessionPath string) (*conversationSnapshot, error) {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	messageIndex, err := indexMessagesAlongPathWithManager(manager, sessionPath)
 	if err != nil {
 		return nil, errors.WrapError("index message directories", err)
 	}
 
 	return &conversationSnapshot{
 		sessionPath:  sessionPath,
+		manager:      manager,
 		messageIndex: messageIndex,
 	}, nil
 }
@@ -30,7 +39,7 @@ func (s *conversationSnapshot) ensureIndexed(path string) error {
 		return nil
 	}
 
-	newIndex, err := indexMessagesAlongPath(path)
+	newIndex, err := indexMessagesAlongPathWithManager(s.manager, path)
 	if err != nil {
 		return errors.WrapError("index new message directories", err)
 	}
@@ -46,7 +55,7 @@ func (s *conversationSnapshot) buildTypedMessages(ctx context.Context, path stri
 		return nil, err
 	}
 
-	messages, err := GetLineage(path)
+	messages, err := GetLineageWithManager(s.manager, path)
 	if err != nil {
 		return nil, errors.WrapError("get lineage", err)
 	}
@@ -59,7 +68,7 @@ func (s *conversationSnapshot) pendingToolCalls(ctx context.Context, path string
 		return nil, err
 	}
 
-	messages, err := GetLineage(path)
+	messages, err := GetLineageWithManager(s.manager, path)
 	if err != nil {
 		return nil, errors.WrapError("get lineage", err)
 	}

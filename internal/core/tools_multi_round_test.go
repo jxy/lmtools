@@ -196,6 +196,58 @@ func TestDuplicateDetectionInRequests(t *testing.T) {
 	}
 }
 
+func TestInitialToolResponsePreservesResponseBlocks(t *testing.T) {
+	toolCalls := []ToolCall{{
+		ID:   "call_001",
+		Name: "lookup",
+		Args: json.RawMessage(`{"q":"x"}`),
+	}}
+	initial := Response{
+		ToolCalls: toolCalls,
+		Blocks: []Block{
+			ReasoningBlock{
+				Provider:         "openai",
+				Type:             "reasoning",
+				ID:               "rs_001",
+				Status:           "completed",
+				EncryptedContent: "enc_001",
+			},
+			ToolUseBlock{
+				ID:    "call_001",
+				Name:  "lookup",
+				Input: json.RawMessage(`{"q":"x"}`),
+			},
+		},
+	}
+
+	response := initialToolResponse(ToolContext{
+		InitialResponse: initial,
+		InitialCalls:    toolCalls,
+	})
+	if len(response.Blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(response.Blocks))
+	}
+
+	store := NewMemorySessionStore("", "")
+	if err := persistAssistantRound(context.Background(), store, response, "gpt-5", nil); err != nil {
+		t.Fatalf("persistAssistantRound() error = %v", err)
+	}
+	messages, err := store.Messages("")
+	if err != nil {
+		t.Fatalf("Messages() error = %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("len(messages) = %d, want 1", len(messages))
+	}
+	reasoning, ok := messages[0].Blocks[0].(ReasoningBlock)
+	if !ok {
+		t.Fatalf("first block type = %T, want ReasoningBlock", messages[0].Blocks[0])
+	}
+	if reasoning.EncryptedContent != "enc_001" {
+		t.Fatalf("EncryptedContent = %q, want enc_001", reasoning.EncryptedContent)
+	}
+}
+
 // Helper functions
 
 func simulateToolExecution(t *testing.T, store SessionStore, maxRounds int, initialText string, initialCalls []ToolCall, model string) string {

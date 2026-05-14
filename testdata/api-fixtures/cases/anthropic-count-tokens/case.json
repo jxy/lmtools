@@ -1,0 +1,14 @@
+{
+  "id": "anthropic-count-tokens",
+  "description": "Anthropic Messages count_tokens endpoint response",
+  "kinds": [
+    "token-count"
+  ],
+  "provider": "anthropic",
+  "models": {
+    "anthropic": "claude-haiku-4-5"
+  },
+  "capture_targets": [
+    "anthropic"
+  ]
+}

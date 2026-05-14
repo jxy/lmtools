@@ -1,0 +1,10 @@
+{
+  "text": "",
+  "tool_calls": [],
+  "status": "failed",
+  "error": {
+    "code": "server_error",
+    "message": "The model failed to produce a response.",
+    "type": "server_error"
+  }
+}

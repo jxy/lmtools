@@ -1,0 +1,73 @@
+{
+  "background": true,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1777573274,
+  "created_at": 1777573270,
+  "error": null,
+  "frequency_penalty": 0,
+  "id": "resp_0320cfd63d68f9bf0069f39d96d838819ea96cc4a414fb3d8c",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "gpt-5.4-nano-2026-03-17",
+  "moderation": null,
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "logprobs": [],
+          "text": "Could you clarify what you mean by **“background work”**? A few common meanings:\n\n1) **Background processing** in an app (e.g., run a task in the background, like uploads, jobs, or workers)  \n2) **Background research** (literature review / context gathering)  \n3) **Background work on a résumé/CV** (prior experience or “background”)  \n4) Something else—e.g., “background work” in a specific tool or language.\n\nTell me which one you mean, and what tech stack or context you’re working in (or paste the prompt/task you have), and I’ll help.",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_0320cfd63d68f9bf0069f39d99a880819e961b8538975c7552",
+      "phase": "final_answer",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "status": "completed",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 8,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 136,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 144
+  },
+  "user": null
+}

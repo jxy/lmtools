@@ -261,6 +261,13 @@ func TestBuildProviderErrorMessage(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 			expectedMsg:    "Upstream google error",
 		},
+		{
+			name:           "request_validation_error",
+			err:            newRequestValidationErrorf("messages: missing tool result"),
+			provider:       constants.ProviderArgo,
+			expectedStatus: http.StatusBadRequest,
+			expectedMsg:    "messages: missing tool result",
+		},
 	}
 
 	for _, tt := range tests {

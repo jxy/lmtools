@@ -78,11 +78,12 @@ func createTestTools() []ToolDefinition {
 }
 
 func buildProviderTestRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	return buildChatRequestFromTyped(cfg, messages, model, system, toolDefs, toolChoice, stream)
+	return buildChatRequestFromTyped(cfg, messages, model, system, system != "", toolDefs, toolChoice, stream)
 }
 
 func buildGoogleTestRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	return buildChatRequestFromTyped(cfg, messages, model, configuredSystemPrompt(cfg), toolDefs, toolChoice, stream)
+	system := configuredSystemPrompt(cfg)
+	return buildChatRequestFromTyped(cfg, messages, model, system, system != "", toolDefs, toolChoice, stream)
 }
 
 // ============================================================================

@@ -1,0 +1,15 @@
+{
+  "id": "stateful-responses-input-tokens",
+  "description": "Stateful Responses API input token counting is read-only and includes previous response context",
+  "kinds": [
+    "stateful"
+  ],
+  "provider": "openai-responses",
+  "models": {
+    "anthropic": "claude-test",
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "capture_targets": [
+    "openai-responses"
+  ]
+}

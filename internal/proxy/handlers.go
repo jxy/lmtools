@@ -3,12 +3,18 @@ package proxy
 import (
 	"lmtools/internal/logger"
 	"net/http"
+	"strings"
 )
 
 // ServeHTTP implements http.Handler
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log := logger.From(ctx)
+
+	if r.URL.Path == "/v1/conversations" || strings.HasPrefix(r.URL.Path, "/v1/conversations/") {
+		s.handleOpenAIConversations(w, r)
+		return
+	}
 
 	switch r.URL.Path {
 	case "/":
@@ -20,9 +26,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleCountTokens(w, r)
 	case "/v1/chat/completions":
 		s.handleOpenAIChatCompletions(w, r)
+	case "/v1/responses":
+		s.handleOpenAIResponses(w, r)
+	case "/v1/responses/input_tokens":
+		s.handleOpenAIResponsesInputTokens(w, r)
+	case "/v1/responses/compact":
+		s.handleOpenAIResponsesCompact(w, r)
 	case "/v1/models":
 		s.handleModels(w, r)
 	default:
+		if strings.HasPrefix(r.URL.Path, "/v1/responses/") {
+			s.handleOpenAIResponsesLifecycle(w, r)
+			return
+		}
 		log.Warnf("%s %s | Path not found", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	}

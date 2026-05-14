@@ -1,0 +1,17 @@
+{
+  "id": "msg_stateful_second",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-test",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "second answer"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

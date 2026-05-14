@@ -1,0 +1,17 @@
+{
+  "id": "openai-responses-incomplete-stream",
+  "description": "OpenAI Responses API stream ending with response.incomplete after max output tokens",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.4-nano"
+  },
+  "render_targets": [
+    "openai-responses"
+  ],
+  "capture_targets": [
+    "openai-responses-stream"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "model": "gpt-5.4-nano",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Return JSON with the city and state for Lake Michigan's Illinois shoreline."
+        }
+      ]
+    }
+  ],
+  "instructions": "Use concise JSON values.",
+  "text": {
+    "format": {
+      "type": "json_object"
+    }
+  },
+  "reasoning": {
+    "effort": "low"
+  },
+  "max_output_tokens": 64,
+  "metadata": {
+    "fixture": "openai-responses-basic-json"
+  }
+}

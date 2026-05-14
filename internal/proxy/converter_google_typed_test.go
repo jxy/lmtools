@@ -112,8 +112,8 @@ func TestConvertAnthropicToGoogle_TypedRenderer(t *testing.T) {
 	if len(toolResultParts) != 1 || toolResultParts[0].FunctionResp == nil {
 		t.Fatalf("tool result parts = %+v, want single functionResponse", toolResultParts)
 	}
-	if toolResultParts[0].FunctionResp.Name != "tool_123" {
-		t.Fatalf("function response name = %q, want %q", toolResultParts[0].FunctionResp.Name, "tool_123")
+	if toolResultParts[0].FunctionResp.Name != "get_weather" {
+		t.Fatalf("function response name = %q, want %q", toolResultParts[0].FunctionResp.Name, "get_weather")
 	}
 	if got := toolResultParts[0].FunctionResp.Response["content"]; got != "Sunny and 22C" {
 		t.Fatalf("function response payload = %+v, want content=Sunny and 22C", toolResultParts[0].FunctionResp.Response)
@@ -142,10 +142,8 @@ func TestTypedToGoogleRequest_PreservesTextThoughtSignature(t *testing.T) {
 			{
 				Role: string(core.RoleAssistant),
 				Blocks: []core.Block{
-					core.TextBlock{
-						Text:             "Let me think.",
-						ThoughtSignature: "sig-text-123",
-					},
+					core.ReasoningBlock{Provider: "google", Type: "thought_signature", Signature: "sig-text-123"},
+					core.TextBlock{Text: "Let me think."},
 				},
 			},
 		},

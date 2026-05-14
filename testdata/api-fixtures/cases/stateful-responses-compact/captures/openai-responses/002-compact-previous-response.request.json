@@ -1,0 +1,10 @@
+{
+  "body": {
+    "input": "The latest user asks for gamma.",
+    "model": "gpt-5.4-nano",
+    "previous_response_id": "resp_0a42caa9343cb59c0069f3b6841f9c819c93bd8e250182b39f"
+  },
+  "method": "POST",
+  "path": "/v1/responses/compact",
+  "url": "https://api.openai.com/v1/responses/compact"
+}

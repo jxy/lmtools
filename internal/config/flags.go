@@ -22,6 +22,7 @@ type Config struct {
 	Model               string // model to use
 	Embed               bool   // whether to run in embed mode
 	StreamChat          bool   // whether to use streaming chat mode
+	OpenAIResponses     bool   // whether OpenAI chat mode should use /v1/responses
 	Effort              string // reasoning effort hint
 	JSONMode            bool   // request JSON object output
 	JSONSchemaPath      string // path to JSON schema for structured output
@@ -119,6 +120,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
+	fs.BoolVar(&cfg.OpenAIResponses, "openai-responses", false, "use OpenAI /v1/responses instead of /v1/chat/completions when -provider openai")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
@@ -236,6 +238,7 @@ func (c Config) RequestOptions() core.RequestOptions {
 		Effort:              c.Effort,
 		JSONMode:            c.JSONMode,
 		JSONSchema:          append(json.RawMessage(nil), c.JSONSchema...),
+		OpenAIResponses:     c.OpenAIResponses,
 		ToolEnabled:         c.EnableTool,
 		ToolTimeout:         c.ToolTimeout,
 		ToolWhitelist:       c.ToolWhitelist,

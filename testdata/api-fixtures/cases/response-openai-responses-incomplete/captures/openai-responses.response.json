@@ -1,0 +1,30 @@
+{
+  "id": "resp_fixture_incomplete",
+  "object": "response",
+  "created_at": 1760000000,
+  "status": "incomplete",
+  "model": "gpt-5",
+  "output": [
+    {
+      "id": "msg_fixture_incomplete",
+      "type": "message",
+      "status": "incomplete",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Partial answer",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  },
+  "usage": {
+    "input_tokens": 11,
+    "output_tokens": 3,
+    "total_tokens": 14
+  }
+}

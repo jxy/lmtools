@@ -1,0 +1,12 @@
+{
+  "id": "resp_upstream",
+  "object": "response",
+  "created_at": 1777493000,
+  "status": "cancelled",
+  "model": "gpt-backend",
+  "output": [],
+  "error": {
+    "code": "cancelled",
+    "message": "Response was cancelled"
+  }
+}

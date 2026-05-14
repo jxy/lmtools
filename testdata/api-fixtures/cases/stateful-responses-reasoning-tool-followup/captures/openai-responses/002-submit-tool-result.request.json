@@ -1,0 +1,16 @@
+{
+  "body": {
+    "input": [
+      {
+        "call_id": "call_hAt7tCwnwQd1wgnLWkIsnhAp",
+        "output": "lookup result",
+        "type": "function_call_output"
+      }
+    ],
+    "model": "gpt-5.4-nano",
+    "previous_response_id": "resp_0bbe21c7c3ea312c0069f39d9251cc81979fd2708ad3999eda"
+  },
+  "method": "POST",
+  "path": "/v1/responses",
+  "url": "https://api.openai.com/v1/responses"
+}

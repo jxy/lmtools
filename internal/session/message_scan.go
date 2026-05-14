@@ -13,7 +13,7 @@ import (
 
 // listMessages returns all message IDs in a directory, sorted.
 // Invariant: A message exists if and only if its .json exists.
-// .txt and .tools.json are optional adjuncts to the message.
+// .txt, .tools.json, and .blocks.json are optional adjuncts to the message.
 func listMessages(sessionPath string) ([]string, error) {
 	entries, err := os.ReadDir(sessionPath)
 	if err != nil {
@@ -29,8 +29,8 @@ func listMessages(sessionPath string) ([]string, error) {
 
 		name := entry.Name()
 		// Look for .json files (metadata) which every message has.
-		// Skip .tools.json files as they're part of the message, not the ID.
-		if strings.HasSuffix(name, ".json") && !strings.Contains(name, ".tools.") {
+		// Skip sidecar JSON files as they're part of the message, not the ID.
+		if isMessageMetadataFilename(name) {
 			msgID := strings.TrimSuffix(name, ".json")
 			// Per documentation: "A message exists if and only if its JSON file exists".
 			messageIDs[msgID] = true
@@ -50,6 +50,12 @@ func listMessages(sessionPath string) ([]string, error) {
 	})
 
 	return result, nil
+}
+
+func isMessageMetadataFilename(name string) bool {
+	return strings.HasSuffix(name, ".json") &&
+		!strings.HasSuffix(name, ".tools.json") &&
+		!strings.HasSuffix(name, ".blocks.json")
 }
 
 // loadMessagesInDir loads all messages from a directory.

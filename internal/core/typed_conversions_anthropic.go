@@ -1,6 +1,10 @@
 package core
 
-import "log"
+import (
+	"encoding/json"
+	"log"
+	"strings"
+)
 
 // ToAnthropicTyped converts TypedMessage to strongly typed Anthropic format.
 func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
@@ -14,6 +18,9 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 		if len(msg.Blocks) == 1 {
 			if textBlock, ok := msg.Blocks[0].(TextBlock); ok {
 				text := textBlock.Text
+				if text == "" {
+					continue
+				}
 				anthMsg.Content = AnthropicContentUnion{
 					Text:     &text,
 					Contents: nil,
@@ -27,16 +34,17 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 		for _, block := range msg.Blocks {
 			switch b := block.(type) {
 			case TextBlock:
+				if b.Text == "" {
+					continue
+				}
 				content = append(content, AnthropicContent{
 					Type: "text",
 					Text: b.Text,
 				})
-			case ThinkingBlock:
-				content = append(content, AnthropicContent{
-					Type:      "thinking",
-					Thinking:  b.Thinking,
-					Signature: b.Signature,
-				})
+			case ReasoningBlock:
+				if anthropicContent, ok := reasoningBlockToAnthropicContent(b); ok {
+					content = append(content, anthropicContent)
+				}
 			case ImageBlock:
 				source := &AnthropicImageSource{
 					Type: "url",
@@ -75,11 +83,15 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 					},
 				})
 			case ToolUseBlock:
+				input := b.Input
+				if b.Type == "custom" {
+					input = WrapCustomToolInput(CustomToolRawInput(b.InputString, b.Input))
+				}
 				content = append(content, AnthropicContent{
 					Type:  "tool_use",
 					ID:    b.ID,
 					Name:  b.Name,
-					Input: b.Input,
+					Input: input,
 				})
 			case ToolResultBlock:
 				content = append(content, AnthropicContent{
@@ -96,10 +108,198 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 				Text:     nil,
 				Contents: content,
 			}
+			result = append(result, anthMsg)
 		}
-		result = append(result, anthMsg)
 	}
 
+	return result
+}
+
+func reasoningBlockToAnthropicContent(block ReasoningBlock) (AnthropicContent, bool) {
+	if block.Provider == "anthropic" {
+		if content, ok := signedAnthropicReasoningContent(block); ok {
+			return content, true
+		}
+		return AnthropicContent{}, false
+	}
+
+	if block.Provider == "openai" {
+		text := foreignReasoningSummaryText(block)
+		if text == "" {
+			return AnthropicContent{}, false
+		}
+		return AnthropicContent{
+			Type: "text",
+			Text: text,
+		}, true
+	}
+	return AnthropicContent{}, false
+}
+
+func signedAnthropicReasoningContent(block ReasoningBlock) (AnthropicContent, bool) {
+	if len(block.Raw) > 0 {
+		var raw map[string]interface{}
+		if err := json.Unmarshal(block.Raw, &raw); err == nil {
+			blockType, _ := raw["type"].(string)
+			switch blockType {
+			case "thinking":
+				if signature, _ := raw["signature"].(string); signature != "" {
+					return AnthropicContent{Raw: sanitizedAnthropicReasoningRaw(raw, block.Raw)}, true
+				}
+			case "redacted_thinking":
+				if data, _ := raw["data"].(string); data != "" {
+					return AnthropicContent{Raw: sanitizedAnthropicReasoningRaw(raw, block.Raw)}, true
+				}
+			}
+		}
+	}
+
+	switch block.Type {
+	case "thinking":
+		if block.Signature == "" {
+			return AnthropicContent{}, false
+		}
+		thinking := block.Text
+		if thinking == "" {
+			thinking = string(block.Content)
+		}
+		if thinking == "" {
+			return AnthropicContent{}, false
+		}
+		return AnthropicContent{
+			Type:      "thinking",
+			Thinking:  thinking,
+			Signature: block.Signature,
+		}, true
+	case "redacted_thinking":
+		if data := reasoningBlockData(block); data != "" {
+			return AnthropicContent{
+				Type: "redacted_thinking",
+				Data: data,
+			}, true
+		}
+	}
+	return AnthropicContent{}, false
+}
+
+func sanitizedAnthropicReasoningRaw(raw map[string]interface{}, original json.RawMessage) json.RawMessage {
+	text, hasText := raw["text"]
+	if !hasText {
+		return append(json.RawMessage(nil), original...)
+	}
+	textString, isString := text.(string)
+	if text != nil && (!isString || textString != "") {
+		return append(json.RawMessage(nil), original...)
+	}
+
+	sanitized := make(map[string]interface{}, len(raw)-1)
+	for key, value := range raw {
+		if key != "text" {
+			sanitized[key] = value
+		}
+	}
+	data, err := json.Marshal(sanitized)
+	if err != nil {
+		return append(json.RawMessage(nil), original...)
+	}
+	return data
+}
+
+func reasoningBlockData(block ReasoningBlock) string {
+	if len(block.Content) > 0 {
+		var content struct {
+			Data string `json:"data"`
+		}
+		if err := json.Unmarshal(block.Content, &content); err == nil && content.Data != "" {
+			return content.Data
+		}
+	}
+	return ""
+}
+
+func foreignReasoningSummaryText(block ReasoningBlock) string {
+	var parts []string
+	if block.Text != "" {
+		parts = append(parts, block.Text)
+	}
+	appendReasoningTextFromRaw(block.Summary, &parts)
+	appendReasoningTextFromRaw(block.Content, &parts)
+	if len(block.Raw) > 0 {
+		var raw interface{}
+		if err := json.Unmarshal(block.Raw, &raw); err == nil {
+			appendReasoningTextFromNamedFields(raw, &parts)
+		}
+	}
+	return strings.Join(dedupeNonEmptyStrings(parts), "\n")
+}
+
+func appendReasoningTextFromRaw(raw json.RawMessage, parts *[]string) {
+	if len(raw) == 0 {
+		return
+	}
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		text := strings.TrimSpace(string(raw))
+		if text != "" {
+			*parts = append(*parts, text)
+		}
+		return
+	}
+	appendReasoningText(value, parts)
+}
+
+func appendReasoningTextFromNamedFields(value interface{}, parts *[]string) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		for _, key := range []string{"summary", "content", "text"} {
+			if nested, ok := v[key]; ok {
+				appendReasoningText(nested, parts)
+			}
+		}
+	case []interface{}:
+		appendReasoningText(v, parts)
+	case string:
+		if text := strings.TrimSpace(v); text != "" {
+			*parts = append(*parts, text)
+		}
+	}
+}
+
+func appendReasoningText(value interface{}, parts *[]string) {
+	switch v := value.(type) {
+	case []interface{}:
+		for _, item := range v {
+			appendReasoningText(item, parts)
+		}
+	case map[string]interface{}:
+		if text, ok := v["text"].(string); ok {
+			if text = strings.TrimSpace(text); text != "" {
+				*parts = append(*parts, text)
+			}
+		}
+		for _, key := range []string{"summary", "content"} {
+			if nested, ok := v[key]; ok {
+				appendReasoningText(nested, parts)
+			}
+		}
+	case string:
+		if text := strings.TrimSpace(v); text != "" {
+			*parts = append(*parts, text)
+		}
+	}
+}
+
+func dedupeNonEmptyStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
 	return result
 }
 
@@ -144,10 +344,14 @@ func FromAnthropicTyped(messages []AnthropicMessage) []TypedMessage {
 				switch block.Type {
 				case "text":
 					typed.Blocks = append(typed.Blocks, TextBlock{Text: block.Text})
-				case "thinking":
-					typed.Blocks = append(typed.Blocks, ThinkingBlock{
-						Thinking:  block.Thinking,
+				case "thinking", "redacted_thinking":
+					raw, _ := json.Marshal(block.ToMap())
+					typed.Blocks = append(typed.Blocks, ReasoningBlock{
+						Provider:  "anthropic",
+						Type:      block.Type,
+						Text:      block.Thinking,
 						Signature: block.Signature,
+						Raw:       raw,
 					})
 				case "tool_use":
 					typed.Blocks = append(typed.Blocks, ToolUseBlock{

@@ -176,7 +176,7 @@ func TestProviderSpecChatRequestBehavior(t *testing.T) {
 				t.Fatalf("requireChatBuilder() error = %v", err)
 			}
 
-			req, body, err := buildChat(cfg, tt.messages, tt.model, tt.system, nil, nil, false)
+			req, body, err := buildChat(cfg, tt.messages, tt.model, tt.system, tt.system != "", nil, nil, false)
 			if err != nil {
 				t.Fatalf("buildChat() error = %v", err)
 			}
@@ -259,7 +259,7 @@ func TestProviderSpecStreamingRequestBehavior(t *testing.T) {
 				t.Fatalf("requireChatBuilder() error = %v", err)
 			}
 
-			req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, tt.model, "", nil, nil, true)
+			req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, tt.model, "", false, nil, nil, true)
 			if err != nil {
 				t.Fatalf("buildChat() error = %v", err)
 			}
@@ -283,7 +283,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "gpt5", "")
 		cfg.Env = "http://argo.example.test"
 
-		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "gpt5", "Be concise.", nil, nil, true)
+		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "gpt5", "Be concise.", true, nil, nil, true)
 		if err != nil {
 			t.Fatalf("buildChat() error = %v", err)
 		}
@@ -311,7 +311,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		cfg.Env = "http://argo.example.test"
 		cfg.IsToolEnabledFlag = false
 
-		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "gpt5", "", sampleProviderSpecToolDefs(), nil, true)
+		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "gpt5", "", false, sampleProviderSpecToolDefs(), nil, true)
 		if err != nil {
 			t.Fatalf("buildChat() error = %v", err)
 		}
@@ -338,7 +338,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "claude-opus-4-1", "")
 		cfg.Env = "http://argo.example.test"
 
-		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "claude-opus-4-1", "Be concise.", nil, nil, true)
+		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "claude-opus-4-1", "Be concise.", true, nil, nil, true)
 		if err != nil {
 			t.Fatalf("buildChat() error = %v", err)
 		}

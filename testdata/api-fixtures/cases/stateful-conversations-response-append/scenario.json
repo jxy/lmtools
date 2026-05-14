@@ -1,0 +1,115 @@
+{
+  "provider": "anthropic",
+  "model": "claude-test",
+  "steps": [
+    {
+      "id": "create-conversation",
+      "method": "POST",
+      "path": "/v1/conversations",
+      "body": {
+        "items": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "seed"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "conversation"
+        }
+      },
+      "bind": {
+        "conversation_id": "id"
+      }
+    },
+    {
+      "id": "create-response-in-conversation",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "conversation": "${conversation_id}",
+        "input": "answer this"
+      },
+      "upstream": {
+        "body": "mock/anthropic-conversation-answer.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "status": "completed",
+          "output.0.content.0.text": "conversation answer"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "seed",
+            "answer this"
+          ]
+        }
+      ],
+      "bind": {
+        "response_id": "id"
+      }
+    },
+    {
+      "id": "list-conversation-items-after-response",
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}/items?order=asc",
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "object": "list",
+          "data.length": 3,
+          "data.0.content.0.text": "seed",
+          "data.1.content.0.text": "answer this",
+          "data.2.role": "assistant",
+          "data.2.content.0.text": "conversation answer"
+        }
+      }
+    },
+    {
+      "id": "create-second-response-in-conversation",
+      "method": "POST",
+      "path": "/v1/responses",
+      "body": {
+        "model": "claude-test",
+        "conversation": "${conversation_id}",
+        "input": "again"
+      },
+      "upstream": {
+        "body": "mock/anthropic-conversation-second.response.json"
+      },
+      "expect": {
+        "status": 200,
+        "json_fields": {
+          "status": "completed",
+          "output.0.content.0.text": "second conversation answer"
+        }
+      },
+      "backend_requests": [
+        {
+          "method": "POST",
+          "path": "/messages",
+          "body_contains": [
+            "seed",
+            "answer this",
+            "conversation answer",
+            "again"
+          ]
+        }
+      ]
+    }
+  ]
+}

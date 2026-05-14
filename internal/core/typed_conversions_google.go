@@ -14,6 +14,7 @@ func ToGoogleForArgoTyped(messages []TypedMessage) []GoogleMessage {
 // This is a pure function with no side effects.
 func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMessage {
 	result := make([]GoogleMessage, 0, len(messages))
+	toolNamesByID := make(map[string]string)
 
 	for _, msg := range messages {
 		role := msg.Role
@@ -28,13 +29,19 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 		googleMsg := GoogleMessage{Role: role}
 		parts := make([]GooglePart, 0, len(msg.Blocks))
 		firstFunctionCall := true
+		pendingThoughtSignature := ""
 		for _, block := range msg.Blocks {
 			switch b := block.(type) {
+			case ReasoningBlock:
+				if b.Provider == "google" && b.Type == "thought_signature" {
+					pendingThoughtSignature = b.Signature
+				}
 			case TextBlock:
 				parts = append(parts, GooglePart{
 					Text:             b.Text,
-					ThoughtSignature: b.ThoughtSignature,
+					ThoughtSignature: pendingThoughtSignature,
 				})
+				pendingThoughtSignature = ""
 			case ImageBlock:
 				parts = append(parts, GooglePart{Text: "[Image: " + b.URL + "]"})
 			case AudioBlock:
@@ -49,22 +56,32 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 			case FileBlock:
 				parts = append(parts, GooglePart{Text: "[File content: " + b.FileID + "]"})
 			case ToolUseBlock:
-				thoughtSignature := b.ThoughtSignature
+				if b.ID != "" && b.Name != "" {
+					toolNamesByID[b.ID] = b.Name
+				}
+				input := b.Input
+				if b.Type == "custom" {
+					input = WrapCustomToolInput(CustomToolRawInput(b.InputString, b.Input))
+				}
+				thoughtSignature := pendingThoughtSignature
 				if thoughtSignature == "" && firstFunctionCall {
 					thoughtSignature = GoogleDummyThoughtSignature
 				}
 				parts = append(parts, GooglePart{
 					FunctionCall: &GoogleFunctionCall{
 						Name: b.Name,
-						Args: b.Input,
+						Args: input,
 					},
 					ThoughtSignature: thoughtSignature,
 				})
+				pendingThoughtSignature = ""
 				firstFunctionCall = false
 			case ToolResultBlock:
 				functionName := b.Name
 				if functionName == "" {
-					// TODO: Implement proper mapping from tool_use_id to function name
+					functionName = toolNamesByID[b.ToolUseID]
+				}
+				if functionName == "" {
 					functionName = b.ToolUseID
 				}
 				parts = append(parts, GooglePart{
@@ -77,6 +94,9 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 					},
 				})
 			}
+		}
+		if pendingThoughtSignature != "" {
+			parts = append(parts, GooglePart{ThoughtSignature: pendingThoughtSignature})
 		}
 
 		if len(parts) > 0 {

@@ -1,0 +1,80 @@
+{
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1777569555,
+  "created_at": 1777569554,
+  "error": null,
+  "frequency_penalty": 0,
+  "id": "resp_019846704161a3ac0069f38f1255b48194828c5506b60df1a2",
+  "incomplete_details": null,
+  "instructions": "Use concise JSON values.",
+  "max_output_tokens": 64,
+  "max_tool_calls": null,
+  "metadata": {
+    "fixture": "openai-responses-basic-json"
+  },
+  "model": "gpt-5.4-nano-2026-03-17",
+  "moderation": null,
+  "object": "response",
+  "output": [
+    {
+      "id": "rs_019846704161a3ac0069f38f1304a4819495fddc2ac8fbd03c",
+      "summary": [],
+      "type": "reasoning"
+    },
+    {
+      "content": [
+        {
+          "annotations": [],
+          "logprobs": [],
+          "text": "{\"city\":\"Chicago\",\"state\":\"Illinois\"}",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_019846704161a3ac0069f38f1348d08194b06002ba1f00ba37",
+      "phase": "final_answer",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "low",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "status": "completed",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "json_object"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 29,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 43,
+    "output_tokens_details": {
+      "reasoning_tokens": 25
+    },
+    "total_tokens": 72
+  },
+  "user": null
+}

@@ -25,7 +25,12 @@ type AnthropicStreamState struct {
 	currentBlockType string
 	currentBlockID   string
 	currentToolName  string
+	currentText      string
+	currentThinking  string
+	currentSignature string
+	currentData      string
 	partialInput     string
+	blocks           []Block
 }
 
 // ParseLine implements StreamState for Anthropic SSE format
@@ -44,14 +49,22 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 		case "content_block_start":
 			var blockStart struct {
 				ContentBlock struct {
-					Type string `json:"type"`
-					ID   string `json:"id"`
-					Name string `json:"name"`
+					Type      string `json:"type"`
+					ID        string `json:"id"`
+					Name      string `json:"name"`
+					Text      string `json:"text"`
+					Thinking  string `json:"thinking"`
+					Signature string `json:"signature"`
+					Data      string `json:"data"`
 				} `json:"content_block"`
 			}
 			if err := json.Unmarshal([]byte(data), &blockStart); err == nil {
 				s.currentBlockType = blockStart.ContentBlock.Type
 				s.currentBlockID = blockStart.ContentBlock.ID
+				s.currentText = blockStart.ContentBlock.Text
+				s.currentThinking = blockStart.ContentBlock.Thinking
+				s.currentSignature = blockStart.ContentBlock.Signature
+				s.currentData = blockStart.ContentBlock.Data
 				if blockStart.ContentBlock.Type == "tool_use" {
 					s.currentToolName = blockStart.ContentBlock.Name
 					s.partialInput = ""
@@ -68,7 +81,24 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 					} `json:"delta"`
 				}
 				if err := json.Unmarshal([]byte(data), &delta); err == nil && delta.Delta.Type == "text_delta" {
+					s.currentText += delta.Delta.Text
 					return delta.Delta.Text, nil, false, nil
+				}
+			case "thinking", "redacted_thinking":
+				var delta struct {
+					Delta struct {
+						Type      string `json:"type"`
+						Thinking  string `json:"thinking"`
+						Signature string `json:"signature"`
+					} `json:"delta"`
+				}
+				if err := json.Unmarshal([]byte(data), &delta); err == nil {
+					switch delta.Delta.Type {
+					case "thinking_delta":
+						s.currentThinking += delta.Delta.Thinking
+					case "signature_delta":
+						s.currentSignature += delta.Delta.Signature
+					}
 				}
 			case "tool_use":
 				var delta struct {
@@ -83,19 +113,58 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 			}
 
 		case "content_block_stop":
-			if s.currentBlockType == "tool_use" && s.currentToolName != "" {
+			switch s.currentBlockType {
+			case "text":
+				if s.currentText != "" {
+					s.blocks = append(s.blocks, TextBlock{Text: s.currentText})
+				}
+			case "thinking":
+				if s.currentThinking != "" || s.currentSignature != "" {
+					raw, _ := json.Marshal(map[string]interface{}{
+						"type":      "thinking",
+						"thinking":  s.currentThinking,
+						"signature": s.currentSignature,
+					})
+					s.blocks = append(s.blocks, ReasoningBlock{
+						Provider:  "anthropic",
+						Type:      "thinking",
+						Text:      s.currentThinking,
+						Signature: s.currentSignature,
+						Raw:       raw,
+					})
+				}
+			case "redacted_thinking":
+				if s.currentData != "" {
+					raw, _ := json.Marshal(map[string]interface{}{
+						"type": "redacted_thinking",
+						"data": s.currentData,
+					})
+					s.blocks = append(s.blocks, ReasoningBlock{
+						Provider: "anthropic",
+						Type:     "redacted_thinking",
+						Raw:      raw,
+					})
+				}
+			case "tool_use":
+				if s.currentToolName == "" {
+					s.resetCurrentBlock()
+					return "", nil, false, nil
+				}
 				// Finalize tool call
 				toolCall := ToolCall{
 					ID:   s.currentBlockID,
 					Name: s.currentToolName,
 					Args: json.RawMessage(s.partialInput),
 				}
-				s.currentToolName = ""
-				s.partialInput = ""
+				s.blocks = append(s.blocks, ToolUseBlock{
+					ID:    s.currentBlockID,
+					Name:  s.currentToolName,
+					Input: json.RawMessage(s.partialInput),
+				})
+				s.resetCurrentBlock()
 				return "", []ToolCall{toolCall}, false, nil
 			}
-			s.currentBlockType = ""
-			s.currentBlockID = ""
+			s.resetCurrentBlock()
 
 		case "message_stop":
 			// Stream is complete
@@ -104,6 +173,24 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 	}
 
 	return "", nil, false, nil
+}
+
+func (s *AnthropicStreamState) resetCurrentBlock() {
+	s.currentBlockType = ""
+	s.currentBlockID = ""
+	s.currentToolName = ""
+	s.currentText = ""
+	s.currentThinking = ""
+	s.currentSignature = ""
+	s.currentData = ""
+	s.partialInput = ""
+}
+
+func (s *AnthropicStreamState) Blocks() []Block {
+	if len(s.blocks) == 0 {
+		return nil
+	}
+	return append([]Block(nil), s.blocks...)
 }
 
 // OpenAIStreamState tracks streaming state with tool support for OpenAI
@@ -128,7 +215,7 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			var toolCalls []ToolCall
 			for idx, tc := range s.partialToolCalls {
 				// Validate JSON arguments before adding to final tool calls
-				if len(tc.Args) > 0 {
+				if tc.Type != "custom" && len(tc.Args) > 0 {
 					var v interface{}
 					if err := json.Unmarshal(tc.Args, &v); err != nil {
 						return "", nil, false, fmt.Errorf("invalid JSON in tool call %d arguments: %w", idx, err)
@@ -156,8 +243,17 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			if tc.ID != "" {
 				partial.ID = tc.ID
 			}
+			if tc.Type != "" {
+				partial.Type = tc.Type
+			}
 			if tc.Name != "" {
 				partial.Name = tc.Name
+			}
+			if tc.Type == "custom" {
+				if tc.Input != "" {
+					partial.Input += tc.Input
+				}
+				continue
 			}
 			if tc.Arguments != "" {
 				currentArgs := string(partial.Args)
@@ -205,6 +301,7 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			}
 			newToolCalls = append(newToolCalls, ToolCall{
 				ID:               s.generateToolCallID(), // Google doesn't provide IDs
+				Type:             "function",
 				Name:             functionCall.Name,
 				Args:             args,
 				ThoughtSignature: functionCall.ThoughtSignature,
