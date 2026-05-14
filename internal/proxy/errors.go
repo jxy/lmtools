@@ -16,7 +16,9 @@ package proxy
 // see stream_errors.go.
 
 import (
+	"context"
 	"encoding/json"
+	"lmtools/internal/logger"
 	"net/http"
 )
 
@@ -67,11 +69,23 @@ func (AnthropicError) isErrorPayload() {}
 // sendError is a unified function to send JSON error responses
 // It accepts any ErrorPayload and writes it as JSON
 func sendError(w http.ResponseWriter, status int, payload ErrorPayload) {
+	ctx := context.Background()
+	if rw, ok := w.(*proxyResponseWriter); ok && rw.request != nil {
+		ctx = rw.request.Context()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
+	body, err := json.Marshal(payload)
+	if err != nil {
+		logger.From(ctx).Errorf("Failed to encode error response: %v", err)
+		w.WriteHeader(status)
+		return
+	}
+	body = append(body, '\n')
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		// If we can't encode the error, fall back to plain text
-		http.Error(w, "Failed to encode error response", status)
+	logWireBytes(ctx, "WIRE CLIENT RESPONSE BODY", body)
+	if _, err := w.Write(body); err != nil {
+		logger.From(ctx).Errorf("Failed to write error response: %v", err)
 	}
 }
 

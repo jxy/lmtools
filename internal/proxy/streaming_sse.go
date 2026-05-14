@@ -37,12 +37,6 @@ func (s *SSEWriter) WriteEvent(eventType, data string) error {
 	default:
 	}
 
-	if eventType != "" {
-		logger.From(s.ctx).Debugf("→ CLIENT: event: %s | data: %s", eventType, data)
-	} else {
-		logger.From(s.ctx).Debugf("→ CLIENT: data: %s", data)
-	}
-
 	var payload strings.Builder
 	if eventType != "" {
 		fmt.Fprintf(&payload, "event: %s\n", eventType)

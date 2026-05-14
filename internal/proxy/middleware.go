@@ -59,9 +59,9 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logger.From(ctx).Errorf("Panic in %s %s: %v", r.Method, r.URL.Path, err)
 
 			if !rw.written {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				rw.Header().Set("Content-Type", "application/json")
+				rw.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(rw).Encode(map[string]interface{}{
 					"error": map[string]interface{}{
 						"type":    "internal_error",
 						"message": "An internal error occurred",
@@ -89,6 +89,9 @@ type proxyResponseWriter struct {
 func (rw *proxyResponseWriter) WriteHeader(code int) {
 	if !rw.written {
 		rw.statusCode = code
+		if rw.request != nil {
+			logWireHTTPClientResponseHeaders(rw.request.Context(), "WIRE CLIENT RESPONSE HEADERS", code, rw.Header())
+		}
 		rw.ResponseWriter.WriteHeader(code)
 		rw.written = true
 	}
@@ -116,6 +119,9 @@ func (rw *proxyResponseWriter) Write(b []byte) (int, error) {
 
 // Flush implements http.Flusher
 func (rw *proxyResponseWriter) Flush() {
+	if !rw.written {
+		rw.WriteHeader(http.StatusOK)
+	}
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}

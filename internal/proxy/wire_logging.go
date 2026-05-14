@@ -68,6 +68,20 @@ func logWireHTTPResponseHeaders(ctx context.Context, label string, resp *http.Re
 	logWireBytes(ctx, label, buf.Bytes())
 }
 
+func logWireHTTPClientResponseHeaders(ctx context.Context, label string, statusCode int, header http.Header) {
+	log := logger.From(ctx)
+	if !log.IsDebugEnabled() {
+		return
+	}
+
+	var buf bytes.Buffer
+	status := fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode))
+	fmt.Fprintf(&buf, "HTTP/1.1 %s\r\n", status)
+	_ = header.Write(&buf)
+	buf.WriteString("\r\n")
+	logWireBytes(ctx, label, buf.Bytes())
+}
+
 func wrapWireLoggedResponseBody(ctx context.Context, label string, resp *http.Response) {
 	if !logger.From(ctx).IsDebugEnabled() || resp == nil || resp.Body == nil {
 		return
