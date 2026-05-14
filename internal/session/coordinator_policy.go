@@ -5,18 +5,12 @@ import (
 	"lmtools/internal/prompts"
 )
 
-type CoordinatorConfig interface {
-	core.SystemConfig
-	core.ToolConfig
-	core.SessionResumeConfig
-}
-
 type ResumeForkDecision struct {
 	ShouldFork bool
 	NewSystem  string
 }
 
-func DecideResumeFork(sessionSystem *string, cfg CoordinatorConfig) ResumeForkDecision {
+func DecideResumeFork(sessionSystem *string, cfg core.RequestOptions) ResumeForkDecision {
 	if cfg.IsSystemExplicitlySet() {
 		specifiedPrompt := cfg.GetEffectiveSystem()
 		if sessionSystem == nil {

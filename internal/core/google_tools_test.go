@@ -8,7 +8,7 @@ import (
 
 // TestBuildGoogleToolAwareRequest tests that Google requests include tool definitions
 func TestBuildGoogleToolAwareRequest(t *testing.T) {
-	cfg := &TestRequestConfig{
+	cfg := TestRequestConfig{
 		Provider: "google",
 		Model:    "gemini-1.5-pro",
 		System:   "You are a helpful assistant",
@@ -152,7 +152,7 @@ func TestGoogleStreamingWithTools(t *testing.T) {
 // TestGoogleToolExecutionFlow tests the full flow of tool execution with Google
 func TestGoogleToolExecutionFlow(t *testing.T) {
 	// Test building initial request with tools
-	cfg := &TestRequestConfig{
+	cfg := TestRequestConfig{
 		Provider: "google",
 		Model:    "gemini-1.5-pro",
 		System:   "You are a helpful assistant",

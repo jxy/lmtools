@@ -33,25 +33,25 @@ func extractJSONBody(req *http.Request) (map[string]interface{}, error) {
 }
 
 // Helper to create test config with API key
-func createTestConfig(provider, model string, enableTool bool) (*TestRequestConfig, string, error) {
+func createTestConfig(provider, model string, enableTool bool) (TestRequestConfig, string, error) {
 	// Create a temporary API key file
 	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
 	if err != nil {
-		return nil, "", err
+		return TestRequestConfig{}, "", err
 	}
 	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
 		os.Remove(apiKeyFile.Name())
-		return nil, "", err
+		return TestRequestConfig{}, "", err
 	}
 	apiKeyFile.Close()
 
-	cfg := &TestRequestConfig{
-		User:              "testuser",
-		Model:             model,
-		System:            "Test system prompt",
-		APIKeyFile:        apiKeyFile.Name(),
-		Provider:          provider,
-		IsToolEnabledFlag: enableTool,
+	cfg := TestRequestConfig{
+		User:        "testuser",
+		Model:       model,
+		System:      "Test system prompt",
+		APIKeyFile:  apiKeyFile.Name(),
+		Provider:    provider,
+		ToolEnabled: enableTool,
 	}
 
 	return cfg, apiKeyFile.Name(), nil
@@ -77,11 +77,11 @@ func createTestTools() []ToolDefinition {
 	}
 }
 
-func buildProviderTestRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildProviderTestRequest(cfg RequestOptions, messages []TypedMessage, model string, system string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	return buildChatRequestFromTyped(cfg, messages, model, system, system != "", toolDefs, toolChoice, stream)
 }
 
-func buildGoogleTestRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildGoogleTestRequest(cfg RequestOptions, messages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	system := configuredSystemPrompt(cfg)
 	return buildChatRequestFromTyped(cfg, messages, model, system, system != "", toolDefs, toolChoice, stream)
 }

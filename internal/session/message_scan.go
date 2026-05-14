@@ -5,7 +5,6 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,19 +104,25 @@ func findSiblings(sessionPath, msgID string) ([]string, error) {
 
 // IsAssistantMessage checks if the given branch path points to an assistant message.
 func IsAssistantMessage(branchPath string) (bool, error) {
+	return IsAssistantMessageWithManager(DefaultManager(), branchPath)
+}
+
+// IsAssistantMessageWithManager checks if the given branch path points to an assistant message using the provided manager.
+func IsAssistantMessageWithManager(manager *Manager, branchPath string) (bool, error) {
+	if manager == nil {
+		manager = DefaultManager()
+	}
 	if branchPath == "" {
 		return false, errors.WrapError("validate branch path", stdErrors.New("branch path cannot be empty"))
 	}
 
-	sessionPath, messageID := ParseMessageID(branchPath)
+	sessionPath, messageID := manager.ParseMessageID(branchPath)
 	if messageID == "" {
 		// Not a message path, but this is not necessarily an error.
 		return false, nil
 	}
 
-	if !filepath.IsAbs(sessionPath) {
-		sessionPath = filepath.Join(GetSessionsDir(), sessionPath)
-	}
+	sessionPath = manager.ResolveSessionPath(sessionPath)
 
 	msg, err := readMessage(sessionPath, messageID)
 	if err != nil {

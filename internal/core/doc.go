@@ -55,7 +55,7 @@
 //
 // Example:
 //
-//	cfg := RequestConfig{...}
+//	cfg := RequestOptions{...}
 //	messages := []Message{{Role: "user", Content: "Hello"}}
 //	req, body, err := BuildRequest(cfg, messages)
 //	if err != nil {

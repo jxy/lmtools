@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func newArgoToolTestConfig() *TestRequestConfig {
+func newArgoToolTestConfig() TestRequestConfig {
 	cfg := NewTestRequestConfig()
 	cfg.User = ""
 	cfg.Provider = ""
@@ -17,9 +17,9 @@ func newArgoToolTestConfig() *TestRequestConfig {
 	cfg.System = ""
 	cfg.Env = ""
 	cfg.ProviderURL = "http://test.example.com"
-	cfg.IsStreamChatMode = false
-	cfg.IsEmbedMode = false
-	cfg.IsToolEnabledFlag = false
+	cfg.StreamChat = false
+	cfg.Embed = false
+	cfg.ToolEnabled = false
 	return cfg
 }
 
@@ -233,7 +233,7 @@ func TestBuildArgoChatRequestWithTools(t *testing.T) {
 			cfg.Model = tt.model
 			cfg.Provider = tt.provider
 			cfg.System = "You are a helpful assistant"
-			cfg.IsToolEnabledFlag = true
+			cfg.ToolEnabled = true
 
 			// Build the request
 			messages := []TypedMessage{NewTextMessage("user", "Test message")}
@@ -652,7 +652,7 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 	cfg.Model = "claudesonnet4"
 	cfg.System = "Test system prompt"
 	cfg.Env = "dev"
-	cfg.IsToolEnabledFlag = true
+	cfg.ToolEnabled = true
 
 	// Test tool results are now embedded in typedMessages
 	additionalText := "Note: Some outputs were truncated"
@@ -909,7 +909,7 @@ func TestBuildArgoToolResultRequest(t *testing.T) {
 			testCfg.Model = tt.model
 			testCfg.System = cfg.System
 			testCfg.Env = cfg.Env
-			testCfg.IsToolEnabledFlag = true
+			testCfg.ToolEnabled = true
 			testCfg.Provider = "argo"
 
 			// Set up request cache for the test
@@ -1065,7 +1065,7 @@ func TestBuildArgoToolResultRequestWithoutTools(t *testing.T) {
 	cfg.Model = "claudesonnet4"
 	cfg.System = "Test system prompt"
 	cfg.Env = "dev"
-	cfg.IsToolEnabledFlag = false // No tools enabled
+	cfg.ToolEnabled = false // No tools enabled
 
 	// Create typed messages for the test
 	typedMessages := []TypedMessage{

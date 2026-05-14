@@ -6,41 +6,45 @@ import (
 	"testing"
 )
 
+var providerSpecExpectations = map[string]struct {
+	expectConvertTools   bool
+	expectGenericRequest bool
+}{
+	constants.ProviderOpenAI: {
+		expectConvertTools:   true,
+		expectGenericRequest: true,
+	},
+	constants.ProviderAnthropic: {
+		expectConvertTools:   true,
+		expectGenericRequest: true,
+	},
+	constants.ProviderGoogle: {
+		expectConvertTools:   true,
+		expectGenericRequest: true,
+	},
+	constants.ProviderArgo: {
+		expectConvertTools: false,
+	},
+}
+
 func TestProviderSpecsCompleteness(t *testing.T) {
-	tests := []struct {
-		provider             string
-		expectConvertTools   bool
-		expectGenericRequest bool
-	}{
-		{
-			provider:             constants.ProviderOpenAI,
-			expectConvertTools:   true,
-			expectGenericRequest: true,
-		},
-		{
-			provider:             constants.ProviderAnthropic,
-			expectConvertTools:   true,
-			expectGenericRequest: true,
-		},
-		{
-			provider:             constants.ProviderGoogle,
-			expectConvertTools:   true,
-			expectGenericRequest: true,
-		},
-		{
-			provider:           constants.ProviderArgo,
-			expectConvertTools: false,
-		},
+	providerIDs := providers.ProviderIDs()
+	if len(providerSpecRegistry()) != len(providerIDs) {
+		t.Fatalf("providerSpecRegistry() has %d providers, want %d", len(providerSpecRegistry()), len(providerIDs))
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.provider, func(t *testing.T) {
-			spec, err := providerSpecForName(tt.provider)
-			if err != nil {
-				t.Fatalf("providerSpecForName(%q) error = %v", tt.provider, err)
+	for _, provider := range providerIDs {
+		t.Run(provider, func(t *testing.T) {
+			tt, ok := providerSpecExpectations[provider]
+			if !ok {
+				t.Fatalf("missing provider spec expectations for %q", provider)
 			}
-			if spec.Provider != tt.provider {
-				t.Fatalf("spec.Provider = %q, want %q", spec.Provider, tt.provider)
+			spec, err := providerSpecForName(provider)
+			if err != nil {
+				t.Fatalf("providerSpecForName(%q) error = %v", provider, err)
+			}
+			if spec.Provider != provider {
+				t.Fatalf("spec.Provider = %q, want %q", spec.Provider, provider)
 			}
 			if spec.displayName() == "" {
 				t.Fatal("displayName() must not be empty")
@@ -54,8 +58,8 @@ func TestProviderSpecsCompleteness(t *testing.T) {
 			if spec.ParseResponse == nil {
 				t.Fatal("ParseResponse must be set")
 			}
-			if got := spec.supportsEmbeddings(); got != providers.SupportsEmbeddings(tt.provider) {
-				t.Fatalf("supportsEmbeddings() = %v, want %v", got, providers.SupportsEmbeddings(tt.provider))
+			if got := spec.supportsEmbeddings(); got != providers.SupportsEmbeddings(provider) {
+				t.Fatalf("supportsEmbeddings() = %v, want %v", got, providers.SupportsEmbeddings(provider))
 			}
 			if got := spec.BuildEmbed != nil; got != spec.supportsEmbeddings() {
 				t.Fatalf("BuildEmbed set = %v, want supportsEmbeddings()=%v", got, spec.supportsEmbeddings())
@@ -67,9 +71,15 @@ func TestProviderSpecsCompleteness(t *testing.T) {
 			if genericRequest != tt.expectGenericRequest {
 				t.Fatalf("generic request support = %v, want %v", genericRequest, tt.expectGenericRequest)
 			}
-			if got := spec.usesOutOfBandSystemPrompt(); got != providers.UsesOutOfBandSystemPrompt(tt.provider) {
-				t.Fatalf("usesOutOfBandSystemPrompt() = %v, want %v", got, providers.UsesOutOfBandSystemPrompt(tt.provider))
+			if got := spec.usesOutOfBandSystemPrompt(); got != providers.UsesOutOfBandSystemPrompt(provider) {
+				t.Fatalf("usesOutOfBandSystemPrompt() = %v, want %v", got, providers.UsesOutOfBandSystemPrompt(provider))
 			}
 		})
+	}
+
+	for provider := range providerSpecRegistry() {
+		if _, ok := providers.InfoFor(provider); !ok {
+			t.Fatalf("provider spec %q is not registered in providers", provider)
+		}
 	}
 }

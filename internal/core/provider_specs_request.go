@@ -47,14 +47,10 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 	return reqMap
 }
 
-func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg interface{}) {
-	outputCfg, ok := cfg.(OutputConfig)
-	if !ok {
-		return
-	}
-	payload.Effort = strings.ToLower(strings.TrimSpace(outputCfg.GetEffort()))
-	payload.JSONMode = outputCfg.IsJSONMode()
-	if schema := outputCfg.GetJSONSchema(); len(schema) > 0 {
+func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg RequestOptions) {
+	payload.Effort = strings.ToLower(strings.TrimSpace(cfg.GetEffort()))
+	payload.JSONMode = cfg.IsJSONMode()
+	if schema := cfg.GetJSONSchema(); len(schema) > 0 {
 		payload.JSONSchema = append(payload.JSONSchema[:0], schema...)
 	}
 }
@@ -218,7 +214,7 @@ func googleAutoToolConfig() map[string]interface{} {
 	}
 }
 
-func openAIChatURL(cfg ProviderConfig, _ string, _ bool) string {
+func openAIChatURL(cfg RequestOptions, _ string, _ bool) string {
 	chatURL, err := providers.ResolveChatURL(constants.ProviderOpenAI, cfg.GetProviderURL(), "", "", false)
 	if err == nil {
 		return chatURL
@@ -230,7 +226,7 @@ func openAIChatURL(cfg ProviderConfig, _ string, _ bool) string {
 	return strings.TrimRight(url, "/") + "/chat/completions"
 }
 
-func anthropicChatURL(cfg ProviderConfig, _ string, _ bool) string {
+func anthropicChatURL(cfg RequestOptions, _ string, _ bool) string {
 	messagesURL, err := providers.ResolveChatURL(constants.ProviderAnthropic, cfg.GetProviderURL(), "", "", false)
 	if err == nil {
 		return messagesURL
@@ -239,7 +235,7 @@ func anthropicChatURL(cfg ProviderConfig, _ string, _ bool) string {
 	return messagesURL
 }
 
-func googleChatURL(cfg ProviderConfig, model string, stream bool) string {
+func googleChatURL(cfg RequestOptions, model string, stream bool) string {
 	url, err := providers.ResolveChatURL(constants.ProviderGoogle, cfg.GetProviderURL(), "", model, stream)
 	if err == nil {
 		return url

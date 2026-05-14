@@ -28,7 +28,7 @@ func (m *mockLoggerMulti) IsDebugEnabled() bool {
 	return m.debugEnabled
 }
 
-// Test configuration that implements RequestConfig interface
+// Test configuration converted to RequestOptions at the executor boundary.
 type testExecutorConfigMulti struct {
 	toolWhitelist   string
 	toolBlacklist   string
@@ -36,38 +36,29 @@ type testExecutorConfigMulti struct {
 	toolTimeout     int
 }
 
-func (c testExecutorConfigMulti) GetUser() string             { return "testuser" }
-func (c testExecutorConfigMulti) GetModel() string            { return "test-model" }
-func (c testExecutorConfigMulti) GetProvider() string         { return "test" }
-func (c testExecutorConfigMulti) GetSystem() string           { return "" }
-func (c testExecutorConfigMulti) IsToolEnabled() bool         { return true }
-func (c testExecutorConfigMulti) GetToolWhitelist() string    { return c.toolWhitelist }
-func (c testExecutorConfigMulti) GetToolBlacklist() string    { return c.toolBlacklist }
-func (c testExecutorConfigMulti) GetToolAutoApprove() bool    { return c.toolAutoApprove }
-func (c testExecutorConfigMulti) GetToolNonInteractive() bool { return true }
-func (c testExecutorConfigMulti) GetToolTimeout() time.Duration {
+func (c testExecutorConfigMulti) requestOptions() RequestOptions {
+	return RequestOptions{
+		User:               "testuser",
+		Model:              "test-model",
+		Provider:           "test",
+		ToolEnabled:        true,
+		ToolTimeout:        c.toolDuration(),
+		ToolWhitelist:      c.toolWhitelist,
+		ToolBlacklist:      c.toolBlacklist,
+		ToolAutoApprove:    c.toolAutoApprove,
+		ToolNonInteractive: true,
+		MaxToolRounds:      32,
+		MaxToolParallel:    4,
+		ToolMaxOutputBytes: 1024 * 1024,
+	}
+}
+
+func (c testExecutorConfigMulti) toolDuration() time.Duration {
 	if c.toolTimeout > 0 {
 		return time.Duration(c.toolTimeout) * time.Second
 	}
 	return 30 * time.Second
 }
-func (c testExecutorConfigMulti) IsSystemExplicitlySet() bool { return false }
-func (c testExecutorConfigMulti) GetInput() string            { return "" }
-func (c testExecutorConfigMulti) IsEmbed() bool               { return false }
-func (c testExecutorConfigMulti) IsStreamChat() bool          { return false }
-func (c testExecutorConfigMulti) GetProviderURL() string      { return "" }
-func (c testExecutorConfigMulti) GetAPIKeyFile() string       { return "" }
-func (c testExecutorConfigMulti) GetEnv() string              { return "" }
-func (c testExecutorConfigMulti) GetMaxTokens() int           { return 0 }
-func (c testExecutorConfigMulti) GetTimeout() time.Duration   { return 30 * time.Second }
-func (c testExecutorConfigMulti) GetRetries() int             { return 0 }
-func (c testExecutorConfigMulti) GetMaxToolRounds() int       { return 32 }
-func (c testExecutorConfigMulti) GetMaxToolParallel() int     { return 4 }
-func (c testExecutorConfigMulti) GetToolMaxOutputBytes() int  { return 1024 * 1024 } // 1MB default
-func (c testExecutorConfigMulti) GetAPIKey() string           { return "test-key" }
-func (c testExecutorConfigMulti) GetEffectiveSystem() string  { return c.GetSystem() }
-func (c testExecutorConfigMulti) GetResume() string           { return "" }
-func (c testExecutorConfigMulti) GetBranch() string           { return "" }
 
 func TestExecutorMultiArgumentWhitelist(t *testing.T) {
 	// Create a temporary whitelist file with multi-argument commands
@@ -95,7 +86,7 @@ func TestExecutorMultiArgumentWhitelist(t *testing.T) {
 	logger := &mockLoggerMulti{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -164,7 +155,7 @@ func TestExecutorMultiArgumentWhitelistExecution(t *testing.T) {
 	logger := &mockLoggerMulti{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}

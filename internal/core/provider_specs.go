@@ -13,8 +13,8 @@ import (
 )
 
 type (
-	providerChatBuilder    func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error)
-	providerEmbedBuilder   func(cfg EmbedRequestConfig, input string) (*http.Request, []byte, error)
+	providerChatBuilder    func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error)
+	providerEmbedBuilder   func(cfg RequestOptions, input string) (*http.Request, []byte, error)
 	providerStreamHandler  func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (Response, error)
 	providerResponseParser func(data []byte, isEmbed bool) (Response, error)
 	providerToolConverter  func(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools
@@ -41,7 +41,7 @@ func initProviderSpecs() {
 	providerSpecs = map[string]providerSpec{
 		constants.ProviderOpenAI: {
 			Provider: constants.ProviderOpenAI,
-			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 				if useOpenAIResponses(cfg) {
 					return buildOpenAIResponsesChatRequest(cfg, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 				}
@@ -57,7 +57,7 @@ func initProviderSpecs() {
 		},
 		constants.ProviderAnthropic: {
 			Provider: constants.ProviderAnthropic,
-			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 				return buildToolAwareRequest(cfg, constants.ProviderAnthropic, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 			},
 			HandleStream:   handleAnthropicStreamWithTools,
@@ -69,7 +69,7 @@ func initProviderSpecs() {
 		},
 		constants.ProviderGoogle: {
 			Provider: constants.ProviderGoogle,
-			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 				return buildToolAwareRequest(cfg, constants.ProviderGoogle, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 			},
 			HandleStream:   handleGoogleStreamWithTools,
@@ -81,7 +81,7 @@ func initProviderSpecs() {
 		},
 		constants.ProviderArgo: {
 			Provider: constants.ProviderArgo,
-			BuildChat: func(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 				return buildArgoChatRequest(cfg, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 			},
 			BuildEmbed: buildArgoEmbedRequest,

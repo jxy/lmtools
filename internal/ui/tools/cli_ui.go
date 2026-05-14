@@ -7,11 +7,11 @@ import (
 // CLIToolUI implements the core.ToolUI interface for CLI display
 type CLIToolUI struct {
 	notifier core.Notifier
-	cfg      core.ToolConfig
+	cfg      core.RequestOptions
 }
 
 // NewCLIToolUI creates a new CLI tool UI instance
-func NewCLIToolUI(notifier core.Notifier, cfg core.ToolConfig) *CLIToolUI {
+func NewCLIToolUI(notifier core.Notifier, cfg core.RequestOptions) *CLIToolUI {
 	return &CLIToolUI{
 		notifier: notifier,
 		cfg:      cfg,

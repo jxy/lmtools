@@ -72,7 +72,7 @@ func TestBuildRequestWithToolInteractions_Providers(t *testing.T) {
 				t.Skip("Skipping test that requires API key file")
 			}
 
-			cfg := &TestRequestConfig{
+			cfg := TestRequestConfig{
 				User:       "testuser",
 				Model:      tt.model,
 				System:     "You are a helpful assistant",
@@ -191,7 +191,7 @@ func TestBuildRequestWithToolInteractions_Regeneration(t *testing.T) {
 				t.Skip("Skipping test that requires API key file")
 			}
 
-			cfg := &TestRequestConfig{
+			cfg := TestRequestConfig{
 				User:       "testuser",
 				Model:      tt.model,
 				System:     "You are a helpful assistant",

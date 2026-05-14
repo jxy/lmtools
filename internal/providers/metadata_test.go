@@ -39,14 +39,7 @@ func TestUnknownProviderMetadataDefaultsAreExplicit(t *testing.T) {
 }
 
 func TestProviderDescriptorsAreComplete(t *testing.T) {
-	requiredProviders := []string{
-		constants.ProviderArgo,
-		constants.ProviderOpenAI,
-		constants.ProviderAnthropic,
-		constants.ProviderGoogle,
-	}
-
-	for _, provider := range requiredProviders {
+	for _, provider := range ProviderIDs() {
 		descriptor, ok := descriptorFor(provider)
 		if !ok {
 			t.Fatalf("descriptorFor(%q) = missing", provider)

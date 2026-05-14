@@ -153,7 +153,7 @@ func TestParseArgoResponseWithOpenAIFormat(t *testing.T) {
 
 func TestBuildArgoToolResultRequestOpenAIFormat(t *testing.T) {
 	// Set up test config
-	cfg := &TestRequestConfig{
+	cfg := TestRequestConfig{
 		User:  "testuser",
 		Model: "gpt5",
 		Env:   "dev",
@@ -287,7 +287,7 @@ func TestBuildArgoToolResultRequestOpenAIFormat(t *testing.T) {
 
 func TestBuildArgoToolResultRequestAnthropicFormat(t *testing.T) {
 	// Set up test config for Claude model
-	cfg := &TestRequestConfig{
+	cfg := TestRequestConfig{
 		User:  "testuser",
 		Model: "claudesonnet4",
 		Env:   "dev",

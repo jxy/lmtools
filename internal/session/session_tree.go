@@ -40,7 +40,15 @@ func formatBytes(bytes int) string {
 
 // ShowSessions displays all conversation trees
 func ShowSessions(notifier core.Notifier) error {
-	sessionsDir := GetSessionsDir()
+	return ShowSessionsWithManager(DefaultManager(), notifier)
+}
+
+// ShowSessionsWithManager displays all conversation trees using the provided manager.
+func ShowSessionsWithManager(manager *Manager, notifier core.Notifier) error {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	sessionsDir := manager.SessionsDir()
 
 	// Check if sessions directory exists
 	if _, err := os.Stat(sessionsDir); os.IsNotExist(err) {
@@ -120,7 +128,15 @@ func ShowSessions(notifier core.Notifier) error {
 
 // ShowTree displays a specific session tree
 func ShowTree(sessionID string) error {
-	sessionPath := filepath.Join(GetSessionsDir(), sessionID)
+	return ShowTreeWithManager(DefaultManager(), sessionID)
+}
+
+// ShowTreeWithManager displays a specific session tree using the provided manager.
+func ShowTreeWithManager(manager *Manager, sessionID string) error {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	sessionPath := manager.ResolveSessionPath(sessionID)
 
 	// Check if session exists
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
@@ -359,7 +375,15 @@ func formatToolResultsInline(results []core.ToolResult) string {
 
 // CountSessions returns the number of sessions
 func CountSessions() (int, error) {
-	sessionsDir := GetSessionsDir()
+	return CountSessionsWithManager(DefaultManager())
+}
+
+// CountSessionsWithManager returns the number of sessions visible to the provided manager.
+func CountSessionsWithManager(manager *Manager) (int, error) {
+	if manager == nil {
+		manager = DefaultManager()
+	}
+	sessionsDir := manager.SessionsDir()
 
 	if _, err := os.Stat(sessionsDir); os.IsNotExist(err) {
 		return 0, nil

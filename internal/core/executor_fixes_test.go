@@ -49,7 +49,7 @@ func TestCommandJSONFormat(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestOutputFormat(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestEmptyWhitelistWithAutoApprove(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestTimeoutAfterApproval(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestExecutionTimerStartsAfterApproval(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestBlacklistErrorMessage(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestTruncationMessageFormat(t *testing.T) {
 	logger := &mockLoggerFixes{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}

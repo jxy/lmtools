@@ -7,7 +7,7 @@ import (
 )
 
 func TestConfiguredSystemPromptDoesNotUseDefault(t *testing.T) {
-	cfg := &TestRequestConfig{}
+	cfg := TestRequestConfig{}
 
 	if got := configuredSystemPrompt(cfg); got != "" {
 		t.Fatalf("configuredSystemPrompt() = %q, want empty string", got)
@@ -18,7 +18,7 @@ func TestConfiguredSystemPromptDoesNotUseDefault(t *testing.T) {
 }
 
 func TestResolvedSystemPromptPrefersOverride(t *testing.T) {
-	cfg := &TestRequestConfig{
+	cfg := TestRequestConfig{
 		System: "configured prompt",
 	}
 
@@ -29,14 +29,14 @@ func TestResolvedSystemPromptPrefersOverride(t *testing.T) {
 
 // TestAnthropicSystemPromptNoDouplication verifies that system prompts are not duplicated for Anthropic
 func TestAnthropicSystemPromptNoDouplication(t *testing.T) {
-	cfg := &TestRequestConfig{
-		User:              "test",
-		Model:             "claude-3-opus-20240229",
-		System:            "You are a helpful assistant",
-		Provider:          "anthropic",
-		ProviderURL:       "https://api.anthropic.com/v1",
-		IsStreamChatMode:  false,
-		IsToolEnabledFlag: false,
+	cfg := TestRequestConfig{
+		User:        "test",
+		Model:       "claude-3-opus-20240229",
+		System:      "You are a helpful assistant",
+		Provider:    "anthropic",
+		ProviderURL: "https://api.anthropic.com/v1",
+		StreamChat:  false,
+		ToolEnabled: false,
 	}
 
 	req, body, err := BuildRequest(cfg, "Hello")
@@ -108,13 +108,13 @@ func TestArgoSystemPromptInMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			cfg := &TestRequestConfig{
-				User:              "test",
-				Model:             tt.model,
-				System:            "You are a helpful assistant",
-				Provider:          "argo",
-				IsStreamChatMode:  false,
-				IsToolEnabledFlag: false,
+			cfg := TestRequestConfig{
+				User:        "test",
+				Model:       tt.model,
+				System:      "You are a helpful assistant",
+				Provider:    "argo",
+				StreamChat:  false,
+				ToolEnabled: false,
 			}
 
 			_, body, err := BuildRequest(cfg, "Hello")
@@ -237,14 +237,14 @@ func TestProviderSystemHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &TestRequestConfig{
-				User:              "test",
-				Model:             "test-model",
-				System:            "You are a helpful assistant",
-				Provider:          tt.provider,
-				ProviderURL:       tt.providerURL,
-				IsStreamChatMode:  false,
-				IsToolEnabledFlag: false,
+			cfg := TestRequestConfig{
+				User:        "test",
+				Model:       "test-model",
+				System:      "You are a helpful assistant",
+				Provider:    tt.provider,
+				ProviderURL: tt.providerURL,
+				StreamChat:  false,
+				ToolEnabled: false,
 			}
 
 			_, body, err := BuildRequest(cfg, "Hello")

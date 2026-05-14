@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func newCoreTestRequestConfig() *TestRequestConfig {
+func newCoreTestRequestConfig() TestRequestConfig {
 	cfg := NewTestRequestConfig()
 	cfg.User = ""
 	cfg.Model = ""
@@ -20,9 +20,9 @@ func newCoreTestRequestConfig() *TestRequestConfig {
 	cfg.Provider = ""
 	cfg.ProviderURL = ""
 	cfg.APIKeyFile = ""
-	cfg.IsEmbedMode = false
-	cfg.IsStreamChatMode = false
-	cfg.IsToolEnabledFlag = false
+	cfg.Embed = false
+	cfg.StreamChat = false
+	cfg.ToolEnabled = false
 	return cfg
 }
 
@@ -525,7 +525,7 @@ func TestStreamingFallbackAccumulation(t *testing.T) {
 	// Create request config with unknown provider
 	cfg := newCoreTestRequestConfig()
 	cfg.Provider = "unknown-provider"
-	cfg.IsStreamChatMode = true
+	cfg.StreamChat = true
 
 	// Create HTTP response
 	resp, err := http.Get(ts.URL)
@@ -1151,8 +1151,8 @@ func TestBuildToolResultRequestStreamingPolicy(t *testing.T) {
 		cfg := newCoreTestRequestConfig()
 		cfg.Provider = "argo"
 		cfg.Model = "gpt-5"
-		cfg.IsStreamChatMode = true
-		cfg.IsToolEnabledFlag = true
+		cfg.StreamChat = true
+		cfg.ToolEnabled = true
 
 		req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
 		if err != nil {
@@ -1171,8 +1171,8 @@ func TestBuildToolResultRequestStreamingPolicy(t *testing.T) {
 		cfg.Provider = "argo"
 		cfg.Model = "gpt-5"
 		cfg.ArgoLegacy = true
-		cfg.IsStreamChatMode = true
-		cfg.IsToolEnabledFlag = true
+		cfg.StreamChat = true
+		cfg.ToolEnabled = true
 
 		req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
 		if err != nil {

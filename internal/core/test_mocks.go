@@ -2,109 +2,17 @@ package core
 
 import (
 	"context"
-	"encoding/json"
-	"lmtools/internal/prompts"
 	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
-// TestRequestConfig is a unified mock that implements RequestConfig for testing
-type TestRequestConfig struct {
-	User                string
-	Model               string
-	System              string
-	SystemExplicitlySet bool
-	Env                 string
-	Provider            string
-	ProviderURL         string
-	APIKeyFile          string
-	Effort              string
-	JSONMode            bool
-	JSONSchema          json.RawMessage
-	IsEmbedMode         bool
-	IsStreamChatMode    bool
-	OpenAIResponses     bool
-	IsToolEnabledFlag   bool
-	ToolTimeout         time.Duration
-	ToolWhitelist       string
-	ToolBlacklist       string
-	ToolAutoApprove     bool
-	ToolNonInteractive  bool
-	MaxToolRounds       int
-	MaxToolParallel     int
-	ToolMaxOutputBytes  int
-	ArgoLegacy          bool
-	Resume              string
-	Branch              string
-}
-
-// Implement RequestConfig interface
-func (c *TestRequestConfig) GetUser() string   { return c.User }
-func (c *TestRequestConfig) GetModel() string  { return c.Model }
-func (c *TestRequestConfig) GetSystem() string { return c.System }
-func (c *TestRequestConfig) GetEffectiveSystem() string {
-	if c.System != "" {
-		return c.System
-	}
-	return prompts.DefaultSystemPrompt
-}
-func (c *TestRequestConfig) IsSystemExplicitlySet() bool { return c.SystemExplicitlySet }
-func (c *TestRequestConfig) GetEnv() string              { return c.Env }
-func (c *TestRequestConfig) GetProvider() string         { return c.Provider }
-func (c *TestRequestConfig) GetProviderURL() string      { return c.ProviderURL }
-func (c *TestRequestConfig) GetAPIKeyFile() string       { return c.APIKeyFile }
-func (c *TestRequestConfig) GetEffort() string           { return c.Effort }
-func (c *TestRequestConfig) IsJSONMode() bool            { return c.JSONMode }
-func (c *TestRequestConfig) GetJSONSchema() json.RawMessage {
-	return append(json.RawMessage(nil), c.JSONSchema...)
-}
-func (c *TestRequestConfig) IsEmbed() bool      { return c.IsEmbedMode }
-func (c *TestRequestConfig) IsStreamChat() bool { return c.IsStreamChatMode }
-func (c *TestRequestConfig) UseOpenAIResponses() bool {
-	return c.OpenAIResponses
-}
-func (c *TestRequestConfig) IsToolEnabled() bool { return c.IsToolEnabledFlag }
-func (c *TestRequestConfig) GetToolTimeout() time.Duration {
-	if c.ToolTimeout > 0 {
-		return c.ToolTimeout
-	}
-	return 30 * time.Second
-}
-func (c *TestRequestConfig) GetToolWhitelist() string    { return c.ToolWhitelist }
-func (c *TestRequestConfig) GetToolBlacklist() string    { return c.ToolBlacklist }
-func (c *TestRequestConfig) GetToolAutoApprove() bool    { return c.ToolAutoApprove }
-func (c *TestRequestConfig) GetToolNonInteractive() bool { return c.ToolNonInteractive }
-func (c *TestRequestConfig) GetMaxToolRounds() int {
-	if c.MaxToolRounds > 0 {
-		return c.MaxToolRounds
-	}
-	return 32
-}
-
-func (c *TestRequestConfig) GetMaxToolParallel() int {
-	if c.MaxToolParallel > 0 {
-		return c.MaxToolParallel
-	}
-	return 4
-}
-
-func (c *TestRequestConfig) GetToolMaxOutputBytes() int {
-	if c.ToolMaxOutputBytes > 0 {
-		return c.ToolMaxOutputBytes
-	}
-	return 1024 * 1024 // 1MB default
-}
-func (c *TestRequestConfig) GetResume() string { return c.Resume }
-func (c *TestRequestConfig) GetBranch() string { return c.Branch }
-func (c *TestRequestConfig) IsArgoLegacy() bool {
-	return c.ArgoLegacy
-}
+type TestRequestConfig = RequestOptions
 
 // NewTestRequestConfig creates a TestRequestConfig with default values
-func NewTestRequestConfig() *TestRequestConfig {
-	return &TestRequestConfig{
+func NewTestRequestConfig() RequestOptions {
+	return RequestOptions{
 		User:          "testuser",
 		Model:         "test-model",
 		System:        "You are a helpful assistant",

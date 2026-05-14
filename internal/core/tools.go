@@ -132,7 +132,7 @@ type ToolExecutionConfig struct {
 // This reduces parameter sprawl and makes the API cleaner
 type ToolContext struct {
 	Ctx             context.Context
-	Cfg             ChatRequestConfig
+	Cfg             RequestOptions
 	Logger          Logger
 	Notifier        Notifier
 	Approver        Approver
@@ -336,7 +336,7 @@ func BuildTruncationNotes(results []ToolResult, toolCalls []ToolCall) string {
 }
 
 // BuildAndSendFollowupRequest builds and sends a follow-up request after tool execution
-func BuildAndSendFollowupRequest(ctx context.Context, cfg ChatRequestConfig, execCfg ToolExecutionConfig,
+func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCfg ToolExecutionConfig,
 	model string, toolDefs []ToolDefinition,
 	getMessagesWithTools func(string) ([]TypedMessage, error),
 	logger Logger,

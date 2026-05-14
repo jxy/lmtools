@@ -134,8 +134,8 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg := newTestCoordinatorConfig()
 			cfg.Resume = sessionID
 			cfg.System = prompts.DefaultSystemPrompt
-			cfg.IsToolEnabledFlag = true
-			cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
+			cfg.ToolEnabled = true
+			cfg.EffectiveSystem = prompts.ToolSystemPrompt
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
@@ -234,9 +234,9 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					cfg := newTestCoordinatorConfig()
 					cfg.Resume = sessionID
 					cfg.System = prompts.DefaultSystemPrompt
-					cfg.IsToolEnabledFlag = enableTool
+					cfg.ToolEnabled = enableTool
 					if enableTool {
-						cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
+						cfg.EffectiveSystem = prompts.ToolSystemPrompt
 					}
 					notifier := core.NewTestNotifier()
 
@@ -289,9 +289,9 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					cfg := newTestCoordinatorConfig()
 					cfg.Resume = sessionID
 					cfg.System = prompts.DefaultSystemPrompt
-					cfg.IsToolEnabledFlag = enableTool
+					cfg.ToolEnabled = enableTool
 					if enableTool {
-						cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
+						cfg.EffectiveSystem = prompts.ToolSystemPrompt
 					}
 					notifier := core.NewTestNotifier()
 
@@ -345,8 +345,8 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg := newTestCoordinatorConfig()
 			cfg.Resume = sessionID
 			cfg.System = prompts.DefaultSystemPrompt
-			cfg.IsToolEnabledFlag = true
-			cfg.EffectiveSystemOverride = stringPtr(prompts.ToolSystemPrompt)
+			cfg.ToolEnabled = true
+			cfg.EffectiveSystem = prompts.ToolSystemPrompt
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
@@ -463,7 +463,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		cfg.Resume = sessionID
 		cfg.System = ""
 		cfg.SystemExplicitlySet = true
-		cfg.EffectiveSystemOverride = stringPtr("")
+		cfg.EffectiveSystem = ""
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)

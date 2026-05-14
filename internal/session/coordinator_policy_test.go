@@ -1,6 +1,7 @@
 package session
 
 import (
+	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 	"testing"
 )
@@ -9,14 +10,14 @@ func TestDecideResumeFork(t *testing.T) {
 	tests := []struct {
 		name          string
 		sessionSystem *string
-		configure     func(*testCoordinatorConfig)
+		configure     func(*core.RequestOptions)
 		wantFork      bool
 		wantSystem    string
 	}{
 		{
 			name:          "explicit system forks when session prompt differs",
 			sessionSystem: stringPtr(prompts.DefaultSystemPrompt),
-			configure: func(cfg *testCoordinatorConfig) {
+			configure: func(cfg *core.RequestOptions) {
 				cfg.System = "custom system"
 				cfg.SystemExplicitlySet = true
 			},
@@ -26,18 +27,18 @@ func TestDecideResumeFork(t *testing.T) {
 		{
 			name:          "explicit empty system removes existing prompt",
 			sessionSystem: stringPtr(prompts.DefaultSystemPrompt),
-			configure: func(cfg *testCoordinatorConfig) {
+			configure: func(cfg *core.RequestOptions) {
 				cfg.System = ""
 				cfg.SystemExplicitlySet = true
-				cfg.EffectiveSystemOverride = stringPtr("")
+				cfg.EffectiveSystem = ""
 			},
 			wantFork: true,
 		},
 		{
 			name:          "tool enable upgrades default prompt",
 			sessionSystem: stringPtr(prompts.DefaultSystemPrompt),
-			configure: func(cfg *testCoordinatorConfig) {
-				cfg.IsToolEnabledFlag = true
+			configure: func(cfg *core.RequestOptions) {
+				cfg.ToolEnabled = true
 			},
 			wantFork:   true,
 			wantSystem: prompts.ToolSystemPrompt,
@@ -45,16 +46,16 @@ func TestDecideResumeFork(t *testing.T) {
 		{
 			name:          "custom prompt is preserved when enabling tools",
 			sessionSystem: stringPtr("custom system"),
-			configure: func(cfg *testCoordinatorConfig) {
-				cfg.IsToolEnabledFlag = true
+			configure: func(cfg *core.RequestOptions) {
+				cfg.ToolEnabled = true
 			},
 			wantFork: false,
 		},
 		{
 			name:          "no prompt forks to tool prompt when tools enabled",
 			sessionSystem: nil,
-			configure: func(cfg *testCoordinatorConfig) {
-				cfg.IsToolEnabledFlag = true
+			configure: func(cfg *core.RequestOptions) {
+				cfg.ToolEnabled = true
 			},
 			wantFork:   true,
 			wantSystem: prompts.ToolSystemPrompt,
@@ -65,7 +66,7 @@ func TestDecideResumeFork(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := newTestCoordinatorConfig()
 			if tt.configure != nil {
-				tt.configure(cfg)
+				tt.configure(&cfg)
 			}
 
 			decision := DecideResumeFork(tt.sessionSystem, cfg)

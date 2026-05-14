@@ -30,14 +30,14 @@ func (providerSpecBehaviorLogger) Debugf(string, ...interface{}) {}
 
 func (providerSpecBehaviorLogger) IsDebugEnabled() bool { return false }
 
-func newProviderSpecTestConfig(provider, model, providerURL string) *TestRequestConfig {
+func newProviderSpecTestConfig(provider, model, providerURL string) TestRequestConfig {
 	cfg := NewTestRequestConfig()
 	cfg.Provider = provider
 	cfg.Model = model
 	cfg.ProviderURL = providerURL
 	cfg.System = ""
-	cfg.IsStreamChatMode = false
-	cfg.IsToolEnabledFlag = false
+	cfg.StreamChat = false
+	cfg.ToolEnabled = false
 	return cfg
 }
 
@@ -309,7 +309,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 	t.Run("explicit tools use native openai tools", func(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "gpt5", "")
 		cfg.Env = "http://argo.example.test"
-		cfg.IsToolEnabledFlag = false
+		cfg.ToolEnabled = false
 
 		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "gpt5", "", false, sampleProviderSpecToolDefs(), nil, true)
 		if err != nil {

@@ -7,11 +7,12 @@ import (
 )
 
 func TestModelProviderCapabilitiesComplete(t *testing.T) {
-	providerNames := []string{
-		constants.ProviderOpenAI,
-		constants.ProviderAnthropic,
-		constants.ProviderGoogle,
-		constants.ProviderArgo,
+	providerNames := providers.ProviderIDs()
+	if len(modelProviderCapabilities) == 0 {
+		modelProviderCapabilitiesOnce.Do(initModelProviderCapabilities)
+	}
+	if len(modelProviderCapabilities) != len(providerNames) {
+		t.Fatalf("modelProviderCapabilities has %d providers, want %d", len(modelProviderCapabilities), len(providerNames))
 	}
 
 	for _, provider := range providerNames {
@@ -31,14 +32,19 @@ func TestModelProviderCapabilitiesComplete(t *testing.T) {
 			}
 		})
 	}
+
+	for provider := range modelProviderCapabilities {
+		if _, ok := providers.InfoFor(provider); !ok {
+			t.Fatalf("model provider capability %q is not registered in providers", provider)
+		}
+	}
 }
 
 func TestProviderForwardingPoliciesComplete(t *testing.T) {
-	providerNames := []string{
-		constants.ProviderOpenAI,
-		constants.ProviderAnthropic,
-		constants.ProviderGoogle,
-		constants.ProviderArgo,
+	providerNames := providers.ProviderIDs()
+	forwardingPoliciesOnce.Do(initForwardingPolicies)
+	if len(anthropicForwardingPolicies) != len(providerNames) {
+		t.Fatalf("anthropicForwardingPolicies has %d providers, want %d", len(anthropicForwardingPolicies), len(providerNames))
 	}
 
 	for _, provider := range providerNames {
@@ -65,6 +71,20 @@ func TestProviderForwardingPoliciesComplete(t *testing.T) {
 				t.Fatal("OpenAI-format streaming forwarder must be set")
 			}
 		})
+	}
+
+	for provider := range anthropicForwardingPolicies {
+		if _, ok := providers.InfoFor(provider); !ok {
+			t.Fatalf("Anthropic forwarding policy %q is not registered in providers", provider)
+		}
+	}
+	for provider := range openAIStreamPolicies {
+		if provider == constants.ProviderOpenAI {
+			t.Fatal("OpenAI provider should not have a conversion stream policy")
+		}
+		if _, ok := providers.InfoFor(provider); !ok {
+			t.Fatalf("OpenAI stream policy %q is not registered in providers", provider)
+		}
 	}
 }
 

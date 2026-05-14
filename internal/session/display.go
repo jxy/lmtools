@@ -110,6 +110,14 @@ func FormatRole(role, model string) string {
 
 // ShowMessage displays a single message with its metadata
 func ShowMessage(messagePath string, notifier core.Notifier) error {
+	return ShowMessageWithManager(DefaultManager(), messagePath, notifier)
+}
+
+// ShowMessageWithManager displays a single message with its metadata using the provided manager.
+func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.Notifier) error {
+	if manager == nil {
+		manager = DefaultManager()
+	}
 	// Extract directory and message ID
 	dir := filepath.Dir(messagePath)
 	msgID := filepath.Base(messagePath)
@@ -121,7 +129,7 @@ func ShowMessage(messagePath string, notifier core.Notifier) error {
 	}
 
 	// Get the relative path for display
-	relPath, err := filepath.Rel(GetSessionsDir(), messagePath)
+	relPath, err := filepath.Rel(manager.SessionsDir(), messagePath)
 	if err != nil {
 		relPath = messagePath
 	}
@@ -189,6 +197,14 @@ func ShowMessage(messagePath string, notifier core.Notifier) error {
 
 // ShowDispatcher routes the show command to the appropriate handler
 func ShowDispatcher(showArg string, notifier core.Notifier) error {
+	return ShowDispatcherWithManager(DefaultManager(), showArg, notifier)
+}
+
+// ShowDispatcherWithManager routes the show command using the provided manager.
+func ShowDispatcherWithManager(manager *Manager, showArg string, notifier core.Notifier) error {
+	if manager == nil {
+		manager = DefaultManager()
+	}
 	// Clean and validate the path
 	showArg = strings.TrimSpace(showArg)
 	if showArg == "" {
@@ -199,16 +215,10 @@ func ShowDispatcher(showArg string, notifier core.Notifier) error {
 	cleanPath := filepath.Clean(showArg)
 
 	// Make it absolute if it's not already
-	var absPath string
-	if filepath.IsAbs(cleanPath) {
-		absPath = cleanPath
-	} else {
-		absPath = filepath.Join(GetSessionsDir(), cleanPath)
-	}
+	absPath := manager.ResolveSessionPath(cleanPath)
 
 	// Security check: ensure path is within sessions directory
-	sessionsDir := GetSessionsDir()
-	if !strings.HasPrefix(absPath, sessionsDir+string(filepath.Separator)) && absPath != sessionsDir {
+	if !manager.IsWithinSessionsDir(absPath) {
 		return errors.WrapError("validate path", stdErrors.New("invalid path: must be within sessions directory"))
 	}
 
@@ -230,7 +240,7 @@ func ShowDispatcher(showArg string, notifier core.Notifier) error {
 	// Try without extension first (user provided just the ID)
 	if _, err := os.Stat(contentPath); err == nil {
 		if _, err := os.Stat(metaPath); err == nil {
-			return ShowMessage(absPath, notifier)
+			return ShowMessageWithManager(manager, absPath, notifier)
 		}
 	}
 
@@ -245,7 +255,7 @@ func ShowDispatcher(showArg string, notifier core.Notifier) error {
 		if _, err := os.Stat(contentPath); err == nil {
 			if _, err := os.Stat(metaPath); err == nil {
 				msgPath := filepath.Join(dir, msgID)
-				return ShowMessage(msgPath, notifier)
+				return ShowMessageWithManager(manager, msgPath, notifier)
 			}
 		}
 	}

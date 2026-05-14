@@ -15,12 +15,12 @@ import (
 // forking, and pending tools execution. It encapsulates the complex session
 // management logic that was previously in cmd/lmc/main.go.
 type Coordinator struct {
-	cfg      CoordinatorConfig
+	cfg      core.RequestOptions
 	notifier core.Notifier
 }
 
 // NewCoordinator creates a new session coordinator
-func NewCoordinator(cfg CoordinatorConfig, notifier core.Notifier) *Coordinator {
+func NewCoordinator(cfg core.RequestOptions, notifier core.Notifier) *Coordinator {
 	return &Coordinator{
 		cfg:      cfg,
 		notifier: notifier,

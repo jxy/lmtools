@@ -64,12 +64,12 @@ const (
 // ============================================================================
 
 // getProviderWithDefault returns the provider from config or a default value
-func getProviderWithDefault(cfg ProviderConfig, defaultProvider string) string {
+func getProviderWithDefault(cfg RequestOptions, defaultProvider string) string {
 	return providers.ResolveProviderWithFallback(cfg.GetProvider(), defaultProvider)
 }
 
 // BuildRequest builds an HTTP request based on configuration and input
-func BuildRequest(cfg ChatRequestConfig, input string) (*http.Request, []byte, error) {
+func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 
 	// Handle embed mode separately
@@ -106,7 +106,7 @@ func BuildRequest(cfg ChatRequestConfig, input string) (*http.Request, []byte, e
 }
 
 // buildEmbedRequest handles embedding requests for providers that support it
-func buildEmbedRequest(cfg EmbedRequestConfig, provider, input string) (*http.Request, []byte, error) {
+func buildEmbedRequest(cfg RequestOptions, provider, input string) (*http.Request, []byte, error) {
 	spec, err := providerSpecForName(provider)
 	if err != nil {
 		return nil, nil, err
@@ -119,7 +119,7 @@ func buildEmbedRequest(cfg EmbedRequestConfig, provider, input string) (*http.Re
 }
 
 // buildArgoEmbedRequest handles Argo embedding requests
-func buildArgoEmbedRequest(cfg EmbedRequestConfig, input string) (*http.Request, []byte, error) {
+func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
 	model := cfg.GetModel()
 	if model == "" {
 		model = DefaultEmbedModel
@@ -149,7 +149,7 @@ func buildArgoEmbedRequest(cfg EmbedRequestConfig, input string) (*http.Request,
 }
 
 // buildOpenAIEmbedRequest handles OpenAI embedding requests
-func buildOpenAIEmbedRequest(cfg EmbedRequestConfig, input string) (*http.Request, []byte, error) {
+func buildOpenAIEmbedRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
 	model := cfg.GetModel()
 	if model == "" {
 		model = GetDefaultChatModel(constants.ProviderOpenAI)
@@ -200,12 +200,12 @@ type ResponseParseOptions struct {
 // 2. Returns the full accumulated content as a string for session storage
 // The response body is closed by this function - callers should not close it.
 // Returns: (Response, error)
-func HandleResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response, logger Logger, notifier Notifier) (Response, error) {
+func HandleResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, logger Logger, notifier Notifier) (Response, error) {
 	return HandleResponseWithOptions(ctx, cfg, resp, logger, notifier, ResponseParseOptions{})
 }
 
 // HandleResponseWithOptions processes an HTTP response with compatibility parse options.
-func HandleResponseWithOptions(ctx context.Context, cfg ResponseConfig, resp *http.Response, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
+func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *http.Response, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
 	defer resp.Body.Close()
 
 	// Get provider, default to argo
@@ -244,7 +244,7 @@ func HandleResponseWithOptions(ctx context.Context, cfg ResponseConfig, resp *ht
 	return response, nil
 }
 
-func effectiveResponseProvider(cfg ResponseConfig) string {
+func effectiveResponseProvider(cfg RequestOptions) string {
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 	if provider != constants.ProviderArgo || cfg.IsEmbed() {
 		return provider
@@ -253,14 +253,10 @@ func effectiveResponseProvider(cfg ResponseConfig) string {
 		return constants.ProviderArgo
 	}
 
-	modelCfg, ok := cfg.(ModelConfig)
-	if !ok {
-		return providers.DetermineArgoModelProvider("")
-	}
-	return providers.DetermineArgoModelProvider(modelCfg.GetModel())
+	return providers.DetermineArgoModelProvider(cfg.GetModel())
 }
 
-func shouldHandleStreamingResponse(cfg ResponseConfig, provider string, resp *http.Response) bool {
+func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *http.Response) bool {
 	if !cfg.IsStreamChat() {
 		return false
 	}
@@ -273,7 +269,7 @@ func shouldHandleStreamingResponse(cfg ResponseConfig, provider string, resp *ht
 }
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
-func handleStreamingResponse(ctx context.Context, cfg ResponseConfig, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
+func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
 	if provider == constants.ProviderOpenAI && useOpenAIResponses(cfg) {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
@@ -301,7 +297,7 @@ func handleStreamingResponse(ctx context.Context, cfg ResponseConfig, resp *http
 }
 
 // handleNonStreamingResponse handles non-streaming responses
-func handleNonStreamingResponse(cfg ResponseConfig, resp *http.Response, provider string, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
+func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
 	// Read response body with size limit from constants
 	data, err := limitio.ReadLimitedWithKind(resp.Body, constants.DefaultMaxResponseBodySize, "API response body")
 	if err != nil {
@@ -372,7 +368,7 @@ type ChatBuildOptions struct {
 
 // BuildChatRequest is the unified entry point for building chat requests
 // It handles all providers and configurations through a single interface
-func BuildChatRequest(cfg ChatRequestConfig, typedMessages []TypedMessage, opts ChatBuildOptions) (*http.Request, []byte, error) {
+func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts ChatBuildOptions) (*http.Request, []byte, error) {
 	// Determine provider and model
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 	model := opts.ModelOverride
@@ -398,7 +394,7 @@ func BuildChatRequest(cfg ChatRequestConfig, typedMessages []TypedMessage, opts 
 }
 
 // BuildToolResultRequest builds a request containing tool execution results
-func BuildToolResultRequest(cfg ChatRequestConfig, model string, system string, toolDefs []ToolDefinition, typedMessages []TypedMessage) (*http.Request, []byte, error) {
+func BuildToolResultRequest(cfg RequestOptions, model string, system string, toolDefs []ToolDefinition, typedMessages []TypedMessage) (*http.Request, []byte, error) {
 	// Preserve follow-up request behavior for callers that rely on tool mode in the
 	// config rather than passing tool definitions explicitly.
 	if len(toolDefs) == 0 && cfg.IsToolEnabled() {
@@ -421,7 +417,7 @@ func BuildToolResultRequest(cfg ChatRequestConfig, model string, system string, 
 // ============================================================================
 
 // BuildRequestWithToolInteractions builds a request using messages that include tool interactions
-func BuildRequestWithToolInteractions(ctx context.Context, cfg ChatRequestConfig, sess Session, getMessagesWithTools func(context.Context, string) ([]TypedMessage, error)) (RequestBuild, error) {
+func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestOptions, sess Session, getMessagesWithTools func(context.Context, string) ([]TypedMessage, error)) (RequestBuild, error) {
 	if cfg.IsEmbed() {
 		return RequestBuild{}, fmt.Errorf("embed mode does not support sessions")
 	}

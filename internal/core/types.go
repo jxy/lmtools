@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/prompts"
 	"net/http"
 	"os"
 	"time"
@@ -18,60 +19,6 @@ const (
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
 )
-
-// RequestConfig interface defines the contract for request configuration
-type UserConfig interface {
-	GetUser() string
-}
-
-type ModelConfig interface {
-	GetModel() string
-}
-
-type SystemConfig interface {
-	GetSystem() string
-	GetEffectiveSystem() string
-	IsSystemExplicitlySet() bool
-}
-
-type ProviderConfig interface {
-	GetProvider() string
-	GetProviderURL() string
-	GetAPIKeyFile() string
-	GetEnv() string
-}
-
-type StreamModeConfig interface {
-	IsEmbed() bool
-	IsStreamChat() bool
-}
-
-type ToolConfig interface {
-	IsToolEnabled() bool
-	GetToolTimeout() time.Duration
-	GetToolWhitelist() string
-	GetToolBlacklist() string
-	GetToolAutoApprove() bool
-	GetToolNonInteractive() bool
-	GetMaxToolRounds() int
-	GetMaxToolParallel() int
-	GetToolMaxOutputBytes() int
-}
-
-type OutputConfig interface {
-	GetEffort() string
-	IsJSONMode() bool
-	GetJSONSchema() json.RawMessage
-}
-
-type OpenAIResponsesConfig interface {
-	UseOpenAIResponses() bool
-}
-
-type SessionResumeConfig interface {
-	GetResume() string
-	GetBranch() string
-}
 
 // RequestOptions is the concrete request configuration consumed by core and
 // session code after CLI flag parsing has applied defaults and validation.
@@ -112,6 +59,12 @@ func (o RequestOptions) GetSystem() string { return o.System }
 func (o RequestOptions) GetEffectiveSystem() string {
 	if o.EffectiveSystem != "" {
 		return o.EffectiveSystem
+	}
+	if o.SystemExplicitlySet {
+		return o.System
+	}
+	if o.System == "" {
+		return prompts.DefaultSystemPrompt
 	}
 	return o.System
 }
@@ -171,32 +124,6 @@ func (o RequestOptions) GetToolMaxOutputBytes() int {
 
 func (o RequestOptions) GetResume() string { return o.Resume }
 func (o RequestOptions) GetBranch() string { return o.Branch }
-
-type ChatRequestConfig interface {
-	UserConfig
-	ModelConfig
-	SystemConfig
-	ProviderConfig
-	StreamModeConfig
-	ToolConfig
-}
-
-type EmbedRequestConfig interface {
-	UserConfig
-	ModelConfig
-	ProviderConfig
-	StreamModeConfig
-}
-
-type ResponseConfig interface {
-	ProviderConfig
-	StreamModeConfig
-}
-
-type RequestConfig interface {
-	ChatRequestConfig
-	SessionResumeConfig
-}
 
 // Logger interface for logging operations
 type Logger interface {

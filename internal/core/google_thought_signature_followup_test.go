@@ -74,7 +74,7 @@ func testGoogleThoughtSignatureRoundTripFromCapture(t *testing.T, stream bool) {
 		cfg.ProviderURL = "https://generativelanguage.googleapis.com/v1beta"
 		cfg.Model = "gemini-3.1-flash-lite-preview"
 		cfg.System = ""
-		cfg.IsStreamChatMode = stream
+		cfg.StreamChat = stream
 
 		resp := &http.Response{
 			StatusCode: http.StatusOK,

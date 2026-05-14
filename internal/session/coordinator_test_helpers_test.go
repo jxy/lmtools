@@ -8,22 +8,8 @@ import (
 	"testing"
 )
 
-type testCoordinatorConfig struct {
-	*core.TestRequestConfig
-	EffectiveSystemOverride *string
-}
-
-func newTestCoordinatorConfig() *testCoordinatorConfig {
-	return &testCoordinatorConfig{
-		TestRequestConfig: core.NewTestRequestConfig(),
-	}
-}
-
-func (c *testCoordinatorConfig) GetEffectiveSystem() string {
-	if c.EffectiveSystemOverride != nil {
-		return *c.EffectiveSystemOverride
-	}
-	return c.TestRequestConfig.GetEffectiveSystem()
+func newTestCoordinatorConfig() core.RequestOptions {
+	return core.NewTestRequestConfig()
 }
 
 func setupCoordinatorTestEnv(t *testing.T) context.Context {

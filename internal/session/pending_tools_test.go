@@ -293,7 +293,7 @@ func TestExecutePendingTools(t *testing.T) {
 			// Create test dependencies
 			ctx := context.Background()
 			cfg := core.NewTestRequestConfig()
-			cfg.IsToolEnabledFlag = true
+			cfg.ToolEnabled = true
 			cfg.ToolTimeout = 5 * time.Second
 			logger := &MockLogger{debugEnabled: true}
 			notifier := &pendingTestNotifier{}
@@ -350,7 +350,7 @@ func TestExecutePendingToolsRequiresToolFlag(t *testing.T) {
 	}
 
 	cfg := core.NewTestRequestConfig()
-	cfg.IsToolEnabledFlag = false
+	cfg.ToolEnabled = false
 	hasPending, err := ExecutePendingTools(context.Background(), sess, cfg, &MockLogger{}, &pendingTestNotifier{}, &MockApprover{shouldApprove: true})
 	if !hasPending {
 		t.Fatal("expected pending tools to be reported")

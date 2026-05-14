@@ -689,14 +689,14 @@ data: {"type":"message_stop"}
 	}
 }
 
-func newStreamTestRequestConfig(provider string, streamChat bool, embed bool, system string) *TestRequestConfig {
+func newStreamTestRequestConfig(provider string, streamChat bool, embed bool, system string) TestRequestConfig {
 	cfg := NewTestRequestConfig()
 	cfg.Provider = provider
 	cfg.Model = ""
 	cfg.System = system
 	cfg.ProviderURL = "http://test.example.com"
-	cfg.IsStreamChatMode = streamChat
-	cfg.IsEmbedMode = embed
-	cfg.IsToolEnabledFlag = false
+	cfg.StreamChat = streamChat
+	cfg.Embed = embed
+	cfg.ToolEnabled = false
 	return cfg
 }

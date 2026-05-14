@@ -124,7 +124,7 @@ type preparedExecution struct {
 }
 
 // NewExecutor creates a new tool executor.
-func NewExecutor(cfg ToolConfig, log ExecLogger, notifier Notifier, approver Approver) (*Executor, error) {
+func NewExecutor(cfg RequestOptions, log ExecLogger, notifier Notifier, approver Approver) (*Executor, error) {
 	e := &Executor{
 		defaultTimeout: cfg.GetToolTimeout(),
 		autoApprove:    cfg.GetToolAutoApprove(),

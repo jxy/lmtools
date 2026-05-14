@@ -300,7 +300,7 @@ func TestCoordinatorPrepareSessionPendingTools(t *testing.T) {
 	cfg := newTestCoordinatorConfig()
 	cfg.Resume = GetSessionID(existingSession.Path)
 	cfg.System = "System prompt"
-	cfg.IsToolEnabledFlag = true
+	cfg.ToolEnabled = true
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 

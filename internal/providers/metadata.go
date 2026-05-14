@@ -1,6 +1,9 @@
 package providers
 
-import "lmtools/internal/constants"
+import (
+	"lmtools/internal/constants"
+	"sort"
+)
 
 const (
 	ArgoProdURL = "https://apps.inside.anl.gov/argoapi/api/v1/resource"
@@ -43,6 +46,15 @@ func InfoFor(provider string) (Info, bool) {
 		return Info{}, false
 	}
 	return descriptor.Info, true
+}
+
+func ProviderIDs() []string {
+	ids := make([]string, 0, len(providerDescriptors))
+	for id := range providerDescriptors {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func DefaultProvider() string {

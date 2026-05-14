@@ -41,31 +41,24 @@ type mockExecutorConfig struct {
 	toolAutoApprove bool
 }
 
-func (m mockExecutorConfig) GetUser() string               { return "testuser" }
-func (m mockExecutorConfig) GetModel() string              { return "test-model" }
-func (m mockExecutorConfig) GetSystem() string             { return "test system" }
-func (m mockExecutorConfig) IsSystemExplicitlySet() bool   { return false }
-func (m mockExecutorConfig) GetEnv() string                { return "" }
-func (m mockExecutorConfig) IsEmbed() bool                 { return false }
-func (m mockExecutorConfig) IsStreamChat() bool            { return false }
-func (m mockExecutorConfig) GetProvider() string           { return "test" }
-func (m mockExecutorConfig) GetProviderURL() string        { return "" }
-func (m mockExecutorConfig) GetAPIKeyFile() string         { return "" }
-func (m mockExecutorConfig) GetAPIKey() string             { return "test-key" }
-func (m mockExecutorConfig) GetInput() string              { return "" }
-func (m mockExecutorConfig) GetMaxTokens() int             { return 0 }
-func (m mockExecutorConfig) IsToolEnabled() bool           { return m.enableTool }
-func (m mockExecutorConfig) GetToolTimeout() time.Duration { return m.toolTimeout }
-func (m mockExecutorConfig) GetToolWhitelist() string      { return m.toolWhitelist }
-func (m mockExecutorConfig) GetToolBlacklist() string      { return m.toolBlacklist }
-func (m mockExecutorConfig) GetToolAutoApprove() bool      { return m.toolAutoApprove }
-func (m mockExecutorConfig) GetToolNonInteractive() bool   { return true }
-func (m mockExecutorConfig) GetMaxToolRounds() int         { return 32 }
-func (m mockExecutorConfig) GetMaxToolParallel() int       { return 4 }
-func (m mockExecutorConfig) GetToolMaxOutputBytes() int    { return 1024 * 1024 } // 1MB default
-func (m mockExecutorConfig) GetEffectiveSystem() string    { return m.GetSystem() }
-func (m mockExecutorConfig) GetResume() string             { return "" }
-func (m mockExecutorConfig) GetBranch() string             { return "" }
+func (m mockExecutorConfig) requestOptions() RequestOptions {
+	return RequestOptions{
+		User:               "testuser",
+		Model:              "test-model",
+		System:             "test system",
+		EffectiveSystem:    "test system",
+		Provider:           "test",
+		ToolEnabled:        m.enableTool,
+		ToolTimeout:        m.toolTimeout,
+		ToolWhitelist:      m.toolWhitelist,
+		ToolBlacklist:      m.toolBlacklist,
+		ToolAutoApprove:    m.toolAutoApprove,
+		ToolNonInteractive: true,
+		MaxToolRounds:      32,
+		MaxToolParallel:    4,
+		ToolMaxOutputBytes: 1024 * 1024,
+	}
+}
 
 func TestExecutorWhitelist(t *testing.T) {
 	// Create temp whitelist file
@@ -85,7 +78,7 @@ func TestExecutorWhitelist(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -135,7 +128,7 @@ func TestExecutorBlacklist(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -184,7 +177,7 @@ func TestExecutorTimeout(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -240,7 +233,7 @@ func TestExecutorParallel(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -301,7 +294,7 @@ func TestExecutorEnvironment(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -353,7 +346,7 @@ func TestExecutorMultipleEnvironmentVariables(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -408,7 +401,7 @@ func TestExecutorWorkdir(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -458,7 +451,7 @@ func TestExecutorOutputTruncation(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -515,7 +508,7 @@ func TestExecutorInvalidCommand(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -584,7 +577,7 @@ func TestExecutorUnsupportedTool(t *testing.T) {
 	logger := &mockLogger{debugEnabled: true}
 	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg, logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -842,7 +835,7 @@ func TestExecutorParallelApprovesSequentiallyBeforeLaunch(t *testing.T) {
 		toolAutoApprove: false,
 	}
 	logger := &mockLogger{debugEnabled: true}
-	executor, err := NewExecutor(cfg, logger, NewTestNotifier(), approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, NewTestNotifier(), approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}

@@ -16,7 +16,7 @@ type argoChatRequestPlan struct {
 	Legacy       bool
 }
 
-func buildArgoChatRequest(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildArgoChatRequest(cfg RequestOptions, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	if err := ValidateMessagesForProvider(constants.ProviderArgo, messages); err != nil {
 		return nil, nil, err
 	}
@@ -40,7 +40,7 @@ func buildArgoChatRequest(cfg ChatRequestConfig, messages []TypedMessage, model 
 	return buildProviderRequest(cfg, plan.Endpoint, body, plan.WireProvider, plan.Payload.Stream)
 }
 
-func newArgoChatRequestPlan(cfg ChatRequestConfig, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (argoChatRequestPlan, error) {
+func newArgoChatRequestPlan(cfg RequestOptions, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (argoChatRequestPlan, error) {
 	if model == "" {
 		model = GetDefaultChatModel(constants.ProviderArgo)
 	}
@@ -74,16 +74,11 @@ func newArgoChatRequestPlan(cfg ChatRequestConfig, messages []TypedMessage, mode
 	return plan, nil
 }
 
-type argoLegacyConfig interface {
-	IsArgoLegacy() bool
+func isArgoLegacyMode(cfg RequestOptions) bool {
+	return cfg.IsArgoLegacy()
 }
 
-func isArgoLegacyMode(cfg interface{}) bool {
-	v, ok := cfg.(argoLegacyConfig)
-	return ok && v.IsArgoLegacy()
-}
-
-func buildLegacyArgoChatRequest(cfg ChatRequestConfig, model string, messages []TypedMessage, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildLegacyArgoChatRequest(cfg RequestOptions, model string, messages []TypedMessage, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	actualStream := stream && len(toolDefs) == 0
 	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.GetProviderURL(), cfg.GetEnv(), model, actualStream, true)
 	if err != nil {

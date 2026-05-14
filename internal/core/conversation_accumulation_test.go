@@ -115,7 +115,7 @@ func TestBuildArgoRequestWithAccumulatedMessages(t *testing.T) {
 	cfg.Model = "gpt5"
 	cfg.Provider = "argo"
 	cfg.System = "Test system"
-	cfg.IsToolEnabledFlag = true
+	cfg.ToolEnabled = true
 
 	req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
 	if err != nil {
@@ -179,7 +179,7 @@ func TestNoDuplicateMessagesInBuildFunctions(t *testing.T) {
 	cfg.Env = "test"
 	cfg.Model = "gpt5"
 	cfg.System = "System prompt"
-	cfg.IsToolEnabledFlag = true
+	cfg.ToolEnabled = true
 
 	req, body, err := BuildToolResultRequest(cfg, cfg.Model, "", nil, typedMessages)
 	if err != nil {

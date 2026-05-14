@@ -12,7 +12,7 @@ import (
 
 type (
 	providerRequestMapper     func(PreparedRequestPayload) map[string]interface{}
-	providerChatURLResolver   func(cfg ProviderConfig, model string, stream bool) string
+	providerChatURLResolver   func(cfg RequestOptions, model string, stream bool) string
 	providerMessageMarshaller func(messages []TypedMessage, keepGoogleSystem bool) []interface{}
 )
 
@@ -45,7 +45,7 @@ func marshalArgoTypedMessages(model string, messages []TypedMessage) []interface
 }
 
 // handleAPIKeyAuth handles API key authentication for all providers
-func handleAPIKeyAuth(httpReq *http.Request, cfg ProviderConfig, provider string) error {
+func handleAPIKeyAuth(httpReq *http.Request, cfg RequestOptions, provider string) error {
 	if keyFile := cfg.GetAPIKeyFile(); keyFile != "" {
 		apiKey, err := auth.ReadKeyFile(keyFile)
 		if err != nil {
@@ -62,7 +62,7 @@ func handleAPIKeyAuth(httpReq *http.Request, cfg ProviderConfig, provider string
 }
 
 // applyProviderAuth applies authentication based on the provider type
-func applyProviderAuth(req *http.Request, cfg ProviderConfig, provider string) error {
+func applyProviderAuth(req *http.Request, cfg RequestOptions, provider string) error {
 	switch providers.CredentialKindFor(provider) {
 	case providers.CredentialKindAPIKey:
 		return handleAPIKeyAuth(req, cfg, provider)
@@ -73,7 +73,7 @@ func applyProviderAuth(req *http.Request, cfg ProviderConfig, provider string) e
 }
 
 // buildProviderRequest builds a unified provider request with common logic extracted
-func buildProviderRequest(cfg ProviderConfig, url string, body []byte, provider string, stream bool) (*http.Request, []byte, error) {
+func buildProviderRequest(cfg RequestOptions, url string, body []byte, provider string, stream bool) (*http.Request, []byte, error) {
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
@@ -87,7 +87,7 @@ func buildProviderRequest(cfg ProviderConfig, url string, body []byte, provider 
 	return httpReq, body, nil
 }
 
-func buildToolAwareRequest(cfg ChatRequestConfig, provider string, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildToolAwareRequest(cfg RequestOptions, provider string, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	spec, err := requireProviderRequestSpec(provider)
 	if err != nil {
 		return nil, nil, err
@@ -109,7 +109,7 @@ func buildToolAwareRequest(cfg ChatRequestConfig, provider string, typedMessages
 
 // buildChatRequestFromTyped builds a unified chat request from typed messages
 // This function handles both initial requests and tool result follow-ups
-func buildChatRequestFromTyped(cfg ChatRequestConfig, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+func buildChatRequestFromTyped(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	if model == "" {
 		return nil, nil, fmt.Errorf("model is required for building request")
 	}
