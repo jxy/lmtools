@@ -50,7 +50,6 @@ func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
 		ProviderURL:        mockServer.URL + "/v1/chat/completions",
 		OpenAIAPIKey:       "test-key",
 		Provider:           constants.ProviderOpenAI,
-		Model:              "gpt-4",
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 
@@ -154,7 +153,6 @@ func TestOpenAIChatCompletionsWithTools(t *testing.T) {
 		ProviderURL:        mockServer.URL + "/v1/chat/completions",
 		OpenAIAPIKey:       "test-key",
 		Provider:           constants.ProviderOpenAI,
-		Model:              "gpt-4",
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 
@@ -268,7 +266,6 @@ func TestArgoOpenAIDirectOmitsZeroMaxCompletionTokens(t *testing.T) {
 		ProviderURL:        mockServer.URL,
 		Provider:           constants.ProviderArgo,
 		ArgoUser:           "testuser",
-		Model:              "gpt-5.4-nano",
 		MaxRequestBodySize: 100 * 1024 * 1024,
 	}
 
@@ -306,6 +303,117 @@ func TestArgoOpenAIDirectOmitsZeroMaxCompletionTokens(t *testing.T) {
 	}
 }
 
+func TestArgoModelMapRoutesOpenAIAliasToAnthropicEndpoint(t *testing.T) {
+	var captured AnthropicRequest
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/v1/messages") {
+			t.Fatalf("upstream path = %q, want /v1/messages suffix", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		return jsonRoundTripResponse(http.StatusOK, AnthropicResponse{
+			ID:         "msg-test",
+			Type:       "message",
+			Role:       "assistant",
+			Model:      captured.Model,
+			Content:    []AnthropicContentBlock{{Type: "text", Text: "ok"}},
+			StopReason: "end_turn",
+			Usage:      &AnthropicUsage{InputTokens: 1, OutputTokens: 1},
+		}), nil
+	})
+
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://argo.local/v1",
+		Provider:           constants.ProviderArgo,
+		ArgoUser:           "testuser",
+		ModelMapRules:      []ModelMapRule{{Pattern: "^gpt-public$", Model: "claude-opus-4-7"}},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	reqBody := OpenAIRequest{
+		Model: "gpt-public",
+		Messages: []OpenAIMessage{{
+			Role:    "user",
+			Content: "Hello!",
+		}},
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if captured.Model != "claude-opus-4-7" {
+		t.Fatalf("upstream model = %q, want claude-opus-4-7", captured.Model)
+	}
+}
+
+func TestArgoModelMapRoutesClaudeAliasToOpenAIEndpoint(t *testing.T) {
+	var captured OpenAIRequest
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
+			t.Fatalf("upstream path = %q, want /v1/chat/completions suffix", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		return jsonRoundTripResponse(http.StatusOK, OpenAIResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   captured.Model,
+			Choices: []OpenAIChoice{{
+				Index: 0,
+				Message: OpenAIMessage{
+					Role:    "assistant",
+					Content: "ok",
+				},
+				FinishReason: "stop",
+			}},
+		}), nil
+	})
+
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://argo.local/v1",
+		Provider:           constants.ProviderArgo,
+		ArgoUser:           "testuser",
+		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-public$", Model: "gpt-5.4-nano"}},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	reqBody := OpenAIRequest{
+		Model: "claude-public",
+		Messages: []OpenAIMessage{{
+			Role:    "user",
+			Content: "Hello!",
+		}},
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if captured.Model != "gpt-5.4-nano" {
+		t.Fatalf("upstream model = %q, want gpt-5.4-nano", captured.Model)
+	}
+}
+
 func TestArgoOpenAIDirectConvertsDeveloperRoleToSystem(t *testing.T) {
 	var captured OpenAIRequest
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -340,7 +448,6 @@ func TestArgoOpenAIDirectConvertsDeveloperRoleToSystem(t *testing.T) {
 		ProviderURL:        "http://argo.local/v1",
 		Provider:           constants.ProviderArgo,
 		ArgoUser:           "testuser",
-		Model:              "gpt-5.4-nano",
 		MaxRequestBodySize: 100 * 1024 * 1024,
 	}
 
@@ -415,7 +522,6 @@ func TestArgoOpenAIDirectUsesArgoUserAuthFallback(t *testing.T) {
 				ProviderURL:        mockServer.URL,
 				Provider:           constants.ProviderArgo,
 				ArgoUser:           "argo-user-key",
-				Model:              "gpt-5.4-nano",
 				MaxRequestBodySize: 100 * 1024 * 1024,
 			}
 
@@ -485,8 +591,6 @@ func TestModelsEndpoint(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        mockServer.URL + "/v1",
-		Model:              "gpt-4",
-		SmallModel:         "gpt-3.5-turbo",
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
 

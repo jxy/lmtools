@@ -122,8 +122,6 @@ func TestOpenAIResponsesBackgroundCommitRequiresActiveRecordBeforeSessionAppend(
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -198,8 +196,6 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -439,8 +435,6 @@ func TestOpenAIResponsesStatePreviousResponseLifecycle(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -555,8 +549,6 @@ func TestOpenAIResponsesConversationReplayPreservesAnthropicSignedThinking(t *te
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -656,8 +648,6 @@ func TestOpenAIResponsesPreviousResponseBranchesFromSnapshot(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -743,8 +733,6 @@ func TestOpenAIResponsesConversationPreviousResponseUsesResponseSnapshot(t *test
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -852,8 +840,6 @@ func TestOpenAIResponsesStoreFalsePreviousResponseDoesNotWriteState(t *testing.T
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -938,8 +924,6 @@ func TestOpenAIResponsesStoreFalseConversationDoesNotWriteState(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1038,8 +1022,6 @@ func TestOpenAIResponsesStoreFalseAutoConversationDoesNotCreateState(t *testing.
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        sessionsDir,
 	}
@@ -1097,8 +1079,6 @@ func TestOpenAIResponsesGeneratedConversationIDReturnedAndRetrieved(t *testing.T
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1161,8 +1141,6 @@ func TestOpenAIResponsesResponseMetadataDoesNotOverwriteConversationMetadata(t *
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1267,8 +1245,6 @@ func TestOpenAIResponsesInputTokensReadOnlyAndPagination(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1350,8 +1326,6 @@ func TestOpenAIResponsesInputTokensUsesAnthropicNativeCount(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local/v1",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1404,8 +1378,6 @@ func TestOpenAIResponsesInputTokensUsesGoogleCountTokens(t *testing.T) {
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        "http://google.local/v1beta/models",
 		GoogleAPIKey:       "google-key",
-		Model:              "gemini-test",
-		SmallModel:         "gemini-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1438,8 +1410,6 @@ func TestOpenAIResponsesInputTokensArgoNonClaudeUsesEstimate(t *testing.T) {
 		ProviderURL:        "http://argo.local",
 		ArgoAPIKey:         "argo-key",
 		ArgoUser:           "fixture-user",
-		Model:              "gpt-test",
-		SmallModel:         "gpt-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1496,8 +1466,6 @@ func TestOpenAIResponsesCompactCreatesContinuationState(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1564,8 +1532,6 @@ func TestOpenAIConversationItemsPagination(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1604,8 +1570,6 @@ func TestOpenAIConversationAppendItemsReturnsOnlyAppendedItems(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1656,8 +1620,6 @@ func TestOpenAIConversationAppendItemsReturnsOnlyAppendedItems(t *testing.T) {
 func TestOpenAIConversationCreateRejectsMalformedItemsWithoutState(t *testing.T) {
 	server := NewMinimalTestServer(t, &Config{
 		Provider:           constants.ProviderAnthropic,
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	})
@@ -1698,8 +1660,6 @@ func TestOpenAIConversationAppendSurfacesSaveStateError(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1800,8 +1760,7 @@ func TestOpenAIResponsesCollectionUtilityRoutesPassThrough(t *testing.T) {
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-big",
-		SmallModel:         "gpt-small",
+		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-haiku-20240307$", Model: "gpt-small"}, {Pattern: "^claude-3-5-sonnet-20241022$", Model: "gpt-big"}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1850,8 +1809,6 @@ func TestOpenAIRawLifecyclePassThroughEnforcesRequestBodyLimit(t *testing.T) {
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-test",
-		SmallModel:         "gpt-test",
 		MaxRequestBodySize: 32,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1890,8 +1847,6 @@ func TestOpenAIResponsesRejectsUnfinishedPreviousResponse(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1959,8 +1914,6 @@ func TestOpenAIResponsesBackgroundDeletePreservesResponseTombstone(t *testing.T)
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2022,8 +1975,6 @@ func TestOpenAIResponsesBackgroundCompletionPreservesCreatedAt(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2086,8 +2037,6 @@ func TestOpenAIResponsesBackgroundConversationDeleteDoesNotCompleteResponse(t *t
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}

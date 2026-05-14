@@ -177,8 +177,6 @@ func TestMessagesCountTokensContract(t *testing.T) {
 			ProviderURL:        backend.URL,
 			ArgoAPIKey:         fixtureArgoAPIKey,
 			ArgoUser:           "fixture-user",
-			SmallModel:         "claude-haiku-4-5",
-			Model:              "claude-haiku-4-5",
 			MaxRequestBodySize: fixtureMaxBodySize,
 		}
 		server, cleanup := NewTestServer(t, config)
@@ -311,7 +309,7 @@ func runFixtureEndpointContract(t *testing.T, root string, meta apifixtures.Case
 	}))
 	t.Cleanup(backend.Close)
 
-	config := fixtureProxyConfig(meta, targetBase, backend.URL)
+	config := fixtureProxyConfig(meta, clientFamily, targetBase, backend.URL)
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 
@@ -372,7 +370,7 @@ func runFixtureEndpointContract(t *testing.T, root string, meta apifixtures.Case
 	}
 }
 
-func fixtureProxyConfig(meta apifixtures.CaseMeta, targetBase, providerURL string) *Config {
+func fixtureProxyConfig(meta apifixtures.CaseMeta, clientFamily, targetBase, providerURL string) *Config {
 	targetModel := fixtureModelForTarget(meta, targetBase)
 	argoUser := meta.ArgoUser
 	if argoUser == "" {
@@ -381,14 +379,15 @@ func fixtureProxyConfig(meta apifixtures.CaseMeta, targetBase, providerURL strin
 
 	cfg := &Config{
 		ProviderURL:        providerURL,
-		Model:              targetModel,
-		SmallModel:         targetModel,
 		MaxRequestBodySize: fixtureMaxBodySize,
 		OpenAIAPIKey:       fixtureOpenAIKey,
 		AnthropicAPIKey:    fixtureAnthropicKey,
 		GoogleAPIKey:       fixtureGoogleKey,
 		ArgoAPIKey:         fixtureArgoAPIKey,
 		ArgoUser:           argoUser,
+	}
+	if shouldMapFixtureModel(clientFamily, targetBase) && targetModel != "" {
+		cfg.ModelMapRules = []ModelMapRule{{Pattern: ".*", Model: targetModel}}
 	}
 
 	switch targetBase {
@@ -410,6 +409,42 @@ func fixtureProxyConfig(meta apifixtures.CaseMeta, targetBase, providerURL strin
 	return cfg
 }
 
+func shouldMapFixtureModel(clientFamily, targetBase string) bool {
+	switch clientFamily {
+	case "anthropic":
+		return true
+	case "openai":
+		return targetBase != "openai" && targetBase != "argo-openai"
+	default:
+		return false
+	}
+}
+
+func TestShouldMapFixtureModel(t *testing.T) {
+	tests := []struct {
+		name         string
+		clientFamily string
+		targetBase   string
+		want         bool
+	}{
+		{name: "anthropic to openai maps", clientFamily: "anthropic", targetBase: "openai", want: true},
+		{name: "anthropic to anthropic maps", clientFamily: "anthropic", targetBase: "anthropic", want: true},
+		{name: "openai to openai passthrough", clientFamily: "openai", targetBase: "openai", want: false},
+		{name: "openai to argo openai passthrough", clientFamily: "openai", targetBase: "argo-openai", want: false},
+		{name: "openai to anthropic maps", clientFamily: "openai", targetBase: "anthropic", want: true},
+		{name: "openai to google maps", clientFamily: "openai", targetBase: "google", want: true},
+		{name: "unknown passthrough", clientFamily: "responses", targetBase: "openai", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldMapFixtureModel(tt.clientFamily, tt.targetBase); got != tt.want {
+				t.Fatalf("shouldMapFixtureModel(%q, %q) = %v, want %v", tt.clientFamily, tt.targetBase, got, tt.want)
+			}
+		})
+	}
+}
+
 func loadFixtureClientRequestBody(root string, meta apifixtures.CaseMeta, clientFamily, targetBase string, stream bool) ([]byte, error) {
 	body, err := apifixtures.ReadCaseFile(root, meta.ID, "ingress.json")
 	if err != nil {
@@ -426,7 +461,7 @@ func loadFixtureClientRequestBody(root string, meta apifixtures.CaseMeta, client
 	}
 
 	if clientFamily == "openai" && targetBase != "openai" && targetBase != "argo-openai" {
-		// Route OpenAI ingress through the mapped Claude small-model path so we
+		// Route OpenAI ingress through an explicitly mapped Claude model path so we
 		// exercise the converted Anthropic/Google/Argo backends with the shared
 		// fixture request semantics.
 		decoded["model"] = fixtureMappedHaiku

@@ -256,7 +256,7 @@ func (s *Server) defaultOpenAIResponsesUtilityModel(req *OpenAIResponsesRequest)
 			return rec.Model
 		}
 	}
-	return s.config.Model
+	return ""
 }
 
 func (s *Server) loadCompletedPreviousResponse(id string) (*responseRecord, error) {

@@ -434,8 +434,6 @@ func TestArgoSimulatedStreamingSlowResponse(t *testing.T) {
 				Provider:           constants.ProviderArgo,
 				ArgoUser:           "testuser",
 				ArgoEnv:            "test",
-				Model:              "gpto3",
-				SmallModel:         "gemini25flash",
 				MaxRequestBodySize: 10 * 1024 * 1024,
 				ProviderURL:        argoMock.URL,
 				PingInterval:       100 * time.Millisecond, // Reduced from 200ms for fast testing

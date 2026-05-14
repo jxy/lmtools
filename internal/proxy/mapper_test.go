@@ -1,164 +1,127 @@
 package proxy
 
-import (
-	"lmtools/internal/constants"
-	"testing"
-)
+import "testing"
 
 func TestModelMapper(t *testing.T) {
 	tests := []struct {
-		name             string
-		config           *Config
-		inputModel       string
-		expectedProvider string
-		expectedModel    string
+		name          string
+		rules         []ModelMapRule
+		inputModel    string
+		expectedModel string
 	}{
 		{
-			name: "haiku maps to small model",
-			config: &Config{
-				Provider:   constants.ProviderOpenAI,
-				SmallModel: "gpt-4o-mini",
-				Model:      "gpt-4o",
+			name: "first matching rule wins",
+			rules: []ModelMapRule{
+				mustModelMapRule(t, "^claude-.*=first-backend"),
+				mustModelMapRule(t, "^claude-3-haiku.*=second-backend"),
 			},
-			inputModel:       "claude-3-haiku-20240307",
-			expectedProvider: constants.ProviderOpenAI,
-			expectedModel:    "gpt-4o-mini",
+			inputModel:    "claude-3-haiku-20240307",
+			expectedModel: "first-backend",
 		},
 		{
-			name: "sonnet maps to model",
-			config: &Config{
-				Provider:   constants.ProviderOpenAI,
-				SmallModel: "gpt-4o-mini",
-				Model:      "gpt-4o",
+			name: "later rule used when earlier rule misses",
+			rules: []ModelMapRule{
+				mustModelMapRule(t, "^gpt-4o$=gpt-backend"),
+				mustModelMapRule(t, "^claude-3-haiku.*=haiku-backend"),
 			},
-			inputModel:       "claude-3-sonnet-20240229",
-			expectedProvider: constants.ProviderOpenAI,
-			expectedModel:    "gpt-4o",
+			inputModel:    "claude-3-haiku-20240307",
+			expectedModel: "haiku-backend",
 		},
 		{
-			name: "opus maps to model",
-			config: &Config{
-				Provider:   constants.ProviderGoogle,
-				SmallModel: "gemini-2.0-flash",
-				Model:      "gemini-2.5-pro",
+			name: "unmatched model passes through",
+			rules: []ModelMapRule{
+				mustModelMapRule(t, "^claude-.*=claude-backend"),
 			},
-			inputModel:       "claude-3-opus-20240229",
-			expectedProvider: constants.ProviderGoogle,
-			expectedModel:    "gemini-2.5-pro",
+			inputModel:    "gpt-4o",
+			expectedModel: "gpt-4o",
 		},
 		{
-			name: "haiku with google provider",
-			config: &Config{
-				Provider:   constants.ProviderGoogle,
-				SmallModel: "gemini-2.0-flash",
-				Model:      "gemini-2.5-pro-preview-03-25",
-			},
-			inputModel:       "claude-3-haiku",
-			expectedProvider: constants.ProviderGoogle,
-			expectedModel:    "gemini-2.0-flash",
+			name:          "no rules passes through",
+			inputModel:    "claude-3-haiku-20240307",
+			expectedModel: "claude-3-haiku-20240307",
 		},
 		{
-			name: "sonnet with argo provider",
-			config: &Config{
-				Provider:   constants.ProviderArgo,
-				SmallModel: "gemini25flash",
-				Model:      "claudesonnet4",
+			name: "claude haiku has no implicit small-model mapping",
+			rules: []ModelMapRule{
+				mustModelMapRule(t, "^gpt-.*=gpt-backend"),
 			},
-			inputModel:       "claude-3-sonnet",
-			expectedProvider: constants.ProviderArgo,
-			expectedModel:    "claudesonnet4",
+			inputModel:    "claude-3-haiku-20240307",
+			expectedModel: "claude-3-haiku-20240307",
 		},
 		{
-			name: "non-claude model passes through unchanged",
-			config: &Config{
-				Provider:   constants.ProviderOpenAI,
-				SmallModel: "gpt-4o-mini",
-				Model:      "gpt-4o",
+			name: "go regexp matching",
+			rules: []ModelMapRule{
+				mustModelMapRule(t, "^(gpt|o)[^-]*-mini$=small-backend"),
 			},
-			inputModel:       "gpt-4o",
-			expectedProvider: constants.ProviderOpenAI,
-			expectedModel:    "gpt-4o",
-		},
-		{
-			name: "gemini model passes through unchanged",
-			config: &Config{
-				Provider:   constants.ProviderGoogle,
-				SmallModel: "gemini-flash",
-				Model:      "gemini-pro",
-			},
-			inputModel:       "gemini-2.0-flash",
-			expectedProvider: constants.ProviderGoogle,
-			expectedModel:    "gemini-2.0-flash",
-		},
-		{
-			name: "non-claude model passes through unchanged",
-			config: &Config{
-				Provider:   constants.ProviderOpenAI,
-				SmallModel: "small",
-				Model:      "big",
-			},
-			inputModel:       "gpt-4o",
-			expectedProvider: constants.ProviderOpenAI,
-			expectedModel:    "gpt-4o",
-		},
-		{
-			name: "unknown model passes through with configured provider",
-			config: &Config{
-				Provider:   constants.ProviderArgo,
-				SmallModel: "small",
-				Model:      "big",
-			},
-			inputModel:       "unknown-model",
-			expectedProvider: constants.ProviderArgo,
-			expectedModel:    "unknown-model",
-		},
-		{
-			name: "haiku model maps to small model",
-			config: &Config{
-				Provider:   constants.ProviderAnthropic,
-				SmallModel: "claude-3-haiku-20240307",
-				Model:      "claude-3-opus-20240229",
-			},
-			inputModel:       "claude-3-haiku-20240307",
-			expectedProvider: constants.ProviderAnthropic,
-			expectedModel:    "claude-3-haiku-20240307",
-		},
-		{
-			name: "provider always comes from config",
-			config: &Config{
-				Provider:   constants.ProviderArgo,
-				SmallModel: "small",
-				Model:      "big",
-			},
-			inputModel:       "gpt-4",
-			expectedProvider: constants.ProviderArgo,
-			expectedModel:    "gpt-4",
-		},
-		{
-			name: "claude-haiku-3 also maps to small model",
-			config: &Config{
-				Provider:   constants.ProviderOpenAI,
-				SmallModel: "gpt-3.5-turbo",
-				Model:      "gpt-4",
-			},
-			inputModel:       "claude-haiku-3",
-			expectedProvider: constants.ProviderOpenAI,
-			expectedModel:    "gpt-3.5-turbo",
+			inputModel:    "gpt4-mini",
+			expectedModel: "small-backend",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mapper := NewModelMapper(tt.config)
-			model := mapper.MapModel(tt.inputModel)
-			provider := tt.config.Provider
-
-			if provider != tt.expectedProvider {
-				t.Errorf("MapModel() provider = %v, want %v", provider, tt.expectedProvider)
-			}
-			if model != tt.expectedModel {
-				t.Errorf("MapModel() model = %v, want %v", model, tt.expectedModel)
+			mapper := NewModelMapper(&Config{ModelMapRules: tt.rules})
+			if got := mapper.MapModel(tt.inputModel); got != tt.expectedModel {
+				t.Fatalf("MapModel(%q) = %q, want %q", tt.inputModel, got, tt.expectedModel)
 			}
 		})
 	}
+}
+
+func TestParseModelMapSpec(t *testing.T) {
+	tests := []struct {
+		name      string
+		spec      string
+		wantRule  ModelMapRule
+		wantError bool
+	}{
+		{
+			name: "valid spec",
+			spec: "^claude-.*=claude-opus-4-1",
+			wantRule: ModelMapRule{
+				Pattern: "^claude-.*",
+				Model:   "claude-opus-4-1",
+			},
+		},
+		{
+			name: "model may contain equals",
+			spec: "^alias$=backend=with-equals",
+			wantRule: ModelMapRule{
+				Pattern: "^alias$",
+				Model:   "backend=with-equals",
+			},
+		},
+		{name: "missing separator", spec: "^claude-.*", wantError: true},
+		{name: "empty regex", spec: "=gpt-5", wantError: true},
+		{name: "empty model", spec: "^gpt-.*=", wantError: true},
+		{name: "invalid regex", spec: "^(bad=gpt-5", wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule, err := ParseModelMapSpec(tt.spec)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("ParseModelMapSpec(%q) succeeded, want error", tt.spec)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseModelMapSpec(%q) error = %v", tt.spec, err)
+			}
+			if rule.Pattern != tt.wantRule.Pattern || rule.Model != tt.wantRule.Model {
+				t.Fatalf("ParseModelMapSpec(%q) = {%q %q}, want {%q %q}",
+					tt.spec, rule.Pattern, rule.Model, tt.wantRule.Pattern, tt.wantRule.Model)
+			}
+		})
+	}
+}
+
+func mustModelMapRule(t *testing.T, spec string) ModelMapRule {
+	t.Helper()
+	rule, err := ParseModelMapSpec(spec)
+	if err != nil {
+		t.Fatalf("ParseModelMapSpec(%q): %v", spec, err)
+	}
+	return rule
 }

@@ -364,7 +364,6 @@ func TestConvertArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCalls(t *t
 func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 	mapper := NewModelMapper(&Config{
 		Provider: constants.ProviderArgo,
-		Model:    "gemini25pro",
 	})
 	converter := &Converter{mapper: mapper}
 
@@ -489,7 +488,6 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
 	mapper := NewModelMapper(&Config{
 		Provider: constants.ProviderArgo,
-		Model:    "gpt4o",
 	})
 	converter := &Converter{mapper: mapper}
 

@@ -3,7 +3,6 @@ package proxy
 import (
 	"fmt"
 	"lmtools/internal/constants"
-	"lmtools/internal/core"
 	"time"
 )
 
@@ -23,10 +22,9 @@ type Config struct {
 	ArgoEnv    string
 
 	// Provider Configuration
-	Provider    string
-	ProviderURL string
-	Model       string
-	SmallModel  string
+	Provider      string
+	ProviderURL   string
+	ModelMapRules []ModelMapRule
 
 	// Security Configuration
 	MaxRequestBodySize  int64 // Maximum request body size in bytes
@@ -37,23 +35,6 @@ type Config struct {
 
 	// Stateful Responses API storage. Empty means ~/.apiproxy/sessions.
 	SessionsDir string
-}
-
-// ApplyDynamicModelDefaults applies provider-specific model defaults
-// when the user hasn't specified models
-func (c *Config) ApplyDynamicModelDefaults() {
-	// Provider is already normalized by Validate()
-	provider := c.Provider
-
-	// If Model not specified, use provider-specific default
-	if c.Model == "" {
-		c.Model = core.GetDefaultChatModel(provider)
-	}
-
-	// If SmallModel not specified, use provider-specific default
-	if c.SmallModel == "" {
-		c.SmallModel = core.GetDefaultSmallModel(provider)
-	}
 }
 
 // Validate checks if the configuration is valid
@@ -80,6 +61,10 @@ func (c *Config) Validate() error {
 
 	if ok, _ := evaluateProviderCredentials(c.Provider, newProviderCredentialState(c)); !ok {
 		return fmt.Errorf("%s", providerValidationError(c.Provider))
+	}
+
+	if err := ValidateModelMapRules(c.ModelMapRules); err != nil {
+		return err
 	}
 
 	return nil

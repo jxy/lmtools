@@ -38,8 +38,7 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 		ArgoUser:           "testuser",
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        openAIMock.URL + "/v1/chat/completions",
-		SmallModel:         "gpt-4o-mini",
-		Model:              "gpt-4o",
+		ModelMapRules:      []ModelMapRule{{Pattern: "haiku", Model: "gpt-4o-mini"}, {Pattern: "claude", Model: "gpt-4o"}},
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -428,14 +427,14 @@ func TestE2EBasicChat(t *testing.T) {
 		expectContent  string
 	}{
 		{
-			name:           "Haiku maps to small model",
+			name:           "Haiku maps by model-map rule",
 			model:          "claude-3-haiku-20240307",
 			message:        "Hello",
 			expectProvider: constants.ProviderOpenAI,
 			expectContent:  "GPT-4o-mini",
 		},
 		{
-			name:           "Sonnet maps to big model",
+			name:           "Sonnet maps by model-map rule",
 			model:          "claude-3-5-sonnet-20241022",
 			message:        "Hello",
 			expectProvider: constants.ProviderOpenAI,
@@ -1003,8 +1002,6 @@ func TestProviderFlagPrecedence(t *testing.T) {
 			// Create config with specified provider
 			config := &Config{
 				Provider:           tc.provider,
-				SmallModel:         "gpt-4o-mini",
-				Model:              "gpt-4o",
 				MaxRequestBodySize: 10 * 1024 * 1024,
 			}
 

@@ -1,9 +1,5 @@
 package proxy
 
-import (
-	"strings"
-)
-
 // ModelMapper handles model name mapping between different providers
 type ModelMapper struct {
 	config *Config
@@ -16,20 +12,18 @@ func NewModelMapper(config *Config) *ModelMapper {
 	}
 }
 
-// MapModel maps an incoming model name to the appropriate model for the configured provider.
-// For Anthropic models: haiku -> SmallModel, others -> Model
-// For all other models: pass through unchanged
-// Note: Provider is always taken from config, not returned here (KISS principle)
+// MapModel maps an incoming model name using the configured model-map rules.
+// The first matching rule wins. Models with no matching rule pass through unchanged.
 func (m *ModelMapper) MapModel(model string) string {
-	// Map Anthropic models to big/small models
-	if strings.HasPrefix(strings.ToLower(model), "claude-") {
-		if strings.Contains(strings.ToLower(model), "haiku") {
-			// Haiku models map to SmallModel
-			return m.config.SmallModel
-		}
-		// All non-haiku Claude models (opus, sonnet, etc.) map to Model
-		return m.config.Model
+	if m == nil || m.config == nil {
+		return model
 	}
-	// Pass through all other models unchanged
+
+	for _, rule := range m.config.ModelMapRules {
+		if rule.matches(model) {
+			return rule.Model
+		}
+	}
+
 	return model
 }

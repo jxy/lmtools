@@ -23,8 +23,6 @@ func TestSimulatedStreamingFormat(t *testing.T) {
 		ProviderURL:        argoMock.URL,
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 

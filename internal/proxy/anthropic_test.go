@@ -24,37 +24,33 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		wantModel    string
 	}{
 		{
-			name: "anthropic provider with claude model",
+			name: "anthropic provider with claude model passes through without model map",
 			config: &Config{
 				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
-				Model:           "claude-3-opus-20240229",
-				SmallModel:      "claude-3-haiku-20240307",
 			},
 			inputModel:   "claude-3-opus-20240229",
 			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-opus-20240229",
 		},
 		{
-			name: "anthropic provider with haiku model",
+			name: "anthropic provider with haiku model passes through without model map",
 			config: &Config{
 				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
-				Model:           "claude-3-opus-20240229",
-				SmallModel:      "claude-3-haiku-20240307",
 			},
 			inputModel:   "claude-3-haiku-20240307",
 			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-haiku-20240307",
 		},
 		{
-			name: "anthropic provider maps opus to model",
+			name: "anthropic provider uses explicit model map",
 			config: &Config{
 				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
-				Model:           "claude-3-opus-20240229",
+				ModelMapRules:   []ModelMapRule{mustModelMapRule(t, "^claude-3-opus.*=claude-3-opus-20240229")},
 			},
-			inputModel:   "claude-3-opus-20240229",
+			inputModel:   "claude-3-opus",
 			wantProvider: constants.ProviderAnthropic,
 			wantModel:    "claude-3-opus-20240229",
 		},
@@ -63,24 +59,21 @@ func TestMapperAnthropicProvider(t *testing.T) {
 			config: &Config{
 				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
-				Model:           "gpt-4",
-				SmallModel:      "gpt-3.5-turbo",
 			},
 			inputModel:   "gpt-4",
 			wantProvider: constants.ProviderAnthropic,
-			wantModel:    "gpt-4", // Non-Claude models pass through unchanged
+			wantModel:    "gpt-4",
 		},
 		{
-			name: "anthropic provider maps haiku to small model",
+			name: "anthropic provider maps haiku only with explicit model map",
 			config: &Config{
 				Provider:        constants.ProviderAnthropic,
 				AnthropicAPIKey: "test-key",
-				Model:           "claude-3-opus-20240229",
-				SmallModel:      "claude-3-haiku-20240307",
+				ModelMapRules:   []ModelMapRule{mustModelMapRule(t, "^claude-3-haiku.*=claude-3-haiku-20240307")},
 			},
 			inputModel:   "claude-3-haiku-20240307",
 			wantProvider: constants.ProviderAnthropic,
-			wantModel:    "claude-3-haiku-20240307", // Maps to SmallModel
+			wantModel:    "claude-3-haiku-20240307",
 		},
 	}
 
@@ -411,7 +404,6 @@ func TestAnthropicIntegration(t *testing.T) {
 		Provider:            constants.ProviderAnthropic,
 		AnthropicAPIKey:     "test-key",
 		ProviderURL:         mockAnthropic.URL,
-		Model:               "claude-3-opus-20240229",
 		MaxRequestBodySize:  10 * 1024 * 1024, // 10MB
 		MaxResponseBodySize: 10 * 1024 * 1024, // 10MB
 	}

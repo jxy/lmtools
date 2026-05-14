@@ -172,6 +172,11 @@ chmod 600 ~/.google-key
 # Argo backend.
 ./bin/apiproxy -provider argo -argo-user "$USER"
 
+# Argo backend with client-visible model aliases.
+./bin/apiproxy -provider argo -argo-user "$USER" \
+  -model-map '^gpt-4o$=gpt5' \
+  -model-map '^claude-.*=claude-opus-4-1-20250805'
+
 # Listen on another host and port.
 ./bin/apiproxy -host 0.0.0.0 -port 8080 \
   -provider openai \
@@ -186,8 +191,8 @@ By default the server binds to `127.0.0.1:8082`. Use `-host 0.0.0.0` only when y
 - `-api-key-file string`: API key file for the selected provider.
 - `-argo-user string`: Argo user or API key when using Argo.
 - `-provider-url string`: Custom provider URL.
-- `-model string`: Primary model. Defaults depend on the provider.
-- `-small-model string`: Small model used for Claude Haiku aliases.
+- `-model-map REGEX=MODEL_NAME`: Map matching request models to a backend model.
+  Can be repeated; the first matching rule wins.
 - `-argo-dev`, `-argo-test`, `-argo-legacy`
 - `-host string`: Bind host. Default `127.0.0.1`.
 - `-port int`: Bind port. Default `8082`.
@@ -297,16 +302,26 @@ claude
 
 The selected `-provider` controls the backend. The proxy does not fall back to another provider automatically.
 
-Claude model aliases are mapped before forwarding:
+Model names are mapped before forwarding only when `-model-map` rules are configured:
 
-- Claude Haiku models map to `-small-model`.
-- Other Claude models map to `-model`.
-- Non-Claude model names pass through unchanged.
+- Each `-model-map REGEX=MODEL_NAME` rule matches against the client-requested model name.
+- Rules are evaluated in command-line order, and the first match wins.
+- If no rule matches, the requested model name is forwarded unchanged.
+
+Example:
+
+```bash
+./bin/apiproxy -provider argo -argo-user "$USER" \
+  -model-map '^gpt-4o-mini$=gpt5mini' \
+  -model-map '^gpt-4o$=gpt5' \
+  -model-map '^claude-3-haiku.*=claude-3-haiku-20240307' \
+  -model-map '^claude-.*=claude-opus-4-1-20250805'
+```
 
 With `-provider argo` in native mode:
 
-- Models starting with `claude` use Argo's Anthropic-compatible `/v1/messages` wire format.
-- All other models use Argo's OpenAI-compatible `/v1/chat/completions` wire format.
+- Backend models starting with `claude` use Argo's Anthropic-compatible `/v1/messages` wire format.
+- All other backend models use Argo's OpenAI-compatible `/v1/chat/completions` wire format.
 - `-argo-legacy` forces the older Argo chat and streamchat endpoints.
 
 ## Responses API Compatibility

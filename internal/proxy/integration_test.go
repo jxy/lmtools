@@ -25,8 +25,6 @@ func TestIntegrationBasicChat(t *testing.T) {
 		OpenAIAPIKey:       "test-openai-key",
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        openAIMock.URL + "/v1",
-		SmallModel:         "gpt-4o-mini",
-		Model:              "gpt-4o",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
@@ -133,8 +131,6 @@ func TestIntegrationStreaming(t *testing.T) {
 		ProviderURL:        argoMock.URL,
 		ArgoUser:           "testuser",
 		ArgoEnv:            "test",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
@@ -268,8 +264,6 @@ func TestIntegrationRetry(t *testing.T) {
 				ArgoLegacy:         tt.argoLegacy,
 				ProviderURL:        retryMock.URL,
 				Provider:           constants.ProviderArgo,
-				SmallModel:         "gpt35",
-				Model:              "gpt4",
 				MaxRequestBodySize: 10 * 1024 * 1024,
 			}
 
@@ -402,8 +396,6 @@ func TestIntegrationRetryRateLimit(t *testing.T) {
 				ArgoLegacy:         tt.argoLegacy,
 				ProviderURL:        rateLimitMock.URL,
 				Provider:           constants.ProviderArgo,
-				SmallModel:         "gpt35",
-				Model:              "gpt4",
 				MaxRequestBodySize: 10 * 1024 * 1024,
 			}
 
@@ -475,8 +467,6 @@ func TestIntegrationSimulatedStreamingWithTools(t *testing.T) {
 		OpenAIAPIKey:       "test-openai-key",
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        openAIMock.URL + "/v1",
-		SmallModel:         "gpt-4o-mini",
-		Model:              "gpt-4o",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
@@ -669,8 +659,6 @@ func TestCustomProviderURL(t *testing.T) {
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderOpenAI,
 					ProviderURL:        customMock.URL + "/custom/openai/path",
-					SmallModel:         "gpt-4o-mini",
-					Model:              "gpt-4o",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
 
@@ -719,8 +707,6 @@ func TestCustomProviderURL(t *testing.T) {
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderGoogle,
 					ProviderURL:        customMock.URL + "/custom/google/models",
-					SmallModel:         "gemini-2.0-flash",
-					Model:              "gemini-2.5-pro-preview-03-25",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
 
@@ -772,8 +758,6 @@ func TestCustomProviderURL(t *testing.T) {
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderArgo,
 					ProviderURL:        customMock.URL + "/custom/argo",
-					SmallModel:         "gpt35",
-					Model:              "gpt4",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
 
@@ -823,8 +807,6 @@ func TestCustomProviderURL(t *testing.T) {
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderArgo,
 					ProviderURL:        customMock.URL + "/custom/argo",
-					SmallModel:         "claude-3-haiku-20240307",
-					Model:              "claude-3-opus-20240229",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
 
@@ -861,8 +843,6 @@ func TestCustomProviderURL(t *testing.T) {
 					ArgoLegacy:         true,
 					Provider:           constants.ProviderArgo,
 					ProviderURL:        customMock.URL + "/custom/argo",
-					SmallModel:         "gpt35",
-					Model:              "gpt4",
 					MaxRequestBodySize: 10 * 1024 * 1024,
 				}
 

@@ -39,8 +39,6 @@ func TestOpenAIResponsesPromptOnlyPassesThroughToOpenAI(t *testing.T) {
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-test",
-		SmallModel:         "gpt-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -109,8 +107,6 @@ func TestOpenAIResponsesDirectPassThroughPreservesCustomTools(t *testing.T) {
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-test",
-		SmallModel:         "gpt-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -169,8 +165,6 @@ func TestOpenAIResponsesDirectPassThroughPreservesUnmodeledFields(t *testing.T) 
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-test",
-		SmallModel:         "gpt-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -220,8 +214,6 @@ func TestOpenAIResponsesDirectStreamPassThroughPreservesUnmodeledFields(t *testi
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-test",
-		SmallModel:         "gpt-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -283,8 +275,7 @@ func TestOpenAIResponsesDirectPassThroughRewritesOnlyMappedModel(t *testing.T) {
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
 		OpenAIAPIKey:       "test-key",
-		Model:              "gpt-upstream",
-		SmallModel:         "gpt-small",
+		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-sonnet$", Model: "gpt-upstream"}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -407,8 +398,6 @@ func TestOpenAIResponsesArgoLegacyNonClaudeUsesLegacyChat(t *testing.T) {
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
 		ArgoLegacy:         true,
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	})
@@ -468,8 +457,6 @@ func TestOpenAIResponsesAnthropicPreservesStrictFunctionTool(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local/v1",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-opus-4-7",
-		SmallModel:         "claude-haiku-4-5",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -539,8 +526,6 @@ func TestOpenAIResponsesArgoOpenAIConvertsInstructionRolesToSystem(t *testing.T)
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        "http://argo.local/v1",
 		ArgoUser:           "test-key",
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -616,8 +601,6 @@ func TestOpenAIResponsesArgoOpenAIAdaptsCustomToolsToFunctions(t *testing.T) {
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        "http://argo.local/v1",
 		ArgoUser:           "test-key",
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -711,8 +694,6 @@ func TestOpenAIResponsesConvertedProviderDropsUnsupportedTools(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -773,8 +754,6 @@ func TestOpenAIResponsesConvertedProviderWrapsCustomToolsForAnthropic(t *testing
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -856,8 +835,6 @@ func TestOpenAIResponsesConvertedProviderWrapsCustomToolsForGoogle(t *testing.T)
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        "http://google.local/v1beta",
 		GoogleAPIKey:       "test-key",
-		Model:              "gemini-test",
-		SmallModel:         "gemini-test",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}

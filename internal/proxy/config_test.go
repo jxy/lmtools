@@ -6,74 +6,41 @@ import (
 	"testing"
 )
 
-func TestDynamicModelDefaults(t *testing.T) {
+func TestValidateModelMapRules(t *testing.T) {
 	tests := []struct {
-		name               string
-		preferredProvider  string
-		inputModel         string
-		inputSmallModel    string
-		expectedModel      string
-		expectedSmallModel string
+		name      string
+		rules     []ModelMapRule
+		wantError bool
 	}{
 		{
-			name:               "OpenAI provider with default models",
-			preferredProvider:  constants.ProviderOpenAI,
-			inputModel:         "",
-			inputSmallModel:    "",
-			expectedModel:      "gpt-5",
-			expectedSmallModel: "gpt-5-mini",
+			name: "valid rules",
+			rules: []ModelMapRule{
+				{Pattern: "^claude-.*", Model: "claude-opus-4-1"},
+				{Pattern: "^gpt-4o$", Model: "gpt-5"},
+			},
 		},
 		{
-			name:               "Google provider with default models",
-			preferredProvider:  constants.ProviderGoogle,
-			inputModel:         "",
-			inputSmallModel:    "",
-			expectedModel:      "gemini-2.5-pro",
-			expectedSmallModel: "gemini-2.5-flash",
+			name:      "empty regex",
+			rules:     []ModelMapRule{{Pattern: "", Model: "gpt-5"}},
+			wantError: true,
 		},
 		{
-			name:               "Argo provider keeps default models",
-			preferredProvider:  constants.ProviderArgo,
-			inputModel:         "",
-			inputSmallModel:    "",
-			expectedModel:      "gpt5",
-			expectedSmallModel: "gpt5mini",
+			name:      "empty model",
+			rules:     []ModelMapRule{{Pattern: "^gpt-.*", Model: ""}},
+			wantError: true,
 		},
 		{
-			name:               "OpenAI with custom models",
-			preferredProvider:  constants.ProviderOpenAI,
-			inputModel:         "gpt-4o",
-			inputSmallModel:    "gpt-4o-mini",
-			expectedModel:      "gpt-4o",
-			expectedSmallModel: "gpt-4o-mini",
-		},
-		{
-			name:               "Only big model changed",
-			preferredProvider:  constants.ProviderOpenAI,
-			inputModel:         "gpt-4o",
-			inputSmallModel:    "claudesonnet4",
-			expectedModel:      "gpt-4o",
-			expectedSmallModel: "claudesonnet4",
+			name:      "invalid regex",
+			rules:     []ModelMapRule{{Pattern: "^(bad", Model: "gpt-5"}},
+			wantError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create config and apply dynamic defaults
-			config := &Config{
-				Provider:   tt.preferredProvider,
-				Model:      tt.inputModel,
-				SmallModel: tt.inputSmallModel,
-			}
-
-			// Apply dynamic defaults using the actual method
-			config.ApplyDynamicModelDefaults()
-
-			if config.Model != tt.expectedModel {
-				t.Errorf("Expected model=%s, got %s", tt.expectedModel, config.Model)
-			}
-			if config.SmallModel != tt.expectedSmallModel {
-				t.Errorf("Expected smallModel=%s, got %s", tt.expectedSmallModel, config.SmallModel)
+			err := ValidateModelMapRules(tt.rules)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("ValidateModelMapRules() error = %v, wantError %v", err, tt.wantError)
 			}
 		})
 	}

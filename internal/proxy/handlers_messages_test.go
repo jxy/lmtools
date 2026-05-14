@@ -17,9 +17,7 @@ import (
 func TestHandleMessagesErrorResponses(t *testing.T) {
 	// Create a test server
 	config := &Config{
-		Provider:   constants.ProviderArgo,
-		Model:      "testmodel",
-		SmallModel: "testsmall",
+		Provider: constants.ProviderArgo,
 	}
 	server := NewMinimalTestServer(t, config)
 
@@ -125,9 +123,7 @@ func TestHandleMessagesErrorResponses(t *testing.T) {
 func TestHandleCountTokensErrorResponses(t *testing.T) {
 	// Create a test server
 	config := &Config{
-		Provider:   constants.ProviderArgo,
-		Model:      "testmodel",
-		SmallModel: "testsmall",
+		Provider: constants.ProviderArgo,
 	}
 	server := NewMinimalTestServer(t, config)
 
@@ -222,8 +218,7 @@ func TestHandleCountTokensUsesAnthropicNativeCount(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local/v1",
 		AnthropicAPIKey:    "anthropic-key",
-		Model:              "claude-count",
-		SmallModel:         "claude-count",
+		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-5-sonnet-latest$", Model: "claude-count"}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 	}
 	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
@@ -270,8 +265,6 @@ func TestHandleCountTokensUsesGoogleCountTokens(t *testing.T) {
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        "http://google.local/v1beta/models",
 		GoogleAPIKey:       "google-key",
-		Model:              "gemini-count",
-		SmallModel:         "gemini-count",
 		MaxRequestBodySize: fixtureMaxBodySize,
 	}
 	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
@@ -305,8 +298,6 @@ func TestHandleCountTokensArgoNonClaudeUsesEstimate(t *testing.T) {
 		ProviderURL:        "http://argo.local",
 		ArgoAPIKey:         "argo-key",
 		ArgoUser:           "fixture-user",
-		Model:              "gpt-count",
-		SmallModel:         "claude-count",
 		MaxRequestBodySize: fixtureMaxBodySize,
 	}
 	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)

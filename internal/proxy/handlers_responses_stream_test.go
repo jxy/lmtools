@@ -50,8 +50,6 @@ func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -128,8 +126,6 @@ func TestOpenAIResponsesStreamArgoLegacyNonClaudeUsesLegacyChat(t *testing.T) {
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
 		ArgoLegacy:         true,
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -234,8 +230,6 @@ func TestOpenAIResponsesStreamArgoAnthropicUsesUpstreamStreaming(t *testing.T) {
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -343,8 +337,6 @@ func TestOpenAIResponsesStreamAnthropicUsesUpstreamStreaming(t *testing.T) {
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        backend.URL,
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -398,8 +390,6 @@ func TestOpenAIResponsesStreamGoogleUsesUpstreamStreaming(t *testing.T) {
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        backend.URL,
 		GoogleAPIKey:       "test-key",
-		Model:              "gemini-test",
-		SmallModel:         "gemini-test",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -497,8 +487,6 @@ func TestOpenAIResponsesStreamAnthropicErrorEventSendsResponseFailed(t *testing.
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        backend.URL,
 		AnthropicAPIKey:    "test-key",
-		Model:              "claude-test",
-		SmallModel:         "claude-test",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 		SessionsDir:        t.TempDir(),
 	})
@@ -544,8 +532,6 @@ func TestOpenAIResponsesStreamArgoOpenAIMalformedChunkSendsResponseFailed(t *tes
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 		SessionsDir:        t.TempDir(),
 	})
@@ -591,8 +577,6 @@ func TestOpenAIResponsesStreamArgoOpenAIErrorChunkSendsResponseFailed(t *testing
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
-		Model:              "gpt-5",
-		SmallModel:         "gpt-5-mini",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 		SessionsDir:        t.TempDir(),
 	})

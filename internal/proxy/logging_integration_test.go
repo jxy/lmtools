@@ -8,6 +8,7 @@ import (
 	"io"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -104,8 +105,8 @@ func TestLoggingWithModelMapping(t *testing.T) {
 		Provider:           constants.ProviderArgo, // Add provider
 		ProviderURL:        mockArgo.URL,
 		ArgoUser:           "testuser",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",  // Add small model
+		ArgoLegacy:         true,
+		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-opus-20240229$", Model: "gpto3"}},
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -144,41 +145,34 @@ func TestLoggingWithModelMapping(t *testing.T) {
 func TestStreamingRequestLogging(t *testing.T) {
 	SetupTestLogger(t)
 
-	// Create mock Argo provider for streaming
-	mockArgo := createMockProvider(t, func(w http.ResponseWriter, r *http.Request) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		// For streamchat endpoint, send plain text response
 		if strings.Contains(r.URL.Path, "streamchat") {
-			w.Header().Set("Content-Type", "text/plain")
-			if _, err := w.Write([]byte("Test streaming response")); err != nil {
-				t.Errorf("Failed to write response: %v", err)
-			}
-			return
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       io.NopCloser(strings.NewReader("Test streaming response")),
+			}, nil
 		}
 
 		// For regular chat endpoint (used in simulated streaming)
-		response := ArgoChatResponse{
+		return jsonRoundTripResponse(http.StatusOK, ArgoChatResponse{
 			Response: "Test response from Argo",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Errorf("Failed to encode response: %v", err)
-		}
+		}), nil
 	})
-	defer mockArgo.Close()
 
 	// Create server config
 	config := &Config{
 		Provider:           constants.ProviderArgo, // Add provider
-		ProviderURL:        mockArgo.URL,
+		ProviderURL:        "http://argo.local",
 		ArgoUser:           "testuser",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",  // Add small model
+		ArgoLegacy:         true,
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
 	// Create server (NewEndpoints is called internally)
-	server, cleanup := NewTestServer(t, config)
-	t.Cleanup(cleanup)
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	server := NewTestServerDirectWithClient(t, config, client)
 
 	// Create streaming request
 	anthReq := AnthropicRequest{
@@ -241,8 +235,7 @@ func TestConcurrentRequestLogging(t *testing.T) {
 		Provider:           constants.ProviderArgo, // Add provider
 		ProviderURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",  // Add small model
+		ArgoLegacy:         true,
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -338,8 +331,7 @@ func TestRequestDurationLogging(t *testing.T) {
 		Provider:           constants.ProviderArgo, // Add provider
 		ProviderURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",  // Add small model
+		ArgoLegacy:         true,
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -422,8 +414,7 @@ func TestPingIntervalLogging(t *testing.T) {
 		Provider:           constants.ProviderArgo, // Add provider
 		ProviderURL:        mockProvider.URL,
 		ArgoUser:           "testuser",
-		Model:              "gpto3",
-		SmallModel:         "gemini25flash",  // Add small model
+		ArgoLegacy:         true,
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 	}
 
@@ -484,7 +475,7 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, MaxRequestBodySize: 10 * 1024 * 1024}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
@@ -545,7 +536,7 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		}
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, MaxRequestBodySize: 10 * 1024 * 1024}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
@@ -600,7 +591,7 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer mockArgo.Close()
-	config := &Config{Provider: constants.ProviderArgo, ArgoUser: "u", ProviderURL: mockArgo.URL, Model: "claude-3-haiku-20240307", SmallModel: "claude-3-haiku-20240307", MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{Provider: constants.ProviderArgo, ArgoUser: "u", ProviderURL: mockArgo.URL, MaxRequestBodySize: 10 * 1024 * 1024}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
@@ -656,7 +647,7 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, Model: "claude-3-opus-20240229", MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, MaxRequestBodySize: 10 * 1024 * 1024}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()

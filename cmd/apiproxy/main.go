@@ -11,9 +11,24 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
+
+type repeatableStringFlag []string
+
+func (f *repeatableStringFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, ",")
+}
+
+func (f *repeatableStringFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: %s [options]
@@ -39,8 +54,8 @@ Provider Options:
   -argo-legacy               Use legacy Argo /api/v1/resource chat endpoints
 
 Model Options:
-  -model string              Model to use (default varies by provider)
-  -small-model string        Small model to use (default varies by provider)
+  -model-map REGEX=MODEL     Map matching request models to a backend model
+                             (repeatable, first match wins)
 
 Request Options:
   -max-request-body-size int Maximum request body size in MB (default: 10)
@@ -101,8 +116,7 @@ func main() {
 		argoLegacy         bool
 		preferredProvider  string
 		providerURL        string
-		model              string
-		smallModel         string
+		modelMapSpecs      repeatableStringFlag
 		maxRequestBodySize int64
 		sessionsDir        string
 
@@ -125,8 +139,7 @@ func main() {
 	flag.BoolVar(&argoLegacy, "argo-legacy", false, "Use legacy Argo /api/v1/resource chat endpoints")
 	flag.StringVar(&preferredProvider, "provider", constants.ProviderArgo, "Provider (argo, anthropic, openai, google)")
 	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
-	flag.StringVar(&model, "model", "", "Model to use (default varies by provider)")
-	flag.StringVar(&smallModel, "small-model", "", "Small model to use")
+	flag.Var(&modelMapSpecs, "model-map", "Map matching request models to a backend model as REGEX=MODEL (repeatable, first match wins)")
 	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", 10, "Maximum request body size in MB")
 	flag.StringVar(&sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
 
@@ -166,6 +179,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	modelMapRules := make([]proxy.ModelMapRule, 0, len(modelMapSpecs))
+	for _, spec := range modelMapSpecs {
+		rule, err := proxy.ParseModelMapSpec(spec)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid -model-map %q: %v\n", spec, err)
+			os.Exit(1)
+		}
+		modelMapRules = append(modelMapRules, rule)
+	}
+
 	// Create configuration from flags
 	config := &proxy.Config{
 		AnthropicAPIKey:    anthropicAPIKey,
@@ -179,14 +202,10 @@ func main() {
 		ArgoEnv:            resolveArgoEnvironment(argoDev, argoTest),
 		Provider:           preferredProvider,
 		ProviderURL:        providerURL,
-		Model:              model,
-		SmallModel:         smallModel,
+		ModelMapRules:      modelMapRules,
 		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
 		SessionsDir:        sessionsDir,
 	}
-
-	// Apply dynamic model defaults based on provider
-	config.ApplyDynamicModelDefaults()
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
