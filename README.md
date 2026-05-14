@@ -126,6 +126,8 @@ Chat output:
 - `-stream`: Stream chat responses.
 - `-openai-responses`: With `-provider openai`, send chat through OpenAI `/v1/responses`.
 - `-print-curl`: Print the equivalent `curl` command and exit without sending the request.
+  With `-resume` or `-branch`, session history is read only and session files are not changed.
+  With `-resume -tool`, pending tool calls are represented by placeholder results.
 - `-s string`: System prompt.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
 - `-json`: Request JSON object output.

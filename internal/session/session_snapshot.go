@@ -47,6 +47,61 @@ func BuildMessagesWithToolInteractionsThroughMessageWithManager(ctx context.Cont
 	return buildTypedMessagesFromLineageRefs(ctx, refs)
 }
 
+func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.TypedMessage, core.Role, error) {
+	manager := DefaultManager()
+	sessionPath, messageID := manager.ParseMessageID(branchRef)
+	if messageID == "" {
+		return nil, "", errors.WrapError("parse branch reference", fmt.Errorf("branch reference must point to a message: %s", branchRef))
+	}
+
+	sessionPath = manager.ResolveSessionPath(sessionPath)
+	anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
+	anchorPath = manager.ResolveSessionPath(anchorPath)
+
+	refs, err := lineageMessageRefsWithManager(manager, anchorPath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	anchorIdx := -1
+	for i, ref := range refs {
+		if ref.path == anchorPath && ref.message.ID == anchorID {
+			anchorIdx = i
+			break
+		}
+	}
+	if anchorIdx == -1 {
+		return nil, "", errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
+	}
+
+	anchorRole := refs[anchorIdx].message.Role
+	switch anchorRole {
+	case core.RoleAssistant:
+		refs = refs[:anchorIdx]
+	case core.RoleUser:
+		prevAssistantIdx := -1
+		for i := anchorIdx - 1; i >= 0; i-- {
+			if refs[i].message.Role == core.RoleAssistant {
+				prevAssistantIdx = i
+				break
+			}
+		}
+		if prevAssistantIdx == -1 {
+			refs = nil
+		} else {
+			refs = refs[:prevAssistantIdx+1]
+		}
+	default:
+		return nil, "", errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", anchorRole, anchorID))
+	}
+
+	messages, err := buildTypedMessagesFromLineageRefs(ctx, refs)
+	if err != nil {
+		return nil, "", err
+	}
+	return messages, anchorRole, nil
+}
+
 // ForkSessionThroughMessageWithManager creates a new session containing only
 // the visible lineage through a specific committed message snapshot.
 func ForkSessionThroughMessageWithManager(ctx context.Context, manager *Manager, sessionPath, terminalPath, terminalMessageID string, newSystemPrompt *string) (*Session, error) {

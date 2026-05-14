@@ -61,57 +61,44 @@ func NewRequestController(ctx context.Context, cfg *config.Config, opts core.Req
 }
 
 // handleRequest processes the main request lifecycle
-func (rc *RequestController) handleRequest(inputStr string, sess *session.Session) error {
+func (rc *RequestController) handleRequest(inputStr string, plan *session.RequestPlan) error {
 	// Build HTTP request
-	rb, err := rc.buildRequest(sess, inputStr)
+	rb, err := buildHTTPRequest(rc.ctx, rc.cfg, rc.opts, plan, inputStr)
 	if err != nil {
 		return err
 	}
-	if rc.cfg.PrintCurl {
-		fmt.Println(renderCurlCommand(rb.Request, rb.Body))
-		return nil
-	}
+	logBuiltHTTPRequest(rc.ctx, rc.cfg, rc.logDir, rc.notifier, rb.Request, rb.Body)
 
 	// Send request with retry
-	resp, err := rc.sendRequest(rb.Request)
+	resp, err := sendWithRetry(rc.ctx, rb.Request, rc.cfg)
 	if err != nil {
 		return err
 	}
 
 	// Handle response
-	response, err := rc.handleResponse(resp, rb.ToolDefs)
+	response, err := core.HandleResponseWithOptions(rc.ctx, rc.opts, resp, logger.From(rc.ctx), rc.notifier, core.ResponseParseOptions{
+		ArgoLegacy: rc.opts.IsArgoLegacy(),
+		ToolDefs:   rb.ToolDefs,
+	})
 	if err != nil {
-		return err
+		return errors.WrapError("handle response", err)
+	}
+
+	var sess *session.Session
+	if plan != nil {
+		committed, err := plan.Commit(rc.ctx)
+		if err != nil {
+			return errors.WrapError("commit session", err)
+		}
+		sess = committed
 	}
 
 	// Process tool calls or save response
 	if len(response.ToolCalls) > 0 {
-		return rc.handleToolCalls(sess, response, rb, inputStr)
+		return rc.handleToolCalls(sess, &response, rb, inputStr)
 	}
 
-	return rc.handleNormalResponse(response, sess, rb.Model)
-}
-
-// buildRequest constructs the HTTP request
-func (rc *RequestController) buildRequest(sess *session.Session, inputStr string) (core.RequestBuild, error) {
-	return buildHTTPRequest(rc.ctx, rc.cfg, rc.opts, sess, inputStr, rc.logDir, rc.notifier)
-}
-
-// sendRequest sends the request with retry logic
-func (rc *RequestController) sendRequest(req *http.Request) (*http.Response, error) {
-	return sendWithRetry(rc.ctx, req, rc.cfg)
-}
-
-// handleResponse processes the HTTP response
-func (rc *RequestController) handleResponse(resp *http.Response, toolDefs []core.ToolDefinition) (*core.Response, error) {
-	response, err := core.HandleResponseWithOptions(rc.ctx, rc.opts, resp, logger.From(rc.ctx), rc.notifier, core.ResponseParseOptions{
-		ArgoLegacy: rc.opts.IsArgoLegacy(),
-		ToolDefs:   toolDefs,
-	})
-	if err != nil {
-		return nil, errors.WrapError("handle response", err)
-	}
-	return &response, nil
+	return rc.handleNormalResponse(&response, sess, rb.Model)
 }
 
 // handleToolCalls processes responses with tool calls
@@ -273,32 +260,54 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
-	// Prepare session using coordinator
-	var sess *session.Session
-	var executedPending bool
-
-	if cfg.PrintCurl && cfg.Resume == "" && cfg.Branch == "" {
-		cfg.NoSession = true
-	} else if !cfg.NoSession {
-		coordinator := session.NewCoordinator(opts, notifier)
-		approver := NewCliApprover(notifier)
-
-		result, err := coordinator.PrepareSession(ctx, inputStr, isRegeneration, approver)
+	if cfg.PrintCurl {
+		plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, notifier, inputStr, isRegeneration, session.PendingToolPreview)
 		if err != nil {
 			return err
 		}
-		sess = result.Session
-		executedPending = result.ExecutedPending
+		hasPendingTools := plan != nil && plan.HasPendingTools
+		if !isRegeneration && inputStr == "" && !hasPendingTools {
+			return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
+		}
+		rb, err := buildHTTPRequest(ctx, &cfg, opts, plan, inputStr)
+		if err != nil {
+			return err
+		}
+		fmt.Println(renderCurlCommand(rb.Request, rb.Body))
+		return nil
+	}
+
+	// Prepare session using coordinator
+	var plan *session.RequestPlan
+	var hasPendingTools bool
+
+	plan, err = prepareSessionRequestPlan(ctx, &cfg, opts, notifier, inputStr, isRegeneration, session.PendingToolExecute)
+	if err != nil {
+		return err
+	}
+	if plan != nil {
+		hasPendingTools = plan.HasPendingTools
 	}
 
 	// Only require input if not regenerating and not continuing tool execution
-	if !isRegeneration && inputStr == "" && !executedPending {
+	if !isRegeneration && inputStr == "" && !hasPendingTools {
 		return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
 	}
 
 	// Create request controller and handle the request
 	controller := NewRequestController(ctx, &cfg, opts, notifier, logDir)
-	return controller.handleRequest(inputStr, sess)
+	return controller.handleRequest(inputStr, plan)
+}
+
+func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
+	if cfg.NoSession {
+		return nil, nil
+	}
+	coordinator := session.NewCoordinator(opts, notifier)
+	approver := NewCliApprover(notifier)
+	return coordinator.PrepareRequest(ctx, inputStr, isRegeneration, approver, session.PrepareRequestOptions{
+		PendingTools: pendingToolMode,
+	})
 }
 
 // handleSpecialFlags handles flags that don't require the full request processing
@@ -399,8 +408,8 @@ func readAndValidateInput(isRegeneration bool) (string, error) {
 	return inputStr, nil
 }
 
-// buildHTTPRequest builds the HTTP request based on configuration
-func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, sess *session.Session, inputStr string, logDir string, notifier core.Notifier) (core.RequestBuild, error) {
+// buildHTTPRequest builds the HTTP request based on configuration.
+func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, plan *session.RequestPlan, inputStr string) (core.RequestBuild, error) {
 	var req *http.Request
 	var body []byte
 	var model string
@@ -408,34 +417,24 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 	var err error
 
 	// Log request start
-	actualModel := cfg.Model
-	if actualModel == "" {
-		if cfg.Embed {
-			actualModel = core.DefaultEmbedModel
-		} else {
-			provider := providers.ResolveProvider(opts.Provider)
-			actualModel = core.GetDefaultChatModel(provider)
-		}
-	}
+	actualModel := actualModelForConfig(cfg, opts)
 	logger.From(ctx).Infof("Starting request | Model: %s | Provider: %s", actualModel, cfg.Provider)
 
-	if sess != nil {
-		// Always use the tool-aware message builder for sessions.
-		rb, err := core.BuildRequestWithToolInteractions(ctx, opts, sess, session.BuildMessagesWithToolInteractions)
+	if plan != nil {
+		toolDefs = toolDefinitionsForOptions(opts)
+		req, body, err = core.BuildChatRequest(opts, plan.Messages, core.ChatBuildOptions{
+			ToolDefs: toolDefs,
+			Stream:   opts.IsStreamChat(),
+		})
 		if err != nil {
 			return core.RequestBuild{}, errors.WrapError("build request", err)
 		}
-		req = rb.Request
-		body = rb.Body
-		model = rb.Model
-		toolDefs = rb.ToolDefs
+		model = actualModel
 	} else {
 		req, body, err = core.BuildRequest(opts, inputStr)
 		if err == nil {
 			model = actualModel
-			if opts.IsToolEnabled() {
-				toolDefs = core.GetBuiltinUniversalCommandTool()
-			}
+			toolDefs = toolDefinitionsForOptions(opts)
 		}
 	}
 
@@ -443,6 +442,34 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 		return core.RequestBuild{}, errors.WrapError("build request", err)
 	}
 
+	return core.RequestBuild{
+		Request:  req,
+		Body:     body,
+		Model:    model,
+		ToolDefs: toolDefs,
+	}, nil
+}
+
+func actualModelForConfig(cfg *config.Config, opts core.RequestOptions) string {
+	actualModel := cfg.Model
+	if actualModel != "" {
+		return actualModel
+	}
+	if cfg.Embed {
+		return core.DefaultEmbedModel
+	}
+	provider := providers.ResolveProvider(opts.Provider)
+	return core.GetDefaultChatModel(provider)
+}
+
+func toolDefinitionsForOptions(opts core.RequestOptions) []core.ToolDefinition {
+	if opts.IsToolEnabled() {
+		return core.GetBuiltinUniversalCommandTool()
+	}
+	return nil
+}
+
+func logBuiltHTTPRequest(ctx context.Context, cfg *config.Config, logDir string, notifier core.Notifier, req *http.Request, body []byte) {
 	// Log request details
 	var requestData map[string]interface{}
 	if err := json.Unmarshal(body, &requestData); err == nil {
@@ -459,13 +486,6 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 		notifier.Warnf("Failed to log request: %v", err)
 	}
 	logWireHTTPRequest(ctx, req, body)
-
-	return core.RequestBuild{
-		Request:  req,
-		Body:     body,
-		Model:    model,
-		ToolDefs: toolDefs,
-	}, nil
 }
 
 func renderCurlCommand(req *http.Request, body []byte) string {
@@ -478,7 +498,6 @@ func renderCurlCommand(req *http.Request, body []byte) string {
 	sort.Strings(headerNames)
 	for _, name := range headerNames {
 		values := append([]string(nil), req.Header.Values(name)...)
-		sort.Strings(values)
 		for _, value := range values {
 			parts = append(parts, "-H", name+": "+value)
 		}
@@ -497,7 +516,20 @@ func renderCurlCommand(req *http.Request, body []byte) string {
 	if len(body) == 0 {
 		return command
 	}
-	return command + " <<'EOJ'\n" + string(body) + "\nEOJ"
+	delimiter := heredocDelimiter(body)
+	return command + " <<'" + delimiter + "'\n" + string(body) + "\n" + delimiter
+}
+
+func heredocDelimiter(body []byte) string {
+	for i := 0; ; i++ {
+		delimiter := "EOJ"
+		if i > 0 {
+			delimiter = fmt.Sprintf("EOJ_%d", i)
+		}
+		if !bytes.Contains(append(append([]byte{'\n'}, body...), '\n'), []byte("\n"+delimiter+"\n")) {
+			return delimiter
+		}
+	}
 }
 
 func shellQuote(value string) string {

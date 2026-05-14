@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/session"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(t *testing.T) {
@@ -99,6 +104,94 @@ func TestRenderCurlCommand(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderCurlCommand() = %q, want substring %q", got, want)
 		}
+	}
+}
+
+func TestRenderCurlCommandPreservesHeaderValueOrder(t *testing.T) {
+	req, err := http.NewRequest("GET", "https://api.example.com/v1/models", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Add("X-Test", "second")
+	req.Header.Add("X-Test", "first")
+
+	got := renderCurlCommand(req, nil)
+	secondIdx := strings.Index(got, "-H 'X-Test: second'")
+	firstIdx := strings.Index(got, "-H 'X-Test: first'")
+	if secondIdx == -1 || firstIdx == -1 {
+		t.Fatalf("renderCurlCommand() = %q, want both X-Test headers", got)
+	}
+	if secondIdx > firstIdx {
+		t.Fatalf("renderCurlCommand() = %q, repeated header values were reordered", got)
+	}
+}
+
+func TestRenderCurlCommandAvoidsHeredocDelimiterCollision(t *testing.T) {
+	req, err := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	body := []byte("line one\nEOJ\nline two")
+
+	got := renderCurlCommand(req, body)
+	if strings.Contains(got, "<<'EOJ'\n") {
+		t.Fatalf("renderCurlCommand() used colliding delimiter: %q", got)
+	}
+	if !strings.Contains(got, "<<'EOJ_1'\n") || !strings.HasSuffix(got, "\nEOJ_1") {
+		t.Fatalf("renderCurlCommand() = %q, want EOJ_1 delimiter", got)
+	}
+}
+
+func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testing.T) {
+	ctx := context.Background()
+	oldDir := session.GetSessionsDir()
+	session.SetSessionsDir(t.TempDir())
+	t.Cleanup(func() { session.SetSessionsDir(oldDir) })
+
+	sess, err := session.CreateSession("session system", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	appendTestSessionMessage(t, ctx, sess, core.RoleUser, "hello")
+	appendTestSessionMessage(t, ctx, sess, core.RoleAssistant, "hi")
+
+	cfg, err := config.ParseFlags([]string{
+		"-provider", "openai",
+		"-provider-url", "http://example.test/v1",
+		"-resume", session.GetSessionID(sess.Path),
+		"-print-curl",
+	})
+	if err != nil {
+		t.Fatalf("ParseFlags() error = %v", err)
+	}
+
+	opts := cfg.RequestOptions()
+	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, core.NewTestNotifier(), "preview question", false, session.PendingToolPreview)
+	if err != nil {
+		t.Fatalf("prepareSessionRequestPlan() error = %v", err)
+	}
+	rb, err := buildHTTPRequest(ctx, &cfg, opts, plan, "preview question")
+	if err != nil {
+		t.Fatalf("buildHTTPRequest() error = %v", err)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rb.Body, &body); err != nil {
+		t.Fatalf("request body is not JSON: %v", err)
+	}
+	messages, ok := body["messages"].([]interface{})
+	if !ok || len(messages) == 0 {
+		t.Fatalf("messages = %#v, want non-empty array", body["messages"])
+	}
+	last, ok := messages[len(messages)-1].(map[string]interface{})
+	if !ok {
+		t.Fatalf("last message = %#v, want object", messages[len(messages)-1])
+	}
+	if last["role"] != "user" || last["content"] != "preview question" {
+		t.Fatalf("last message = %#v, want preview user input", last)
+	}
+	if _, err := os.Stat(filepath.Join(sess.Path, "0003.json")); !os.IsNotExist(err) {
+		t.Fatalf("print-curl preview mutated session, 0003.json stat err = %v", err)
 	}
 }
 
@@ -220,4 +313,16 @@ func (e testError) Error() string {
 
 func errorf(format string, args ...interface{}) error {
 	return testError{msg: format}
+}
+
+func appendTestSessionMessage(t *testing.T, ctx context.Context, sess *session.Session, role core.Role, content string) {
+	t.Helper()
+	_, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now(),
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("AppendMessageWithToolInteraction(%s, %q) error = %v", role, content, err)
+	}
 }
