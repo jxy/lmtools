@@ -185,6 +185,28 @@ chmod 600 ~/.google-key
 
 By default the server binds to `127.0.0.1:8082`. Use `-host 0.0.0.0` only when you intend to expose it beyond localhost.
 
+### Codex With Argo
+
+Codex can use Argo through `apiproxy` by configuring a local OpenAI-compatible provider. Add a provider and profile to `.codex/config.toml`:
+
+```toml
+[model_providers.apiproxy]
+name = "apiproxy to argo"
+base_url = "http://127.0.0.1:8082/v1"
+
+[profiles.apiproxy]
+model_provider = "apiproxy"
+```
+
+Then start `apiproxy` with a model map from the Codex-requested model name to the Argo backend model:
+
+```bash
+./bin/apiproxy -provider argo -argo-user "$USER" \
+  -model-map '^gpt-5\.5$=gpt55'
+```
+
+Run Codex with the `apiproxy` profile. Requests for `gpt-5.5` are sent to Argo as `gpt55`.
+
 ### apiproxy Flags
 
 - `-provider string`: `argo` (default), `anthropic`, `openai`, or `google`.
