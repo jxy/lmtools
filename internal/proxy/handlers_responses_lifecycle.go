@@ -35,6 +35,13 @@ type openAIResponsesStateContext struct {
 	ConversationBaseTerminalMessageID string
 }
 
+type openAIResponsesStatePrepareMode struct {
+	Store      bool
+	Writable   bool
+	Background bool
+	ReadOnly   bool
+}
+
 func (s *Server) handleOpenAIResponsesLifecycle(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/v1/responses/")
@@ -633,19 +640,35 @@ func (s *Server) deleteOpenAIConversationItem(ctx context.Context, w http.Respon
 
 func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, background bool) (*openAIResponsesStateContext, TypedRequest, error) {
 	store := req.Store == nil || *req.Store
-	writableState := store || background
+	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, openAIResponsesStatePrepareMode{
+		Store:      store,
+		Writable:   store || background,
+		Background: background,
+	})
+}
+
+func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string) (*openAIResponsesStateContext, TypedRequest, error) {
+	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, openAIResponsesStatePrepareMode{ReadOnly: true})
+}
+
+func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, mode openAIResponsesStatePrepareMode) (*openAIResponsesStateContext, TypedRequest, error) {
 	convSpec, err := parseConversationSpec(req.Conversation)
 	if err != nil {
 		return nil, typed, err
 	}
-	needsState := writableState || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
-	if !needsState {
-		return nil, typed, nil
+	if mode.ReadOnly && convSpec.create {
+		return nil, typed, fmt.Errorf("conversation id is required")
+	}
+	if !mode.ReadOnly {
+		needsState := mode.Writable || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
+		if !needsState {
+			return nil, typed, nil
+		}
 	}
 
 	stateCtx := &openAIResponsesStateContext{
-		Store:          store,
-		Background:     background,
+		Store:          mode.Store,
+		Background:     mode.Background,
 		Instructions:   responsesInstructionText(req.Instructions),
 		CurrentRequest: mustMarshalJSON(req),
 	}
@@ -666,48 +689,27 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		}
 	}
 
-	if convSpec.requested && (!convSpec.create || writableState) {
-		var conv *conversationRecord
-		var sess *session.Session
-		if convSpec.create {
-			if stateCtx.Previous != nil {
-				return nil, typed, fmt.Errorf("conversation does not match previous_response_id")
-			}
-			conv, sess, err = s.responsesState.createConversation(convSpec.metadata, stateCtx.Instructions)
-			if err != nil {
-				return nil, typed, err
-			}
-		} else {
-			var ok bool
-			conv, ok, err = s.responsesState.loadConversation(convSpec.id)
-			if err != nil {
-				return nil, typed, err
-			}
-			if !ok {
-				return nil, typed, fmt.Errorf("conversation %q was not found", convSpec.id)
-			}
-			if writableState && len(convSpec.metadata) > 0 {
-				conv.Metadata = cloneStringInterfaceMap(convSpec.metadata)
-			}
+	if convSpec.requested && (mode.ReadOnly || !convSpec.create || mode.Writable) {
+		conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, mode)
+		if err != nil {
+			return nil, typed, err
 		}
-		if stateCtx.Previous != nil {
-			if stateCtx.Previous.ConversationID != conv.ID {
-				return nil, typed, fmt.Errorf("conversation does not match previous_response_id")
-			}
-		} else {
+		if stateCtx.Previous == nil {
 			sessionPath = conv.SessionPath
 			stateCtx.Session = sess
 		}
 		stateCtx.Conversation = conv
-		if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
-			return nil, typed, err
+		if !mode.ReadOnly {
+			if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
+				return nil, typed, err
+			}
 		}
 		if stateCtx.Instructions == "" {
 			stateCtx.Instructions = conv.Instructions
 		}
 	}
 
-	if stateCtx.Previous != nil && writableState {
+	if stateCtx.Previous != nil && mode.Writable {
 		forkedSession, err := s.forkOpenAIResponsesResponseSnapshot(ctx, stateCtx.Previous)
 		if err != nil {
 			return nil, typed, err
@@ -716,7 +718,7 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		sessionPath = forkedSession.Path
 	}
 
-	if sessionPath == "" && writableState {
+	if sessionPath == "" && mode.Writable {
 		sess, err := s.responsesState.createSession()
 		if err != nil {
 			return nil, typed, err
@@ -731,19 +733,10 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 	}
 
 	if stateCtx.Session != nil {
-		var history []core.TypedMessage
-		if stateCtx.Previous != nil && !writableState {
-			history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
-		} else if stateCtx.Conversation != nil && stateCtx.Previous == nil {
-			history, err = s.conversationHistory(ctx, stateCtx.Conversation)
-		} else {
-			history, err = session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, stateCtx.Session.Path)
-		}
+		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, mode)
 		if err != nil {
 			return nil, typed, err
 		}
-		stateCtx.History = history
-		typed.Messages = append(append([]core.TypedMessage{}, history...), typed.Messages...)
 	}
 	if typed.Developer == "" {
 		typed.Developer = stateCtx.Instructions
@@ -754,85 +747,53 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 	return stateCtx, typed, nil
 }
 
-func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string) (*openAIResponsesStateContext, TypedRequest, error) {
-	convSpec, err := parseConversationSpec(req.Conversation)
-	if err != nil {
-		return nil, typed, err
-	}
+func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, mode openAIResponsesStatePrepareMode) (*conversationRecord, *session.Session, error) {
+	var conv *conversationRecord
+	var sess *session.Session
+	var err error
 	if convSpec.create {
-		return nil, typed, fmt.Errorf("conversation id is required")
-	}
-
-	stateCtx := &openAIResponsesStateContext{
-		Store:          false,
-		Instructions:   responsesInstructionText(req.Instructions),
-		CurrentRequest: mustMarshalJSON(req),
-	}
-	if stateCtx.Instructions == "" {
-		stateCtx.Instructions = typed.Developer
-	}
-
-	var sessionPath string
-	if req.PreviousResponseID != "" {
-		prev, err := s.loadCompletedPreviousResponse(req.PreviousResponseID)
-		if err != nil {
-			return nil, typed, err
+		if stateCtx.Previous != nil {
+			return nil, nil, fmt.Errorf("conversation does not match previous_response_id")
 		}
-		stateCtx.Previous = prev
-		sessionPath = prev.SessionPath
-		if stateCtx.Instructions == "" {
-			stateCtx.Instructions = prev.Instructions
-		}
-	}
-
-	if convSpec.requested {
-		conv, ok, err := s.responsesState.loadConversation(convSpec.id)
+		conv, sess, err = s.responsesState.createConversation(convSpec.metadata, stateCtx.Instructions)
 		if err != nil {
-			return nil, typed, err
+			return nil, nil, err
+		}
+	} else {
+		var ok bool
+		conv, ok, err = s.responsesState.loadConversation(convSpec.id)
+		if err != nil {
+			return nil, nil, err
 		}
 		if !ok {
-			return nil, typed, fmt.Errorf("conversation %q was not found", convSpec.id)
+			return nil, nil, fmt.Errorf("conversation %q was not found", convSpec.id)
 		}
-		if stateCtx.Previous != nil {
-			if stateCtx.Previous.ConversationID != conv.ID {
-				return nil, typed, fmt.Errorf("conversation does not match previous_response_id")
-			}
-		} else {
-			sessionPath = conv.SessionPath
-		}
-		stateCtx.Conversation = conv
-		if stateCtx.Instructions == "" {
-			stateCtx.Instructions = conv.Instructions
+		if mode.Writable && len(convSpec.metadata) > 0 {
+			conv.Metadata = cloneStringInterfaceMap(convSpec.metadata)
 		}
 	}
+	if stateCtx.Previous != nil && stateCtx.Previous.ConversationID != conv.ID {
+		return nil, nil, fmt.Errorf("conversation does not match previous_response_id")
+	}
+	return conv, sess, nil
+}
 
-	if sessionPath != "" {
-		sess, err := s.responsesState.loadSession(sessionPath)
-		if err != nil {
-			return nil, typed, err
-		}
-		stateCtx.Session = sess
-		var history []core.TypedMessage
-		if stateCtx.Previous != nil {
-			history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
-		} else if stateCtx.Conversation != nil {
-			history, err = s.conversationHistory(ctx, stateCtx.Conversation)
-		} else {
-			history, err = session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, sess.Path)
-		}
-		if err != nil {
-			return nil, typed, err
-		}
-		stateCtx.History = history
-		typed.Messages = append(append([]core.TypedMessage{}, history...), typed.Messages...)
+func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, mode openAIResponsesStatePrepareMode) (TypedRequest, error) {
+	var history []core.TypedMessage
+	var err error
+	if stateCtx.Previous != nil && (!mode.Writable || mode.ReadOnly) {
+		history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
+	} else if stateCtx.Conversation != nil && stateCtx.Previous == nil {
+		history, err = s.conversationHistory(ctx, stateCtx.Conversation)
+	} else {
+		history, err = session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, stateCtx.Session.Path)
 	}
-	if typed.Developer == "" {
-		typed.Developer = stateCtx.Instructions
+	if err != nil {
+		return typed, err
 	}
-	if originalModel != "" && typed.Metadata == nil {
-		typed.Metadata = map[string]interface{}{}
-	}
-	return stateCtx, typed, nil
+	stateCtx.History = history
+	typed.Messages = append(append([]core.TypedMessage{}, history...), typed.Messages...)
+	return typed, nil
 }
 
 func convertedOpenAIResponsesCompaction(stateCtx *openAIResponsesStateContext, typedWithState TypedRequest, summary string, upstreamResp *AnthropicResponse) *OpenAIResponsesCompactionResponse {
@@ -844,6 +805,13 @@ func convertedOpenAIResponsesCompaction(stateCtx *openAIResponsesStateContext, t
 		Output:    compactedResponseOutputItems(stateCtx, typedWithState.Messages, summary),
 		Usage:     anthropicUsageToResponsesUsage(upstreamResp),
 	}
+}
+
+type openAIResponsesCommitTarget struct {
+	Session             *session.Session
+	Conversation        *conversationRecord
+	AdvanceConversation bool
+	ExistingCreatedAt   int64
 }
 
 func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, typedCurrent TypedRequest, resp *OpenAIResponsesResponse, originalModel string, assistantBlocks []core.Block) error {
@@ -869,42 +837,64 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	s.responsesState.mu.Lock()
 	defer s.responsesState.mu.Unlock()
 
-	if err := s.ensureOpenAIResponsesStateWritableLocked(stateCtx, resp.ID, true); err != nil {
+	target, err := s.prepareOpenAIResponsesCommitTargetLocked(ctx, stateCtx, resp.ID)
+	if err != nil {
 		return err
 	}
+
+	result, err := appendOpenAIResponsesCommitMessages(ctx, target.Session, typedCurrent, resp, originalModel, assistantBlocks)
+	if err != nil {
+		return err
+	}
+	target.Session.Path = result.Path
+	stateCtx.Session = target.Session
+	if target.ExistingCreatedAt != 0 {
+		resp.CreatedAt = target.ExistingCreatedAt
+	}
+
+	return s.saveOpenAIResponsesCommitRecordsLocked(stateCtx, req, resp, originalModel, result, target)
+}
+
+func (s *Server) prepareOpenAIResponsesCommitTargetLocked(ctx context.Context, stateCtx *openAIResponsesStateContext, responseID string) (openAIResponsesCommitTarget, error) {
+	if err := s.ensureOpenAIResponsesStateWritableLocked(stateCtx, responseID, true); err != nil {
+		return openAIResponsesCommitTarget{}, err
+	}
+	target := openAIResponsesCommitTarget{Session: stateCtx.Session}
 	existingCreatedAt := int64(0)
 	if stateCtx.ExistingRecordID != "" {
 		var existing responseRecord
 		ok, err := s.responsesState.readJSON(s.responsesState.responsePath(stateCtx.ExistingRecordID), &existing)
 		if err != nil {
-			return err
+			return openAIResponsesCommitTarget{}, err
 		}
 		if ok {
 			existingCreatedAt = existing.CreatedAt
 		}
 	}
-	commitSession := stateCtx.Session
-	var currentConversation *conversationRecord
-	advanceConversation := false
+	target.ExistingCreatedAt = existingCreatedAt
 	if stateCtx.Conversation != nil {
 		conv, matches, err := s.openAIResponsesConversationHeadMatchesLocked(stateCtx)
 		if err != nil {
-			return err
+			return openAIResponsesCommitTarget{}, err
 		}
-		currentConversation = conv
+		target.Conversation = conv
 		if matches {
-			advanceConversation = true
+			target.AdvanceConversation = true
 		} else {
 			forkedSession, err := s.forkOpenAIResponsesConversationBase(ctx, stateCtx)
 			if err != nil {
-				return err
+				return openAIResponsesCommitTarget{}, err
 			}
-			commitSession = forkedSession
+			target.Session = forkedSession
 		}
 	}
+	return target, nil
+}
+
+func appendOpenAIResponsesCommitMessages(ctx context.Context, commitSession *session.Session, typedCurrent TypedRequest, resp *OpenAIResponsesResponse, originalModel string, assistantBlocks []core.Block) (session.SaveResult, error) {
 	for _, msg := range typedCurrent.Messages {
 		if err := appendTypedMessageToSession(ctx, commitSession, msg, originalModel); err != nil {
-			return err
+			return session.SaveResult{}, err
 		}
 	}
 	assistantResponse := openAIResponsesCoreResponse(resp)
@@ -913,14 +903,12 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	}
 	result, err := session.SaveAssistantResponse(ctx, commitSession, assistantResponse, originalModel)
 	if err != nil {
-		return err
+		return session.SaveResult{}, err
 	}
-	commitSession.Path = result.Path
-	stateCtx.Session = commitSession
-	if existingCreatedAt != 0 {
-		resp.CreatedAt = existingCreatedAt
-	}
+	return result, nil
+}
 
+func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel string, result session.SaveResult, target openAIResponsesCommitTarget) error {
 	raw := mustMarshalJSON(resp)
 	rec := &responseRecord{
 		Version:            responsesStateVersion,
@@ -946,21 +934,21 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	if rec.CreatedAt == 0 {
 		rec.CreatedAt = rec.CompletedAt
 	}
-	if currentConversation != nil {
-		rec.ConversationID = currentConversation.ID
-		if advanceConversation {
-			currentConversation.SessionPath = commitSession.Path
-			currentConversation.LastResponseID = resp.ID
+	if target.Conversation != nil {
+		rec.ConversationID = target.Conversation.ID
+		if target.AdvanceConversation {
+			target.Conversation.SessionPath = target.Session.Path
+			target.Conversation.LastResponseID = resp.ID
 			if stateCtx.Conversation.Metadata != nil {
-				currentConversation.Metadata = cloneStringInterfaceMap(stateCtx.Conversation.Metadata)
+				target.Conversation.Metadata = cloneStringInterfaceMap(stateCtx.Conversation.Metadata)
 			}
 			if stateCtx.Instructions != "" {
-				currentConversation.Instructions = stateCtx.Instructions
+				target.Conversation.Instructions = stateCtx.Instructions
 			}
-			if err := s.responsesState.saveConversationLocked(currentConversation); err != nil {
+			if err := s.responsesState.saveConversationLocked(target.Conversation); err != nil {
 				return err
 			}
-			stateCtx.Conversation = currentConversation
+			stateCtx.Conversation = target.Conversation
 		}
 	}
 	return s.responsesState.saveResponseLocked(rec)

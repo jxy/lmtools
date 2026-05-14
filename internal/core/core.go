@@ -270,7 +270,7 @@ func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *ht
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
 func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
-	if provider == constants.ProviderOpenAI && useOpenAIResponses(cfg) {
+	if provider == constants.ProviderOpenAI && cfg.UseOpenAIResponses() {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
 			return Response{}, fmt.Errorf("failed to create log file: %w", err)
@@ -328,7 +328,7 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 		})
 		return Response{Text: text, ToolCalls: toolCalls}, err
 	}
-	if provider == constants.ProviderOpenAI && useOpenAIResponses(cfg) {
+	if provider == constants.ProviderOpenAI && cfg.UseOpenAIResponses() {
 		return parseOpenAIResponses(data, cfg.IsEmbed())
 	}
 	return spec.parseResponseData(data, cfg.IsEmbed())

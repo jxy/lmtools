@@ -14,28 +14,31 @@ import (
 )
 
 type responsesStreamWriter struct {
-	sse              *SSEWriter
-	ctx              context.Context
-	responseID       string
-	model            string
-	conversationID   string
-	createdAt        int64
-	sequence         int
-	output           []OpenAIResponsesOutputItem
-	outputText       string
-	usage            *OpenAIResponsesUsage
-	serviceTier      string
-	incompleteReason string
-	responseError    interface{}
-	started          bool
-	messageIndex     *int
-	messageItemID    string
-	messageText      string
-	messagePartOpen  bool
-	functionItems    map[int]*responsesFunctionItemState
-	customItems      map[int]*responsesCustomItemState
-	reasoningItems   map[int]*responsesReasoningItemState
-	toolNameRegistry responseToolNameRegistry
+	sse               *SSEWriter
+	ctx               context.Context
+	responseID        string
+	model             string
+	conversationID    string
+	createdAt         int64
+	sequence          int
+	output            []OpenAIResponsesOutputItem
+	outputText        string
+	usage             *OpenAIResponsesUsage
+	serviceTier       string
+	incompleteReason  string
+	responseError     interface{}
+	started           bool
+	messageIndex      *int
+	messageItemID     string
+	messageText       string
+	messagePartOpen   bool
+	functionItems     map[int]*responsesFunctionItemState
+	functionByOutput  map[int]*responsesFunctionItemState
+	customItems       map[int]*responsesCustomItemState
+	customByOutput    map[int]*responsesCustomItemState
+	reasoningItems    map[int]*responsesReasoningItemState
+	reasoningByOutput map[int]*responsesReasoningItemState
+	toolNameRegistry  responseToolNameRegistry
 }
 
 type responsesFunctionItemState struct {
@@ -86,14 +89,17 @@ func newResponsesStreamWriter(w http.ResponseWriter, ctx context.Context, origin
 		return nil, err
 	}
 	return &responsesStreamWriter{
-		sse:            sse,
-		ctx:            ctx,
-		responseID:     generateUUID("resp_"),
-		model:          originalModel,
-		createdAt:      time.Now().Unix(),
-		functionItems:  make(map[int]*responsesFunctionItemState),
-		customItems:    make(map[int]*responsesCustomItemState),
-		reasoningItems: make(map[int]*responsesReasoningItemState),
+		sse:               sse,
+		ctx:               ctx,
+		responseID:        generateUUID("resp_"),
+		model:             originalModel,
+		createdAt:         time.Now().Unix(),
+		functionItems:     make(map[int]*responsesFunctionItemState),
+		functionByOutput:  make(map[int]*responsesFunctionItemState),
+		customItems:       make(map[int]*responsesCustomItemState),
+		customByOutput:    make(map[int]*responsesCustomItemState),
+		reasoningItems:    make(map[int]*responsesReasoningItemState),
+		reasoningByOutput: make(map[int]*responsesReasoningItemState),
 	}, nil
 }
 
@@ -280,6 +286,7 @@ func (w *responsesStreamWriter) ensureFunctionItem(index int, id, name string) (
 		Name:        outputName,
 	}
 	w.functionItems[index] = state
+	w.functionByOutput[state.OutputIndex] = state
 	item := OpenAIResponsesOutputItem{
 		ID:        state.ItemID,
 		Type:      "function_call",
@@ -346,6 +353,7 @@ func (w *responsesStreamWriter) ensureCustomItem(index int, id, name string) (*r
 		Name:        outputName,
 	}
 	w.customItems[index] = state
+	w.customByOutput[state.OutputIndex] = state
 	item := OpenAIResponsesOutputItem{
 		ID:        state.ItemID,
 		Type:      "custom_tool_call",
@@ -384,13 +392,7 @@ func (w *responsesStreamWriter) closeFunctionItems(status string) error {
 		if item.Type != "function_call" || item.Status == "completed" || item.Status == "incomplete" {
 			continue
 		}
-		var state *responsesFunctionItemState
-		for _, candidate := range w.functionItems {
-			if candidate.OutputIndex == i {
-				state = candidate
-				break
-			}
-		}
+		state := w.functionByOutput[i]
 		if state == nil {
 			continue
 		}
@@ -427,13 +429,7 @@ func (w *responsesStreamWriter) closeCustomItems(status string) error {
 		if item.Type != "custom_tool_call" || item.Status == "completed" || item.Status == "incomplete" {
 			continue
 		}
-		var state *responsesCustomItemState
-		for _, candidate := range w.customItems {
-			if candidate.OutputIndex == i {
-				state = candidate
-				break
-			}
-		}
+		state := w.customByOutput[i]
 		if state == nil {
 			continue
 		}
@@ -477,6 +473,7 @@ func (w *responsesStreamWriter) StartReasoningBlock(index int, block AnthropicCo
 		Data:        block.Data,
 	}
 	w.reasoningItems[index] = state
+	w.reasoningByOutput[state.OutputIndex] = state
 	item := OpenAIResponsesOutputItem{
 		ID:      itemID,
 		Type:    "reasoning",
@@ -663,12 +660,7 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 }
 
 func (w *responsesStreamWriter) reasoningStateForOutputIndex(index int) *responsesReasoningItemState {
-	for _, state := range w.reasoningItems {
-		if state.OutputIndex == index {
-			return state
-		}
-	}
-	return nil
+	return w.reasoningByOutput[index]
 }
 
 func (s *responsesReasoningItemState) toCoreBlock() core.Block {

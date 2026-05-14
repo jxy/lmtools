@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestOpenAIResponsesRequestToTypedStrict(t *testing.T) {
+func TestOpenAIResponsesRequestToTyped(t *testing.T) {
 	req := &OpenAIResponsesRequest{
 		Model:        "gpt-5.4-nano",
 		Instructions: "Use concise JSON.",
@@ -37,9 +37,9 @@ func TestOpenAIResponsesRequestToTypedStrict(t *testing.T) {
 		MaxOutputTokens: intPtr(64),
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	if typed.Developer != "Use concise JSON." {
 		t.Fatalf("developer = %q", typed.Developer)
@@ -70,9 +70,9 @@ func TestOpenAIResponsesRefusalPartsReadRefusalField(t *testing.T) {
 		},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	if len(typed.Messages) != 1 {
 		t.Fatalf("messages = %+v, want one assistant message", typed.Messages)
@@ -188,9 +188,9 @@ func TestOpenAIResponsesFunctionCallOutputArrayToTyped(t *testing.T) {
 		},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	if len(typed.Messages) != 1 || len(typed.Messages[0].Blocks) != 1 {
 		t.Fatalf("messages = %+v", typed.Messages)
@@ -225,9 +225,9 @@ func TestOpenAIResponsesFunctionCallOutputPreservesToolName(t *testing.T) {
 		},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	if len(typed.Messages) != 2 || len(typed.Messages[1].Blocks) != 1 {
 		t.Fatalf("messages = %+v", typed.Messages)
@@ -253,9 +253,9 @@ func TestOpenAIResponsesFunctionCallOutputRendersAsAnthropicUserToolResult(t *te
 		},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	anthReq, err := TypedToAnthropicRequest(typed, "claude-test")
 	if err != nil {
@@ -292,9 +292,9 @@ func TestOpenAIResponsesRequiredToolChoiceMapsToCompatibilityProviders(t *testin
 		}},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	anthReq, err := TypedToAnthropicRequest(typed, "claude-test")
 	if err != nil {
@@ -327,9 +327,9 @@ func TestOpenAIResponsesFunctionToolsConvert(t *testing.T) {
 		}},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	if len(typed.Tools) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(typed.Tools))
@@ -359,9 +359,9 @@ func TestOpenAIResponsesFunctionToolStrictRendersToAnthropic(t *testing.T) {
 		}},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	anthReq, err := TypedToAnthropicRequest(typed, "claude-opus-4-7")
 	if err != nil {
@@ -558,9 +558,9 @@ func TestOpenAIResponsesNamespaceToolsFlattenToChat(t *testing.T) {
 		ToolChoice: map[string]interface{}{"type": "function", "namespace": "mcp__computer_use__", "name": "click"},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	if len(typed.Tools) != 2 {
 		t.Fatalf("typed tools len = %d, want 2", len(typed.Tools))
@@ -739,7 +739,7 @@ func TestAnthropicNamespacedCustomToolWrapperRestoresResponsesNamespace(t *testi
 }
 
 func TestOpenAIResponsesRejectsMalformedFunctionTool(t *testing.T) {
-	_, err := OpenAIResponsesRequestToTypedStrict(&OpenAIResponsesRequest{
+	_, err := OpenAIResponsesRequestToTyped(context.Background(), &OpenAIResponsesRequest{
 		Model: "gpt-5.4-nano",
 		Input: "use a tool",
 		Tools: []map[string]interface{}{{
@@ -756,7 +756,7 @@ func TestOpenAIResponsesRejectsMalformedFunctionTool(t *testing.T) {
 }
 
 func TestOpenAIResponsesPromptRejectedByConvertedProviderConversion(t *testing.T) {
-	_, err := OpenAIResponsesRequestToTypedStrict(&OpenAIResponsesRequest{
+	_, err := OpenAIResponsesRequestToTyped(context.Background(), &OpenAIResponsesRequest{
 		Model:  "gpt-5.4-nano",
 		Input:  "hi",
 		Prompt: map[string]interface{}{"id": "pmpt_123"},

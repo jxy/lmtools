@@ -51,9 +51,9 @@ func TestAPIFixtureRequestRendering(t *testing.T) {
 				if err := json.Unmarshal(ingress, &req); err != nil {
 					t.Fatalf("unmarshal OpenAI Responses ingress: %v", err)
 				}
-				typed, err = OpenAIResponsesRequestToTypedStrict(&req)
+				typed, err = OpenAIResponsesRequestToTyped(context.Background(), &req)
 				if err != nil {
-					t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+					t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 				}
 			case "anthropic":
 				var req AnthropicRequest

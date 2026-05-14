@@ -42,7 +42,7 @@ func initProviderSpecs() {
 		constants.ProviderOpenAI: {
 			Provider: constants.ProviderOpenAI,
 			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-				if useOpenAIResponses(cfg) {
+				if cfg.UseOpenAIResponses() {
 					return buildOpenAIResponsesChatRequest(cfg, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 				}
 				return buildToolAwareRequest(cfg, constants.ProviderOpenAI, typedMessages, model, "", false, toolDefs, toolChoice, stream)

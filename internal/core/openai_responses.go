@@ -10,10 +10,6 @@ import (
 	"strings"
 )
 
-func useOpenAIResponses(cfg RequestOptions) bool {
-	return cfg.UseOpenAIResponses()
-}
-
 func buildOpenAIResponsesChatRequest(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	payload, err := PrepareRequestPayloadWithSystemExplicit(constants.ProviderOpenAI, model, typedMessages, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {

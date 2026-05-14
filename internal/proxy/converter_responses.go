@@ -16,10 +16,6 @@ const (
 	defaultResponsesClaudeDefaultMaxTokens = 64000
 )
 
-func OpenAIResponsesRequestToTypedStrict(req *OpenAIResponsesRequest) (TypedRequest, error) {
-	return openAIResponsesRequestToTyped(context.Background(), req)
-}
-
 func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
 	return openAIResponsesRequestToTyped(ctx, req)
 }

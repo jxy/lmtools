@@ -59,9 +59,9 @@ func TestOpenAIResponsesReasoningInputRoundTrip(t *testing.T) {
 		},
 	}
 
-	typed, err := OpenAIResponsesRequestToTypedStrict(req)
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	rendered, err := TypedToOpenAIResponsesRequest(typed, "gpt-5")
 	if err != nil {
@@ -86,6 +86,64 @@ func TestOpenAIResponsesReasoningInputRoundTrip(t *testing.T) {
 	}
 	if output, _ := input[2].(map[string]interface{}); output["type"] != "function_call_output" {
 		t.Fatalf("third item = %#v, want function_call_output", input[2])
+	}
+}
+
+func TestOpenAIResponsesStatePreparationPreviousResponseHistoryMatchesReadOnly(t *testing.T) {
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+	sess, err := server.responsesState.createSession()
+	if err != nil {
+		t.Fatalf("createSession() error = %v", err)
+	}
+	if err := appendTypedMessageToSession(ctx, sess, core.NewTextMessage(string(core.RoleUser), "hello"), "claude-test"); err != nil {
+		t.Fatalf("append user message error = %v", err)
+	}
+	result, err := session.SaveAssistantResponse(ctx, sess, core.Response{Text: "answer"}, "claude-test")
+	if err != nil {
+		t.Fatalf("SaveAssistantResponse() error = %v", err)
+	}
+	sess.Path = result.Path
+
+	respID := "resp_history_match"
+	if err := server.responsesState.saveResponse(&responseRecord{
+		Version:     responsesStateVersion,
+		ID:          respID,
+		Object:      "response",
+		Status:      "completed",
+		Model:       "claude-test",
+		SessionPath: sess.Path,
+		MessageID:   result.MessageID,
+		CreatedAt:   time.Now().Unix(),
+		Store:       true,
+		Raw:         mustMarshalJSON(&OpenAIResponsesResponse{ID: respID, Object: "response", Status: "completed", Model: "claude-test"}),
+	}); err != nil {
+		t.Fatalf("saveResponse() error = %v", err)
+	}
+
+	req := &OpenAIResponsesRequest{Model: "claude-test", PreviousResponseID: respID, Input: "next"}
+	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "next")}}
+	stateCtx, foregroundTyped, err := server.prepareOpenAIResponsesState(ctx, req, typed, "claude-test", false)
+	if err != nil {
+		t.Fatalf("prepareOpenAIResponsesState() error = %v", err)
+	}
+	if stateCtx == nil || stateCtx.Session == nil {
+		t.Fatalf("foreground state = %#v, want loaded state", stateCtx)
+	}
+	readOnlyStateCtx, readOnlyTyped, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed, "claude-test")
+	if err != nil {
+		t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v", err)
+	}
+	if readOnlyStateCtx == nil || readOnlyStateCtx.Session == nil {
+		t.Fatalf("read-only state = %#v, want loaded state", readOnlyStateCtx)
+	}
+
+	want := "user:hello\nassistant:answer\nuser:next"
+	if got := strings.Join(responseTypedTextLines(foregroundTyped.Messages), "\n"); got != want {
+		t.Fatalf("foreground messages = %q, want %q", got, want)
+	}
+	if got := strings.Join(responseTypedTextLines(readOnlyTyped.Messages), "\n"); got != want {
+		t.Fatalf("read-only messages = %q, want %q", got, want)
 	}
 }
 
@@ -2097,166 +2155,15 @@ func TestResponsesStateDeleteRejectsInvalidIDs(t *testing.T) {
 	}
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
-func jsonRoundTripResponse(status int, payload interface{}) *http.Response {
-	data, _ := json.Marshal(payload)
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(bytes.NewReader(data)),
-	}
-}
-
-func postResponses(t *testing.T, server http.Handler, payload map[string]interface{}) map[string]interface{} {
-	t.Helper()
-	return requestJSON(t, server, http.MethodPost, "/v1/responses", payload)
-}
-
-func getJSON(t *testing.T, server http.Handler, path string) map[string]interface{} {
-	t.Helper()
-	return requestJSON(t, server, http.MethodGet, path, nil)
-}
-
-func responseConversationID(payload map[string]interface{}) string {
-	conv, _ := payload["conversation"].(map[string]interface{})
-	id, _ := conv["id"].(string)
-	return id
-}
-
-func assertConversationMetadataScope(t *testing.T, server http.Handler, convID, want string) {
-	t.Helper()
-	conv := getJSON(t, server, "/v1/conversations/"+convID)
-	metadata, ok := conv["metadata"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("conversation metadata = %#v, want object", conv["metadata"])
-	}
-	if got := metadata["scope"]; got != want {
-		t.Fatalf("conversation metadata scope = %#v, want %q; payload = %#v", got, want, conv)
-	}
-}
-
-func assertResponseRecordMetadataScope(t *testing.T, server *Server, resp map[string]interface{}, want string) {
-	t.Helper()
-	respID, _ := resp["id"].(string)
-	if respID == "" {
-		t.Fatalf("response missing id: %#v", resp)
-	}
-	rec, ok, err := server.responsesState.loadResponse(respID)
-	if err != nil || !ok {
-		t.Fatalf("loadResponse(%q) = ok:%v err:%v", respID, ok, err)
-	}
-	if got := rec.Metadata["scope"]; got != want {
-		t.Fatalf("response metadata scope = %#v, want %q; record = %#v", got, want, rec)
-	}
-}
-
-func requestJSONStatus(t *testing.T, server http.Handler, method, path string, payload map[string]interface{}) (int, []byte) {
-	t.Helper()
-	var body io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatalf("json.Marshal(payload) error = %v", err)
+func responseTypedTextLines(messages []core.TypedMessage) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		for _, block := range msg.Blocks {
+			text, ok := block.(core.TextBlock)
+			if ok && text.Text != "" {
+				out = append(out, msg.Role+":"+text.Text)
+			}
 		}
-		body = bytes.NewReader(data)
 	}
-	req := httptest.NewRequest(method, path, body)
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-	resp := recorder.Result()
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, respBody
-}
-
-func requestJSON(t *testing.T, server http.Handler, method, path string, payload map[string]interface{}) map[string]interface{} {
-	t.Helper()
-	var body io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatalf("json.Marshal(payload) error = %v", err)
-		}
-		body = bytes.NewReader(data)
-	}
-	req := httptest.NewRequest(method, path, body)
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-	resp := recorder.Result()
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		t.Fatalf("%s %s status = %d, body = %s", method, path, resp.StatusCode, string(respBody))
-	}
-	var decoded map[string]interface{}
-	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(response) error = %v, body = %s", err, string(respBody))
-	}
-	return decoded
-}
-
-func waitForChannel(t *testing.T, ch <-chan struct{}, label string) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for %s", label)
-	}
-}
-
-type blockingRequestBody struct {
-	payload []byte
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func newBlockingRequestBody(payload []byte) *blockingRequestBody {
-	return &blockingRequestBody{
-		payload: append([]byte(nil), payload...),
-		started: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-}
-
-func (b *blockingRequestBody) Read(p []byte) (int, error) {
-	b.once.Do(func() {
-		close(b.started)
-		<-b.release
-	})
-	if len(b.payload) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, b.payload)
-	b.payload = b.payload[n:]
-	return n, nil
-}
-
-func waitForBackgroundIdle(t *testing.T, server *Server) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		server.backgroundMu.Lock()
-		count := len(server.backgroundCancel)
-		server.backgroundMu.Unlock()
-		if count == 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	server.backgroundMu.Lock()
-	count := len(server.backgroundCancel)
-	server.backgroundMu.Unlock()
-	t.Fatalf("background responses still running: %d", count)
+	return out
 }

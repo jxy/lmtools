@@ -1,9 +1,6 @@
 package proxy
 
-import (
-	"encoding/json"
-	"lmtools/internal/core"
-)
+import "lmtools/internal/core"
 
 // OpenAIResponsesRequest represents an OpenAI /v1/responses request.
 type OpenAIResponsesRequest struct {
@@ -59,7 +56,7 @@ type OpenAIResponsesResponse struct {
 	Model             string                       `json:"model"`
 	Conversation      *OpenAIResponsesConversation `json:"conversation,omitempty"`
 	Output            []OpenAIResponsesOutputItem  `json:"output"`
-	OutputText        string                       `json:"output_text,omitempty"`
+	OutputText        string                       `json:"-"`
 	Usage             *OpenAIResponsesUsage        `json:"usage,omitempty"`
 	Error             interface{}                  `json:"error,omitempty"`
 	IncompleteDetails interface{}                  `json:"incomplete_details,omitempty"`
@@ -80,20 +77,6 @@ type OpenAIResponsesCompactionResponse struct {
 	CreatedAt int64                       `json:"created_at"`
 	Output    []OpenAIResponsesOutputItem `json:"output"`
 	Usage     *OpenAIResponsesUsage       `json:"usage,omitempty"`
-}
-
-func (r OpenAIResponsesResponse) MarshalJSON() ([]byte, error) {
-	type alias OpenAIResponsesResponse
-	data, err := json.Marshal(alias(r))
-	if err != nil {
-		return nil, err
-	}
-	var obj map[string]interface{}
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return nil, err
-	}
-	delete(obj, "output_text")
-	return json.Marshal(obj)
 }
 
 type OpenAIResponsesOutputItem struct {

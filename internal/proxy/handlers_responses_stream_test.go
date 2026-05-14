@@ -455,6 +455,39 @@ func TestOpenAIResponsesStreamWriterFailEmitsTerminalEvent(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesStreamWriterClosesToolItemsByOutputIndex(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writer, err := newResponsesStreamWriter(recorder, context.Background(), "gpt-test")
+	if err != nil {
+		t.Fatalf("newResponsesStreamWriter() error = %v", err)
+	}
+	if err := writer.start(); err != nil {
+		t.Fatalf("writer.start() error = %v", err)
+	}
+	if err := writer.WriteTextDelta("hi"); err != nil {
+		t.Fatalf("writer.WriteTextDelta() error = %v", err)
+	}
+	if err := writer.WriteFunctionCallDelta(9, "call_fn", "lookup", `{"q":"x"}`); err != nil {
+		t.Fatalf("writer.WriteFunctionCallDelta() error = %v", err)
+	}
+	if err := writer.WriteCustomToolCallDelta(3, "call_custom", "patch", "raw input"); err != nil {
+		t.Fatalf("writer.WriteCustomToolCallDelta() error = %v", err)
+	}
+	resp, err := writer.Finish("stop")
+	if err != nil {
+		t.Fatalf("writer.Finish() error = %v", err)
+	}
+	if len(resp.Output) != 3 {
+		t.Fatalf("output length = %d, want 3: %#v", len(resp.Output), resp.Output)
+	}
+	if resp.Output[1].Type != "function_call" || resp.Output[1].Arguments != `{"q":"x"}` {
+		t.Fatalf("function output item = %#v", resp.Output[1])
+	}
+	if resp.Output[2].Type != "custom_tool_call" || resp.Output[2].Input != "raw input" {
+		t.Fatalf("custom output item = %#v", resp.Output[2])
+	}
+}
+
 func TestOpenAIResponsesStreamAnthropicErrorEventSendsResponseFailed(t *testing.T) {
 	SetupTestLogger(t)
 
@@ -612,9 +645,9 @@ func TestOpenAIResponsesStreamFailureCommitSurvivesCanceledContext(t *testing.T)
 		Input:  "say hi",
 		Stream: true,
 	}
-	typedCurrent, err := OpenAIResponsesRequestToTypedStrict(req)
+	typedCurrent, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
-		t.Fatalf("OpenAIResponsesRequestToTypedStrict() error = %v", err)
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
 	stateCtx, _, err := server.prepareOpenAIResponsesState(context.Background(), req, typedCurrent, req.Model, false)
 	if err != nil {
