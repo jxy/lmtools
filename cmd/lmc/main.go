@@ -24,6 +24,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +66,10 @@ func (rc *RequestController) handleRequest(inputStr string, sess *session.Sessio
 	rb, err := rc.buildRequest(sess, inputStr)
 	if err != nil {
 		return err
+	}
+	if rc.cfg.PrintCurl {
+		fmt.Println(renderCurlCommand(rb.Request, rb.Body))
+		return nil
 	}
 
 	// Send request with retry
@@ -272,7 +277,9 @@ func run(notifier core.Notifier) error {
 	var sess *session.Session
 	var executedPending bool
 
-	if !cfg.NoSession {
+	if cfg.PrintCurl && cfg.Resume == "" && cfg.Branch == "" {
+		cfg.NoSession = true
+	} else if !cfg.NoSession {
 		coordinator := session.NewCoordinator(opts, notifier)
 		approver := NewCliApprover(notifier)
 
@@ -313,6 +320,14 @@ func handleSpecialFlags(ctx context.Context, cfg *config.Config, notifier core.N
 
 	// Handle list-models flag
 	if cfg.ListModels {
+		if cfg.PrintCurl {
+			req, err := buildListModelsRequest(*cfg)
+			if err != nil {
+				return true, err
+			}
+			fmt.Println(renderCurlCommand(req, nil))
+			return true, nil
+		}
 		return true, listModels(ctx, *cfg, logDir)
 	}
 
@@ -405,8 +420,7 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 	logger.From(ctx).Infof("Starting request | Model: %s | Provider: %s", actualModel, cfg.Provider)
 
 	if sess != nil {
-		// Always use the tool-aware message builder for sessions
-		// This ensures tool interactions are preserved during regeneration
+		// Always use the tool-aware message builder for sessions.
 		rb, err := core.BuildRequestWithToolInteractions(ctx, opts, sess, session.BuildMessagesWithToolInteractions)
 		if err != nil {
 			return core.RequestBuild{}, errors.WrapError("build request", err)
@@ -452,6 +466,57 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 		Model:    model,
 		ToolDefs: toolDefs,
 	}, nil
+}
+
+func renderCurlCommand(req *http.Request, body []byte) string {
+	parts := []string{"curl", "-X", req.Method}
+
+	headerNames := make([]string, 0, len(req.Header))
+	for name := range req.Header {
+		headerNames = append(headerNames, name)
+	}
+	sort.Strings(headerNames)
+	for _, name := range headerNames {
+		values := append([]string(nil), req.Header.Values(name)...)
+		sort.Strings(values)
+		for _, value := range values {
+			parts = append(parts, "-H", name+": "+value)
+		}
+	}
+
+	if len(body) > 0 {
+		parts = append(parts, "--data-binary", "@-")
+	}
+	parts = append(parts, req.URL.String())
+
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, shellQuote(part))
+	}
+	command := strings.Join(quoted, " ")
+	if len(body) == 0 {
+		return command
+	}
+	return command + " <<'EOJ'\n" + string(body) + "\nEOJ"
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if strings.IndexFunc(value, func(r rune) bool {
+		return !isShellBarewordRune(r)
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func isShellBarewordRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') ||
+		strings.ContainsRune("@%_+=:,./-", r)
 }
 
 // sendWithRetry sends the HTTP request with retry logic
@@ -558,38 +623,10 @@ func persistAssistantOnly(ctx context.Context, response core.Response, sess *ses
 
 // listModels queries and displays available models for the configured provider
 func listModels(ctx context.Context, cfg config.Config, logDir string) error {
-	provider := cfg.Provider
-	provider = providers.ResolveProvider(provider)
-
-	url, err := providers.ResolveModelsURLWithArgoOptions(provider, cfg.ProviderURL, cfg.ArgoEnv, cfg.ArgoLegacy)
+	provider := providers.ResolveProvider(cfg.Provider)
+	req, err := buildListModelsRequest(cfg)
 	if err != nil {
-		return errors.WrapError("validate provider", err)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return errors.WrapError("create request", err)
-	}
-
-	// Add authentication headers if needed
-	if providers.RequiresAPIKey(provider) && cfg.ProviderURL == "" {
-		// Standard non-Argo providers need API key
-		if cfg.APIKeyFile == "" {
-			return errors.WrapError("validate config", fmt.Errorf("-api-key-file is required for %s provider when listing models", provider))
-		}
-
-		apiKey, err := auth.ReadKeyFile(cfg.APIKeyFile)
-		if err != nil {
-			return errors.WrapError("read API key", err)
-		}
-
-		if err := auth.ApplyProviderCredentials(req, provider, apiKey); err != nil {
-			if provider == constants.ProviderGoogle {
-				return errors.WrapError("apply Google API key", err)
-			}
-			return errors.WrapError("apply provider credentials", err)
-		}
+		return err
 	}
 
 	// Make request
@@ -632,6 +669,44 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 
 	displayModels(provider, items)
 	return nil
+}
+
+func buildListModelsRequest(cfg config.Config) (*http.Request, error) {
+	provider := cfg.Provider
+	provider = providers.ResolveProvider(provider)
+
+	url, err := providers.ResolveModelsURLWithArgoOptions(provider, cfg.ProviderURL, cfg.ArgoEnv, cfg.ArgoLegacy)
+	if err != nil {
+		return nil, errors.WrapError("validate provider", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, errors.WrapError("create request", err)
+	}
+
+	// Add authentication headers if needed
+	if providers.RequiresAPIKey(provider) && cfg.ProviderURL == "" {
+		// Standard non-Argo providers need API key
+		if cfg.APIKeyFile == "" {
+			return nil, errors.WrapError("validate config", fmt.Errorf("-api-key-file is required for %s provider when listing models", provider))
+		}
+
+		apiKey, err := auth.ReadKeyFile(cfg.APIKeyFile)
+		if err != nil {
+			return nil, errors.WrapError("read API key", err)
+		}
+
+		if err := auth.ApplyProviderCredentials(req, provider, apiKey); err != nil {
+			if provider == constants.ProviderGoogle {
+				return nil, errors.WrapError("apply Google API key", err)
+			}
+			return nil, errors.WrapError("apply provider credentials", err)
+		}
+	}
+
+	return req, nil
 }
 
 func parseModelsForDisplay(provider string, data []byte) ([]modelcatalog.Item, error) {

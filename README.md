@@ -43,6 +43,12 @@ echo "Return three bullet points" | ./bin/lmc \
   -api-key-file "$HOME/.openai-key" \
   -openai-responses
 
+# Print the equivalent curl command without sending the request.
+echo "Explain quantum computing" | ./bin/lmc \
+  -provider openai \
+  -api-key-file "$HOME/.openai-key" \
+  -print-curl
+
 # Generate embeddings. Session tracking is disabled automatically.
 echo "Hello world" | ./bin/lmc -argo-user "$USER" -e
 
@@ -119,6 +125,7 @@ Chat output:
 
 - `-stream`: Stream chat responses.
 - `-openai-responses`: With `-provider openai`, send chat through OpenAI `/v1/responses`.
+- `-print-curl`: Print the equivalent `curl` command and exit without sending the request.
 - `-s string`: System prompt.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
 - `-json`: Request JSON object output.

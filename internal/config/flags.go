@@ -23,6 +23,7 @@ type Config struct {
 	Embed               bool   // whether to run in embed mode
 	StreamChat          bool   // whether to use streaming chat mode
 	OpenAIResponses     bool   // whether OpenAI chat mode should use /v1/responses
+	PrintCurl           bool   // print the equivalent curl command instead of sending the request
 	Effort              string // reasoning effort hint
 	JSONMode            bool   // request JSON object output
 	JSONSchemaPath      string // path to JSON schema for structured output
@@ -121,6 +122,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
 	fs.BoolVar(&cfg.OpenAIResponses, "openai-responses", false, "use OpenAI /v1/responses instead of /v1/chat/completions when -provider openai")
+	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")

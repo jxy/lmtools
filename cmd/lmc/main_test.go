@@ -4,7 +4,9 @@ import (
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -73,6 +75,51 @@ func TestGetExitCode(t *testing.T) {
 func TestGetOperationName(t *testing.T) {
 	// This is a compilation test to ensure the function exists
 	// We can't test it directly without creating a config
+}
+
+func TestRenderCurlCommand(t *testing.T) {
+	req, err := http.NewRequest("POST", "https://api.example.com/v1/chat/completions?debug=true", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer sk-test")
+	req.Header.Set("Content-Type", "application/json")
+	body := []byte(`{"message":"Bob's answer"}`)
+
+	got := renderCurlCommand(req, body)
+	wants := []string{
+		"curl -X POST",
+		"-H 'Authorization: Bearer sk-test'",
+		"-H 'Content-Type: application/json'",
+		"--data-binary @-",
+		"'https://api.example.com/v1/chat/completions?debug=true'",
+		"<<'EOJ'\n{\"message\":\"Bob's answer\"}\nEOJ",
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderCurlCommand() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{value: "simple-token", want: "simple-token"},
+		{value: "", want: "''"},
+		{value: "Content-Type: application/json", want: "'Content-Type: application/json'"},
+		{value: "Bob's answer", want: "'Bob'\\''s answer'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			if got := shellQuote(tt.value); got != tt.want {
+				t.Fatalf("shellQuote(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestGetActualModel(t *testing.T) {

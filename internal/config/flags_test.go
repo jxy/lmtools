@@ -195,6 +195,16 @@ func TestParseFlagsOutputOptions(t *testing.T) {
 	}
 }
 
+func TestParseFlagsPrintCurl(t *testing.T) {
+	cfg, err := ParseFlags([]string{"-argo-user", "alice", "-print-curl"})
+	if err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	if !cfg.PrintCurl {
+		t.Fatal("PrintCurl = false, want true")
+	}
+}
+
 func TestParseFlagsOutputOptionValidation(t *testing.T) {
 	invalidSchemaPath := t.TempDir() + "/schema.json"
 	if err := os.WriteFile(invalidSchemaPath, []byte(`not json`), 0o644); err != nil {
