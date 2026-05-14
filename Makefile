@@ -1,14 +1,26 @@
 SHELL := /bin/bash
 
+HOST_GOOS := $(shell go env GOOS)
+HOST_GOARCH := $(shell go env GOARCH)
+
+GOOS ?= $(HOST_GOOS)
+GOARCH ?= $(HOST_GOARCH)
+BIN_DIR ?= ./bin
+
+EXE_SUFFIX := $(if $(filter windows,$(GOOS)),.exe,)
+BUILD_SUBDIR ?= $(if $(filter $(HOST_GOOS)-$(HOST_GOARCH),$(GOOS)-$(GOARCH)),,$(GOOS)-$(GOARCH))
+BUILD_OUT_DIR := $(BIN_DIR)$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR),)
+
 .PHONY: all build test test-unit test-integration test-e2e test-all coverage lint lint-fix clean dev check verify-fixtures verify-fixtures-refresh help
 
 # Default target
 all: lint test build
 
-# Build all binaries
+# Build all binaries for the selected platform
 build:
-	go build -o ./bin/lmc ./cmd/lmc
-	go build -o ./bin/apiproxy ./cmd/apiproxy
+	@mkdir -p $(BUILD_OUT_DIR)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(BUILD_OUT_DIR)/lmc$(EXE_SUFFIX) ./cmd/lmc
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(BUILD_OUT_DIR)/apiproxy$(EXE_SUFFIX) ./cmd/apiproxy
 
 # Run unit tests for all packages
 test: test-unit
@@ -70,7 +82,8 @@ help:
 	@echo "Available targets:"
 	@echo ""
 	@echo "  make                 - Run lint, test, and build (default)"
-	@echo "  make build           - Build all binaries (lmc and apiproxy)"
+	@echo "  make build           - Build all binaries for GOOS/GOARCH, defaulting to the host"
+	@echo "  make build GOOS=linux GOARCH=amd64 - Cross-build all binaries"
 	@echo "  make test            - Run all unit tests"
 	@echo "  make test-integration - Run integration tests (requires binaries)"
 	@echo "  make test-e2e        - Run end-to-end tests with mock servers"
