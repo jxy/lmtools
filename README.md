@@ -1,641 +1,417 @@
-# lmc + apiproxy
+# lmtools
 
-> **Disclaimer**: Almost all code in this repository was "vibe-coded" by various LLMs (GPT, Claude, Gemini, etc.). Use at your own risk and review before deploying to production.
+`lmtools` provides two binaries:
 
-`lmc` is a CLI for chatting with AI models, generating embeddings, and managing sessions. `apiproxy` is a small HTTP server that translates between Anthropic, OpenAI, Google, and Argo APIs.
+- `lmc`: a command-line client for chat, embeddings, tools, and local session history.
+- `apiproxy`: an HTTP proxy that exposes Anthropic-compatible, OpenAI Chat
+  Completions-compatible, and OpenAI Responses-compatible endpoints over
+  Anthropic, OpenAI, Google, or Argo backends.
 
 ## Install
 
-Requires Go 1.21+
+Requires Go 1.21 or later.
 
 ```bash
-make build   # builds ./bin/lmc and ./bin/apiproxy
+make build
 ```
 
-## Quick Start
+This builds:
 
-- Chat (streaming) via Argo
-  ```bash
-  echo "Tell me a story" | lmc -argo-user $USER -stream
-  ```
-- Run proxy → OpenAI
-  ```bash
-  echo "sk-..." > ~/.openai-key && chmod 600 ~/.openai-key
-  ./bin/apiproxy -provider openai -api-key-file "$HOME/.openai-key"
-  ```
-More usage examples are below.
+- `./bin/lmc`
+- `./bin/apiproxy`
 
-## lmc usage
+## lmc
+
+### Common Usage
 
 ```bash
-# Generate embeddings (sessions automatically disabled)
-echo "Hello world" | lmc -argo-user yourname -e
+# Chat with the default Argo provider.
+echo "Tell me a story" | ./bin/lmc -argo-user "$USER"
 
-# Chat mode with automatic session creation
-echo "What is LMC?" | lmc -argo-user yourname
+# Stream the answer.
+echo "Tell me a story" | ./bin/lmc -argo-user "$USER" -stream
 
-# Streaming chat
-echo "Tell me a story" | lmc -argo-user yourname -stream
+# Use OpenAI.
+echo "Explain quantum computing" | ./bin/lmc \
+  -provider openai \
+  -api-key-file "$HOME/.openai-key" \
+  -model gpt-5
 
-# Use a specific model
-echo "Explain quantum computing" | lmc -argo-user yourname -model gpt4o
+# Use OpenAI's Responses API instead of Chat Completions.
+echo "Return three bullet points" | ./bin/lmc \
+  -provider openai \
+  -api-key-file "$HOME/.openai-key" \
+  -openai-responses
 
-# Enable tool execution capabilities
-echo "List files in current directory" | lmc -argo-user yourname -tool
+# Generate embeddings. Session tracking is disabled automatically.
+echo "Hello world" | ./bin/lmc -argo-user "$USER" -e
+
+# Enable command tool use.
+echo "List files in this directory" | ./bin/lmc \
+  -argo-user "$USER" \
+  -tool
 ```
 
 ### Sessions
 
 ```bash
-# Show all conversation sessions
-lmc -argo-user yourname -show-sessions
+# Show saved sessions.
+./bin/lmc -argo-user "$USER" -show-sessions
 
-# Resume a previous session
-echo "Continue from where we left off" | lmc -argo-user yourname -resume 0001
+# Resume a session or branch.
+echo "Continue" | ./bin/lmc -argo-user "$USER" -resume 0001
 
-# Branch from a specific message
-echo "Let me rephrase that" | lmc -argo-user yourname -branch 0001/0002
+# Branch from a message.
+echo "Try a different answer" | ./bin/lmc -argo-user "$USER" -branch 0001/0002
 
-# Delete a session or message
-lmc -argo-user yourname -delete 0001
+# Show a session or message.
+./bin/lmc -argo-user "$USER" -show 0001
+./bin/lmc -argo-user "$USER" -show 0001/0002
 
-# Show a specific conversation or message
-lmc -argo-user yourname -show 0001
-lmc -argo-user yourname -show 0001/0002
+# Delete a session, branch, or message and its descendants.
+./bin/lmc -argo-user "$USER" -delete 0001
+
+# Use a one-off request without writing session files.
+echo "One-off question" | ./bin/lmc -argo-user "$USER" -no-session
 ```
 
-### Advanced
+### Tool Use
 
 ```bash
-# Use custom sessions directory
-echo "Test" | lmc -argo-user yourname -sessions-dir /tmp/my-sessions
+# Auto-approve whitelisted commands.
+printf '["ls"]\n["pwd"]\n' > whitelist.txt
+echo "Show the working directory and files" | ./bin/lmc \
+  -argo-user "$USER" \
+  -tool \
+  -tool-whitelist whitelist.txt \
+  -tool-auto-approve
 
-# Use the Argo dev environment
-echo "Test" | lmc -argo-user yourname -argo-dev
-
-# Use the Argo test environment
-echo "Test" | lmc -argo-user yourname -argo-test
-
-# Custom Argo API endpoint
-echo "Test" | lmc -argo-user yourname -provider-url https://custom.example/api
-
-# Force legacy Argo chat/streamchat endpoints
-echo "Test" | lmc -argo-user yourname -argo-legacy
-
-# Set system prompt
-echo "Hello" | lmc -argo-user yourname -s "You are a helpful coding assistant"
-
-# Disable session tracking (tool loops use in-memory context for the current run)
-echo "One-off question" | lmc -argo-user yourname -no-session
+# Non-interactive scripted usage.
+echo "Run the allowed checks" | ./bin/lmc \
+  -argo-user "$USER" \
+  -tool \
+  -tool-non-interactive \
+  -tool-whitelist whitelist.txt \
+  -tool-auto-approve
 ```
 
-### Tool Execution
+Commands are checked against the blacklist first, then the whitelist and approval
+settings. Without `-tool-non-interactive`, `lmc` prompts before running commands
+that are not already auto-approved.
 
-```bash
-# Enable tool execution with auto-approval for safe commands
-echo "Show current directory" | lmc -argo-user yourname -tool -tool-auto-approve
+### lmc Flags
 
-# Use tool with custom timeout
-echo "Run a long process" | lmc -argo-user yourname -tool -tool-timeout 5m
+Credentials:
 
-# Use tool with whitelist for auto-approval (each line must be a JSON array)
-echo '["ls"]' > whitelist.txt
-echo '["pwd"]' >> whitelist.txt
-echo "List files" | lmc -argo-user yourname -tool -tool-whitelist whitelist.txt -tool-auto-approve
-```
+- `-argo-user string`: Argo user or API key.
+- `-api-key-file string`: API key file for OpenAI, Google, Anthropic, or Argo.
 
-## Command-line Flags
+Provider and model:
 
-### Required
-- `-argo-user string`: Argo user/credential (or use `-api-key-file`)
-- `-api-key-file string`: Path to API key file (required for OpenAI, Google, and Anthropic unless using `-provider-url`; also accepted for Argo)
+- `-provider string`: `argo` (default), `openai`, `google`, or `anthropic`.
+- `-model string`: Model name. Defaults depend on the provider.
+- `-provider-url string`: Custom provider URL.
+- `-list-models`: List models when the selected provider exposes a models endpoint.
+- `-argo-dev`, `-argo-test`: Use the Argo dev or test host.
+- `-argo-legacy`: Use Argo legacy chat endpoints.
 
-### Model Selection
-- `-model string`: Model to use (chat mode defaults: gpt5 for Argo, gpt-5 for OpenAI, gemini-2.5-pro for Google, claude-opus-4-1-20250805 for Anthropic)
-- `-e`: Enable embed mode for generating embeddings
-- `-list-models`: List available models from provider
+Chat output:
 
-### Chat Options
-- `-stream`: Use streaming chat mode for real-time responses. Tool follow-up requests keep streaming except on `-argo-legacy`, where tool loops fall back to non-streaming for compatibility.
-- `-openai-responses`: With `-provider openai`, use OpenAI's `/v1/responses` endpoint instead of `/v1/chat/completions`.
-- `-s string`: System prompt for chat mode (default: "You are a brilliant assistant.")
-- `-effort string`: Reasoning effort hint (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
-- `-json`: Request JSON object output
-- `-json-schema string`: Path to a JSON schema file for structured output
+- `-stream`: Stream chat responses.
+- `-openai-responses`: With `-provider openai`, send chat through OpenAI `/v1/responses`.
+- `-s string`: System prompt.
+- `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+- `-json`: Request JSON object output.
+- `-json-schema path`: Request schema-constrained JSON output.
 
-### Tool Execution
-- `-tool`: Enable built-in universal_command tool for system command execution
-  - **Note**: Direct Google provider supports tool execution
-- `-tool-timeout duration`: Timeout for tool execution (default: 30s)
-- `-tool-whitelist string`: Path to whitelist file where each line is a JSON array of command parts
-- `-tool-blacklist string`: Path to blacklist file (commands always rejected)
-- `-tool-auto-approve`: Skip manual approval for whitelisted commands
-- `-tool-non-interactive`: Run in non-interactive mode (deny unapproved commands)
-- `-tool-max-output-bytes int`: Maximum output size per tool execution (default: 1MB, max: 100MB)
-- `-max-tool-rounds int`: Maximum rounds of tool execution (default: 32)
-- `-max-tool-parallel int`: Maximum parallel tool executions (default: 4). Approval prompts for parallel calls are requested sequentially before execution starts.
+Tools:
 
-### Session Management
-- `-resume string`: Resume session or branch by ID/path
-- `-branch string`: Create branch from specific message ID
-- `-show-sessions`: Display all conversation trees
-- `-show string`: Show specific session or message by ID/path
-- `-delete string`: Delete node (session/branch/message) and its descendants
-- `-no-session`: Disable session creation (automatically set for embed mode). With `-tool`, the current tool loop is kept in memory but not persisted.
-- `-sessions-dir string`: Custom sessions directory (default: ~/.lmc/sessions)
-- `-skip-flock-check`: Skip file locking check
+- `-tool`: Enable the built-in `universal_command` tool.
+- `-tool-timeout duration`: Per-command timeout.
+- `-tool-whitelist path`: Allowed commands, one command or JSON command array per line.
+- `-tool-blacklist path`: Blocked commands.
+- `-tool-auto-approve`: Skip prompts for whitelisted commands.
+- `-tool-non-interactive`: Deny unapproved commands instead of prompting.
+- `-max-tool-rounds int`: Maximum tool-call rounds.
+- `-max-tool-parallel int`: Maximum concurrent tool executions.
+- `-tool-max-output-bytes int`: Maximum captured output per tool execution.
 
-### Provider Configuration
-- `-provider string`: Provider: argo (default), openai, google, anthropic
-- `-provider-url string`: Custom provider API endpoint
-- `-argo-dev`: Use the Argo dev host `https://apps-dev.inside.anl.gov` instead of the default prod host `https://apps.inside.anl.gov`
-- `-argo-test`: Use the Argo test host `https://apps-test.inside.anl.gov` instead of the default prod host `https://apps.inside.anl.gov`
-- `-argo-legacy`: Use Argo's legacy `/argoapi/api/v1/resource/chat/` and `/argoapi/api/v1/resource/streamchat/` endpoints instead of the newer OpenAI/Anthropic-compatible endpoints
+Sessions and logging:
 
-### Other Options
-- `-timeout duration`: HTTP request timeout (default: 10m)
-- `-retries int`: Number of retry attempts for failed requests (default: 3)
-- `-log-dir string`: Custom log directory (default: ~/.lmc/logs)
-- `-log-level string`: Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)
-
-## Data Storage
-
-LMC stores its data in the `~/.lmc` directory:
-
-- `~/.lmc/sessions/`: Conversation history with tree-based branching
-- `~/.lmc/logs/`: Process logs and request/response logs
-  - Process logs: `YYYYMMDDTHHMMSS_lmc_PID.log`
-  - Request/response logs: `YYYYMMDDTHHMMSS_operation_*.json`
-
-## Session Features
-
-LMC provides sophisticated session management:
-
-- **Automatic session tracking**: Each conversation is saved with a unique ID
-- **Resume conversations**: Continue previous discussions with full context
-- **Branching support**: Create alternative conversation paths from any message
-- **Tree visualization**: View conversation history as a tree structure
-- **Concurrent safety**: Multiple processes can safely access sessions simultaneously
-- **Automatic session forking**: Sessions fork when resumed with different system prompts (e.g., using `-tool` or different `-s` flag)
-
-### Session Atomicity
-
-LMC ensures atomic session operations through careful file ordering:
-
-- Each message consists of `.txt` (content), `.json` (metadata), and optionally `.tools.json` (tool interactions)
-- The `.json` file is written last and serves as the commit point - a message exists if and only if its JSON file exists
-- If interrupted, partial messages are automatically ignored
-- Any orphaned `.txt` or `.tools.json` files without a corresponding `.json` file are automatically cleaned up
-
-### Session Forking
-
-When resuming a session with a different system prompt:
-- LMC automatically creates a fork to preserve the original conversation
-- The entire conversation history is copied to the new fork
-- For large sessions (hundreds of messages), forking may take several seconds and doubles disk usage
-- Consider creating a new session with `-no-session` if you don't need the full history
-
-### Tool Execution Behavior
-
-When tools are enabled with `-tool`:
-
-- **Approval flow**: Commands require approval based on whitelist/blacklist/auto-approve settings
-- **Execution tracking**: All tool calls and results are persisted in session history
-- **No-session loops**: When `-no-session` is used, tool calls and results stay in an in-memory loop store for the current invocation
-- **Continuation**: Tool execution can span multiple rounds (up to `-max-tool-rounds`)
-- **Streaming**: Tool follow-up responses stream for native OpenAI, Anthropic, Google, and Argo-compatible endpoints; only legacy Argo tool follow-ups are downgraded to non-streaming
-- **Parallel approval order**: For parallel tool calls, each command is approved or denied sequentially before any approved commands are launched concurrently
-- **Pending tools**: Resuming a session with unexecuted tool calls requires `-tool`; without it, LMC reports the pending tools and leaves them unexecuted
-- **Error handling**: Failed commands are recorded with error details
-- **Output truncation**: Large outputs are truncated to prevent memory issues
-- **Non-interactive mode**: Use `-tool-non-interactive` for scripted usage (requires whitelist or auto-approve)
-
-#### Non-interactive Scripts
-
-When running `lmc` as a background job or in environments with closed stdin (such as CI/CD pipelines), tool execution behaves differently:
-
-- **EOF detection**: When stdin is closed or EOF is encountered, interactive approval prompts are not possible
-- **Automatic denial**: Without `-tool-non-interactive`, commands will be denied when stdin is unavailable
-- **Required flags**: For background/scripted usage, you must use `-tool-non-interactive` along with either:
-  - `-tool-whitelist` with a file containing allowed commands
-  - `-tool-auto-approve` to approve all non-blacklisted commands
-- **Example for scripts**:
-  ```bash
-  # Create whitelist
-  echo '["ls", "-la"]' > allowed.txt
-  echo '["pwd"]' >> allowed.txt
-
-  # Run in background with proper flags
-  echo "List files and show working directory" | \
-    lmc -argo-user bot -tool -tool-non-interactive \
-    -tool-whitelist allowed.txt -tool-auto-approve &
-  ```
-
-## Supported Models
-
-### Chat Models
-gpt35, gpt35large, gpt4, gpt4large, gpt4turbo, gpt4o, gpt4olatest, gpto1mini, gpto3mini, gpto1, gpto3, gpto4mini, gpt41, gpt41mini, gpt41nano, gpt5, gpt5mini, gpt5nano, gemini25pro, gemini25flash, claudeopus4, claudesonnet4, claudesonnet37, claudesonnet35v2
-
-### Embedding Models
-ada002, v3large, v3small
-
----
+- `-resume string`, `-branch string`, `-show-sessions`, `-show string`, `-delete string`
+- `-no-session`
+- `-sessions-dir string`: Default `~/.lmc/sessions`.
+- `-log-dir string`: Default `~/.lmc/logs`.
+- `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
+- `-timeout duration`
+- `-retries int`
+- `-skip-flock-check`
 
 ## apiproxy
 
-The lmtools suite includes an API proxy that translates between Anthropic's Messages API format and OpenAI, Google AI, or Argo APIs.
+`apiproxy` listens locally by default and translates request and response formats at the API boundary.
 
-## API Proxy Features
-
-- **Protocol Translation**: Converts between Anthropic, OpenAI, Google AI, and Argo API formats
-- **Model Mapping**: Automatically maps model names between providers
-- **Multi-Provider Support**: Route requests to different providers based on configuration
-- **Streaming Support**: Real-time Server-Sent Events for all providers
-- **Token Counting**: Uses native count APIs for Anthropic, Gemini, and Argo Claude models where available, with proxy-side estimation as the fallback
-
-## API Proxy Quick Start
-
-### Prerequisites
-
-- Go 1.21 or later
-- API keys for the providers you want to use:
-  - OpenAI API key
-  - Google AI Studio API key
-  - Argo credentials (`-argo-user` or `-api-key-file`)
-
-### Installation
+### Start The Proxy
 
 ```bash
-# Build both lmc and apiproxy
-make build
-
-# Or build apiproxy separately
-go build -o ./bin/apiproxy ./cmd/apiproxy
-```
-
-### Config (essentials)
-
-- Credentials: `-api-key-file` for OpenAI, Google, or Anthropic; `-argo-user` or `-api-key-file` for Argo
-- Argo host: prod by default, `-argo-dev` for dev, `-argo-test` for test, `-provider-url` for a custom host
-- Argo endpoint mode: native compatible endpoints by default, `-argo-legacy` for legacy `/api/v1/resource/*`
-- Provider: `-provider` (argo|anthropic|openai|google), `-provider-url`
-- Server: `-host` (default 127.0.0.1), `-port` (default 8082)
-- Responses state: `-sessions-dir` for the stateful Responses API store (default `~/.apiproxy/sessions`)
-- Request size: `-max-request-body-size` in MB (default 10)
-
-### Run
-
-```bash
-# First, save your API keys to files (one key per file)
+# OpenAI backend.
 echo "sk-..." > ~/.openai-key
+chmod 600 ~/.openai-key
+./bin/apiproxy -provider openai -api-key-file "$HOME/.openai-key"
+
+# Anthropic backend.
+echo "sk-ant-..." > ~/.anthropic-key
+chmod 600 ~/.anthropic-key
+./bin/apiproxy -provider anthropic -api-key-file "$HOME/.anthropic-key"
+
+# Google backend.
 echo "AIza..." > ~/.google-key
-chmod 600 ~/.openai-key ~/.google-key  # Secure the files
+chmod 600 ~/.google-key
+./bin/apiproxy -provider google -api-key-file "$HOME/.google-key"
 
-# Start with OpenAI
-./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key"
+# Argo backend.
+./bin/apiproxy -provider argo -argo-user "$USER"
 
-# Use Google AI as provider
-./bin/apiproxy -provider="google" -api-key-file="$HOME/.google-key"
-
-# Use Argo with custom models
-./bin/apiproxy -argo-user="username" -provider="argo" \
-  -model="claudesonnet4" -small-model="gemini25flash"
-
-# Custom host and port with debug logging
-./bin/apiproxy -host="0.0.0.0" -port="8080" -log-level="DEBUG" \
-  -provider="openai" -api-key-file="$HOME/.openai-key"
-
-# Note: By default, the server binds to 127.0.0.1 (localhost only).
-# Use -host="0.0.0.0" to allow external connections.
+# Listen on another host and port.
+./bin/apiproxy -host 0.0.0.0 -port 8080 \
+  -provider openai \
+  -api-key-file "$HOME/.openai-key"
 ```
 
-When `-provider=argo`, routing is model-driven:
-- Models starting with `claude` use Argo's native Anthropic `/v1/messages` wire format
-- All other models use Argo's native OpenAI `/v1/chat/completions` wire format
-- `POST /v1/chat/completions` is a direct Argo OpenAI pass-through for non-Claude models; Claude models are converted to and from Anthropic messages
+By default the server binds to `127.0.0.1:8082`. Use `-host 0.0.0.0` only when you intend to expose it beyond localhost.
 
-When `-argo-legacy` is set:
-- All Argo chat traffic uses the legacy `/argoapi/api/v1/resource/chat/` and `/argoapi/api/v1/resource/streamchat/` endpoints
-- Proxy-side streaming simulation and token estimation remain in use where the legacy endpoints do not provide native support
-- Embedded Argo tool-call extraction is limited to legacy Argo responses; native Argo OpenAI/Anthropic-compatible responses use provider-native tool fields
+### apiproxy Flags
 
-### Endpoints
+- `-provider string`: `argo` (default), `anthropic`, `openai`, or `google`.
+- `-api-key-file string`: API key file for the selected provider.
+- `-argo-user string`: Argo user or API key when using Argo.
+- `-provider-url string`: Custom provider URL.
+- `-model string`: Primary model. Defaults depend on the provider.
+- `-small-model string`: Small model used for Claude Haiku aliases.
+- `-argo-dev`, `-argo-test`, `-argo-legacy`
+- `-host string`: Bind host. Default `127.0.0.1`.
+- `-port int`: Bind port. Default `8082`.
+- `-sessions-dir string`: Local Responses API state directory. Default `~/.apiproxy/sessions`.
+- `-max-request-body-size int`: Request body limit in MB. Default `10`.
+- `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
+- `-log-format string`: `text` or `json`.
 
 ### Supported Endpoints
 
-The proxy supports both Anthropic and OpenAI API formats:
+Anthropic-compatible:
 
-Anthropic-compatible
-- `POST /v1/messages` - Chat completions (Anthropic format)
-- `POST /v1/messages/count_tokens` - Token counting
+- `POST /v1/messages`
+- `POST /v1/messages/count_tokens`
 
-OpenAI-compatible
-- `POST /v1/chat/completions` - Chat completions (OpenAI format)
-- `POST /v1/responses` - Responses API (OpenAI format)
-- `POST /v1/responses/input_tokens` - Responses input-token counting
-- `POST /v1/responses/compact` - Responses conversation compaction
-- `GET /v1/responses/{id}` / `POST /v1/responses/{id}/cancel` / `DELETE /v1/responses/{id}` - Responses lifecycle
-- `GET /v1/responses/{id}/input_items` - Responses input-item listing
-- `POST /v1/conversations`, `GET/POST/DELETE /v1/conversations/{id}`, and `/v1/conversations/{id}/items` - local conversation state for translated Responses requests
-- `GET /v1/models` - List available models
+OpenAI-compatible:
 
-Translated Responses requests preserve portable function tools. OpenAI-only
-Responses tool types are passed through only when `-provider openai` is used;
-other provider paths log a warning and drop those tools.
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `POST /v1/responses/input_tokens`
+- `POST /v1/responses/compact`
+- `GET /v1/responses/{id}`
+- `POST /v1/responses/{id}/cancel`
+- `DELETE /v1/responses/{id}`
+- `GET /v1/responses/{id}/input_items`
+- `POST /v1/conversations`
+- `GET /v1/conversations/{id}`
+- `POST /v1/conversations/{id}`
+- `DELETE /v1/conversations/{id}`
+- `GET /v1/conversations/{id}/items`
+- `POST /v1/conversations/{id}/items`
+- `GET /v1/conversations/{id}/items/{item_id}`
+- `DELETE /v1/conversations/{id}/items/{item_id}`
+- `GET /v1/models`
 
-When `-provider openai` is used, Responses request bodies are forwarded to
-OpenAI after applying configured model mapping, and forwarded Responses or
-conversation request bodies still use the configured request-size limit. When
-translating Responses requests to another provider, `store` defaults to true;
-stored successful or failed streamed responses can be retrieved by id, and
-`store:false` disables local persistence.
+### Example API Calls
 
-### With Claude Code
-
-```bash
-# Set the base URL to your proxy
-export ANTHROPIC_BASE_URL=http://localhost:8082
-
-# Use Claude Code normally
-claude
-```
-
-### Direct API Calls
-
-#### Anthropic Format
+Anthropic Messages:
 
 ```bash
-# Basic chat completion
-curl -X POST http://localhost:8082/v1/messages \
+curl http://localhost:8082/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-3-haiku-20240307",
     "max_tokens": 1000,
     "messages": [
-      {"role": "user", "content": "Hello, how are you?"}
-    ]
-  }'
-
-# Count tokens
-curl -X POST http://localhost:8082/v1/messages/count_tokens \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-3-sonnet-20240229",
-    "messages": [
-      {"role": "user", "content": "Count my tokens"}
+      {"role": "user", "content": "Hello"}
     ]
   }'
 ```
 
-#### OpenAI Format
+OpenAI Chat Completions:
 
 ```bash
-# Basic chat completion (OpenAI format)
-curl -X POST http://localhost:8082/v1/chat/completions \
+curl http://localhost:8082/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5",
     "messages": [
-      {"role": "user", "content": "Hello, how are you?"}
-    ],
-    "max_tokens": 100
+      {"role": "user", "content": "Hello"}
+    ]
   }'
+```
 
-# With tools/functions
-curl -X POST http://localhost:8082/v1/chat/completions \
+OpenAI Responses:
+
+```bash
+curl http://localhost:8082/v1/responses \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4",
-    "messages": [
-      {"role": "user", "content": "What is the weather in New York?"}
-    ],
+    "model": "gpt-5",
+    "input": "Summarize this in one sentence."
+  }'
+```
+
+Responses with a function tool:
+
+```bash
+curl http://localhost:8082/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5",
+    "input": "What is the weather in Chicago?",
     "tools": [{
       "type": "function",
-      "function": {
-        "name": "get_weather",
-        "description": "Get the weather for a location",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "location": {
-              "type": "string",
-              "description": "The city and state"
-            }
-          },
-          "required": ["location"]
-        }
+      "name": "get_weather",
+      "description": "Get weather for a location",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location": {"type": "string"}
+        },
+        "required": ["location"]
       }
-    }],
-    "max_tokens": 100
+    }]
   }'
-
-# List available models
-curl -X GET http://localhost:8082/v1/models
 ```
 
-### Model mapping
-
-The proxy automatically maps model names to appropriate providers:
-
-### Anthropic Models
-| Anthropic Model | Mapped To | Provider |
-|----------------|-----------|----------|
-| *haiku* | Small model | Set by `-small-model` flag |
-| *sonnet*, *opus* | Primary model | Set by `-model` flag |
-
-### OpenAI Models
-| OpenAI Model | Behavior |
-|--------------|----------|
-| gpt-4, gpt-4-turbo, gpt-5 | Pass-through when provider=openai |
-| gpt-3.5-turbo, gpt-4-mini | Pass-through when provider=openai |
-| o1-preview, o1-mini | Pass-through when provider=openai |
-
-Model names are passed through unchanged to the Argo provider after wire-format routing is selected.
-
-#### Argo Model Provider Detection
-
-The Argo provider automatically detects the appropriate wire format based on model prefix:
-- Models starting with `claude` → Anthropic format (`/v1/messages`)
-- All other models → OpenAI format (`/v1/chat/completions`)
-
-### Provider selection
-
-Provider selection is simple and explicit:
-- Requests are always routed to the provider set by the `-provider` flag (default: argo)
-- If the selected provider lacks credentials (API key or ProviderURL), the request fails with an error
-- No automatic fallback to other providers occurs
-
-Model name mapping:
-- Anthropic models (starting with "claude-"):
-  - Models containing "haiku" → map to configured small model (set by `-small-model` flag, default: "claudesonnet4")
-  - All other Claude models (opus, sonnet, etc.) → map to configured model (set by `-model` flag, default: "claudeopus4")
-- All non-Anthropic model names → pass through unchanged to the provider
-
-Default small models for cost optimization:
-- Argo: `gpt5mini`
-- OpenAI: `gpt-5-mini`
-- Anthropic: `claude-3-haiku-20240307`
-- Google: `gemini-2.5-flash`
-
-### Examples
-
-### Use Argo (Default)
+### Using With Claude Code
 
 ```bash
-# Run proxy with Argo (use either -argo-user or -api-key-file)
-# Native Argo currently treats -argo-user as the API key until Argo changes authentication.
-./bin/apiproxy \
-  -argo-user="username"
-# Uses default models: claudeopus4 for big, claudesonnet4 for small
-
-# Use Argo dev
-./bin/apiproxy \
-  -argo-user="username" \
-  -argo-dev
-
-# Use Argo test
-./bin/apiproxy \
-  -argo-user="username" \
-  -argo-test
-
-# Use legacy Argo endpoints
-./bin/apiproxy \
-  -argo-user="username" \
-  -argo-legacy
+export ANTHROPIC_BASE_URL=http://localhost:8082
+claude
 ```
 
-### Use OpenAI
+## Provider Routing
 
-```bash
-# Save API key to file
-echo "sk-..." > ~/.openai-key
-chmod 600 ~/.openai-key
+The selected `-provider` controls the backend. The proxy does not fall back to another provider automatically.
 
-# Run proxy
-./bin/apiproxy \
-  -api-key-file="$HOME/.openai-key" \
-  -provider="openai" \
-  -model="gpt-4o" \
-  -small-model="gpt-4o-mini"
-```
+Claude model aliases are mapped before forwarding:
 
-### Use Google AI
+- Claude Haiku models map to `-small-model`.
+- Other Claude models map to `-model`.
+- Non-Claude model names pass through unchanged.
 
-```bash
-# Save API key to file
-echo "AIza..." > ~/.google-key
-chmod 600 ~/.google-key
+With `-provider argo` in native mode:
 
-# Run proxy
-./bin/apiproxy \
-  -api-key-file="$HOME/.google-key" \
-  -provider="google" \
-  -model="gemini-2.5-pro-preview-03-25" \
-  -small-model="gemini-2.0-flash"
-```
+- Models starting with `claude` use Argo's Anthropic-compatible `/v1/messages` wire format.
+- All other models use Argo's OpenAI-compatible `/v1/chat/completions` wire format.
+- `-argo-legacy` forces the older Argo chat and streamchat endpoints.
 
-### Supported models
-OpenAI
-- o3-mini, o1, o1-mini, o1-pro
-- gpt-4.5-preview, gpt-4o, gpt-4o-mini
-- gpt-4o-audio-preview, gpt-4o-mini-audio-preview
-- chatgpt-4o-latest
-- gpt-4.1, gpt-4.1-mini
+## Responses API Compatibility
 
-Google
-- gemini-2.5-pro-preview-03-25
-- gemini-2.0-flash
+`apiproxy` supports `/v1/responses` in two modes.
 
-### Argo Models
-- All models from argolib including:
-  - GPT variants: gpt35, gpt4, gpt4o, etc.
-  - Google AI variants: gemini25pro, gemini25flash
-  - Claude variants: claudeopus4, claudesonnet4, etc.
+### Direct OpenAI Backend
 
-## API Proxy Streaming
+When started with `-provider openai`, `/v1/responses` requests are forwarded to
+OpenAI's official Responses API backend after model mapping. This is the
+highest-fidelity mode.
 
-The proxy supports Server-Sent Events (SSE) streaming for real-time responses:
+In this mode:
 
-- **Anthropic Format** (`/v1/messages`): Native Anthropic SSE format
-- **OpenAI Format** (`/v1/chat/completions`): Native OpenAI SSE format
-- **OpenAI Responses Format** (`/v1/responses`): Responses API SSE events, with direct pass-through for OpenAI and converted terminal streams for other providers
-- **Automatic Conversion**: Seamlessly converts between streaming formats
-- **Argo Native Streaming**: Uses Argo's upstream SSE streams directly instead of proxy-side simulation
-- **Keep-Alive**: Automatic ping events prevent timeouts on slow responses
+- OpenAI Responses request bodies are preserved, including valid OpenAI fields the compatibility layer does not understand.
+- Non-stream and stream responses are passed back in OpenAI Responses format.
+- Responses lifecycle and Conversations API calls are forwarded upstream.
+- Returned model names are rewritten only where the proxy has enough request context to restore the client-visible model alias.
 
-### OpenAI Chat SSE Details
+### Converted Backends
 
-When the proxy streams in OpenAI SSE format (`/v1/chat/completions`):
+When started with `-provider anthropic`, `-provider google`, or `-provider argo`
+for a model that is not using OpenAI Responses upstream, the proxy converts the
+request into the closest portable backend call and synthesizes a Responses-shaped
+result.
 
-- Order
-  - First: `delta { role:"assistant", content:null }`, `finish_reason:null`
-  - Second: `delta.tool_calls[0]` intro with `id`, `type:"function"`, `function.name`, `arguments:""`
-  - Next: only `delta.tool_calls[0].function.arguments` fragments
-  - Final: `delta {}`, `finish_reason:"tool_calls"|"stop"`, then `[DONE]`
-- Finish reason
-  - Intermediate chunks include `"finish_reason": null`.
-  - The final chunk sets `"finish_reason"` to a concrete value (`"tool_calls"` or `"stop"`).
-- Usage
-  - If `stream_options.include_usage` is set, chunks include `usage:null`; a final chunk includes `usage:{...}` before `[DONE]`.
+Request conversion:
 
-All SSE messages are `data: <json>\n\n`.
+- `input` strings become one user message.
+- `input` arrays preserve message, function call, custom tool call, tool-result,
+  reasoning, and compaction items where the target path has an equivalent.
+- `instructions` become provider instruction text.
+- `max_output_tokens`, `temperature`, `top_p`, `metadata`, `service_tier`, and
+  `stream` map to the portable provider request where supported.
+- `text.format` with `json_object` or `json_schema` maps to the existing JSON output controls.
+- `reasoning.effort` maps to provider reasoning controls where supported.
+- Function tools and custom tools map to portable tool definitions. Namespace
+  tools are flattened for providers that require flat tool names and are
+  restored in Responses output when possible.
 
-## Thinking Field Support
+Backend wire format:
 
-The proxy supports the `thinking` field for enhanced reasoning capabilities:
+- Anthropic backends receive Anthropic Messages API requests.
+- Argo Claude-routed models receive Argo's Anthropic-compatible Messages requests.
+- Argo non-Claude models receive Argo's OpenAI-compatible Chat Completions requests.
+- Google backends receive Gemini requests through the proxy's compatibility converter.
 
-### For Claude Models (opus/sonnet)
-The thinking structure is passed through as-is to enable native thinking mode:
-```json
-{
-  "thinking": {
-    "type": "enabled",
-    "budget_tokens": 31999
-  }
-}
-```
+Response conversion:
 
-### For GPT/O3/O4 Models
-The thinking structure is automatically converted to `reasoning_effort: "high"`:
-```json
-// Input:
-{
-  "thinking": {
-    "type": "enabled",
-    "budget_tokens": 31999
-  }
-}
+- Provider text becomes Responses `output` message content.
+- Anthropic `tool_use` blocks and OpenAI Chat Completions `tool_calls` become Responses `function_call` or `custom_tool_call` output items.
+- Tool-call arguments are preserved as JSON strings when possible.
+- Anthropic thinking blocks become Responses `reasoning` output items with summary text.
+- Usage is mapped when the backend reports usage.
+- Converted responses store local state by default, so `previous_response_id`,
+  response retrieval, input item listing, and conversation endpoints can work
+  without OpenAI as the backend.
 
-// Converted to:
-{
-  "reasoning_effort": "high"
-}
-```
+Streaming conversion:
 
-## API Proxy Limitations
+- Direct OpenAI Responses streams are passed through.
+- Converted streams emit Responses SSE events synthesized from upstream Anthropic, OpenAI Chat Completions, Google, or Argo stream chunks.
+- Legacy Argo mode may simulate streaming from a non-streaming upstream response.
 
-- Token counting uses native provider APIs where available. Anthropic and Argo Claude-routed models use Anthropic `count_tokens`; Gemini uses `countTokens`; non-Claude Argo models and legacy Argo mode use proxy-side estimation.
-- Some advanced features may not be fully supported across all providers
-- Error messages from providers are passed through with minimal modification
+### Converted Responses Limitations
 
-## API Proxy Troubleshooting
+Converted Responses support is a compatibility layer, not a full replacement for OpenAI's official Responses API backend.
 
-### Common Issues
+Known limitations when `-provider` is not `openai`:
 
-1. **"API key required" errors**: Ensure the appropriate API key file flags are provided and the files exist
-2. **Model not found**: Check that the model name is in the supported lists
-3. **Connection errors**: Verify network connectivity and proxy settings
-4. **Invalid responses**: Enable debug logging to see raw requests/responses
+- OpenAI prompt templates (`prompt`) are rejected because they do not have a portable provider representation.
+- OpenAI-hosted tools such as web search and file search are not run by the
+  proxy. Unsupported tool types are logged and dropped on converted paths.
+- Custom tools are represented, but target providers may not enforce OpenAI custom-tool grammar or validation semantics.
+- Some OpenAI-only controls have no portable effect, including
+  `max_tool_calls`, `parallel_tool_calls`, `include`, `truncation`,
+  `top_logprobs`, `prompt_cache_key`, `text.verbosity`, and
+  `reasoning.summary`.
+- Output images, files, audio, annotations, and logprobs are not synthesized by the converted response path.
+- Local response and conversation state lives under `~/.apiproxy/sessions` or `-sessions-dir`; it is not OpenAI-hosted state.
+- `store:false` disables local persistence for foreground converted requests, so
+  response retrieval and `previous_response_id` are unavailable for those
+  responses.
+- Background execution, cancellation, compaction, and token counts are best-effort local compatibility features.
+- Converted SSE event streams expose the common Responses event shape but do not
+  include every event type or metadata field produced by OpenAI.
 
-### Debug Mode
+## Token Counting
 
-Set log level for more verbose output:
+- `/v1/messages/count_tokens` uses Anthropic count tokens for Anthropic and Argo Claude-routed models.
+- Google uses Gemini token counting where available.
+- Non-Claude Argo models, legacy Argo mode, OpenAI, and unsupported routes use local estimation.
+- `/v1/responses/input_tokens` resolves local Responses state first on converted
+  provider paths, then uses the same provider counting or estimation behavior.
 
-```bash
-# Enable debug logging
-./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key" -log-level="DEBUG"
+## Data Locations
 
-# JSON formatted logs for parsing
-./bin/apiproxy -provider="openai" -api-key-file="$HOME/.openai-key" -log-format="json" -log-level="DEBUG"
-```
+- `lmc` sessions: `~/.lmc/sessions`
+- `lmc` logs: `~/.lmc/logs`
+- `apiproxy` Responses state: `~/.apiproxy/sessions`
+- Built binaries: `./bin/lmc` and `./bin/apiproxy`
+
+## Troubleshooting
+
+- Use `-log-level DEBUG` on either binary to inspect request routing and conversion warnings.
+- Confirm that the selected `-provider` has credentials or a `-provider-url`.
+- For Argo, verify whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
+- If a converted Responses request loses an OpenAI-only field, use `-provider openai` for direct official Responses API passthrough.
