@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"lmtools/internal/constants"
 	"lmtools/internal/limitio"
 	"lmtools/internal/logger"
@@ -21,24 +20,19 @@ func (s *Server) CloseIdleConnections() {
 	}
 }
 
-// readLimitedWithKind reads from an io.Reader with a size limit and descriptive error context.
-func readLimitedWithKind(r io.Reader, maxSize int64, kind string) ([]byte, error) {
-	return limitio.ReadLimitedWithKind(r, maxSize, kind)
-}
-
 // readResponseBody safely reads a response body with size limit
 func (s *Server) readResponseBody(resp *http.Response) ([]byte, error) {
 	maxSize := s.config.MaxResponseBodySize
 	if maxSize <= 0 {
 		maxSize = constants.DefaultMaxResponseBodySize
 	}
-	return readLimitedWithKind(resp.Body, maxSize, "response body")
+	return limitio.ReadLimitedWithKind(resp.Body, maxSize, "response body")
 }
 
 // readErrorBody reads error response with fixed 10KB limit
 // This is specifically for error responses where we want a smaller limit
 func (s *Server) readErrorBody(resp *http.Response) ([]byte, error) {
-	return readLimitedWithKind(resp.Body, constants.MaxErrorResponseSize, "error response")
+	return limitio.ReadLimitedWithKind(resp.Body, constants.MaxErrorResponseSize, "error response")
 }
 
 // readRequestBody safely reads an HTTP request body with size limit
@@ -47,7 +41,7 @@ func (s *Server) readRequestBody(r *http.Request) ([]byte, error) {
 	if maxSize <= 0 {
 		maxSize = constants.DefaultMaxRequestBodySize
 	}
-	return readLimitedWithKind(r.Body, maxSize, "request body")
+	return limitio.ReadLimitedWithKind(r.Body, maxSize, "request body")
 }
 
 // extractRequestLogger is a helper function to extract the request logger from context

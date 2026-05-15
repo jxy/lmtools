@@ -93,7 +93,7 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesState(ctx, responsesReq, typed, route.OriginalModel, false)
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateWithMode(ctx, responsesReq, typed, route.OriginalModel, responsesStateForeground, responsesStoreRequested(responsesReq))
 	if err != nil {
 		logger.From(ctx).Errorf("Failed to prepare OpenAI responses state: %v", err)
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)

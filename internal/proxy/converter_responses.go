@@ -17,10 +17,6 @@ const (
 )
 
 func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
-	return openAIResponsesRequestToTyped(ctx, req)
-}
-
-func openAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
 	if req == nil {
 		return TypedRequest{}, fmt.Errorf("request is required")
 	}

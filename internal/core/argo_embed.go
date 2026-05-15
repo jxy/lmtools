@@ -112,7 +112,7 @@ func ExtractEmbeddedToolCalls(content string, validTools []ToolDefinition) (stri
 	contentToProcess := unwrapIfNeeded(content)
 
 	// Step 3: Scan and parse embedded tool calls
-	seq, suffix, err := scanForToolCalls(contentToProcess, validTools)
+	seq, suffix, err := parseEmbeddedToolCalls(contentToProcess, validTools)
 	if err != nil {
 		// No embedded tool calls found - return original content unchanged
 		logger.GetLogger().Debugf("ExtractEmbeddedToolCalls: no tool calls found: %v", err)
@@ -142,11 +142,6 @@ func unwrapIfNeeded(content string) string {
 		return unwrapped
 	}
 	return content
-}
-
-// scanForToolCalls is a renamed version of parseEmbeddedToolCalls for clarity
-func scanForToolCalls(content string, validTools []ToolDefinition) ([]EmbeddedSequence, string, error) {
-	return parseEmbeddedToolCalls(content, validTools)
 }
 
 // tryUnwrapArgoResponse attempts to unwrap content from a nested Argo response structure.

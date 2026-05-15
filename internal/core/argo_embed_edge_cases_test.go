@@ -213,8 +213,7 @@ func TestQuotedBraceInProse(t *testing.T) {
 	}
 }
 
-// TestParseEmbeddedToolCall_ThinWrapper tests that ParseEmbeddedToolCall correctly wraps parseEmbeddedToolCalls
-func TestParseEmbeddedToolCall_ThinWrapper(t *testing.T) {
+func TestParseEmbeddedToolCallsLastCallBehavior(t *testing.T) {
 	tests := []struct {
 		name        string
 		content     string

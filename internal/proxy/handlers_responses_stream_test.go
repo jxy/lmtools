@@ -486,6 +486,13 @@ func TestOpenAIResponsesStreamWriterClosesToolItemsByOutputIndex(t *testing.T) {
 	if resp.Output[2].Type != "custom_tool_call" || resp.Output[2].Input != "raw input" {
 		t.Fatalf("custom output item = %#v", resp.Output[2])
 	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "response.function_call_arguments.done") {
+		t.Fatalf("stream missing function arguments done event: %s", body)
+	}
+	if !strings.Contains(body, "response.custom_tool_call_input.done") {
+		t.Fatalf("stream missing custom tool input done event: %s", body)
+	}
 }
 
 func TestOpenAIResponsesStreamAnthropicErrorEventSendsResponseFailed(t *testing.T) {
@@ -649,9 +656,9 @@ func TestOpenAIResponsesStreamFailureCommitSurvivesCanceledContext(t *testing.T)
 	if err != nil {
 		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
-	stateCtx, _, err := server.prepareOpenAIResponsesState(context.Background(), req, typedCurrent, req.Model, false)
+	stateCtx, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), req, typedCurrent, req.Model, responsesStateForeground, responsesStoreRequested(req))
 	if err != nil {
-		t.Fatalf("prepareOpenAIResponsesState() error = %v", err)
+		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
 	}
 
 	streamCtx, cancel := context.WithCancel(context.Background())

@@ -20,19 +20,23 @@ import (
 )
 
 type openAIResponsesStateContext struct {
-	Session                           *session.Session
-	Conversation                      *conversationRecord
-	Previous                          *responseRecord
-	History                           []core.TypedMessage
-	Store                             bool
-	Background                        bool
-	Instructions                      string
-	CurrentRequest                    json.RawMessage
-	ExistingRecordID                  string
-	ConversationBaseSessionPath       string
-	ConversationBaseLastResponseID    string
-	ConversationBaseMessagePath       string
-	ConversationBaseTerminalMessageID string
+	Session          *session.Session
+	Conversation     *conversationRecord
+	Previous         *responseRecord
+	History          []core.TypedMessage
+	Store            bool
+	Background       bool
+	Instructions     string
+	CurrentRequest   json.RawMessage
+	ExistingRecordID string
+	ConversationBase conversationBaseRef
+}
+
+type conversationBaseRef struct {
+	SessionPath       string
+	LastResponseID    string
+	MessagePath       string
+	TerminalMessageID string
 }
 
 type openAIResponsesStateMode int
@@ -563,6 +567,11 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
+	messages, err := conversationMessagesFromRequest(ctx, body)
+	if err != nil {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		return
+	}
 
 	s.responsesState.mu.Lock()
 	defer s.responsesState.mu.Unlock()
@@ -582,16 +591,12 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
 	}
-	beforeItems, err := s.conversationItemsForRecord(ctx, &conv, true)
+	beforeMessages, err := session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, conv.SessionPath)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
 	}
-	messages, err := conversationMessagesFromRequest(ctx, body)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
+	beforeItemCount := len(coreResponsesInput(beforeMessages))
 	if err := appendConversationMessages(ctx, sess, messages); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
@@ -602,13 +607,8 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
 	}
-	items, err := s.conversationItemsForRecord(ctx, &conv, true)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
-		return
-	}
-	appended := items[len(beforeItems):]
-	_ = s.sendJSONResponse(ctx, w, listPayload(filterDeletedConversationItems(&conv, appended)))
+	appended := conversationItemsFromMessages(messages, beforeItemCount, conversationDeletedItemSet(&conv), false)
+	_ = s.sendJSONResponse(ctx, w, listPayload(appended))
 }
 
 func (s *Server) retrieveOpenAIConversationItem(ctx context.Context, w http.ResponseWriter, conversationID, itemID string) {
@@ -655,13 +655,8 @@ func (s *Server) deleteOpenAIConversationItem(ctx context.Context, w http.Respon
 	s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation item not found", "not_found", http.StatusNotFound)
 }
 
-func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, background bool) (*openAIResponsesStateContext, TypedRequest, error) {
-	store := req.Store == nil || *req.Store
-	mode := responsesStateForeground
-	if background {
-		mode = responsesStateBackground
-	}
-	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, mode, store)
+func responsesStoreRequested(req *OpenAIResponsesRequest) bool {
+	return req == nil || req.Store == nil || *req.Store
 }
 
 func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string) (*openAIResponsesStateContext, TypedRequest, error) {
@@ -1010,32 +1005,36 @@ func (s *Server) captureOpenAIResponsesConversationBase(stateCtx *openAIResponse
 		return nil
 	}
 	if stateCtx.Previous != nil {
-		stateCtx.ConversationBaseSessionPath = stateCtx.Previous.SessionPath
-		stateCtx.ConversationBaseLastResponseID = stateCtx.Previous.ID
-		stateCtx.ConversationBaseMessagePath = stateCtx.Previous.SessionPath
-		stateCtx.ConversationBaseTerminalMessageID = stateCtx.Previous.MessageID
-		if stateCtx.ConversationBaseTerminalMessageID == "" {
+		stateCtx.ConversationBase = conversationBaseRef{
+			SessionPath:       stateCtx.Previous.SessionPath,
+			LastResponseID:    stateCtx.Previous.ID,
+			MessagePath:       stateCtx.Previous.SessionPath,
+			TerminalMessageID: stateCtx.Previous.MessageID,
+		}
+		if stateCtx.ConversationBase.TerminalMessageID == "" {
 			ref, ok, err := session.LastMessageRefWithManager(s.responsesState.manager, stateCtx.Previous.SessionPath)
 			if err != nil {
 				return err
 			}
 			if ok {
-				stateCtx.ConversationBaseMessagePath = ref.Path
-				stateCtx.ConversationBaseTerminalMessageID = ref.ID
+				stateCtx.ConversationBase.MessagePath = ref.Path
+				stateCtx.ConversationBase.TerminalMessageID = ref.ID
 			}
 		}
 		return nil
 	}
 
-	stateCtx.ConversationBaseSessionPath = conv.SessionPath
-	stateCtx.ConversationBaseLastResponseID = conv.LastResponseID
+	stateCtx.ConversationBase = conversationBaseRef{
+		SessionPath:    conv.SessionPath,
+		LastResponseID: conv.LastResponseID,
+	}
 	ref, ok, err := session.LastMessageRefWithManager(s.responsesState.manager, conv.SessionPath)
 	if err != nil {
 		return err
 	}
 	if ok {
-		stateCtx.ConversationBaseMessagePath = ref.Path
-		stateCtx.ConversationBaseTerminalMessageID = ref.ID
+		stateCtx.ConversationBase.MessagePath = ref.Path
+		stateCtx.ConversationBase.TerminalMessageID = ref.ID
 	}
 	return nil
 }
@@ -1052,7 +1051,8 @@ func (s *Server) openAIResponsesConversationHeadMatchesLocked(stateCtx *openAIRe
 	if !ok || conv.Deleted {
 		return nil, false, errResponsesStateDeleted
 	}
-	if conv.SessionPath != stateCtx.ConversationBaseSessionPath || conv.LastResponseID != stateCtx.ConversationBaseLastResponseID {
+	base := stateCtx.ConversationBase
+	if conv.SessionPath != base.SessionPath || conv.LastResponseID != base.LastResponseID {
 		return &conv, false, nil
 	}
 
@@ -1060,28 +1060,28 @@ func (s *Server) openAIResponsesConversationHeadMatchesLocked(stateCtx *openAIRe
 	if err != nil {
 		return nil, false, err
 	}
-	if stateCtx.ConversationBaseTerminalMessageID == "" {
+	if base.TerminalMessageID == "" {
 		return &conv, !ok, nil
 	}
-	return &conv, ok && ref.Path == stateCtx.ConversationBaseMessagePath && ref.ID == stateCtx.ConversationBaseTerminalMessageID, nil
+	return &conv, ok && ref.Path == base.MessagePath && ref.ID == base.TerminalMessageID, nil
 }
 
 func (s *Server) forkOpenAIResponsesConversationBase(ctx context.Context, stateCtx *openAIResponsesStateContext) (*session.Session, error) {
 	if stateCtx != nil && stateCtx.Previous != nil && stateCtx.Session != nil {
 		return stateCtx.Session, nil
 	}
-	if stateCtx == nil || stateCtx.ConversationBaseSessionPath == "" {
+	if stateCtx == nil || stateCtx.ConversationBase.SessionPath == "" {
 		return nil, fmt.Errorf("conversation base session path is empty")
 	}
-	if stateCtx.ConversationBaseTerminalMessageID == "" {
+	if stateCtx.ConversationBase.TerminalMessageID == "" {
 		return s.responsesState.createSession()
 	}
 	return session.ForkSessionThroughMessageWithManager(
 		ctx,
 		s.responsesState.manager,
-		stateCtx.ConversationBaseSessionPath,
-		stateCtx.ConversationBaseMessagePath,
-		stateCtx.ConversationBaseTerminalMessageID,
+		stateCtx.ConversationBase.SessionPath,
+		stateCtx.ConversationBase.MessagePath,
+		stateCtx.ConversationBase.TerminalMessageID,
 		nil,
 	)
 }
@@ -1119,7 +1119,7 @@ func responsesBackgroundRequested(req *OpenAIResponsesRequest) bool {
 
 func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter, r *http.Request, responsesReq *OpenAIResponsesRequest, typedCurrent TypedRequest, route *endpointRoute) {
 	ctx := r.Context()
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesState(ctx, responsesReq, typedCurrent, route.OriginalModel, true)
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateWithMode(ctx, responsesReq, typedCurrent, route.OriginalModel, responsesStateBackground, responsesStoreRequested(responsesReq))
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
 		return
@@ -1644,9 +1644,12 @@ func (s *Server) conversationItemsForRecord(ctx context.Context, conv *conversat
 	if err != nil {
 		return nil, err
 	}
+	return conversationItemsFromMessages(messages, 0, conversationDeletedItemSet(conv), includeDeleted), nil
+}
+
+func conversationItemsFromMessages(messages []core.TypedMessage, startIndex int, deleted map[string]bool, includeDeleted bool) []interface{} {
 	items := coreResponsesInput(messages)
 	out := make([]interface{}, 0, len(items))
-	deleted := conversationDeletedItemSet(conv)
 	for i, item := range items {
 		itemMap, ok := item.(map[string]interface{})
 		if !ok {
@@ -1655,14 +1658,14 @@ func (s *Server) conversationItemsForRecord(ctx context.Context, conv *conversat
 		}
 		cloned := cloneMapInterface(itemMap)
 		if _, exists := itemMap["id"]; !exists {
-			cloned["id"] = conversationItemID(i)
+			cloned["id"] = conversationItemID(startIndex + i)
 		}
 		if !includeDeleted && deleted[fmt.Sprint(cloned["id"])] {
 			continue
 		}
 		out = append(out, cloned)
 	}
-	return out, nil
+	return out
 }
 
 func (s *Server) conversationHistory(ctx context.Context, conv *conversationRecord) ([]core.TypedMessage, error) {
@@ -1678,21 +1681,6 @@ func (s *Server) conversationHistory(ctx context.Context, conv *conversationReco
 		return messages, nil
 	}
 	return filterConversationHistoryDeletedItems(messages, deleted), nil
-}
-
-func filterDeletedConversationItems(conv *conversationRecord, items []interface{}) []interface{} {
-	deleted := conversationDeletedItemSet(conv)
-	if len(deleted) == 0 {
-		return items
-	}
-	out := make([]interface{}, 0, len(items))
-	for _, item := range items {
-		if itemMap, ok := item.(map[string]interface{}); ok && deleted[fmt.Sprint(itemMap["id"])] {
-			continue
-		}
-		out = append(out, item)
-	}
-	return out
 }
 
 func filterConversationHistoryDeletedItems(messages []core.TypedMessage, deleted map[string]bool) []core.TypedMessage {

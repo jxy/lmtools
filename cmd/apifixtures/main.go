@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,10 +11,6 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/modelcatalog"
 	"lmtools/internal/providers"
-	"lmtools/internal/retry"
-	"math"
-	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -315,7 +310,7 @@ func captureTokenCountCaseWithClient(root string, meta apifixtures.CaseMeta, tar
 		req.Header.Set(key, value)
 	}
 
-	resp, data, err := doCaptureRequest(context.Background(), client, req, body, targetHost(target), nil)
+	resp, data, err := apifixtures.DoCaptureRequest(context.Background(), client, req, body, targetHost(target), nil)
 	if err != nil {
 		return err
 	}
@@ -373,7 +368,7 @@ func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetCon
 		req.Header.Set(key, value)
 	}
 
-	resp, data, err := doCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
+	resp, data, err := apifixtures.DoCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
 	if err != nil {
 		return err
 	}
@@ -561,7 +556,7 @@ func doStatefulCaptureRequest(ctx context.Context, client *http.Client, method, 
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
-	return doCaptureRequest(ctx, client, req, body, provider, nil)
+	return apifixtures.DoCaptureRequest(ctx, client, req, body, provider, nil)
 }
 
 func pollStatefulCapture(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte, provider string, fields map[string]interface{}, vars map[string]string) (*http.Response, []byte, error) {
@@ -865,7 +860,7 @@ func doCaptureModelsRequest(ctx context.Context, client *http.Client, req *http.
 	case "google":
 		return doCaptureGoogleModelsRequest(ctx, client, req, target)
 	default:
-		return doCaptureRequest(ctx, client, req, nil, targetHost(target), nil)
+		return apifixtures.DoCaptureRequest(ctx, client, req, nil, targetHost(target), nil)
 	}
 }
 
@@ -880,7 +875,7 @@ func doCaptureAnthropicModelsRequest(ctx context.Context, client *http.Client, r
 			"limit":    "1000",
 			"after_id": afterID,
 		})
-		resp, data, err := doCaptureRequest(ctx, client, pageReq, nil, targetHost(target), nil)
+		resp, data, err := apifixtures.DoCaptureRequest(ctx, client, pageReq, nil, targetHost(target), nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -931,7 +926,7 @@ func doCaptureGoogleModelsRequest(ctx context.Context, client *http.Client, req 
 			"pageSize":  "1000",
 			"pageToken": pageToken,
 		})
-		resp, data, err := doCaptureRequest(ctx, client, pageReq, nil, targetHost(target), nil)
+		resp, data, err := apifixtures.DoCaptureRequest(ctx, client, pageReq, nil, targetHost(target), nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1007,157 +1002,6 @@ func lastModelID(fallback string, models []modelcatalog.AnthropicModelInfo) stri
 }
 
 const maxModelsCapturePages = 100
-
-func doCaptureRequest(ctx context.Context, client *http.Client, req *http.Request, body []byte, provider string, cfg *retry.Config) (*http.Response, []byte, error) {
-	if cfg == nil {
-		cfg = retry.ProviderConfig(provider)
-	}
-	if cfg == nil {
-		cfg = retry.DefaultConfig()
-	}
-	if cfg.MaxRetries < 0 {
-		cfg.MaxRetries = 0
-	}
-
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	var lastResp *http.Response
-	var lastBody []byte
-	var overrideBackoff time.Duration
-
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
-		if attempt > 0 {
-			backoff := calculateCaptureBackoff(cfg, attempt-1, rng)
-			if overrideBackoff > 0 {
-				backoff = overrideBackoff
-				overrideBackoff = 0
-			}
-			select {
-			case <-ctx.Done():
-				return nil, nil, ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-
-		reqClone := req.Clone(ctx)
-		reqClone.Body = io.NopCloser(bytes.NewReader(body))
-		reqClone.ContentLength = int64(len(body))
-
-		resp, err := client.Do(reqClone)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
-			}
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() && attempt < cfg.MaxRetries {
-				continue
-			}
-			return nil, nil, err
-		}
-
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, nil, err
-		}
-
-		lastResp = cloneHTTPResponse(resp, data)
-		lastBody = append(lastBody[:0], data...)
-
-		if !shouldRetryCaptureStatus(resp.StatusCode) {
-			return cloneHTTPResponse(resp, data), data, nil
-		}
-
-		if retryAfter := retry.ExtractRetryAfter(lastResp); retryAfter > 0 {
-			nextBackoff := calculateCaptureBackoff(cfg, attempt, rng)
-			if retryAfter > nextBackoff {
-				overrideBackoff = retryAfter
-			}
-		} else if retryAfter := extractProviderRetryDelay(provider, data); retryAfter > 0 {
-			nextBackoff := calculateCaptureBackoff(cfg, attempt, rng)
-			if retryAfter > nextBackoff {
-				overrideBackoff = retryAfter
-			}
-		}
-	}
-
-	if lastResp != nil {
-		return lastResp, lastBody, nil
-	}
-	return nil, nil, fmt.Errorf("capture request failed without response")
-}
-
-func shouldRetryCaptureStatus(statusCode int) bool {
-	switch statusCode {
-	case http.StatusRequestTimeout,
-		http.StatusTooManyRequests,
-		425,
-		http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout:
-		return true
-	default:
-		if statusCode >= 400 && statusCode < 500 {
-			return false
-		}
-		return statusCode >= 500
-	}
-}
-
-func calculateCaptureBackoff(cfg *retry.Config, attempt int, rng *rand.Rand) time.Duration {
-	backoff := float64(cfg.InitialBackoff) * math.Pow(cfg.BackoffFactor, float64(attempt))
-	jitter := (rng.Float64() - 0.5) * 0.5
-	backoff = backoff * (1 + jitter)
-	if cfg.MaxBackoff > 0 && backoff > float64(cfg.MaxBackoff) {
-		backoff = float64(cfg.MaxBackoff)
-	}
-	return time.Duration(backoff)
-}
-
-func cloneHTTPResponse(resp *http.Response, body []byte) *http.Response {
-	if resp == nil {
-		return nil
-	}
-	clone := new(http.Response)
-	*clone = *resp
-	clone.Header = resp.Header.Clone()
-	clone.Body = io.NopCloser(bytes.NewReader(body))
-	clone.ContentLength = int64(len(body))
-	return clone
-}
-
-func extractProviderRetryDelay(provider string, body []byte) time.Duration {
-	switch provider {
-	case "google":
-		return extractGoogleRetryDelay(body)
-	default:
-		return 0
-	}
-}
-
-func extractGoogleRetryDelay(body []byte) time.Duration {
-	var payload struct {
-		Error struct {
-			Details []struct {
-				Type       string `json:"@type"`
-				RetryDelay string `json:"retryDelay"`
-			} `json:"details"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return 0
-	}
-	for _, detail := range payload.Error.Details {
-		if detail.Type != "type.googleapis.com/google.rpc.RetryInfo" {
-			continue
-		}
-		delay, err := time.ParseDuration(detail.RetryDelay)
-		if err == nil && delay > 0 {
-			return delay
-		}
-	}
-	return 0
-}
 
 func refreshDerivedArtifacts(root string, meta apifixtures.CaseMeta, target targetConfig, data []byte) error {
 	if target.Stream {

@@ -236,7 +236,7 @@ func captureArtifact(root string, meta apifixtures.CaseMeta, target targetConfig
 		req.Header.Set(key, value)
 	}
 
-	resp, data, err := doCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
+	resp, data, err := apifixtures.DoCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
 	if err != nil {
 		return compareArtifact{}, err
 	}

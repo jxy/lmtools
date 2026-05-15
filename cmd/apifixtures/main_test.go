@@ -1073,9 +1073,9 @@ func TestDoCaptureRequestRetriesRateLimit(t *testing.T) {
 		MaxBackoff:     5 * time.Millisecond,
 		BackoffFactor:  2,
 	}
-	resp, body, err := doCaptureRequest(context.Background(), server.Client(), req, []byte(`{"hello":"world"}`), "openai", cfg)
+	resp, body, err := apifixtures.DoCaptureRequest(context.Background(), server.Client(), req, []byte(`{"hello":"world"}`), "openai", cfg)
 	if err != nil {
-		t.Fatalf("doCaptureRequest() error = %v", err)
+		t.Fatalf("apifixtures.DoCaptureRequest() error = %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -1110,9 +1110,9 @@ func TestDoCaptureRequestReturnsLastRetryableResponse(t *testing.T) {
 		MaxBackoff:     5 * time.Millisecond,
 		BackoffFactor:  2,
 	}
-	resp, body, err := doCaptureRequest(context.Background(), server.Client(), req, []byte(`{"hello":"world"}`), "openai", cfg)
+	resp, body, err := apifixtures.DoCaptureRequest(context.Background(), server.Client(), req, []byte(`{"hello":"world"}`), "openai", cfg)
 	if err != nil {
-		t.Fatalf("doCaptureRequest() error = %v", err)
+		t.Fatalf("apifixtures.DoCaptureRequest() error = %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -1124,25 +1124,5 @@ func TestDoCaptureRequestReturnsLastRetryableResponse(t *testing.T) {
 	}
 	if got := string(body); got != `{"attempt":3}` {
 		t.Fatalf("body = %q, want last retryable response body", got)
-	}
-}
-
-func TestExtractGoogleRetryDelay(t *testing.T) {
-	body := []byte(`{
-  "error": {
-    "details": [
-      {
-        "@type": "type.googleapis.com/google.rpc.Help"
-      },
-      {
-        "@type": "type.googleapis.com/google.rpc.RetryInfo",
-        "retryDelay": "22.5s"
-      }
-    ]
-  }
-}`)
-
-	if got := extractGoogleRetryDelay(body); got != 22500*time.Millisecond {
-		t.Fatalf("extractGoogleRetryDelay() = %v, want 22.5s", got)
 	}
 }

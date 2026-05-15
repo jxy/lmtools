@@ -32,31 +32,20 @@ type responsesStreamWriter struct {
 	messageItemID     string
 	messageText       string
 	messagePartOpen   bool
-	functionItems     map[int]*responsesFunctionItemState
-	functionByOutput  map[int]*responsesFunctionItemState
-	customItems       map[int]*responsesCustomItemState
-	customByOutput    map[int]*responsesCustomItemState
+	toolItems         map[int]*responsesStreamToolItemState
+	toolByOutput      map[int]*responsesStreamToolItemState
 	reasoningItems    map[int]*responsesReasoningItemState
 	reasoningByOutput map[int]*responsesReasoningItemState
 	toolNameRegistry  responseToolNameRegistry
 }
 
-type responsesFunctionItemState struct {
+type responsesStreamToolItemState struct {
 	OutputIndex int
 	ItemID      string
 	CallID      string
 	Namespace   string
 	Name        string
-	Arguments   string
-}
-
-type responsesCustomItemState struct {
-	OutputIndex int
-	ItemID      string
-	CallID      string
-	Namespace   string
-	Name        string
-	Input       string
+	Payload     string
 }
 
 type responsesReasoningItemState struct {
@@ -94,10 +83,8 @@ func newResponsesStreamWriter(w http.ResponseWriter, ctx context.Context, origin
 		responseID:        generateUUID("resp_"),
 		model:             originalModel,
 		createdAt:         time.Now().Unix(),
-		functionItems:     make(map[int]*responsesFunctionItemState),
-		functionByOutput:  make(map[int]*responsesFunctionItemState),
-		customItems:       make(map[int]*responsesCustomItemState),
-		customByOutput:    make(map[int]*responsesCustomItemState),
+		toolItems:         make(map[int]*responsesStreamToolItemState),
+		toolByOutput:      make(map[int]*responsesStreamToolItemState),
 		reasoningItems:    make(map[int]*responsesReasoningItemState),
 		reasoningByOutput: make(map[int]*responsesReasoningItemState),
 	}, nil
@@ -259,10 +246,10 @@ func (w *responsesStreamWriter) closeMessageItem(status string) error {
 	return nil
 }
 
-func (w *responsesStreamWriter) ensureFunctionItem(index int, id, name string) (*responsesFunctionItemState, error) {
-	if state, ok := w.functionItems[index]; ok {
+func (w *responsesStreamWriter) ensureToolItem(index int, id, name, itemType, toolType string) (*responsesStreamToolItemState, error) {
+	if state, ok := w.toolItems[index]; ok {
 		if state.Name == "" && name != "" {
-			state.Name, state.Namespace = w.responseToolOutputName(name, "function")
+			state.Name, state.Namespace = w.responseToolOutputName(name, toolType)
 		}
 		return state, nil
 	}
@@ -271,36 +258,47 @@ func (w *responsesStreamWriter) ensureFunctionItem(index int, id, name string) (
 	}
 	itemID := id
 	if itemID == "" {
-		itemID = generateUUID("fc_")
+		itemID = generateUUID(responsesToolItemIDPrefix(itemType))
 	}
 	callID := id
 	if callID == "" {
 		callID = generateUUID("call_")
 	}
-	outputName, namespace := w.responseToolOutputName(name, "function")
-	state := &responsesFunctionItemState{
+	outputName, namespace := w.responseToolOutputName(name, toolType)
+	state := &responsesStreamToolItemState{
 		OutputIndex: len(w.output),
 		ItemID:      itemID,
 		CallID:      callID,
 		Namespace:   namespace,
 		Name:        outputName,
 	}
-	w.functionItems[index] = state
-	w.functionByOutput[state.OutputIndex] = state
+	w.toolItems[index] = state
+	w.toolByOutput[state.OutputIndex] = state
 	item := OpenAIResponsesOutputItem{
 		ID:        state.ItemID,
-		Type:      "function_call",
+		Type:      itemType,
 		Status:    "in_progress",
 		CallID:    state.CallID,
 		Namespace: state.Namespace,
 		Name:      state.Name,
-		Arguments: "",
+	}
+	if itemType == "function_call" {
+		item.Arguments = ""
+	} else {
+		item.Input = ""
 	}
 	w.output = append(w.output, item)
 	return state, w.send("response.output_item.added", map[string]interface{}{
 		"output_index": state.OutputIndex,
 		"item":         item,
 	})
+}
+
+func responsesToolItemIDPrefix(itemType string) string {
+	if itemType == "custom_tool_call" {
+		return "ctc_"
+	}
+	return "fc_"
 }
 
 func (w *responsesStreamWriter) responseToolOutputName(name, toolType string) (string, string) {
@@ -311,14 +309,14 @@ func (w *responsesStreamWriter) responseToolOutputName(name, toolType string) (s
 }
 
 func (w *responsesStreamWriter) WriteFunctionCallDelta(index int, id, name, arguments string) error {
-	state, err := w.ensureFunctionItem(index, id, name)
+	state, err := w.ensureToolItem(index, id, name, "function_call", "function")
 	if err != nil {
 		return err
 	}
 	if arguments == "" {
 		return nil
 	}
-	state.Arguments += arguments
+	state.Payload += arguments
 	return w.send("response.function_call_arguments.delta", map[string]interface{}{
 		"output_index": state.OutputIndex,
 		"item_id":      state.ItemID,
@@ -326,59 +324,15 @@ func (w *responsesStreamWriter) WriteFunctionCallDelta(index int, id, name, argu
 	})
 }
 
-func (w *responsesStreamWriter) ensureCustomItem(index int, id, name string) (*responsesCustomItemState, error) {
-	if state, ok := w.customItems[index]; ok {
-		if state.Name == "" && name != "" {
-			state.Name, state.Namespace = w.responseToolOutputName(name, "custom")
-		}
-		return state, nil
-	}
-	if err := w.closeMessageItem("completed"); err != nil {
-		return nil, err
-	}
-	itemID := id
-	if itemID == "" {
-		itemID = generateUUID("ctc_")
-	}
-	callID := id
-	if callID == "" {
-		callID = generateUUID("call_")
-	}
-	outputName, namespace := w.responseToolOutputName(name, "custom")
-	state := &responsesCustomItemState{
-		OutputIndex: len(w.output),
-		ItemID:      itemID,
-		CallID:      callID,
-		Namespace:   namespace,
-		Name:        outputName,
-	}
-	w.customItems[index] = state
-	w.customByOutput[state.OutputIndex] = state
-	item := OpenAIResponsesOutputItem{
-		ID:        state.ItemID,
-		Type:      "custom_tool_call",
-		Status:    "in_progress",
-		CallID:    state.CallID,
-		Namespace: state.Namespace,
-		Name:      state.Name,
-		Input:     "",
-	}
-	w.output = append(w.output, item)
-	return state, w.send("response.output_item.added", map[string]interface{}{
-		"output_index": state.OutputIndex,
-		"item":         item,
-	})
-}
-
 func (w *responsesStreamWriter) WriteCustomToolCallDelta(index int, id, name, input string) error {
-	state, err := w.ensureCustomItem(index, id, name)
+	state, err := w.ensureToolItem(index, id, name, "custom_tool_call", "custom")
 	if err != nil {
 		return err
 	}
 	if input == "" {
 		return nil
 	}
-	state.Input += input
+	state.Payload += input
 	return w.send("response.custom_tool_call_input.delta", map[string]interface{}{
 		"output_index": state.OutputIndex,
 		"item_id":      state.ItemID,
@@ -386,65 +340,43 @@ func (w *responsesStreamWriter) WriteCustomToolCallDelta(index int, id, name, in
 	})
 }
 
-func (w *responsesStreamWriter) closeFunctionItems(status string) error {
+func (w *responsesStreamWriter) closeToolItems(status string) error {
 	for i := 0; i < len(w.output); i++ {
 		item := w.output[i]
-		if item.Type != "function_call" || item.Status == "completed" || item.Status == "incomplete" {
+		if (item.Type != "function_call" && item.Type != "custom_tool_call") || item.Status == "completed" || item.Status == "incomplete" {
 			continue
 		}
-		state := w.functionByOutput[i]
+		state := w.toolByOutput[i]
 		if state == nil {
 			continue
-		}
-		arguments := state.Arguments
-		if strings.TrimSpace(arguments) == "" {
-			arguments = "{}"
-		}
-		if err := w.send("response.function_call_arguments.done", map[string]interface{}{
-			"output_index": state.OutputIndex,
-			"item_id":      state.ItemID,
-			"arguments":    arguments,
-		}); err != nil {
-			return err
-		}
-		item.Status = status
-		item.Arguments = arguments
-		item.Namespace = state.Namespace
-		item.Name = state.Name
-		item.CallID = state.CallID
-		w.output[i] = item
-		if err := w.send("response.output_item.done", map[string]interface{}{
-			"output_index": i,
-			"item":         item,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (w *responsesStreamWriter) closeCustomItems(status string) error {
-	for i := 0; i < len(w.output); i++ {
-		item := w.output[i]
-		if item.Type != "custom_tool_call" || item.Status == "completed" || item.Status == "incomplete" {
-			continue
-		}
-		state := w.customByOutput[i]
-		if state == nil {
-			continue
-		}
-		if err := w.send("response.custom_tool_call_input.done", map[string]interface{}{
-			"output_index": state.OutputIndex,
-			"item_id":      state.ItemID,
-			"input":        state.Input,
-		}); err != nil {
-			return err
 		}
 		item.Status = status
 		item.Namespace = state.Namespace
 		item.Name = state.Name
 		item.CallID = state.CallID
-		item.Input = state.Input
+		if item.Type == "function_call" {
+			arguments := state.Payload
+			if strings.TrimSpace(arguments) == "" {
+				arguments = "{}"
+			}
+			if err := w.send("response.function_call_arguments.done", map[string]interface{}{
+				"output_index": state.OutputIndex,
+				"item_id":      state.ItemID,
+				"arguments":    arguments,
+			}); err != nil {
+				return err
+			}
+			item.Arguments = arguments
+		} else {
+			if err := w.send("response.custom_tool_call_input.done", map[string]interface{}{
+				"output_index": state.OutputIndex,
+				"item_id":      state.ItemID,
+				"input":        state.Payload,
+			}); err != nil {
+				return err
+			}
+			item.Input = state.Payload
+		}
 		w.output[i] = item
 		if err := w.send("response.output_item.done", map[string]interface{}{
 			"output_index": i,
@@ -563,10 +495,7 @@ func (w *responsesStreamWriter) Finish(finishReason string) (*OpenAIResponsesRes
 	if err := w.closeMessageItem(itemStatus); err != nil {
 		return nil, err
 	}
-	if err := w.closeFunctionItems(itemStatus); err != nil {
-		return nil, err
-	}
-	if err := w.closeCustomItems(itemStatus); err != nil {
+	if err := w.closeToolItems(itemStatus); err != nil {
 		return nil, err
 	}
 	if err := w.closeReasoningItems(itemStatus); err != nil {
@@ -590,10 +519,7 @@ func (w *responsesStreamWriter) Fail(streamErr error) (*OpenAIResponsesResponse,
 	if err := w.closeMessageItem("incomplete"); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	if err := w.closeFunctionItems("incomplete"); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	if err := w.closeCustomItems("incomplete"); err != nil && firstErr == nil {
+	if err := w.closeToolItems("incomplete"); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	if err := w.closeReasoningItems("incomplete"); err != nil && firstErr == nil {
@@ -857,7 +783,12 @@ func (s *Server) simulateLegacyArgoResponsesStream(ctx context.Context, anthReq 
 
 func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.Reader, writer *responsesStreamWriter) (string, error) {
 	finishReason := "stop"
-	customToolBlocks := make(map[int]*responsesCustomItemState)
+	type pendingCustomToolBlock struct {
+		callID string
+		name   string
+		input  string
+	}
+	customToolBlocks := make(map[int]*pendingCustomToolBlock)
 	if err := consumeSSEStream(body, func(currentEvent string, data json.RawMessage) error {
 		warnAnthropicStreamEventFields(ctx, currentEvent, data)
 		switch currentEvent {
@@ -876,10 +807,9 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 			switch evt.ContentBlock.Type {
 			case "tool_use":
 				if _, ok := writer.toolNameRegistry.resolve(evt.ContentBlock.Name, "custom"); ok {
-					customToolBlocks[evt.Index] = &responsesCustomItemState{
-						ItemID: evt.ContentBlock.ID,
-						CallID: evt.ContentBlock.ID,
-						Name:   evt.ContentBlock.Name,
+					customToolBlocks[evt.Index] = &pendingCustomToolBlock{
+						callID: evt.ContentBlock.ID,
+						name:   evt.ContentBlock.Name,
 					}
 					return nil
 				}
@@ -901,7 +831,7 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 					partial = *evt.Delta.PartialJSON
 				}
 				if state, ok := customToolBlocks[evt.Index]; ok {
-					state.Input += partial
+					state.input += partial
 					return nil
 				}
 				return writer.WriteFunctionCallDelta(evt.Index, "", "", partial)
@@ -915,7 +845,7 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 			}
 			if state, ok := customToolBlocks[evt.Index]; ok {
 				delete(customToolBlocks, evt.Index)
-				return writer.WriteCustomToolCallDelta(evt.Index, state.CallID, state.Name, anthropicCustomToolInputFromJSON(state.Input))
+				return writer.WriteCustomToolCallDelta(evt.Index, state.callID, state.name, anthropicCustomToolInputFromJSON(state.input))
 			}
 			return writer.CloseReasoningBlock(evt.Index, "completed")
 		case EventMessageDelta:
