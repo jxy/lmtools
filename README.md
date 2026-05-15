@@ -7,6 +7,10 @@
   Completions-compatible, and OpenAI Responses-compatible endpoints over
   Anthropic, OpenAI, Google, or Argo backends.
 
+**Disclaimer**: Almost all code in this repository was "vibe-coded" by various
+LLMs (GPT, Claude, Gemini, etc.). Use at your own risk and review before
+deploying to production.
+
 ## Install
 
 Requires Go 1.21 or later.

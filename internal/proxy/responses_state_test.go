@@ -147,6 +147,117 @@ func TestOpenAIResponsesStatePreparationPreviousResponseHistoryMatchesReadOnly(t
 	}
 }
 
+func TestOpenAIResponsesReadOnlyAutoConversationDoesNotCreateState(t *testing.T) {
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+	req := &OpenAIResponsesRequest{Model: "claude-test", Conversation: "auto", Input: "hello"}
+	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
+
+	stateCtx, _, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed, "claude-test")
+	if err == nil || !strings.Contains(err.Error(), "conversation id is required") {
+		t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v, want conversation id error", err)
+	}
+	if stateCtx != nil {
+		t.Fatalf("stateCtx = %#v, want nil", stateCtx)
+	}
+	entries, err := os.ReadDir(server.responsesState.conversationsDir)
+	if err == nil && len(entries) != 0 {
+		t.Fatalf("conversations created in read-only mode: %v", entries)
+	}
+	if err != nil && !stdErrors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadDir(conversations) error = %v", err)
+	}
+}
+
+func TestOpenAIResponsesForegroundStoreFalseWithoutHistoryReturnsNilState(t *testing.T) {
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+	store := false
+	req := &OpenAIResponsesRequest{Model: "claude-test", Store: &store, Input: "hello"}
+	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
+
+	stateCtx, typedWithState, err := server.prepareOpenAIResponsesState(ctx, req, typed, "claude-test", false)
+	if err != nil {
+		t.Fatalf("prepareOpenAIResponsesState() error = %v", err)
+	}
+	if stateCtx != nil {
+		t.Fatalf("stateCtx = %#v, want nil", stateCtx)
+	}
+	if got := strings.Join(responseTypedTextLines(typedWithState.Messages), "\n"); got != "user:hello" {
+		t.Fatalf("messages = %q, want current request only", got)
+	}
+}
+
+func TestOpenAIResponsesBackgroundStoreFalseAllocatesState(t *testing.T) {
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+	store := false
+	req := &OpenAIResponsesRequest{Model: "claude-test", Store: &store, Input: "hello"}
+	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
+
+	stateCtx, typedWithState, err := server.prepareOpenAIResponsesState(ctx, req, typed, "claude-test", true)
+	if err != nil {
+		t.Fatalf("prepareOpenAIResponsesState(background) error = %v", err)
+	}
+	if stateCtx == nil || stateCtx.Session == nil {
+		t.Fatalf("stateCtx = %#v, want background session state", stateCtx)
+	}
+	if stateCtx.Store {
+		t.Fatalf("stateCtx.Store = true, want false")
+	}
+	if !stateCtx.Background {
+		t.Fatalf("stateCtx.Background = false, want true")
+	}
+	if len(stateCtx.CurrentRequest) == 0 {
+		t.Fatal("stateCtx.CurrentRequest is empty")
+	}
+	if got := strings.Join(responseTypedTextLines(typedWithState.Messages), "\n"); got != "user:hello" {
+		t.Fatalf("messages = %q, want current request only", got)
+	}
+}
+
+func TestOpenAIResponsesCommitMarshalErrorDoesNotAppendSession(t *testing.T) {
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+	req := &OpenAIResponsesRequest{Model: "claude-test", Input: "hello"}
+	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
+	stateCtx, _, err := server.prepareOpenAIResponsesState(ctx, req, typed, "claude-test", false)
+	if err != nil {
+		t.Fatalf("prepareOpenAIResponsesState() error = %v", err)
+	}
+	if stateCtx == nil || stateCtx.Session == nil {
+		t.Fatalf("stateCtx = %#v, want writable session state", stateCtx)
+	}
+
+	err = server.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, req, typed, &OpenAIResponsesResponse{
+		ID:        "resp_bad_raw",
+		Object:    "response",
+		Status:    "completed",
+		Model:     "claude-test",
+		CreatedAt: time.Now().Unix(),
+		Output: []OpenAIResponsesOutputItem{{
+			Type:   "message",
+			Status: "completed",
+			Role:   core.RoleAssistant,
+			Content: []OpenAIResponsesContentPart{{
+				Type: "output_text",
+				Text: "finished",
+			}},
+		}},
+		Error: func() {},
+	}, "claude-test", nil)
+	if err == nil || !strings.Contains(err.Error(), "marshal JSON") {
+		t.Fatalf("commitOpenAIResponsesStateWithBlocks() error = %v, want marshal JSON error", err)
+	}
+	messages, err := session.BuildMessagesWithToolInteractionsWithManager(ctx, server.responsesState.manager, stateCtx.Session.Path)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractionsWithManager() error = %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("session messages = %+v, want no appended messages", messages)
+	}
+}
+
 func TestResponsesStateCancelResponseIfPendingDoesNotOverwriteCompleted(t *testing.T) {
 	state := newResponsesState(t.TempDir())
 	respID := "resp_race_complete"

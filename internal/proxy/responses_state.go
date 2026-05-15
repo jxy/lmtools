@@ -250,7 +250,11 @@ func (s *responsesState) cancelResponseIfPending(id string, errPayload interface
 	rec.Status = "cancelled"
 	rec.CompletedAt = time.Now().Unix()
 	rec.Error = errPayload
-	rec.Raw = mustMarshalJSON(responseRecordPayload(&rec))
+	raw, err := marshalJSONRaw(responseRecordPayload(&rec))
+	if err != nil {
+		return nil, false, err
+	}
+	rec.Raw = raw
 	if err := s.saveResponseLocked(&rec); err != nil {
 		return nil, false, err
 	}
@@ -280,7 +284,11 @@ func (s *responsesState) updateResponseStatusIfPending(id, status string, errPay
 	if status == "failed" || status == "cancelled" {
 		rec.CompletedAt = time.Now().Unix()
 	}
-	rec.Raw = mustMarshalJSON(responseRecordPayload(&rec))
+	raw, err := marshalJSONRaw(responseRecordPayload(&rec))
+	if err != nil {
+		return err
+	}
+	rec.Raw = raw
 	return s.saveResponseLocked(&rec)
 }
 

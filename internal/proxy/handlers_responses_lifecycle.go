@@ -35,11 +35,24 @@ type openAIResponsesStateContext struct {
 	ConversationBaseTerminalMessageID string
 }
 
-type openAIResponsesStatePrepareMode struct {
-	Store      bool
-	Writable   bool
-	Background bool
-	ReadOnly   bool
+type openAIResponsesStateMode int
+
+const (
+	responsesStateReadOnly openAIResponsesStateMode = iota
+	responsesStateForeground
+	responsesStateBackground
+)
+
+func (mode openAIResponsesStateMode) readOnly() bool {
+	return mode == responsesStateReadOnly
+}
+
+func (mode openAIResponsesStateMode) background() bool {
+	return mode == responsesStateBackground
+}
+
+func (mode openAIResponsesStateMode) writable(store bool) bool {
+	return mode == responsesStateBackground || (mode == responsesStateForeground && store)
 }
 
 func (s *Server) handleOpenAIResponsesLifecycle(w http.ResponseWriter, r *http.Request) {
@@ -437,19 +450,18 @@ func (s *Server) handleOpenAIConversations(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) createOpenAIConversation(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	var body map[string]interface{}
+	var body openAIConversationRequestBody
 	if err := s.decodeOptionalJSON(r, &body); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
-	metadata, _ := body["metadata"].(map[string]interface{})
-	instructions := responsesInstructionText(body["instructions"])
-	messages, err := conversationMessagesFromBody(ctx, body)
+	instructions := responsesInstructionText(body.Instructions)
+	messages, err := conversationMessagesFromRequest(ctx, body)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
-	conv, sess, err := s.responsesState.createConversation(metadata, instructions)
+	conv, sess, err := s.responsesState.createConversation(body.Metadata, instructions)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
@@ -489,15 +501,15 @@ func (s *Server) updateOpenAIConversation(ctx context.Context, w http.ResponseWr
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation not found", "not_found", http.StatusNotFound)
 		return
 	}
-	var body map[string]interface{}
+	var body openAIConversationRequestBody
 	if err := s.decodeOptionalJSON(r, &body); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
-	if metadata, _ := body["metadata"].(map[string]interface{}); metadata != nil {
-		conv.Metadata = cloneStringInterfaceMap(metadata)
+	if body.Metadata != nil {
+		conv.Metadata = cloneStringInterfaceMap(body.Metadata)
 	}
-	if instructions := responsesInstructionText(body["instructions"]); instructions != "" {
+	if instructions := responsesInstructionText(body.Instructions); instructions != "" {
 		conv.Instructions = instructions
 	}
 	if err := s.responsesState.saveConversation(conv); err != nil {
@@ -546,7 +558,7 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		return
 	}
 
-	var body map[string]interface{}
+	var body openAIConversationRequestBody
 	if err := s.decodeOptionalJSON(r, &body); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
@@ -575,7 +587,12 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
 	}
-	if err := appendConversationItemsFromBody(ctx, sess, body); err != nil {
+	messages, err := conversationMessagesFromRequest(ctx, body)
+	if err != nil {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		return
+	}
+	if err := appendConversationMessages(ctx, sess, messages); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
@@ -640,37 +657,42 @@ func (s *Server) deleteOpenAIConversationItem(ctx context.Context, w http.Respon
 
 func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, background bool) (*openAIResponsesStateContext, TypedRequest, error) {
 	store := req.Store == nil || *req.Store
-	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, openAIResponsesStatePrepareMode{
-		Store:      store,
-		Writable:   store || background,
-		Background: background,
-	})
+	mode := responsesStateForeground
+	if background {
+		mode = responsesStateBackground
+	}
+	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, mode, store)
 }
 
 func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string) (*openAIResponsesStateContext, TypedRequest, error) {
-	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, openAIResponsesStatePrepareMode{ReadOnly: true})
+	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, responsesStateReadOnly, false)
 }
 
-func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, mode openAIResponsesStatePrepareMode) (*openAIResponsesStateContext, TypedRequest, error) {
+func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, mode openAIResponsesStateMode, store bool) (*openAIResponsesStateContext, TypedRequest, error) {
 	convSpec, err := parseConversationSpec(req.Conversation)
 	if err != nil {
 		return nil, typed, err
 	}
-	if mode.ReadOnly && convSpec.create {
+	if mode.readOnly() && convSpec.create {
 		return nil, typed, fmt.Errorf("conversation id is required")
 	}
-	if !mode.ReadOnly {
-		needsState := mode.Writable || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
+	writable := mode.writable(store)
+	if !mode.readOnly() {
+		needsState := writable || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
 		if !needsState {
 			return nil, typed, nil
 		}
 	}
 
+	currentRequest, err := marshalJSONRaw(req)
+	if err != nil {
+		return nil, typed, err
+	}
 	stateCtx := &openAIResponsesStateContext{
-		Store:          mode.Store,
-		Background:     mode.Background,
+		Store:          store,
+		Background:     mode.background(),
 		Instructions:   responsesInstructionText(req.Instructions),
-		CurrentRequest: mustMarshalJSON(req),
+		CurrentRequest: currentRequest,
 	}
 	if stateCtx.Instructions == "" {
 		stateCtx.Instructions = typed.Developer
@@ -689,8 +711,8 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 		}
 	}
 
-	if convSpec.requested && (mode.ReadOnly || !convSpec.create || mode.Writable) {
-		conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, mode)
+	if convSpec.requested && (mode.readOnly() || !convSpec.create || writable) {
+		conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, writable)
 		if err != nil {
 			return nil, typed, err
 		}
@@ -699,7 +721,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 			stateCtx.Session = sess
 		}
 		stateCtx.Conversation = conv
-		if !mode.ReadOnly {
+		if !mode.readOnly() {
 			if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
 				return nil, typed, err
 			}
@@ -709,7 +731,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 		}
 	}
 
-	if stateCtx.Previous != nil && mode.Writable {
+	if stateCtx.Previous != nil && writable {
 		forkedSession, err := s.forkOpenAIResponsesResponseSnapshot(ctx, stateCtx.Previous)
 		if err != nil {
 			return nil, typed, err
@@ -718,7 +740,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 		sessionPath = forkedSession.Path
 	}
 
-	if sessionPath == "" && mode.Writable {
+	if sessionPath == "" && writable {
 		sess, err := s.responsesState.createSession()
 		if err != nil {
 			return nil, typed, err
@@ -733,7 +755,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 	}
 
 	if stateCtx.Session != nil {
-		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, mode)
+		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, mode, writable)
 		if err != nil {
 			return nil, typed, err
 		}
@@ -747,7 +769,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 	return stateCtx, typed, nil
 }
 
-func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, mode openAIResponsesStatePrepareMode) (*conversationRecord, *session.Session, error) {
+func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, writable bool) (*conversationRecord, *session.Session, error) {
 	var conv *conversationRecord
 	var sess *session.Session
 	var err error
@@ -768,7 +790,7 @@ func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIRespons
 		if !ok {
 			return nil, nil, fmt.Errorf("conversation %q was not found", convSpec.id)
 		}
-		if mode.Writable && len(convSpec.metadata) > 0 {
+		if writable && len(convSpec.metadata) > 0 {
 			conv.Metadata = cloneStringInterfaceMap(convSpec.metadata)
 		}
 	}
@@ -778,10 +800,10 @@ func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIRespons
 	return conv, sess, nil
 }
 
-func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, mode openAIResponsesStatePrepareMode) (TypedRequest, error) {
+func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, mode openAIResponsesStateMode, writable bool) (TypedRequest, error) {
 	var history []core.TypedMessage
 	var err error
-	if stateCtx.Previous != nil && (!mode.Writable || mode.ReadOnly) {
+	if stateCtx.Previous != nil && (!writable || mode.readOnly()) {
 		history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
 	} else if stateCtx.Conversation != nil && stateCtx.Previous == nil {
 		history, err = s.conversationHistory(ctx, stateCtx.Conversation)
@@ -841,6 +863,13 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	if err != nil {
 		return err
 	}
+	if target.ExistingCreatedAt != 0 {
+		resp.CreatedAt = target.ExistingCreatedAt
+	}
+	raw, err := marshalJSONRaw(resp)
+	if err != nil {
+		return err
+	}
 
 	result, err := appendOpenAIResponsesCommitMessages(ctx, target.Session, typedCurrent, resp, originalModel, assistantBlocks)
 	if err != nil {
@@ -848,11 +877,8 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	}
 	target.Session.Path = result.Path
 	stateCtx.Session = target.Session
-	if target.ExistingCreatedAt != 0 {
-		resp.CreatedAt = target.ExistingCreatedAt
-	}
 
-	return s.saveOpenAIResponsesCommitRecordsLocked(stateCtx, req, resp, originalModel, result, target)
+	return s.saveOpenAIResponsesCommitRecordsLocked(stateCtx, req, resp, originalModel, result, target, raw)
 }
 
 func (s *Server) prepareOpenAIResponsesCommitTargetLocked(ctx context.Context, stateCtx *openAIResponsesStateContext, responseID string) (openAIResponsesCommitTarget, error) {
@@ -908,8 +934,7 @@ func appendOpenAIResponsesCommitMessages(ctx context.Context, commitSession *ses
 	return result, nil
 }
 
-func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel string, result session.SaveResult, target openAIResponsesCommitTarget) error {
-	raw := mustMarshalJSON(resp)
+func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel string, result session.SaveResult, target openAIResponsesCommitTarget, raw json.RawMessage) error {
 	rec := &responseRecord{
 		Version:            responsesStateVersion,
 		ID:                 resp.ID,
@@ -1118,6 +1143,11 @@ func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter,
 	if stateCtx.Conversation != nil {
 		attachOpenAIResponsesConversation(initial, stateCtx.Conversation.ID)
 	}
+	initialRaw, err := marshalJSONRaw(initial)
+	if err != nil {
+		s.sendOpenAIError(w, ErrTypeServer, "Failed to save response state", "state_error", http.StatusInternalServerError)
+		return
+	}
 	rec := &responseRecord{
 		Version:            responsesStateVersion,
 		ID:                 respID,
@@ -1132,7 +1162,7 @@ func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter,
 		Instructions:       stateCtx.Instructions,
 		Metadata:           cloneStringInterfaceMap(responsesReq.Metadata),
 		Request:            append(json.RawMessage(nil), stateCtx.CurrentRequest...),
-		Raw:                mustMarshalJSON(initial),
+		Raw:                initialRaw,
 	}
 	if stateCtx.Conversation != nil {
 		rec.ConversationID = stateCtx.Conversation.ID
@@ -1763,21 +1793,17 @@ func appendUniqueString(items []string, value string) []string {
 	return append(items, value)
 }
 
-func appendConversationItemsFromBody(ctx context.Context, sess *session.Session, body map[string]interface{}) error {
-	messages, err := conversationMessagesFromBody(ctx, body)
-	if err != nil {
-		return err
-	}
-	return appendConversationMessages(ctx, sess, messages)
+type openAIConversationRequestBody struct {
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Instructions interface{}            `json:"instructions,omitempty"`
+	Input        interface{}            `json:"input,omitempty"`
+	Items        interface{}            `json:"items,omitempty"`
 }
 
-func conversationMessagesFromBody(ctx context.Context, body map[string]interface{}) ([]core.TypedMessage, error) {
-	if body == nil {
-		return nil, nil
-	}
-	input := body["items"]
+func conversationMessagesFromRequest(ctx context.Context, body openAIConversationRequestBody) ([]core.TypedMessage, error) {
+	input := body.Items
 	if input == nil {
-		input = body["input"]
+		input = body.Input
 	}
 	if input == nil {
 		return nil, nil
@@ -1985,6 +2011,14 @@ func mustMarshalJSON(value interface{}) json.RawMessage {
 		return nil
 	}
 	return data
+}
+
+func marshalJSONRaw(value interface{}) (json.RawMessage, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("marshal JSON: %w", err)
+	}
+	return data, nil
 }
 
 func cloneMapInterface(input map[string]interface{}) map[string]interface{} {

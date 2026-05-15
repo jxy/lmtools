@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
@@ -195,6 +196,68 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	}
 }
 
+func TestHandleNormalResponsePersistsAndPrints(t *testing.T) {
+	ctx := context.Background()
+	oldDir := session.GetSessionsDir()
+	session.SetSessionsDir(t.TempDir())
+	t.Cleanup(func() { session.SetSessionsDir(oldDir) })
+
+	sess, err := session.CreateSession("", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	response := &core.Response{Text: "assistant answer"}
+	out, err := captureStdout(t, func() error {
+		return handleNormalResponse(ctx, &config.Config{}, core.NewTestNotifier(), response, sess, "test-model")
+	})
+	if err != nil {
+		t.Fatalf("handleNormalResponse() error = %v", err)
+	}
+	if out != "assistant answer" {
+		t.Fatalf("stdout = %q, want response text", out)
+	}
+	messages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+	}
+	if got := strings.Join(lmcTypedTextLines(messages), "\n"); got != "assistant:assistant answer" {
+		t.Fatalf("session messages = %q, want saved assistant response", got)
+	}
+}
+
+func TestFinishToolExecutionPrintsOnlyUnstreamedFinalText(t *testing.T) {
+	out, err := captureStdout(t, func() error {
+		return finishToolExecution(core.ToolExecutionResult{FinalText: "final answer"})
+	})
+	if err != nil {
+		t.Fatalf("finishToolExecution() error = %v", err)
+	}
+	if out != "final answer" {
+		t.Fatalf("stdout = %q, want final answer", out)
+	}
+
+	out, err = captureStdout(t, func() error {
+		return finishToolExecution(core.ToolExecutionResult{FinalText: "already streamed", FinalStreamed: true})
+	})
+	if err != nil {
+		t.Fatalf("finishToolExecution(streamed) error = %v", err)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want no duplicate streamed text", out)
+	}
+
+	wantErr := errorf("tool failed")
+	out, err = captureStdout(t, func() error {
+		return finishToolExecution(core.ToolExecutionResult{FinalText: "ignored", Error: wantErr})
+	})
+	if err != wantErr {
+		t.Fatalf("finishToolExecution(error) error = %v, want %v", err, wantErr)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want no output on error", out)
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		value string
@@ -325,4 +388,42 @@ func appendTestSessionMessage(t *testing.T, ctx context.Context, sess *session.S
 	if err != nil {
 		t.Fatalf("AppendMessageWithToolInteraction(%s, %q) error = %v", role, content, err)
 	}
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+	runErr := fn()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("stdout writer close error = %v", err)
+	}
+	out, readErr := io.ReadAll(reader)
+	if closeErr := reader.Close(); closeErr != nil {
+		t.Fatalf("stdout reader close error = %v", closeErr)
+	}
+	if readErr != nil {
+		t.Fatalf("stdout read error = %v", readErr)
+	}
+	return string(out), runErr
+}
+
+func lmcTypedTextLines(messages []core.TypedMessage) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		for _, block := range msg.Blocks {
+			text, ok := block.(core.TextBlock)
+			if ok && text.Text != "" {
+				out = append(out, msg.Role+":"+text.Text)
+			}
+		}
+	}
+	return out
 }

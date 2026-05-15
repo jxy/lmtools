@@ -630,7 +630,7 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 				}
 			}
 		case "reasoning":
-			if state := w.reasoningStateForOutputIndex(i); state != nil {
+			if state := w.reasoningByOutput[i]; state != nil {
 				if block := state.toCoreBlock(); block != nil {
 					blocks = append(blocks, block)
 				}
@@ -657,10 +657,6 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 		}
 	}
 	return blocks
-}
-
-func (w *responsesStreamWriter) reasoningStateForOutputIndex(index int) *responsesReasoningItemState {
-	return w.reasoningByOutput[index]
 }
 
 func (s *responsesReasoningItemState) toCoreBlock() core.Block {
@@ -958,27 +954,6 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 		id        string
 		arguments string
 	}
-	appendPending := func(state *pendingFunctionBuffer, id, arguments string) {
-		if id != "" {
-			state.id = id
-		}
-		state.arguments += arguments
-	}
-	appendCustom := func(state *customFunctionBuffer, id, name, arguments string) {
-		if id != "" {
-			state.id = id
-		}
-		if name != "" {
-			state.name = name
-		}
-		state.arguments += arguments
-	}
-	flushPendingFunction := func(index int, state *pendingFunctionBuffer, name string) error {
-		if state == nil {
-			return nil
-		}
-		return writer.WriteFunctionCallDelta(index, state.id, name, state.arguments)
-	}
 	customFunctionBuffers := make(map[int]*customFunctionBuffer)
 	pendingFunctionBuffers := make(map[int]*pendingFunctionBuffer)
 	regularFunctionStarted := make(map[int]bool)
@@ -1012,7 +987,13 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 				continue
 			}
 			if state, exists := customFunctionBuffers[tc.Index]; exists {
-				appendCustom(state, tc.ID, tc.Name, tc.Arguments)
+				if tc.ID != "" {
+					state.id = tc.ID
+				}
+				if tc.Name != "" {
+					state.name = tc.Name
+				}
+				state.arguments += tc.Arguments
 				continue
 			}
 			if regularFunctionStarted[tc.Index] {
@@ -1027,21 +1008,29 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 					state = &pendingFunctionBuffer{}
 					pendingFunctionBuffers[tc.Index] = state
 				}
-				appendPending(state, tc.ID, tc.Arguments)
+				if tc.ID != "" {
+					state.id = tc.ID
+				}
+				state.arguments += tc.Arguments
 				continue
 			}
 			if isResponsesCustomToolName(writer.toolNameRegistry, tc.Name) {
 				state := &customFunctionBuffer{}
 				if pending := pendingFunctionBuffers[tc.Index]; pending != nil {
-					appendCustom(state, pending.id, "", pending.arguments)
+					state.id = pending.id
+					state.arguments = pending.arguments
 					delete(pendingFunctionBuffers, tc.Index)
 				}
-				appendCustom(state, tc.ID, tc.Name, tc.Arguments)
+				if tc.ID != "" {
+					state.id = tc.ID
+				}
+				state.name = tc.Name
+				state.arguments += tc.Arguments
 				customFunctionBuffers[tc.Index] = state
 				continue
 			}
 			if pending := pendingFunctionBuffers[tc.Index]; pending != nil {
-				if err := flushPendingFunction(tc.Index, pending, tc.Name); err != nil {
+				if err := writer.WriteFunctionCallDelta(tc.Index, pending.id, tc.Name, pending.arguments); err != nil {
 					return "", err
 				}
 				delete(pendingFunctionBuffers, tc.Index)
@@ -1059,7 +1048,10 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 		return "", err
 	}
 	for index, state := range pendingFunctionBuffers {
-		if err := flushPendingFunction(index, state, ""); err != nil {
+		if state == nil {
+			continue
+		}
+		if err := writer.WriteFunctionCallDelta(index, state.id, "", state.arguments); err != nil {
 			return "", err
 		}
 	}

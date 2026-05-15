@@ -54,71 +54,30 @@ import (
 	"time"
 )
 
-// ServerOption is a functional option for configuring test servers
-type ServerOption func(*serverOptions)
-
-// serverOptions holds configuration for test server creation
-type serverOptions struct {
-	disableKeepAlives bool
-	transport         *http.Transport
-}
-
-// WithDisableKeepAlives disables keep-alives for testing
-func WithDisableKeepAlives(disable bool) ServerOption {
-	return func(opts *serverOptions) {
-		opts.disableKeepAlives = disable
-	}
-}
-
-// WithTransport sets a custom transport
-func WithTransport(transport *http.Transport) ServerOption {
-	return func(opts *serverOptions) {
-		opts.transport = transport
-	}
-}
-
-// newServerWithOptionsT creates a new API proxy server with the given options.
-// This is an internal helper used by NewTestServer.
-func newServerWithOptionsT(t *testing.T, config *Config, opts ...ServerOption) (http.Handler, func()) {
+// NewTestServer creates a new API proxy server optimized for testing.
+// It disables keep-alives to ensure connections are closed after each request.
+// Use this for most tests. For tests that exercise error handling and retry
+// logic, use NewTestServerWithFastRetries instead.
+func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 
 	// Create endpoints - fail via test API for better debugging
 	endpoints, err := NewEndpoints(config)
 	if err != nil {
-		t.Fatalf("NewServerWithOptionsT: NewEndpoints failed: %v", err)
+		t.Fatalf("NewTestServer: NewEndpoints failed: %v", err)
 	}
 
-	// Apply options
-	options := &serverOptions{}
-	for _, opt := range opts {
-		opt(options)
+	transport := &http.Transport{
+		DisableKeepAlives:   true,
+		MaxIdleConns:        1,
+		MaxIdleConnsPerHost: 1,
+		MaxConnsPerHost:     1,
+		IdleConnTimeout:     1 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DisableCompression:  false,
 	}
-
-	// Create transport
-	var transport *http.Transport
-	if options.transport != nil {
-		transport = options.transport
-	} else if options.disableKeepAlives {
-		// Create a transport that disables keep-alives for testing
-		transport = &http.Transport{
-			DisableKeepAlives:   true, // Ensure connections are closed after each request
-			MaxIdleConns:        1,
-			MaxIdleConnsPerHost: 1,
-			MaxConnsPerHost:     1,
-			IdleConnTimeout:     1 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-			DisableCompression:  false,
-		}
-	}
-
-	// Create client
-	var client *retry.Client
-	if transport != nil {
-		client = retry.NewClientWithTransport(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
-	} else {
-		client = retry.NewClientWithOptions(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger)
-	}
+	client := retry.NewClientWithTransport(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
 
 	// Create server
 	mapper := NewModelMapper(config)
@@ -138,21 +97,10 @@ func newServerWithOptionsT(t *testing.T, config *Config, opts ...ServerOption) (
 
 	// Create cleanup function
 	cleanup := func() {
-		if transport != nil && options.disableKeepAlives {
-			// Force close all connections
-			transport.CloseIdleConnections()
-		}
+		transport.CloseIdleConnections()
 	}
 
 	return handler, cleanup
-}
-
-// NewTestServer creates a new API proxy server optimized for testing.
-// It disables keep-alives to ensure connections are closed after each request.
-// Use this for most tests. For tests that exercise error handling and retry
-// logic, use NewTestServerWithFastRetries instead.
-func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
-	return newServerWithOptionsT(t, config, WithDisableKeepAlives(true))
 }
 
 // NewTestServerWithFastRetries creates a server with minimal retry delays for error propagation tests.

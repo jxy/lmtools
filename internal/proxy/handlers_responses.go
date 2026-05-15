@@ -387,16 +387,10 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 		}
 		openAIReq.Model = mappedModel
 		openAIReq.Stream = true
-		writer, err := newResponsesStreamWriter(w, ctx, originalModel)
-		if err != nil {
-			logger.From(ctx).Errorf("Failed to initialize OpenAI responses stream: %v", err)
-			s.sendOpenAIError(w, ErrTypeServer, "Failed to initialize streaming", "stream_init_error", http.StatusInternalServerError)
+		writer, ok := s.newConfiguredResponsesStreamWriter(ctx, w, stateCtx, originalModel, typed)
+		if !ok {
 			return
 		}
-		if stateCtx != nil && stateCtx.Conversation != nil {
-			writer.SetConversationID(stateCtx.Conversation.ID)
-		}
-		writer.SetToolNameRegistry(responseToolNameRegistryFromCoreTools(typed.Tools))
 		resp, blocks, err := s.streamResponsesFromArgoOpenAIRequest(ctx, openAIReq, writer)
 		if err != nil {
 			if !writer.started {
@@ -420,16 +414,10 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 	anthReq.Model = mappedModel
 	anthReq.Stream = true
 
-	writer, err := newResponsesStreamWriter(w, ctx, originalModel)
-	if err != nil {
-		logger.From(ctx).Errorf("Failed to initialize OpenAI responses stream: %v", err)
-		s.sendOpenAIError(w, ErrTypeServer, "Failed to initialize streaming", "stream_init_error", http.StatusInternalServerError)
+	writer, ok := s.newConfiguredResponsesStreamWriter(ctx, w, stateCtx, originalModel, typed)
+	if !ok {
 		return
 	}
-	if stateCtx != nil && stateCtx.Conversation != nil {
-		writer.SetConversationID(stateCtx.Conversation.ID)
-	}
-	writer.SetToolNameRegistry(responseToolNameRegistryFromCoreTools(typed.Tools))
 	resp, blocks, err := s.streamResponsesFromProvider(ctx, anthReq, provider, originalModel, writer)
 	if err != nil {
 		if !writer.started {
@@ -443,6 +431,20 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 		logger.From(ctx).Errorf("Failed to save OpenAI responses stream state: %v", err)
 		return
 	}
+}
+
+func (s *Server) newConfiguredResponsesStreamWriter(ctx context.Context, rw http.ResponseWriter, stateCtx *openAIResponsesStateContext, originalModel string, typed TypedRequest) (*responsesStreamWriter, bool) {
+	writer, err := newResponsesStreamWriter(rw, ctx, originalModel)
+	if err != nil {
+		logger.From(ctx).Errorf("Failed to initialize OpenAI responses stream: %v", err)
+		s.sendOpenAIError(rw, ErrTypeServer, "Failed to initialize streaming", "stream_init_error", http.StatusInternalServerError)
+		return nil, false
+	}
+	if stateCtx != nil && stateCtx.Conversation != nil {
+		writer.SetConversationID(stateCtx.Conversation.ID)
+	}
+	writer.SetToolNameRegistry(responseToolNameRegistryFromCoreTools(typed.Tools))
+	return writer, true
 }
 
 func (s *Server) failAndCommitOpenAIResponsesStream(ctx context.Context, stateCtx *openAIResponsesStateContext, responsesReq *OpenAIResponsesRequest, typedCurrent TypedRequest, writer *responsesStreamWriter, streamErr error, originalModel string) {

@@ -37,47 +37,22 @@ const (
 	exitInterrupted = 130 // Standard for SIGINT
 )
 
-// RequestController encapsulates the request lifecycle to reduce complexity in run()
-type RequestController struct {
-	ctx      context.Context
-	cfg      *config.Config
-	opts     core.RequestOptions
-	notifier core.Notifier
-	logDir   string
-}
-
-// NewRequestController creates a new request controller
-func NewRequestController(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir string) *RequestController {
-	// Add request counter to context for request-scoped logging
+func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir, inputStr string, plan *session.RequestPlan) error {
 	ctx = logger.WithNewRequestCounter(ctx)
 
-	return &RequestController{
-		ctx:      ctx,
-		cfg:      cfg,
-		opts:     opts,
-		notifier: notifier,
-		logDir:   logDir,
-	}
-}
-
-// handleRequest processes the main request lifecycle
-func (rc *RequestController) handleRequest(inputStr string, plan *session.RequestPlan) error {
-	// Build HTTP request
-	rb, err := buildHTTPRequest(rc.ctx, rc.cfg, rc.opts, plan, inputStr)
+	rb, err := buildHTTPRequest(ctx, cfg, opts, plan, inputStr)
 	if err != nil {
 		return err
 	}
-	logBuiltHTTPRequest(rc.ctx, rc.cfg, rc.logDir, rc.notifier, rb.Request, rb.Body)
+	logBuiltHTTPRequest(ctx, cfg, logDir, notifier, rb.Request, rb.Body)
 
-	// Send request with retry
-	resp, err := sendWithRetry(rc.ctx, rb.Request, rc.cfg)
+	resp, err := sendWithRetry(ctx, rb.Request, cfg)
 	if err != nil {
 		return err
 	}
 
-	// Handle response
-	response, err := core.HandleResponseWithOptions(rc.ctx, rc.opts, resp, logger.From(rc.ctx), rc.notifier, core.ResponseParseOptions{
-		ArgoLegacy: rc.opts.IsArgoLegacy(),
+	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), notifier, core.ResponseParseOptions{
+		ArgoLegacy: opts.IsArgoLegacy(),
 		ToolDefs:   rb.ToolDefs,
 	})
 	if err != nil {
@@ -86,63 +61,53 @@ func (rc *RequestController) handleRequest(inputStr string, plan *session.Reques
 
 	var sess *session.Session
 	if plan != nil {
-		committed, err := plan.Commit(rc.ctx)
+		committed, err := plan.Commit(ctx)
 		if err != nil {
 			return errors.WrapError("commit session", err)
 		}
 		sess = committed
 	}
 
-	// Process tool calls or save response
 	if len(response.ToolCalls) > 0 {
-		return rc.handleToolCalls(sess, &response, rb, inputStr)
+		return handleToolCalls(ctx, cfg, opts, notifier, logDir, sess, &response, rb, inputStr)
 	}
 
-	return rc.handleNormalResponse(&response, sess, rb.Model)
+	return handleNormalResponse(ctx, cfg, notifier, &response, sess, rb.Model)
 }
 
-// handleToolCalls processes responses with tool calls
-func (rc *RequestController) handleToolCalls(sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) error {
-	logger.From(rc.ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
+func handleToolCalls(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) error {
+	logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
 
-	// Build tool execution context
-	tc := rc.newToolContext(sess, response, rb, inputStr)
+	tc := newToolContext(ctx, cfg, opts, notifier, logDir, sess, response, rb, inputStr)
 
-	// Execute tools and get the final response
 	result := core.HandleToolExecution(tc)
 
-	// Handle the result
-	return rc.finishToolExecution(result)
+	return finishToolExecution(result)
 }
 
-// newToolContext creates a tool execution context with all required dependencies
-func (rc *RequestController) newToolContext(sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) core.ToolContext {
-	store, messageBuilder := rc.createToolStoreAndMessageBuilder(sess, inputStr)
+func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) core.ToolContext {
+	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
 
-	// Create retry client for tool execution
-	retryClient := retry.NewClientWithRetries(rc.cfg.Timeout, rc.cfg.Retries, logger.From(rc.ctx))
+	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.From(ctx))
 
-	// Configure tool execution
 	execCfg := core.ToolExecutionConfig{
 		Store:       store,
 		RetryClient: retryClient,
 		LogRequestFn: func(body []byte) error {
-			return logger.From(rc.ctx).LogJSON(rc.logDir, "tool_result_input", body)
+			return logger.From(ctx).LogJSON(logDir, "tool_result_input", body)
 		},
 		ActualModel: rb.Model,
 	}
 
-	approver := NewCliApprover(rc.notifier)
+	approver := NewCliApprover(notifier)
 
-	// Create CLI-specific UI for tool display
-	ui := tools.NewCLIToolUI(rc.notifier, rc.opts)
+	ui := tools.NewCLIToolUI(notifier, opts)
 
-	// Return the complete tool context
 	return core.ToolContext{
-		Ctx:             rc.ctx,
-		Cfg:             rc.opts,
-		Logger:          logger.From(rc.ctx),
-		Notifier:        rc.notifier,
+		Ctx:             ctx,
+		Cfg:             opts,
+		Logger:          logger.From(ctx),
+		Notifier:        notifier,
 		Approver:        approver,
 		ExecCfg:         execCfg,
 		Model:           rb.Model,
@@ -156,34 +121,31 @@ func (rc *RequestController) newToolContext(sess *session.Session, response *cor
 	}
 }
 
-func (rc *RequestController) createToolStoreAndMessageBuilder(sess *session.Session, inputStr string) (core.SessionStore, func(string) ([]core.TypedMessage, error)) {
+func createToolStoreAndMessageBuilder(ctx context.Context, opts core.RequestOptions, sess *session.Session, inputStr string) (core.SessionStore, func(string) ([]core.TypedMessage, error)) {
 	if sess != nil {
-		return session.NewStore(sess, logger.From(rc.ctx)), rc.createMessageBuilder(sess)
+		return session.NewStore(sess, logger.From(ctx)), createMessageBuilder(ctx, sess)
 	}
 
-	store := core.NewMemorySessionStore(rc.opts.GetEffectiveSystem(), inputStr)
+	store := core.NewMemorySessionStore(opts.GetEffectiveSystem(), inputStr)
 	return store, store.Messages
 }
 
-// createMessageBuilder creates an appropriate message builder for the session.
-func (rc *RequestController) createMessageBuilder(sess *session.Session) func(string) ([]core.TypedMessage, error) {
-	cached, err := session.CreateCachedMessageBuilder(rc.ctx, sess.Path)
+func createMessageBuilder(ctx context.Context, sess *session.Session) func(string) ([]core.TypedMessage, error) {
+	cached, err := session.CreateCachedMessageBuilder(ctx, sess.Path)
 	if err == nil {
 		return cached
 	}
-	logger.From(rc.ctx).Warnf("Failed to create cached message builder: %v", err)
+	logger.From(ctx).Warnf("Failed to create cached message builder: %v", err)
 	return func(path string) ([]core.TypedMessage, error) {
-		return session.BuildMessagesWithToolInteractions(rc.ctx, path)
+		return session.BuildMessagesWithToolInteractions(ctx, path)
 	}
 }
 
-// finishToolExecution handles the final result of tool execution
-func (rc *RequestController) finishToolExecution(result core.ToolExecutionResult) error {
+func finishToolExecution(result core.ToolExecutionResult) error {
 	if result.Error != nil {
 		return result.Error
 	}
 
-	// Print the final text only if it was not already streamed by HandleResponse.
 	if result.FinalText != "" && !result.FinalStreamed {
 		fmt.Print(result.FinalText)
 	}
@@ -191,14 +153,11 @@ func (rc *RequestController) finishToolExecution(result core.ToolExecutionResult
 	return nil
 }
 
-// handleNormalResponse processes responses without tool calls
-func (rc *RequestController) handleNormalResponse(response *core.Response, sess *session.Session, model string) error {
-	// Save assistant response to session
-	if err := persistAssistantOnly(rc.ctx, *response, sess, rc.cfg, rc.notifier, model); err != nil {
+func handleNormalResponse(ctx context.Context, cfg *config.Config, notifier core.Notifier, response *core.Response, sess *session.Session, model string) error {
+	if err := persistAssistantOnly(ctx, *response, sess, cfg, notifier, model); err != nil {
 		return err
 	}
 
-	// Print output if not streaming
 	if response.Text != "" && !response.Streamed {
 		fmt.Print(response.Text)
 	}
@@ -294,9 +253,7 @@ func run(notifier core.Notifier) error {
 		return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
 	}
 
-	// Create request controller and handle the request
-	controller := NewRequestController(ctx, &cfg, opts, notifier, logDir)
-	return controller.handleRequest(inputStr, plan)
+	return executeRequest(ctx, &cfg, opts, notifier, logDir, inputStr, plan)
 }
 
 func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
