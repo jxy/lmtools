@@ -14,6 +14,7 @@ import (
 	"lmtools/internal/session"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -505,6 +506,104 @@ func TestCompactedResponseOutputItemsSkipsHistoricalAssistantByMessageIndex(t *t
 				t.Fatalf("compaction output replayed historical assistant text: %+v", output)
 			}
 		}
+	}
+}
+
+func TestResponseRecordPayloadPreservesRawAndOverlaysRecordState(t *testing.T) {
+	rec := &responseRecord{
+		ID:                "resp_current",
+		Object:            "response",
+		Status:            "failed",
+		Model:             "claude-visible",
+		ConversationID:    "conv_current",
+		Error:             map[string]interface{}{"code": "state_error"},
+		IncompleteDetails: map[string]interface{}{"reason": "max_output_tokens"},
+		Raw: json.RawMessage(`{
+			"id":"resp_stale",
+			"object":"response",
+			"status":"queued",
+			"model":"gpt-stale",
+			"output":[{"type":"message","content":[{"type":"output_text","text":"kept"}]}],
+			"conversation":{"id":"conv_stale"}
+		}`),
+	}
+
+	payload, ok := responseRecordPayload(rec).(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T, want map", responseRecordPayload(rec))
+	}
+	if payload["id"] != "resp_current" || payload["status"] != "failed" || payload["model"] != "claude-visible" {
+		t.Fatalf("record fields were not overlaid on raw payload: %#v", payload)
+	}
+	conversation, ok := payload["conversation"].(map[string]interface{})
+	if !ok || conversation["id"] != "conv_current" {
+		t.Fatalf("conversation payload = %#v, want conv_current", payload["conversation"])
+	}
+	if _, ok := payload["output"]; !ok {
+		t.Fatalf("raw output was not preserved: %#v", payload)
+	}
+	if errPayload, ok := payload["error"].(map[string]interface{}); !ok || errPayload["code"] != "state_error" {
+		t.Fatalf("error payload = %#v, want record error", payload["error"])
+	}
+	if details, ok := payload["incomplete_details"].(map[string]interface{}); !ok || details["reason"] != "max_output_tokens" {
+		t.Fatalf("incomplete details = %#v, want record details", payload["incomplete_details"])
+	}
+}
+
+func TestPaginatedListPayloadRejectsInvalidParameters(t *testing.T) {
+	items := []interface{}{
+		map[string]interface{}{"id": "item_0000"},
+		map[string]interface{}{"id": "item_0001"},
+	}
+	tests := []struct {
+		name   string
+		values url.Values
+		want   string
+	}{
+		{
+			name:   "zero limit",
+			values: url.Values{"limit": {"0"}},
+			want:   "limit must be an integer between 1 and 100",
+		},
+		{
+			name:   "large limit",
+			values: url.Values{"limit": {"101"}},
+			want:   "limit must be an integer between 1 and 100",
+		},
+		{
+			name:   "non integer limit",
+			values: url.Values{"limit": {"many"}},
+			want:   "limit must be an integer between 1 and 100",
+		},
+		{
+			name:   "invalid order",
+			values: url.Values{"order": {"sideways"}},
+			want:   "order must be 'asc' or 'desc'",
+		},
+		{
+			name:   "missing cursor",
+			values: url.Values{"after": {"missing"}},
+			want:   `after cursor "missing" was not found`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := paginatedListPayload(items, tt.values); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("paginatedListPayload() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesStateModeRejectsUnknownMode(t *testing.T) {
+	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+	req := &OpenAIResponsesRequest{Model: "claude-test", Input: "hello"}
+	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
+
+	_, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), req, typed, "claude-test", openAIResponsesStateMode(99), true)
+	if err == nil || !strings.Contains(err.Error(), "unknown responses state mode") {
+		t.Fatalf("prepareOpenAIResponsesStateWithMode() error = %v, want unknown mode", err)
 	}
 }
 

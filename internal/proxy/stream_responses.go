@@ -8,6 +8,7 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"net/http"
 	"sort"
 	"strings"
@@ -718,7 +719,7 @@ func (s *Server) streamResponsesFromArgo(ctx context.Context, anthReq *Anthropic
 	if s.useLegacyArgo() {
 		return s.simulateLegacyArgoResponsesStream(ctx, anthReq, writer)
 	}
-	if s.argoWireProvider(anthReq.Model) == constants.ProviderAnthropic {
+	if providers.DetermineArgoModelProvider(anthReq.Model) == constants.ProviderAnthropic {
 		resp, err := s.argoAnthropicStreamingRequest(ctx, anthReq)
 		if err != nil {
 			return "", err
@@ -904,14 +905,7 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 
 func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io.Reader, writer *responsesStreamWriter) (string, error) {
 	finishReason := "stop"
-	type toolDeltaState struct {
-		id        string
-		name      string
-		arguments string
-		custom    bool
-		started   bool
-	}
-	toolStates := make(map[int]*toolDeltaState)
+	toolDeltas := newOpenAIChatToolDeltaBuffer(writer)
 	scanner := NewSSEScanner(body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -935,58 +929,7 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 			return "", err
 		}
 		for _, tc := range parsed.ToolCalls {
-			if tc.Type == "custom" {
-				if err := writer.WriteCustomToolCallDelta(tc.Index, tc.ID, tc.Name, tc.Input); err != nil {
-					return "", err
-				}
-				continue
-			}
-			state := toolStates[tc.Index]
-			if state == nil {
-				state = &toolDeltaState{}
-				toolStates[tc.Index] = state
-			}
-			if tc.ID != "" {
-				state.id = tc.ID
-			}
-			if state.custom {
-				if tc.ID != "" {
-					state.id = tc.ID
-				}
-				if tc.Name != "" {
-					state.name = tc.Name
-				}
-				state.arguments += tc.Arguments
-				continue
-			}
-			if state.started {
-				if err := writer.WriteFunctionCallDelta(tc.Index, tc.ID, tc.Name, tc.Arguments); err != nil {
-					return "", err
-				}
-				continue
-			}
-			if tc.Name == "" {
-				state.arguments += tc.Arguments
-				continue
-			}
-			state.name = tc.Name
-			if isResponsesCustomToolName(writer.toolNameRegistry, tc.Name) {
-				state.custom = true
-				state.arguments += tc.Arguments
-				continue
-			}
-			id := tc.ID
-			if id == "" {
-				id = state.id
-			}
-			if state.arguments != "" {
-				if err := writer.WriteFunctionCallDelta(tc.Index, id, tc.Name, state.arguments); err != nil {
-					return "", err
-				}
-				state.arguments = ""
-			}
-			state.started = true
-			if err := writer.WriteFunctionCallDelta(tc.Index, id, tc.Name, tc.Arguments); err != nil {
+			if err := toolDeltas.Apply(tc); err != nil {
 				return "", err
 			}
 		}
@@ -997,30 +940,109 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	indexes := make([]int, 0, len(toolStates))
-	for index := range toolStates {
+	if err := toolDeltas.Flush(); err != nil {
+		return "", err
+	}
+	return finishReason, nil
+}
+
+type openAIChatToolDeltaBuffer struct {
+	writer *responsesStreamWriter
+	states map[int]*openAIChatToolDeltaState
+}
+
+type openAIChatToolDeltaState struct {
+	id        string
+	name      string
+	arguments string
+	custom    bool
+	started   bool
+}
+
+func newOpenAIChatToolDeltaBuffer(writer *responsesStreamWriter) *openAIChatToolDeltaBuffer {
+	return &openAIChatToolDeltaBuffer{
+		writer: writer,
+		states: make(map[int]*openAIChatToolDeltaState),
+	}
+}
+
+func (b *openAIChatToolDeltaBuffer) Apply(tc core.ParsedOpenAIStreamToolCall) error {
+	if tc.Type == "custom" {
+		return b.writer.WriteCustomToolCallDelta(tc.Index, tc.ID, tc.Name, tc.Input)
+	}
+
+	state := b.state(tc.Index)
+	if tc.ID != "" {
+		state.id = tc.ID
+	}
+	if state.custom {
+		if tc.Name != "" {
+			state.name = tc.Name
+		}
+		state.arguments += tc.Arguments
+		return nil
+	}
+	if state.started {
+		return b.writer.WriteFunctionCallDelta(tc.Index, tc.ID, tc.Name, tc.Arguments)
+	}
+	if tc.Name == "" {
+		state.arguments += tc.Arguments
+		return nil
+	}
+
+	state.name = tc.Name
+	if isResponsesCustomToolName(b.writer.toolNameRegistry, tc.Name) {
+		state.custom = true
+		state.arguments += tc.Arguments
+		return nil
+	}
+
+	id := tc.ID
+	if id == "" {
+		id = state.id
+	}
+	if state.arguments != "" {
+		if err := b.writer.WriteFunctionCallDelta(tc.Index, id, tc.Name, state.arguments); err != nil {
+			return err
+		}
+		state.arguments = ""
+	}
+	state.started = true
+	return b.writer.WriteFunctionCallDelta(tc.Index, id, tc.Name, tc.Arguments)
+}
+
+func (b *openAIChatToolDeltaBuffer) Flush() error {
+	indexes := make([]int, 0, len(b.states))
+	for index := range b.states {
 		indexes = append(indexes, index)
 	}
 	sort.Ints(indexes)
+
 	for _, index := range indexes {
-		state := toolStates[index]
-		if state == nil {
+		state := b.states[index]
+		if state == nil || state.started {
 			continue
 		}
 		if state.custom {
-			if err := writer.WriteCustomToolCallDelta(index, state.id, state.name, anthropicCustomToolInputFromJSON(state.arguments)); err != nil {
-				return "", err
+			if err := b.writer.WriteCustomToolCallDelta(index, state.id, state.name, anthropicCustomToolInputFromJSON(state.arguments)); err != nil {
+				return err
 			}
 			continue
 		}
-		if state.started {
-			continue
-		}
-		if err := writer.WriteFunctionCallDelta(index, state.id, state.name, state.arguments); err != nil {
-			return "", err
+		if err := b.writer.WriteFunctionCallDelta(index, state.id, state.name, state.arguments); err != nil {
+			return err
 		}
 	}
-	return finishReason, nil
+	return nil
+}
+
+func (b *openAIChatToolDeltaBuffer) state(index int) *openAIChatToolDeltaState {
+	state := b.states[index]
+	if state == nil {
+		state = &openAIChatToolDeltaState{}
+		b.states[index] = state
+	}
+	return state
 }
 
 func (s *Server) convertGoogleStreamToResponses(ctx context.Context, body io.Reader, writer *responsesStreamWriter) (string, error) {

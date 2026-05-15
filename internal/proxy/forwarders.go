@@ -7,7 +7,6 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
-	"lmtools/internal/providers"
 	"net/http"
 	"strings"
 )
@@ -29,10 +28,6 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	return &openAIResp, nil
-}
-
-func (s *Server) argoWireProvider(model string) string {
-	return providers.DetermineArgoModelProvider(model)
 }
 
 func (s *Server) useLegacyArgo() bool {

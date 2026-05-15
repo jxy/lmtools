@@ -22,7 +22,7 @@ func TestStreamingErrorHandling(t *testing.T) {
 		}
 
 		// Start streaming
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Starting...", nil, nil)
 
 		// Cancel context
@@ -91,7 +91,7 @@ func TestStreamingErrorHandling(t *testing.T) {
 		}
 
 		// Stream with empty content
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("", nil, nil) // Empty delta
 		_ = writer.WriteFinish("stop", nil)
 
@@ -115,7 +115,7 @@ func TestStreamingErrorHandling(t *testing.T) {
 		}
 
 		// Stream tool call with malformed JSON arguments
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 
 		toolCall := &ToolCallDelta{
 			Index: 0,
@@ -160,7 +160,7 @@ func TestStreamingTimeout(t *testing.T) {
 		}
 
 		// Start streaming
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Starting...", nil, nil)
 
 		// Wait for timeout
@@ -211,7 +211,7 @@ func TestStreamingRecovery(t *testing.T) {
 		}
 
 		// Start streaming
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Processing...", nil, nil)
 
 		// Send error
@@ -271,7 +271,7 @@ func TestStreamingEdgeCases(t *testing.T) {
 		}
 
 		// Try to send multiple finish reasons (should only use the first)
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Test", nil, nil)
 		stop := "stop"
 		_ = writer.WriteDelta("", nil, &stop) // First finish
@@ -327,7 +327,7 @@ func TestStreamingEdgeCases(t *testing.T) {
 		}
 
 		// Stream content with unicode and special characters
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		unicodeContent := "Hello 世界! 🌍 Special chars: \n\t\"\\ End."
 		_ = writer.WriteDelta(unicodeContent, nil, nil)
 		_ = writer.WriteFinish("stop", nil)
@@ -381,7 +381,7 @@ func TestStreamingWriteErrors(t *testing.T) {
 		}
 
 		// Start streaming
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("First", nil, nil)
 
 		// This should fail

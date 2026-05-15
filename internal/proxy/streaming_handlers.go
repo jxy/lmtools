@@ -8,6 +8,7 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"net/http"
 	"strings"
 	"time"
@@ -199,7 +200,7 @@ func (s *Server) streamFromArgo(ctx context.Context, anthReq *AnthropicRequest, 
 		return s.streamLegacyArgo(ctx, anthReq, handler)
 	}
 
-	switch s.argoWireProvider(anthReq.Model) {
+	switch providers.DetermineArgoModelProvider(anthReq.Model) {
 	case constants.ProviderAnthropic:
 		return s.streamNativeArgoAnthropic(ctx, anthReq, handler)
 	default:
@@ -347,9 +348,6 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 					return handleErr
 				}
 				return nil
-			}
-			if evt.Delta.StopReason != "" {
-				handler.SetStopReason(evt.Delta.StopReason)
 			}
 			if evt.Usage != nil {
 				handler.SetUsage(evt.Usage.InputTokens, evt.Usage.OutputTokens)
@@ -704,7 +702,7 @@ func (s *Server) streamOpenAIFromArgo(ctx context.Context, anthReq *AnthropicReq
 		}
 	}
 
-	switch s.argoWireProvider(anthReq.Model) {
+	switch providers.DetermineArgoModelProvider(anthReq.Model) {
 	case constants.ProviderAnthropic:
 		resp, err := s.argoAnthropicStreamingRequest(ctx, anthReq)
 		if err != nil {

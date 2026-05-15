@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"lmtools/internal/constants"
+	"lmtools/internal/providers"
 )
 
 func (s *Server) forwardAnthropicViaOpenAI(ctx context.Context, anthReq *AnthropicRequest, originalModel string) (*AnthropicResponse, error) {
@@ -30,7 +31,7 @@ func (s *Server) forwardAnthropicViaArgo(ctx context.Context, anthReq *Anthropic
 		return s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq), nil
 	}
 
-	switch s.argoWireProvider(anthReq.Model) {
+	switch providers.DetermineArgoModelProvider(anthReq.Model) {
 	case constants.ProviderAnthropic:
 		return s.forwardToArgoAnthropic(ctx, anthReq)
 	default:

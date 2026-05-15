@@ -753,6 +753,102 @@ func TestOpenAIResponsesStreamConvertsOpenAIToolCallDeltas(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesStreamBuffersFunctionArgumentsUntilName(t *testing.T) {
+	SetupTestLogger(t)
+
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{})
+	recorder := httptest.NewRecorder()
+	writer, err := newResponsesStreamWriter(recorder, ctx, "gpt-5")
+	if err != nil {
+		t.Fatalf("newResponsesStreamWriter() error = %v", err)
+	}
+	if err := writer.start(); err != nil {
+		t.Fatalf("writer.start() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"arguments":"{\"city\":\"Chi"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"lookup_city"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"cago\"}"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	finishReason, err := server.convertOpenAIChatStreamToResponses(ctx, strings.NewReader(stream), writer)
+	if err != nil {
+		t.Fatalf("convertOpenAIChatStreamToResponses() error = %v", err)
+	}
+	resp, err := writer.Finish(finishReason)
+	if err != nil {
+		t.Fatalf("writer.Finish() error = %v", err)
+	}
+
+	if len(resp.Output) != 1 {
+		t.Fatalf("output len=%d, want 1", len(resp.Output))
+	}
+	item := resp.Output[0]
+	if item.Type != "function_call" || item.Name != "lookup_city" || item.Arguments != `{"city":"Chicago"}` {
+		t.Fatalf("function item = %#v", item)
+	}
+	body := recorder.Body.String()
+	itemIndex := strings.Index(body, "response.output_item.added")
+	deltaIndex := strings.Index(body, "response.function_call_arguments.delta")
+	if itemIndex < 0 || deltaIndex < 0 || itemIndex > deltaIndex {
+		t.Fatalf("function arguments delta emitted before output item was added: %s", body)
+	}
+}
+
+func TestOpenAIResponsesStreamBuffersInterleavedToolCallIndexes(t *testing.T) {
+	SetupTestLogger(t)
+
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{})
+	recorder := httptest.NewRecorder()
+	writer, err := newResponsesStreamWriter(recorder, ctx, "gpt-5")
+	if err != nil {
+		t.Fatalf("newResponsesStreamWriter() error = %v", err)
+	}
+	if err := writer.start(); err != nil {
+		t.Fatalf("writer.start() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"arguments":"{\"a\":"}},{"index":1,"id":"call_b","type":"function","function":{"arguments":"{\"b\":"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"tool_a"}},{"index":1,"function":{"name":"tool_b"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"2}"}},{"index":0,"function":{"arguments":"1}"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	finishReason, err := server.convertOpenAIChatStreamToResponses(ctx, strings.NewReader(stream), writer)
+	if err != nil {
+		t.Fatalf("convertOpenAIChatStreamToResponses() error = %v", err)
+	}
+	resp, err := writer.Finish(finishReason)
+	if err != nil {
+		t.Fatalf("writer.Finish() error = %v", err)
+	}
+
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len=%d, want 2: %#v", len(resp.Output), resp.Output)
+	}
+	if got := resp.Output[0]; got.Type != "function_call" || got.Name != "tool_a" || got.CallID != "call_a" || got.Arguments != `{"a":1}` {
+		t.Fatalf("first tool item = %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "function_call" || got.Name != "tool_b" || got.CallID != "call_b" || got.Arguments != `{"b":2}` {
+		t.Fatalf("second tool item = %#v", got)
+	}
+}
+
 func TestOpenAIResponsesStreamBuffersNamelessCustomToolCallDeltas(t *testing.T) {
 	SetupTestLogger(t)
 
@@ -772,9 +868,9 @@ func TestOpenAIResponsesStreamBuffersNamelessCustomToolCallDeltas(t *testing.T) 
 	}
 
 	stream := strings.Join([]string{
-		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function"}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"arguments":"{\"input\":\"*** Begin"}}]},"finish_reason":null}]}`,
 		``,
-		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"apply_patch","arguments":"{\"input\":\"*** Begin"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"apply_patch"}}]},"finish_reason":null}]}`,
 		``,
 		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":" Patch\\n*** End Patch\\n\"}"}}]},"finish_reason":null}]}`,
 		``,

@@ -20,7 +20,7 @@ func TestStreamTerminationFormats(t *testing.T) {
 		}
 
 		// Write some content and finish the stream
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Hello world", nil, nil)
 		_ = writer.WriteFinish("stop", nil)
 
@@ -140,7 +140,7 @@ func TestStreamWithUsageComparison(t *testing.T) {
 		}
 
 		// Write content with usage
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Test", nil, nil)
 		_ = writer.WriteFinish("stop", openAIUsage)
 
@@ -203,7 +203,7 @@ func TestMixedContentStreaming(t *testing.T) {
 		}
 
 		// Stream text followed by tool call
-		_ = writer.WriteInitialAssistantDelta()
+		_ = writer.WriteInitialAssistantTextDelta()
 		_ = writer.WriteDelta("Let me help you with that. ", nil, nil)
 
 		// Create tool call

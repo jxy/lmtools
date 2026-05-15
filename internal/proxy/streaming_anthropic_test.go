@@ -8,32 +8,6 @@ import (
 	"testing"
 )
 
-// TestSendDoneNoOp tests that SendDone doesn't send [DONE] for Anthropic format
-func TestSendDoneNoOp(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	ctx := context.Background()
-
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-opus-20240229", ctx)
-	if err != nil {
-		t.Fatalf("Failed to create handler: %v", err)
-	}
-
-	// Call SendDone
-	err = handler.SendDone()
-	if err != nil {
-		t.Fatalf("SendDone returned error: %v", err)
-	}
-
-	// Check that nothing was written
-	body := recorder.Body.String()
-	if strings.Contains(body, "[DONE]") {
-		t.Error("SendDone should not send [DONE] for Anthropic format")
-	}
-	if body != "" {
-		t.Errorf("SendDone should not write anything, but got: %s", body)
-	}
-}
-
 // TestToolUseStreamingFormat tests that tool_use blocks have proper format
 func TestToolUseStreamingFormat(t *testing.T) {
 	recorder := httptest.NewRecorder()

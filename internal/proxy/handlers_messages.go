@@ -326,7 +326,4 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 		// handleStreamError classifies error, logs appropriately, and notifies client
 		_ = handleStreamError(ctx, handler, fmt.Sprintf("Anthropic->%s", provider), err)
 	}
-
-	// Ensure stream is properly closed
-	handler.Close()
 }

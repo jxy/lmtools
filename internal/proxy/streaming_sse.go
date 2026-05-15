@@ -65,10 +65,3 @@ func (s *SSEWriter) WriteJSON(eventType string, data interface{}) error {
 	}
 	return s.WriteEvent(eventType, string(jsonData))
 }
-
-// TrackEvent tracks an event that was sent to the client.
-func (s *SSEWriter) TrackEvent(handler *AnthropicStreamHandler, eventType string) {
-	if handler != nil && handler.state != nil && eventType != "" {
-		handler.state.EventsSent = append(handler.state.EventsSent, eventType)
-	}
-}

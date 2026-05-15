@@ -10,18 +10,16 @@ import (
 
 // StreamingState tracks the state of a streaming response.
 type StreamingState struct {
-	MessageID         string
-	TextSent          bool
-	TextBlockClosed   bool
-	ToolIndex         *int
-	LastToolIndex     int
-	AccumulatedText   string
-	HasSentStopReason bool
-	InputTokens       int
-	OutputTokens      int
-	ToolCalls         []AnthropicContentBlock
-	ClosedBlocks      map[int]bool
-	EventsSent        []string
+	MessageID       string
+	TextSent        bool
+	TextBlockClosed bool
+	ToolIndex       *int
+	LastToolIndex   int
+	AccumulatedText string
+	InputTokens     int
+	OutputTokens    int
+	ToolCalls       []AnthropicContentBlock
+	ClosedBlocks    map[int]bool
 }
 
 func newStreamingState(messageID string) *StreamingState {
@@ -101,12 +99,6 @@ func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string
 
 // SendToolInputDelta sends tool input delta.
 func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON string) error {
-	h.mu.Lock()
-	if !h.simulatedStreaming && len(h.state.ToolCalls) > 0 {
-		logger.From(h.ctx).Debugf("%s", "  Real streaming: would accumulate partial JSON")
-	}
-	h.mu.Unlock()
-
 	return h.SendEvent(EventContentBlockDelta, NewToolInputDelta(index, partialJSON))
 }
 
@@ -181,17 +173,11 @@ func (h *AnthropicStreamHandler) SendMessageStop() error {
 	return h.SendEvent(EventMessageStop, NewMessageStop())
 }
 
-// SendDone sends the stream termination marker.
-func (h *AnthropicStreamHandler) SendDone() error {
-	return nil
-}
-
 // FinishStream sends the standard completion sequence for a stream.
 func (h *AnthropicStreamHandler) FinishStream(stopReason string, usage *AnthropicUsage) error {
 	if usage != nil {
 		h.SetUsage(usage.InputTokens, usage.OutputTokens)
 	}
-	h.SetStopReason(stopReason)
 
 	h.mu.Lock()
 	outputTokens := h.state.OutputTokens
@@ -201,9 +187,6 @@ func (h *AnthropicStreamHandler) FinishStream(stopReason string, usage *Anthropi
 		return handleStreamError(h.ctx, h, "AnthropicFinish", err)
 	}
 	if err := h.SendMessageStop(); err != nil {
-		return handleStreamError(h.ctx, h, "AnthropicFinish", err)
-	}
-	if err := h.SendDone(); err != nil {
 		return handleStreamError(h.ctx, h, "AnthropicFinish", err)
 	}
 	return nil
@@ -258,23 +241,11 @@ func (h *AnthropicStreamHandler) SendStreamError(message string) error {
 	return h.SendEvent(EventError, NewError(message))
 }
 
-// Close ensures the stream is properly closed.
-func (h *AnthropicStreamHandler) Close() error {
-	return nil
-}
-
 // UpdateModel updates the model in the handler state.
 func (h *AnthropicStreamHandler) UpdateModel(model string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.originalModel = model
-}
-
-// SetStopReason sets the stop reason in the handler state.
-func (h *AnthropicStreamHandler) SetStopReason(string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.state.HasSentStopReason = true
 }
 
 // SetUsage sets the token usage in the handler state.

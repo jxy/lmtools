@@ -79,11 +79,6 @@ func (w *OpenAIStreamWriter) WriteChunk(chunk *OpenAIStreamChunk) error {
 	return w.sse.WriteEvent("", string(data))
 }
 
-// WriteInitialAssistantDelta writes the initial assistant role delta.
-func (w *OpenAIStreamWriter) WriteInitialAssistantDelta() error {
-	return w.WriteInitialAssistantTextDelta()
-}
-
 // WriteInitialAssistantTextDelta writes the initial assistant role delta for a text stream.
 func (w *OpenAIStreamWriter) WriteInitialAssistantTextDelta() error {
 	role := core.Role("assistant")
@@ -264,11 +259,6 @@ func (w *OpenAIStreamWriter) WriteError(errType, message string) error {
 	}
 
 	return w.sse.WriteEvent("", string(data))
-}
-
-// Close ensures the stream is properly closed.
-func (w *OpenAIStreamWriter) Close() error {
-	return nil
 }
 
 // SendStreamError sends an error event to the client.
