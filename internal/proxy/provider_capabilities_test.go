@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"lmtools/internal/constants"
 	"lmtools/internal/providers"
 	"testing"
@@ -8,13 +9,6 @@ import (
 
 func TestModelProviderCapabilitiesComplete(t *testing.T) {
 	providerNames := providers.ProviderIDs()
-	if len(modelProviderCapabilities) == 0 {
-		modelProviderCapabilitiesOnce.Do(initModelProviderCapabilities)
-	}
-	if len(modelProviderCapabilities) != len(providerNames) {
-		t.Fatalf("modelProviderCapabilities has %d providers, want %d", len(modelProviderCapabilities), len(providerNames))
-	}
-
 	for _, provider := range providerNames {
 		t.Run(provider, func(t *testing.T) {
 			capability, ok := modelProviderCapabilityFor(provider)
@@ -32,59 +26,25 @@ func TestModelProviderCapabilitiesComplete(t *testing.T) {
 			}
 		})
 	}
+}
 
-	for provider := range modelProviderCapabilities {
-		if _, ok := providers.InfoFor(provider); !ok {
-			t.Fatalf("model provider capability %q is not registered in providers", provider)
-		}
+func TestProviderDispatchRejectsUnknownProvider(t *testing.T) {
+	server := &Server{}
+	if _, err := server.forwardAnthropicRequest(context.Background(), &AnthropicRequest{}, "unknown-provider", "model"); err == nil {
+		t.Fatal("forwardAnthropicRequest() error = nil, want unknown provider error")
 	}
 }
 
-func TestProviderForwardingPoliciesComplete(t *testing.T) {
+func TestProvidersKnownToForwardingDispatch(t *testing.T) {
 	providerNames := providers.ProviderIDs()
-	forwardingPoliciesOnce.Do(initForwardingPolicies)
-	if len(anthropicForwardingPolicies) != len(providerNames) {
-		t.Fatalf("anthropicForwardingPolicies has %d providers, want %d", len(anthropicForwardingPolicies), len(providerNames))
-	}
-
 	for _, provider := range providerNames {
 		t.Run(provider, func(t *testing.T) {
-			policy, ok := anthropicForwardingPolicyFor(provider)
-			if !ok {
-				t.Fatalf("missing Anthropic forwarding policy for provider %q", provider)
-			}
-			if policy.Response == nil || policy.Stream == nil {
-				t.Fatal("Anthropic forwarding must be set")
-			}
-
-			openAIStream, ok := openAIStreamPolicyFor(provider)
-			if provider == constants.ProviderOpenAI {
-				if ok {
-					t.Fatal("OpenAI provider should use direct OpenAI streaming, not conversion policy")
-				}
-				return
-			}
-			if !ok {
-				t.Fatalf("missing OpenAI stream policy for provider %q", provider)
-			}
-			if openAIStream.Stream == nil {
-				t.Fatal("OpenAI-format streaming forwarder must be set")
+			switch provider {
+			case constants.ProviderOpenAI, constants.ProviderAnthropic, constants.ProviderGoogle, constants.ProviderArgo:
+			default:
+				t.Fatalf("add provider %q to direct forwarding dispatch", provider)
 			}
 		})
-	}
-
-	for provider := range anthropicForwardingPolicies {
-		if _, ok := providers.InfoFor(provider); !ok {
-			t.Fatalf("Anthropic forwarding policy %q is not registered in providers", provider)
-		}
-	}
-	for provider := range openAIStreamPolicies {
-		if provider == constants.ProviderOpenAI {
-			t.Fatal("OpenAI provider should not have a conversion stream policy")
-		}
-		if _, ok := providers.InfoFor(provider); !ok {
-			t.Fatalf("OpenAI stream policy %q is not registered in providers", provider)
-		}
 	}
 }
 

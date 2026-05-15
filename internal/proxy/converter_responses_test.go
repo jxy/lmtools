@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/apifixtures"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"strings"
@@ -895,7 +896,7 @@ func TestOpenAIResponsesResponseMarshalOmitsOutputText(t *testing.T) {
 	if _, ok := got["output_text"]; ok {
 		t.Fatalf("marshaled response unexpectedly contains output_text: %s", string(data))
 	}
-	text, ok := lookupStatefulJSONPath(got, "output.0.content.0.text")
+	text, ok := apifixtures.LookupStatefulJSONPath(got, "output.0.content.0.text")
 	if !ok || text != "Checking." {
 		t.Fatalf("nested output text = %#v, want Checking. in %s", text, string(data))
 	}

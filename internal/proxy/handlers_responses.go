@@ -25,47 +25,39 @@ func (s *Server) parseOpenAIResponsesRequest(r *http.Request) (*OpenAIResponsesR
 }
 
 func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
-	var responsesReq *OpenAIResponsesRequest
-	var responsesRawBody []byte
-	_, route, ok := s.handlePOSTEndpoint(
-		w,
-		r,
-		"OpenAI responses endpoint",
-		func(r *http.Request) (*endpointRequestInfo, error) {
-			req, rawBody, err := s.parseOpenAIResponsesRequest(r)
-			if err != nil {
-				return nil, err
-			}
-			responsesReq = req
-			responsesRawBody = rawBody
-			return &endpointRequestInfo{
-				Model:     req.Model,
-				Stream:    req.Stream,
-				Payload:   req,
-				ToolCount: len(req.Tools),
-				Tools:     req.Tools,
-			}, nil
-		},
-		endpointErrorHandlers{
-			MethodNotAllowed: func() {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
-			},
-			BadRequest: func(message string) {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "", http.StatusBadRequest)
-			},
-			ConfigError: func(message string) {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "configuration_error", http.StatusInternalServerError)
-			},
-			AuthError: func(message string) {
-				s.sendOpenAIError(w, ErrTypeAuthentication, message, "unauthorized", http.StatusUnauthorized)
-			},
-		},
-	)
-	if !ok {
+	ctx := r.Context()
+	log := logger.From(ctx)
+	log.Infof("%s %s | OpenAI responses endpoint", r.Method, r.URL.Path)
+
+	if r.Method != http.MethodPost {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	ctx := r.Context()
+	responsesReq, responsesRawBody, err := s.parseOpenAIResponsesRequest(r)
+	if err != nil {
+		log.Errorf("Failed to parse request: %s", err)
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		return
+	}
+	info := endpointRequestInfo{
+		Model:     responsesReq.Model,
+		Stream:    responsesReq.Stream,
+		Payload:   responsesReq,
+		ToolCount: len(responsesReq.Tools),
+		Tools:     responsesReq.Tools,
+	}
+	logEndpointRequest(ctx, info)
+
+	route, routeErr := s.resolveEndpointRoute(ctx, info.Model)
+	if routeErr != nil {
+		if routeErr.Kind == endpointRouteAuthError {
+			s.sendOpenAIError(w, ErrTypeAuthentication, routeErr.Message, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, routeErr.Message, "configuration_error", http.StatusInternalServerError)
+		return
+	}
 	responsesReq.Model = route.MappedModel
 
 	if route.Provider == constants.ProviderOpenAI {

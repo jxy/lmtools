@@ -5,12 +5,6 @@ import (
 	"lmtools/internal/constants"
 )
 
-type (
-	anthropicResponseForwarder func(ctx context.Context, anthReq *AnthropicRequest, originalModel string) (*AnthropicResponse, error)
-	anthropicStreamForwarder   func(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler) error
-	openAIStreamForwarder      func(ctx context.Context, anthReq *AnthropicRequest, writer *OpenAIStreamWriter) error
-)
-
 func (s *Server) forwardAnthropicViaOpenAI(ctx context.Context, anthReq *AnthropicRequest, originalModel string) (*AnthropicResponse, error) {
 	openAIResp, err := s.forwardToOpenAI(ctx, anthReq)
 	if err != nil {

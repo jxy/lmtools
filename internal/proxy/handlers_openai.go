@@ -25,47 +25,40 @@ func (s *Server) parseOpenAIRequest(r *http.Request) (*OpenAIRequest, error) {
 
 // handleOpenAIChatCompletions handles the OpenAI chat completions endpoint
 func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Request) {
-	var openAIReq *OpenAIRequest
-	info, route, ok := s.handlePOSTEndpoint(
-		w,
-		r,
-		"OpenAI chat completions endpoint",
-		func(r *http.Request) (*endpointRequestInfo, error) {
-			req, err := s.parseOpenAIRequest(r)
-			if err != nil {
-				return nil, err
-			}
-			openAIReq = req
-			return &endpointRequestInfo{
-				Model:        req.Model,
-				Stream:       req.Stream,
-				MessageCount: len(req.Messages),
-				ToolCount:    len(req.Tools),
-				Payload:      req,
-				Tools:        req.Tools,
-			}, nil
-		},
-		endpointErrorHandlers{
-			MethodNotAllowed: func() {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
-			},
-			BadRequest: func(message string) {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "", http.StatusBadRequest)
-			},
-			ConfigError: func(message string) {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "configuration_error", http.StatusInternalServerError)
-			},
-			AuthError: func(message string) {
-				s.sendOpenAIError(w, ErrTypeAuthentication, message, "unauthorized", http.StatusUnauthorized)
-			},
-		},
-	)
-	if !ok {
+	ctx := r.Context()
+	log := logger.From(ctx)
+	log.Infof("%s %s | OpenAI chat completions endpoint", r.Method, r.URL.Path)
+
+	if r.Method != http.MethodPost {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	ctx := r.Context()
-	log := logger.From(ctx)
+	openAIReq, err := s.parseOpenAIRequest(r)
+	if err != nil {
+		log.Errorf("Failed to parse request: %s", err)
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		return
+	}
+	info := endpointRequestInfo{
+		Model:        openAIReq.Model,
+		Stream:       openAIReq.Stream,
+		MessageCount: len(openAIReq.Messages),
+		ToolCount:    len(openAIReq.Tools),
+		Payload:      openAIReq,
+		Tools:        openAIReq.Tools,
+	}
+	logEndpointRequest(ctx, info)
+
+	route, routeErr := s.resolveEndpointRoute(ctx, info.Model)
+	if routeErr != nil {
+		if routeErr.Kind == endpointRouteAuthError {
+			s.sendOpenAIError(w, ErrTypeAuthentication, routeErr.Message, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, routeErr.Message, "configuration_error", http.StatusInternalServerError)
+		return
+	}
 
 	if err := validateOpenAIRequestForProvider(openAIReq, route.Provider, route.MappedModel); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
@@ -275,16 +268,15 @@ func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	policy, ok := openAIStreamPolicyFor(provider)
-	if !ok {
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderAnthropic:
+		err = s.streamOpenAIFromAnthropic(ctx, anthReq, writer)
+	case constants.ProviderGoogle:
+		err = s.streamOpenAIFromGoogle(ctx, anthReq, writer)
+	case constants.ProviderArgo:
+		err = s.streamOpenAIFromArgo(ctx, anthReq, writer)
+	default:
 		err = fmt.Errorf("unknown provider: %s", provider)
-	} else {
-		forward, lookupErr := policy.requireStreamForwarder(s)
-		if lookupErr != nil {
-			err = lookupErr
-		} else {
-			err = forward(ctx, anthReq, writer)
-		}
 	}
 
 	if err != nil {

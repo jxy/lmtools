@@ -12,9 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -110,8 +107,8 @@ func runStatefulStep(t *testing.T, server http.Handler, backend *statefulFixture
 	startBackendRequests := backend.RequestCount()
 
 	bodyBytes := marshalStatefulStepBody(t, step.Body, vars)
-	method := strings.ToUpper(substituteStatefulString(step.Method, vars))
-	path := substituteStatefulString(step.Path, vars)
+	method := strings.ToUpper(apifixtures.SubstituteStatefulString(step.Method, vars))
+	path := apifixtures.SubstituteStatefulString(step.Path, vars)
 
 	var status int
 	var responseBody []byte
@@ -132,7 +129,7 @@ func marshalStatefulStepBody(t *testing.T, body interface{}, vars map[string]str
 	if body == nil {
 		return nil
 	}
-	data, err := json.Marshal(substituteStatefulValue(body, vars))
+	data, err := json.Marshal(apifixtures.SubstituteStatefulValue(body, vars))
 	if err != nil {
 		t.Fatalf("marshal step body error = %v", err)
 	}
@@ -178,7 +175,7 @@ func pollStatefulRequest(t *testing.T, server http.Handler, method, path string,
 	var decoded map[string]interface{}
 	for {
 		status, responseBody, decoded = doStatefulRequest(t, server, method, path, body)
-		if status == expectedStatus && statefulJSONFieldsMatch(decoded, fields, vars) {
+		if status == expectedStatus && apifixtures.StatefulFieldsMatch(decoded, fields, vars) {
 			return status, responseBody, decoded
 		}
 		if time.Now().After(deadline) {
@@ -200,33 +197,22 @@ func assertStatefulResponse(t *testing.T, step apifixtures.StatefulStep, vars ma
 	}
 	assertStatefulJSONFields(t, "response", decoded, step.Expect.JSONFields, vars)
 	for _, rawWant := range step.Expect.BodyContains {
-		want := substituteStatefulString(rawWant, vars)
+		want := apifixtures.SubstituteStatefulString(rawWant, vars)
 		if !bytes.Contains(body, []byte(want)) {
 			t.Fatalf("response body does not contain %q: %s", want, string(body))
 		}
 	}
 }
 
-func statefulJSONFieldsMatch(decoded map[string]interface{}, fields map[string]interface{}, vars map[string]string) bool {
-	for path, rawWant := range fields {
-		want := substituteStatefulValue(rawWant, vars)
-		got, ok := lookupStatefulJSONPath(decoded, path)
-		if !ok || !statefulValuesEqual(got, want) {
-			return false
-		}
-	}
-	return true
-}
-
 func assertStatefulJSONFields(t *testing.T, label string, decoded map[string]interface{}, fields map[string]interface{}, vars map[string]string) {
 	t.Helper()
 	for path, rawWant := range fields {
-		want := substituteStatefulValue(rawWant, vars)
-		got, ok := lookupStatefulJSONPath(decoded, path)
+		want := apifixtures.SubstituteStatefulValue(rawWant, vars)
+		got, ok := apifixtures.LookupStatefulJSONPath(decoded, path)
 		if !ok {
 			t.Fatalf("%s missing JSON field %q in %#v", label, path, decoded)
 		}
-		if !statefulValuesEqual(got, want) {
+		if !apifixtures.StatefulValuesEqual(got, want) {
 			t.Fatalf("%s JSON field %q = %#v, want %#v", label, path, got, want)
 		}
 	}
@@ -235,7 +221,7 @@ func assertStatefulJSONFields(t *testing.T, label string, decoded map[string]int
 func bindStatefulVars(t *testing.T, bindings map[string]string, decoded map[string]interface{}, vars map[string]string) {
 	t.Helper()
 	for name, path := range bindings {
-		value, ok := lookupStatefulJSONPath(decoded, path)
+		value, ok := apifixtures.LookupStatefulJSONPath(decoded, path)
 		if !ok {
 			t.Fatalf("binding %q path %q missing in %#v", name, path, decoded)
 		}
@@ -255,20 +241,20 @@ func assertStatefulBackendRequests(t *testing.T, backend *statefulFixtureBackend
 	}
 	for i, want := range expected {
 		got := newRequests[i]
-		if want.Method != "" && got.Method != substituteStatefulString(want.Method, vars) {
+		if want.Method != "" && got.Method != apifixtures.SubstituteStatefulString(want.Method, vars) {
 			t.Fatalf("backend request %d method = %s, want %s", i, got.Method, want.Method)
 		}
-		if want.Path != "" && got.Path != substituteStatefulString(want.Path, vars) {
+		if want.Path != "" && got.Path != apifixtures.SubstituteStatefulString(want.Path, vars) {
 			t.Fatalf("backend request %d path = %s, want %s", i, got.Path, want.Path)
 		}
 		for _, rawNeedle := range want.BodyContains {
-			needle := substituteStatefulString(rawNeedle, vars)
+			needle := apifixtures.SubstituteStatefulString(rawNeedle, vars)
 			if !bytes.Contains(got.Body, []byte(needle)) {
 				t.Fatalf("backend request %d body does not contain %q: %s", i, needle, string(got.Body))
 			}
 		}
 		for _, rawNeedle := range want.BodyNotContains {
-			needle := substituteStatefulString(rawNeedle, vars)
+			needle := apifixtures.SubstituteStatefulString(rawNeedle, vars)
 			if bytes.Contains(got.Body, []byte(needle)) {
 				t.Fatalf("backend request %d body unexpectedly contains %q: %s", i, needle, string(got.Body))
 			}
@@ -307,7 +293,7 @@ type statefulFixtureBackendRequest struct {
 
 func (b *statefulFixtureBackend) Enqueue(upstream *apifixtures.StatefulUpstream, vars map[string]string) {
 	b.t.Helper()
-	bodyPath := substituteStatefulString(upstream.Body, vars)
+	bodyPath := apifixtures.SubstituteStatefulString(upstream.Body, vars)
 	body, err := apifixtures.ReadCaseFile(b.root, b.caseID, bodyPath)
 	if err != nil {
 		b.t.Fatalf("ReadCaseFile(%q) error = %v", bodyPath, err)
@@ -393,88 +379,6 @@ func (b *statefulFixtureBackend) WaitForIdle(t *testing.T, timeout time.Duration
 	case <-done:
 	case <-time.After(timeout):
 		t.Fatalf("stateful fixture backend still has active requests")
-	}
-}
-
-var statefulPlaceholderPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
-
-func substituteStatefulValue(value interface{}, vars map[string]string) interface{} {
-	switch typed := value.(type) {
-	case string:
-		return substituteStatefulString(typed, vars)
-	case []interface{}:
-		out := make([]interface{}, len(typed))
-		for i := range typed {
-			out[i] = substituteStatefulValue(typed[i], vars)
-		}
-		return out
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(typed))
-		for key, item := range typed {
-			out[key] = substituteStatefulValue(item, vars)
-		}
-		return out
-	default:
-		return value
-	}
-}
-
-func substituteStatefulString(value string, vars map[string]string) string {
-	return statefulPlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
-		name := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
-		if replacement, ok := vars[name]; ok {
-			return replacement
-		}
-		return match
-	})
-}
-
-func lookupStatefulJSONPath(decoded interface{}, path string) (interface{}, bool) {
-	current := decoded
-	for _, part := range strings.Split(path, ".") {
-		switch typed := current.(type) {
-		case map[string]interface{}:
-			value, ok := typed[part]
-			if !ok {
-				return nil, false
-			}
-			current = value
-		case []interface{}:
-			if part == "length" {
-				current = float64(len(typed))
-				continue
-			}
-			index, err := strconv.Atoi(part)
-			if err != nil || index < 0 || index >= len(typed) {
-				return nil, false
-			}
-			current = typed[index]
-		default:
-			return nil, false
-		}
-	}
-	return current, true
-}
-
-func statefulValuesEqual(got, want interface{}) bool {
-	gotNumber, gotIsNumber := statefulNumber(got)
-	wantNumber, wantIsNumber := statefulNumber(want)
-	if gotIsNumber && wantIsNumber {
-		return gotNumber == wantNumber
-	}
-	return reflect.DeepEqual(got, want)
-}
-
-func statefulNumber(value interface{}) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	default:
-		return 0, false
 	}
 }
 

@@ -27,11 +27,16 @@ type endpointRoute struct {
 	Provider      string
 }
 
-type endpointErrorHandlers struct {
-	MethodNotAllowed func()
-	BadRequest       func(string)
-	ConfigError      func(string)
-	AuthError        func(string)
+type endpointRouteErrorKind string
+
+const (
+	endpointRouteConfigError endpointRouteErrorKind = "config"
+	endpointRouteAuthError   endpointRouteErrorKind = "auth"
+)
+
+type endpointRouteError struct {
+	Kind    endpointRouteErrorKind
+	Message string
 }
 
 func (s *Server) decodeEndpointRequest(r *http.Request, dst interface{}) error {
@@ -127,23 +132,17 @@ func logEndpointRequest(ctx context.Context, info endpointRequestInfo) {
 	}
 }
 
-func (s *Server) resolveEndpointRoute(ctx context.Context, model string, errs endpointErrorHandlers) (*endpointRoute, bool) {
+func (s *Server) resolveEndpointRoute(ctx context.Context, model string) (*endpointRoute, *endpointRouteError) {
 	log := logger.From(ctx)
 	provider := s.config.Provider
 	if provider == "" {
 		log.Errorf("No provider configured")
-		if errs.ConfigError != nil {
-			errs.ConfigError("No provider configured")
-		}
-		return nil, false
+		return nil, &endpointRouteError{Kind: endpointRouteConfigError, Message: "No provider configured"}
 	}
 
 	if hasCredentials, diagnostic := s.hasCredentials(provider); !hasCredentials {
 		log.Errorf("No credentials configured for provider %s: %s", provider, diagnostic)
-		if errs.AuthError != nil {
-			errs.AuthError(diagnostic)
-		}
-		return nil, false
+		return nil, &endpointRouteError{Kind: endpointRouteAuthError, Message: diagnostic}
 	}
 
 	route := &endpointRoute{
@@ -155,43 +154,5 @@ func (s *Server) resolveEndpointRoute(ctx context.Context, model string, errs en
 	log.Infof("Model routing: %s -> provider=%s, mapped=%s",
 		route.OriginalModel, route.Provider, route.MappedModel)
 
-	return route, true
-}
-
-func (s *Server) handlePOSTEndpoint(
-	w http.ResponseWriter,
-	r *http.Request,
-	endpointName string,
-	parse func(*http.Request) (*endpointRequestInfo, error),
-	errs endpointErrorHandlers,
-) (*endpointRequestInfo, *endpointRoute, bool) {
-	ctx := r.Context()
-	log := logger.From(ctx)
-
-	log.Infof("%s %s | %s", r.Method, r.URL.Path, endpointName)
-
-	if r.Method != http.MethodPost {
-		if errs.MethodNotAllowed != nil {
-			errs.MethodNotAllowed()
-		}
-		return nil, nil, false
-	}
-
-	info, err := parse(r)
-	if err != nil {
-		log.Errorf("Failed to parse request: %s", err)
-		if errs.BadRequest != nil {
-			errs.BadRequest(err.Error())
-		}
-		return nil, nil, false
-	}
-
-	logEndpointRequest(ctx, *info)
-
-	route, ok := s.resolveEndpointRoute(ctx, info.Model, errs)
-	if !ok {
-		return nil, nil, false
-	}
-
-	return info, route, true
+	return route, nil
 }

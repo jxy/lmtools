@@ -7,6 +7,7 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"io"
+	"lmtools/internal/apifixtures"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/retry"
@@ -624,7 +625,7 @@ func TestOpenAIResponsesStatePreviousResponseLifecycle(t *testing.T) {
 		"previous_response_id": respID,
 		"input":                "next",
 	})
-	if got, _ := lookupStatefulJSONPath(secondResp, "output.0.content.0.text"); got != "second answer" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(secondResp, "output.0.content.0.text"); got != "second answer" {
 		t.Fatalf("second output text = %q, want second answer", got)
 	}
 
@@ -743,7 +744,7 @@ func TestOpenAIResponsesConversationReplayPreservesAnthropicSignedThinking(t *te
 			"output":  "sunny",
 		}},
 	})
-	if got, _ := lookupStatefulJSONPath(secondResp, "output.0.content.0.text"); got != "The tool result was replayed." {
+	if got, _ := apifixtures.LookupStatefulJSONPath(secondResp, "output.0.content.0.text"); got != "The tool result was replayed." {
 		t.Fatalf("second output text = %#v, want replay response", got)
 	}
 
@@ -1449,18 +1450,18 @@ func TestOpenAIResponsesInputTokensReadOnlyAndPagination(t *testing.T) {
 	mu.Unlock()
 
 	firstPage := getJSON(t, server, "/v1/responses/"+respID+"/input_items?order=asc&limit=1")
-	if got, _ := lookupStatefulJSONPath(firstPage, "data.0.id"); got != "item_0000" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(firstPage, "data.0.id"); got != "item_0000" {
 		t.Fatalf("asc first page id = %#v, want item_0000", got)
 	}
 	if firstPage["has_more"] != true {
 		t.Fatalf("asc first page has_more = %#v, want true", firstPage["has_more"])
 	}
 	secondPage := getJSON(t, server, "/v1/responses/"+respID+"/input_items?order=asc&after=item_0000&limit=1")
-	if got, _ := lookupStatefulJSONPath(secondPage, "data.0.id"); got != "item_0001" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(secondPage, "data.0.id"); got != "item_0001" {
 		t.Fatalf("asc second page id = %#v, want item_0001", got)
 	}
 	defaultPage := getJSON(t, server, "/v1/responses/"+respID+"/input_items?limit=1")
-	if got, _ := lookupStatefulJSONPath(defaultPage, "data.0.id"); got != "item_0002" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(defaultPage, "data.0.id"); got != "item_0002" {
 		t.Fatalf("default desc page id = %#v, want item_0002", got)
 	}
 }
@@ -1659,10 +1660,10 @@ func TestOpenAIResponsesCompactCreatesContinuationState(t *testing.T) {
 	if !strings.HasPrefix(compactID, "resp_") {
 		t.Fatalf("compact id = %q, want resp_ prefix", compactID)
 	}
-	if got, _ := lookupStatefulJSONPath(compactResp, "output.2.type"); got != "compaction" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(compactResp, "output.2.type"); got != "compaction" {
 		t.Fatalf("compact output type = %#v, want compaction", got)
 	}
-	encryptedContent, ok := lookupStatefulJSONPath(compactResp, "output.2.encrypted_content")
+	encryptedContent, ok := apifixtures.LookupStatefulJSONPath(compactResp, "output.2.encrypted_content")
 	if !ok {
 		t.Fatalf("compact encrypted_content missing: %#v", compactResp)
 	}
@@ -1676,7 +1677,7 @@ func TestOpenAIResponsesCompactCreatesContinuationState(t *testing.T) {
 			map[string]interface{}{"type": "message", "role": "user", "content": "Continue."},
 		},
 	})
-	if got, _ := lookupStatefulJSONPath(followupResp, "output.0.content.0.text"); got != "continued from compacted state" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(followupResp, "output.0.content.0.text"); got != "continued from compacted state" {
 		t.Fatalf("follow-up output = %#v, want compacted continuation", got)
 	}
 
@@ -1719,17 +1720,17 @@ func TestOpenAIConversationItemsPagination(t *testing.T) {
 	convID, _ := conv["id"].(string)
 
 	firstPage := getJSON(t, server, "/v1/conversations/"+convID+"/items?order=asc&limit=2")
-	if got, _ := lookupStatefulJSONPath(firstPage, "data.0.id"); got != "item_0000" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(firstPage, "data.0.id"); got != "item_0000" {
 		t.Fatalf("conversation first id = %#v, want item_0000", got)
 	}
-	if got, _ := lookupStatefulJSONPath(firstPage, "data.1.id"); got != "item_0001" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(firstPage, "data.1.id"); got != "item_0001" {
 		t.Fatalf("conversation second id = %#v, want item_0001", got)
 	}
 	if firstPage["has_more"] != true {
 		t.Fatalf("conversation first page has_more = %#v, want true", firstPage["has_more"])
 	}
 	secondPage := getJSON(t, server, "/v1/conversations/"+convID+"/items?order=asc&after=item_0001&limit=2")
-	if got, _ := lookupStatefulJSONPath(secondPage, "data.0.id"); got != "item_0002" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(secondPage, "data.0.id"); got != "item_0002" {
 		t.Fatalf("conversation next id = %#v, want item_0002", got)
 	}
 }
@@ -1766,10 +1767,10 @@ func TestOpenAIConversationAppendItemsReturnsOnlyAppendedItems(t *testing.T) {
 	if !ok || len(data) != 1 {
 		t.Fatalf("append response data = %#v, want one appended item", appended["data"])
 	}
-	if got, _ := lookupStatefulJSONPath(appended, "data.0.id"); got != "item_0001" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(appended, "data.0.id"); got != "item_0001" {
 		t.Fatalf("appended item id = %#v, want item_0001", got)
 	}
-	if got, _ := lookupStatefulJSONPath(appended, "data.0.content.0.text"); got != "appended" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(appended, "data.0.content.0.text"); got != "appended" {
 		t.Fatalf("appended item text = %#v, want appended", got)
 	}
 
@@ -1778,10 +1779,10 @@ func TestOpenAIConversationAppendItemsReturnsOnlyAppendedItems(t *testing.T) {
 	if !ok || len(allData) != 2 {
 		t.Fatalf("conversation items data = %#v, want two persisted items", items["data"])
 	}
-	if got, _ := lookupStatefulJSONPath(items, "data.0.id"); got != "item_0000" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(items, "data.0.id"); got != "item_0000" {
 		t.Fatalf("first persisted item id = %#v, want item_0000", got)
 	}
-	if got, _ := lookupStatefulJSONPath(items, "data.1.id"); got != "item_0001" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(items, "data.1.id"); got != "item_0001" {
 		t.Fatalf("second persisted item id = %#v, want item_0001", got)
 	}
 }

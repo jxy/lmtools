@@ -47,18 +47,6 @@ const (
 	responsesStateBackground
 )
 
-func (mode openAIResponsesStateMode) readOnly() bool {
-	return mode == responsesStateReadOnly
-}
-
-func (mode openAIResponsesStateMode) background() bool {
-	return mode == responsesStateBackground
-}
-
-func (mode openAIResponsesStateMode) writable(store bool) bool {
-	return mode == responsesStateBackground || (mode == responsesStateForeground && store)
-}
-
 func (s *Server) handleOpenAIResponsesLifecycle(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/v1/responses/")
@@ -226,52 +214,48 @@ func (s *Server) handleOpenAIResponsesCompact(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) parseOpenAIResponsesUtilityRequest(w http.ResponseWriter, r *http.Request, endpointName string) (*OpenAIResponsesRequest, []byte, *endpointRoute, bool) {
-	var responsesReq *OpenAIResponsesRequest
-	var rawBody []byte
-	_, route, ok := s.handlePOSTEndpoint(
-		w,
-		r,
-		endpointName,
-		func(r *http.Request) (*endpointRequestInfo, error) {
-			var req OpenAIResponsesRequest
-			body, err := s.decodeEndpointRequestWithDisposition(r, &req, "preserved for direct OpenAI passthrough, ignored by converted providers")
-			if err != nil {
-				return nil, err
-			}
-			rawBody = body
-			if req.Model == "" {
-				req.Model = s.defaultOpenAIResponsesUtilityModel(&req)
-			}
-			if req.Model == "" {
-				return nil, fmt.Errorf("model is required")
-			}
-			responsesReq = &req
-			return &endpointRequestInfo{
-				Model:     req.Model,
-				Payload:   &req,
-				ToolCount: len(req.Tools),
-				Tools:     req.Tools,
-			}, nil
-		},
-		endpointErrorHandlers{
-			MethodNotAllowed: func() {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
-			},
-			BadRequest: func(message string) {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "", http.StatusBadRequest)
-			},
-			ConfigError: func(message string) {
-				s.sendOpenAIError(w, ErrTypeInvalidRequest, message, "configuration_error", http.StatusInternalServerError)
-			},
-			AuthError: func(message string) {
-				s.sendOpenAIError(w, ErrTypeAuthentication, message, "unauthorized", http.StatusUnauthorized)
-			},
-		},
-	)
-	if !ok {
+	ctx := r.Context()
+	log := logger.From(ctx)
+	log.Infof("%s %s | %s", r.Method, r.URL.Path, endpointName)
+
+	if r.Method != http.MethodPost {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
 		return nil, nil, nil, false
 	}
-	return responsesReq, rawBody, route, true
+
+	var req OpenAIResponsesRequest
+	rawBody, err := s.decodeEndpointRequestWithDisposition(r, &req, "preserved for direct OpenAI passthrough, ignored by converted providers")
+	if err != nil {
+		log.Errorf("Failed to parse request: %s", err)
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		return nil, nil, nil, false
+	}
+	if req.Model == "" {
+		req.Model = s.defaultOpenAIResponsesUtilityModel(&req)
+	}
+	if req.Model == "" {
+		log.Errorf("Failed to parse request: model is required")
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "model is required", "", http.StatusBadRequest)
+		return nil, nil, nil, false
+	}
+	info := endpointRequestInfo{
+		Model:     req.Model,
+		Payload:   &req,
+		ToolCount: len(req.Tools),
+		Tools:     req.Tools,
+	}
+	logEndpointRequest(ctx, info)
+
+	route, routeErr := s.resolveEndpointRoute(ctx, info.Model)
+	if routeErr != nil {
+		if routeErr.Kind == endpointRouteAuthError {
+			s.sendOpenAIError(w, ErrTypeAuthentication, routeErr.Message, "unauthorized", http.StatusUnauthorized)
+			return nil, nil, nil, false
+		}
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, routeErr.Message, "configuration_error", http.StatusInternalServerError)
+		return nil, nil, nil, false
+	}
+	return &req, rawBody, route, true
 }
 
 func (s *Server) defaultOpenAIResponsesUtilityModel(req *OpenAIResponsesRequest) string {
@@ -668,11 +652,24 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 	if err != nil {
 		return nil, typed, err
 	}
-	if mode.readOnly() && convSpec.create {
+	readOnly := false
+	background := false
+	writable := false
+	switch mode {
+	case responsesStateReadOnly:
+		readOnly = true
+	case responsesStateForeground:
+		writable = store
+	case responsesStateBackground:
+		background = true
+		writable = true
+	default:
+		return nil, typed, fmt.Errorf("unknown responses state mode %d", mode)
+	}
+	if readOnly && convSpec.create {
 		return nil, typed, fmt.Errorf("conversation id is required")
 	}
-	writable := mode.writable(store)
-	if !mode.readOnly() {
+	if !readOnly {
 		needsState := writable || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
 		if !needsState {
 			return nil, typed, nil
@@ -685,7 +682,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 	}
 	stateCtx := &openAIResponsesStateContext{
 		Store:          store,
-		Background:     mode.background(),
+		Background:     background,
 		Instructions:   responsesInstructionText(req.Instructions),
 		CurrentRequest: currentRequest,
 	}
@@ -706,7 +703,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 		}
 	}
 
-	if convSpec.requested && (mode.readOnly() || !convSpec.create || writable) {
+	if convSpec.requested && (readOnly || !convSpec.create || writable) {
 		conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, writable)
 		if err != nil {
 			return nil, typed, err
@@ -716,7 +713,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 			stateCtx.Session = sess
 		}
 		stateCtx.Conversation = conv
-		if !mode.readOnly() {
+		if !readOnly {
 			if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
 				return nil, typed, err
 			}
@@ -750,7 +747,7 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 	}
 
 	if stateCtx.Session != nil {
-		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, mode, writable)
+		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, readOnly, writable)
 		if err != nil {
 			return nil, typed, err
 		}
@@ -795,10 +792,10 @@ func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIRespons
 	return conv, sess, nil
 }
 
-func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, mode openAIResponsesStateMode, writable bool) (TypedRequest, error) {
+func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, readOnly bool, writable bool) (TypedRequest, error) {
 	var history []core.TypedMessage
 	var err error
-	if stateCtx.Previous != nil && (!writable || mode.readOnly()) {
+	if stateCtx.Previous != nil && (!writable || readOnly) {
 		history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
 	} else if stateCtx.Conversation != nil && stateCtx.Previous == nil {
 		history, err = s.conversationHistory(ctx, stateCtx.Conversation)
@@ -1188,7 +1185,9 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 		s.backgroundMu.Unlock()
 	}()
 
-	s.updateBackgroundResponseStatus(respID, "in_progress", nil)
+	if err := s.updateBackgroundResponseStatus(respID, "in_progress", nil); err != nil {
+		logger.From(ctx).Errorf("failed to mark background response %s in_progress: %v", respID, err)
+	}
 	upstreamResp, err := s.forwardTypedAsAnthropic(ctx, typedWithState, route.Provider, route.MappedModel, route.OriginalModel)
 	if err != nil {
 		status := "failed"
@@ -1197,11 +1196,15 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 			status = "cancelled"
 			errPayload = map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}
 		}
-		s.updateBackgroundResponseStatus(respID, status, errPayload)
+		if err := s.updateBackgroundResponseStatus(respID, status, errPayload); err != nil {
+			logger.From(ctx).Errorf("failed to mark background response %s %s: %v", respID, status, err)
+		}
 		return
 	}
 	if ctx.Err() != nil {
-		s.updateBackgroundResponseStatus(respID, "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"})
+		if err := s.updateBackgroundResponseStatus(respID, "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}); err != nil {
+			logger.From(ctx).Errorf("failed to mark background response %s cancelled: %v", respID, err)
+		}
 		return
 	}
 	registry := responseToolNameRegistryFromCoreTools(typedWithState.Tools)
@@ -1212,12 +1215,14 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 		if stdErrors.Is(err, errResponsesStateDeleted) || stdErrors.Is(err, errResponsesStateNotActive) {
 			return
 		}
-		s.updateBackgroundResponseStatus(respID, "failed", map[string]interface{}{"code": "state_error", "message": err.Error()})
+		if statusErr := s.updateBackgroundResponseStatus(respID, "failed", map[string]interface{}{"code": "state_error", "message": err.Error()}); statusErr != nil {
+			logger.From(ctx).Errorf("failed to mark background response %s failed: %v", respID, statusErr)
+		}
 	}
 }
 
-func (s *Server) updateBackgroundResponseStatus(id, status string, errPayload interface{}) {
-	_ = s.responsesState.updateResponseStatusIfPending(id, status, errPayload)
+func (s *Server) updateBackgroundResponseStatus(id, status string, errPayload interface{}) error {
+	return s.responsesState.updateResponseStatusIfPending(id, status, errPayload)
 }
 
 func appendTypedMessageToSession(ctx context.Context, sess *session.Session, msg core.TypedMessage, model string) error {

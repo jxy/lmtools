@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"lmtools/internal/apifixtures"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"net/http"
@@ -1171,7 +1172,7 @@ func assertFailedResponsesStreamPersisted(t *testing.T, proxyURL, body string) {
 	if !ok || errorPayload["code"] != "upstream_stream_error" {
 		t.Fatalf("retrieved response error = %#v, want upstream_stream_error", retrieved["error"])
 	}
-	if got, _ := lookupStatefulJSONPath(retrieved, "output.0.content.0.text"); got != "partial" {
+	if got, _ := apifixtures.LookupStatefulJSONPath(retrieved, "output.0.content.0.text"); got != "partial" {
 		t.Fatalf("retrieved failed response partial output = %#v, want partial; payload = %#v", got, retrieved)
 	}
 	inputItems := getProxyJSON(t, proxyURL+"/v1/responses/"+failed.ID+"/input_items")

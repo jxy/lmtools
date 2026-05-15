@@ -15,9 +15,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -473,8 +470,8 @@ func captureStatefulCaseWithClient(root string, meta apifixtures.CaseMeta, targe
 }
 
 func captureStatefulStep(root string, meta apifixtures.CaseMeta, target targetConfig, scenario apifixtures.StatefulScenario, step apifixtures.StatefulStep, index int, baseURL string, headers map[string]string, client *http.Client, vars map[string]string) (statefulCaptureMetadata, error) {
-	method := strings.ToUpper(substituteStatefulCaptureString(step.Method, vars))
-	path := substituteStatefulCaptureString(step.Path, vars)
+	method := strings.ToUpper(apifixtures.SubstituteStatefulString(step.Method, vars))
+	path := apifixtures.SubstituteStatefulString(step.Path, vars)
 	body, err := statefulCaptureRequestBody(step.Body, scenario, meta, target, vars)
 	if err != nil {
 		return statefulCaptureMetadata{}, err
@@ -504,7 +501,7 @@ func captureStatefulStep(root string, meta apifixtures.CaseMeta, target targetCo
 		return statefulCaptureMetadata{}, fmt.Errorf("parse stateful capture response for step %s: %w", step.ID, err)
 	}
 	for name, jsonPath := range statefulCaptureBindings(step) {
-		value, ok := lookupStatefulCaptureJSONPath(decoded, jsonPath)
+		value, ok := apifixtures.LookupStatefulJSONPath(decoded, jsonPath)
 		if !ok {
 			return statefulCaptureMetadata{}, fmt.Errorf("stateful capture step %s missing bind path %q", step.ID, jsonPath)
 		}
@@ -574,7 +571,7 @@ func pollStatefulCapture(ctx context.Context, client *http.Client, method, url s
 		lastResp = resp
 		lastBody = data
 		var decoded map[string]interface{}
-		if err := json.Unmarshal(data, &decoded); err == nil && statefulCaptureFieldsMatch(decoded, fields, vars) {
+		if err := json.Unmarshal(data, &decoded); err == nil && apifixtures.StatefulFieldsMatch(decoded, fields, vars) {
 			return lastResp, lastBody, nil
 		}
 		if time.Now().After(deadline) {
@@ -609,7 +606,7 @@ func statefulCaptureRequestBody(body interface{}, scenario apifixtures.StatefulS
 	if body == nil {
 		return nil, nil
 	}
-	substituted := substituteStatefulCaptureValue(body, vars)
+	substituted := apifixtures.SubstituteStatefulValue(body, vars)
 	if bodyMap, ok := substituted.(map[string]interface{}); ok {
 		if _, hasModel := bodyMap["model"]; hasModel {
 			model := strings.TrimSpace(meta.Models[target.ID])
@@ -692,99 +689,6 @@ func sanitizeStatefulCaptureStepID(stepID string) string {
 		}
 	}
 	return b.String()
-}
-
-var statefulCapturePlaceholderPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
-
-func substituteStatefulCaptureValue(value interface{}, vars map[string]string) interface{} {
-	switch typed := value.(type) {
-	case string:
-		return substituteStatefulCaptureString(typed, vars)
-	case []interface{}:
-		out := make([]interface{}, len(typed))
-		for i := range typed {
-			out[i] = substituteStatefulCaptureValue(typed[i], vars)
-		}
-		return out
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(typed))
-		for key, item := range typed {
-			out[key] = substituteStatefulCaptureValue(item, vars)
-		}
-		return out
-	default:
-		return value
-	}
-}
-
-func substituteStatefulCaptureString(value string, vars map[string]string) string {
-	return statefulCapturePlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
-		name := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
-		if replacement, ok := vars[name]; ok {
-			return replacement
-		}
-		return match
-	})
-}
-
-func statefulCaptureFieldsMatch(decoded map[string]interface{}, fields map[string]interface{}, vars map[string]string) bool {
-	for path, rawWant := range fields {
-		want := substituteStatefulCaptureValue(rawWant, vars)
-		got, ok := lookupStatefulCaptureJSONPath(decoded, path)
-		if !ok || !statefulCaptureValuesEqual(got, want) {
-			return false
-		}
-	}
-	return true
-}
-
-func lookupStatefulCaptureJSONPath(decoded interface{}, path string) (interface{}, bool) {
-	current := decoded
-	for _, part := range strings.Split(path, ".") {
-		switch typed := current.(type) {
-		case map[string]interface{}:
-			value, ok := typed[part]
-			if !ok {
-				return nil, false
-			}
-			current = value
-		case []interface{}:
-			if part == "length" {
-				current = float64(len(typed))
-				continue
-			}
-			index, err := strconv.Atoi(part)
-			if err != nil || index < 0 || index >= len(typed) {
-				return nil, false
-			}
-			current = typed[index]
-		default:
-			return nil, false
-		}
-	}
-	return current, true
-}
-
-func statefulCaptureValuesEqual(got, want interface{}) bool {
-	gotNumber, gotIsNumber := statefulCaptureNumber(got)
-	wantNumber, wantIsNumber := statefulCaptureNumber(want)
-	if gotIsNumber && wantIsNumber {
-		return gotNumber == wantNumber
-	}
-	return reflect.DeepEqual(got, want)
-}
-
-func statefulCaptureNumber(value interface{}) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	default:
-		return 0, false
-	}
 }
 
 func normalizeStreamCapture(data []byte) []byte {

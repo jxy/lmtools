@@ -80,6 +80,36 @@ type ModelItem struct {
 	Metadata                   map[string]interface{} `json:"metadata,omitempty"`
 }
 
+type modelProviderCapability struct {
+	Provider    string
+	ParseModels func(*Server, context.Context, []byte) ([]ModelItem, error)
+}
+
+func modelProviderCapabilityFor(provider string) (modelProviderCapability, bool) {
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderOpenAI:
+		return modelProviderCapability{Provider: constants.ProviderOpenAI, ParseModels: (*Server).parseOpenAIModelsForProvider}, true
+	case constants.ProviderAnthropic:
+		return modelProviderCapability{Provider: constants.ProviderAnthropic, ParseModels: (*Server).parseAnthropicModelsForProvider}, true
+	case constants.ProviderGoogle:
+		return modelProviderCapability{Provider: constants.ProviderGoogle, ParseModels: (*Server).parseGoogleModelsForProvider}, true
+	case constants.ProviderArgo:
+		return modelProviderCapability{Provider: constants.ProviderArgo, ParseModels: (*Server).parseArgoModelsForProvider}, true
+	default:
+		return modelProviderCapability{}, false
+	}
+}
+
+func (capability modelProviderCapability) displayName() string {
+	if info, ok := providers.InfoFor(capability.Provider); ok {
+		return info.DisplayName
+	}
+	if capability.Provider != "" {
+		return capability.Provider
+	}
+	return "unknown"
+}
+
 // handleModelsNonOK centralizes error handling for non-200 status codes from models endpoints
 // Uses centralized error helpers for consistency with streaming error handling
 func (s *Server) handleModelsNonOK(ctx context.Context, provider string, status int, body []byte) error {

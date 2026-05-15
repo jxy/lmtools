@@ -9,34 +9,33 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
 
 type responsesStreamWriter struct {
-	sse               *SSEWriter
-	ctx               context.Context
-	responseID        string
-	model             string
-	conversationID    string
-	createdAt         int64
-	sequence          int
-	output            []OpenAIResponsesOutputItem
-	outputText        string
-	usage             *OpenAIResponsesUsage
-	serviceTier       string
-	incompleteReason  string
-	responseError     interface{}
-	started           bool
-	messageIndex      *int
-	messageItemID     string
-	messageText       string
-	messagePartOpen   bool
-	toolItems         map[int]*responsesStreamToolItemState
-	toolByOutput      map[int]*responsesStreamToolItemState
-	reasoningItems    map[int]*responsesReasoningItemState
-	reasoningByOutput map[int]*responsesReasoningItemState
-	toolNameRegistry  responseToolNameRegistry
+	sse              *SSEWriter
+	ctx              context.Context
+	responseID       string
+	model            string
+	conversationID   string
+	createdAt        int64
+	sequence         int
+	output           []OpenAIResponsesOutputItem
+	outputText       string
+	usage            *OpenAIResponsesUsage
+	serviceTier      string
+	incompleteReason string
+	responseError    interface{}
+	started          bool
+	messageIndex     *int
+	messageItemID    string
+	messageText      string
+	messagePartOpen  bool
+	toolItems        map[int]*responsesStreamToolItemState
+	reasoningItems   map[int]*responsesReasoningItemState
+	toolNameRegistry responseToolNameRegistry
 }
 
 type responsesStreamToolItemState struct {
@@ -78,15 +77,13 @@ func newResponsesStreamWriter(w http.ResponseWriter, ctx context.Context, origin
 		return nil, err
 	}
 	return &responsesStreamWriter{
-		sse:               sse,
-		ctx:               ctx,
-		responseID:        generateUUID("resp_"),
-		model:             originalModel,
-		createdAt:         time.Now().Unix(),
-		toolItems:         make(map[int]*responsesStreamToolItemState),
-		toolByOutput:      make(map[int]*responsesStreamToolItemState),
-		reasoningItems:    make(map[int]*responsesReasoningItemState),
-		reasoningByOutput: make(map[int]*responsesReasoningItemState),
+		sse:            sse,
+		ctx:            ctx,
+		responseID:     generateUUID("resp_"),
+		model:          originalModel,
+		createdAt:      time.Now().Unix(),
+		toolItems:      make(map[int]*responsesStreamToolItemState),
+		reasoningItems: make(map[int]*responsesReasoningItemState),
 	}, nil
 }
 
@@ -273,7 +270,6 @@ func (w *responsesStreamWriter) ensureToolItem(index int, id, name, itemType, to
 		Name:        outputName,
 	}
 	w.toolItems[index] = state
-	w.toolByOutput[state.OutputIndex] = state
 	item := OpenAIResponsesOutputItem{
 		ID:        state.ItemID,
 		Type:      itemType,
@@ -341,13 +337,13 @@ func (w *responsesStreamWriter) WriteCustomToolCallDelta(index int, id, name, in
 }
 
 func (w *responsesStreamWriter) closeToolItems(status string) error {
-	for i := 0; i < len(w.output); i++ {
-		item := w.output[i]
-		if (item.Type != "function_call" && item.Type != "custom_tool_call") || item.Status == "completed" || item.Status == "incomplete" {
+	for _, state := range w.orderedToolStates() {
+		i := state.OutputIndex
+		if i < 0 || i >= len(w.output) {
 			continue
 		}
-		state := w.toolByOutput[i]
-		if state == nil {
+		item := w.output[i]
+		if (item.Type != "function_call" && item.Type != "custom_tool_call") || item.Status == "completed" || item.Status == "incomplete" {
 			continue
 		}
 		item.Status = status
@@ -405,7 +401,6 @@ func (w *responsesStreamWriter) StartReasoningBlock(index int, block AnthropicCo
 		Data:        block.Data,
 	}
 	w.reasoningItems[index] = state
-	w.reasoningByOutput[state.OutputIndex] = state
 	item := OpenAIResponsesOutputItem{
 		ID:      itemID,
 		Type:    "reasoning",
@@ -452,8 +447,12 @@ func (w *responsesStreamWriter) CloseReasoningBlock(index int, status string) er
 }
 
 func (w *responsesStreamWriter) closeReasoningItems(status string) error {
-	for index := range w.reasoningItems {
-		item := w.output[w.reasoningItems[index].OutputIndex]
+	for _, index := range w.orderedReasoningIndexes() {
+		state := w.reasoningItems[index]
+		if state == nil || state.OutputIndex < 0 || state.OutputIndex >= len(w.output) {
+			continue
+		}
+		item := w.output[state.OutputIndex]
 		if item.Status == "completed" || item.Status == "incomplete" {
 			continue
 		}
@@ -546,6 +545,12 @@ func responsesStreamFailurePayload(streamErr error) map[string]interface{} {
 }
 
 func (w *responsesStreamWriter) Blocks() []core.Block {
+	reasoningByOutput := make(map[int]*responsesReasoningItemState, len(w.reasoningItems))
+	for _, state := range w.reasoningItems {
+		if state != nil {
+			reasoningByOutput[state.OutputIndex] = state
+		}
+	}
 	blocks := make([]core.Block, 0, len(w.output))
 	for i, item := range w.output {
 		switch item.Type {
@@ -556,7 +561,7 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 				}
 			}
 		case "reasoning":
-			if state := w.reasoningByOutput[i]; state != nil {
+			if state := reasoningByOutput[i]; state != nil {
 				if block := state.toCoreBlock(); block != nil {
 					blocks = append(blocks, block)
 				}
@@ -583,6 +588,30 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 		}
 	}
 	return blocks
+}
+
+func (w *responsesStreamWriter) orderedToolStates() []*responsesStreamToolItemState {
+	states := make([]*responsesStreamToolItemState, 0, len(w.toolItems))
+	for _, state := range w.toolItems {
+		if state != nil {
+			states = append(states, state)
+		}
+	}
+	sort.Slice(states, func(i, j int) bool {
+		return states[i].OutputIndex < states[j].OutputIndex
+	})
+	return states
+}
+
+func (w *responsesStreamWriter) orderedReasoningIndexes() []int {
+	indexes := make([]int, 0, len(w.reasoningItems))
+	for index := range w.reasoningItems {
+		indexes = append(indexes, index)
+	}
+	sort.Slice(indexes, func(i, j int) bool {
+		return w.reasoningItems[indexes[i]].OutputIndex < w.reasoningItems[indexes[j]].OutputIndex
+	})
+	return indexes
 }
 
 func (s *responsesReasoningItemState) toCoreBlock() core.Block {
@@ -875,18 +904,14 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 
 func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io.Reader, writer *responsesStreamWriter) (string, error) {
 	finishReason := "stop"
-	type customFunctionBuffer struct {
+	type toolDeltaState struct {
 		id        string
 		name      string
 		arguments string
+		custom    bool
+		started   bool
 	}
-	type pendingFunctionBuffer struct {
-		id        string
-		arguments string
-	}
-	customFunctionBuffers := make(map[int]*customFunctionBuffer)
-	pendingFunctionBuffers := make(map[int]*pendingFunctionBuffer)
-	regularFunctionStarted := make(map[int]bool)
+	toolStates := make(map[int]*toolDeltaState)
 	scanner := NewSSEScanner(body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -916,7 +941,15 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 				}
 				continue
 			}
-			if state, exists := customFunctionBuffers[tc.Index]; exists {
+			state := toolStates[tc.Index]
+			if state == nil {
+				state = &toolDeltaState{}
+				toolStates[tc.Index] = state
+			}
+			if tc.ID != "" {
+				state.id = tc.ID
+			}
+			if state.custom {
 				if tc.ID != "" {
 					state.id = tc.ID
 				}
@@ -926,47 +959,34 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 				state.arguments += tc.Arguments
 				continue
 			}
-			if regularFunctionStarted[tc.Index] {
+			if state.started {
 				if err := writer.WriteFunctionCallDelta(tc.Index, tc.ID, tc.Name, tc.Arguments); err != nil {
 					return "", err
 				}
 				continue
 			}
 			if tc.Name == "" {
-				state := pendingFunctionBuffers[tc.Index]
-				if state == nil {
-					state = &pendingFunctionBuffer{}
-					pendingFunctionBuffers[tc.Index] = state
-				}
-				if tc.ID != "" {
-					state.id = tc.ID
-				}
 				state.arguments += tc.Arguments
 				continue
 			}
+			state.name = tc.Name
 			if isResponsesCustomToolName(writer.toolNameRegistry, tc.Name) {
-				state := &customFunctionBuffer{}
-				if pending := pendingFunctionBuffers[tc.Index]; pending != nil {
-					state.id = pending.id
-					state.arguments = pending.arguments
-					delete(pendingFunctionBuffers, tc.Index)
-				}
-				if tc.ID != "" {
-					state.id = tc.ID
-				}
-				state.name = tc.Name
+				state.custom = true
 				state.arguments += tc.Arguments
-				customFunctionBuffers[tc.Index] = state
 				continue
 			}
-			if pending := pendingFunctionBuffers[tc.Index]; pending != nil {
-				if err := writer.WriteFunctionCallDelta(tc.Index, pending.id, tc.Name, pending.arguments); err != nil {
+			id := tc.ID
+			if id == "" {
+				id = state.id
+			}
+			if state.arguments != "" {
+				if err := writer.WriteFunctionCallDelta(tc.Index, id, tc.Name, state.arguments); err != nil {
 					return "", err
 				}
-				delete(pendingFunctionBuffers, tc.Index)
+				state.arguments = ""
 			}
-			regularFunctionStarted[tc.Index] = true
-			if err := writer.WriteFunctionCallDelta(tc.Index, tc.ID, tc.Name, tc.Arguments); err != nil {
+			state.started = true
+			if err := writer.WriteFunctionCallDelta(tc.Index, id, tc.Name, tc.Arguments); err != nil {
 				return "", err
 			}
 		}
@@ -977,19 +997,26 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	for index, state := range pendingFunctionBuffers {
-		if state == nil {
-			continue
-		}
-		if err := writer.WriteFunctionCallDelta(index, state.id, "", state.arguments); err != nil {
-			return "", err
-		}
+	indexes := make([]int, 0, len(toolStates))
+	for index := range toolStates {
+		indexes = append(indexes, index)
 	}
-	for index, state := range customFunctionBuffers {
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		state := toolStates[index]
 		if state == nil {
 			continue
 		}
-		if err := writer.WriteCustomToolCallDelta(index, state.id, state.name, anthropicCustomToolInputFromJSON(state.arguments)); err != nil {
+		if state.custom {
+			if err := writer.WriteCustomToolCallDelta(index, state.id, state.name, anthropicCustomToolInputFromJSON(state.arguments)); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if state.started {
+			continue
+		}
+		if err := writer.WriteFunctionCallDelta(index, state.id, state.name, state.arguments); err != nil {
 			return "", err
 		}
 	}

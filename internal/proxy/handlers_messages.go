@@ -41,42 +41,38 @@ func (s *Server) parseAnthropicTokenCountRequest(r *http.Request) (*AnthropicTok
 
 // handleMessages processes the main messages endpoint
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
-	var anthReq *AnthropicRequest
-	info, route, ok := s.handlePOSTEndpoint(
-		w,
-		r,
-		"Anthropic messages endpoint",
-		func(r *http.Request) (*endpointRequestInfo, error) {
-			req, err := s.parseAnthropicRequest(r)
-			if err != nil {
-				return nil, err
-			}
-			anthReq = req
-			return &endpointRequestInfo{
-				Model:        req.Model,
-				Stream:       req.Stream,
-				MessageCount: len(req.Messages),
-				ToolCount:    len(req.Tools),
-				Payload:      req,
-				Tools:        req.Tools,
-			}, nil
-		},
-		endpointErrorHandlers{
-			MethodNotAllowed: func() {
-				s.sendAnthropicError(w, ErrTypeInvalidRequest, "Method not allowed", http.StatusMethodNotAllowed)
-			},
-			BadRequest: func(message string) {
-				s.sendAnthropicError(w, ErrTypeInvalidRequest, message, http.StatusBadRequest)
-			},
-			ConfigError: func(message string) {
-				s.sendAnthropicError(w, ErrTypeInvalidRequest, message, http.StatusInternalServerError)
-			},
-			AuthError: func(message string) {
-				s.sendAnthropicError(w, ErrTypeAuthentication, message, http.StatusUnauthorized)
-			},
-		},
-	)
-	if !ok {
+	ctx := r.Context()
+	log := logger.From(ctx)
+	log.Infof("%s %s | Anthropic messages endpoint", r.Method, r.URL.Path)
+
+	if r.Method != http.MethodPost {
+		s.sendAnthropicError(w, ErrTypeInvalidRequest, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	anthReq, err := s.parseAnthropicRequest(r)
+	if err != nil {
+		log.Errorf("Failed to parse request: %s", err)
+		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
+		return
+	}
+	info := endpointRequestInfo{
+		Model:        anthReq.Model,
+		Stream:       anthReq.Stream,
+		MessageCount: len(anthReq.Messages),
+		ToolCount:    len(anthReq.Tools),
+		Payload:      anthReq,
+		Tools:        anthReq.Tools,
+	}
+	logEndpointRequest(ctx, info)
+
+	route, routeErr := s.resolveEndpointRoute(ctx, info.Model)
+	if routeErr != nil {
+		if routeErr.Kind == endpointRouteAuthError {
+			s.sendAnthropicError(w, ErrTypeAuthentication, routeErr.Message, http.StatusUnauthorized)
+			return
+		}
+		s.sendAnthropicError(w, ErrTypeInvalidRequest, routeErr.Message, http.StatusInternalServerError)
 		return
 	}
 
@@ -221,17 +217,18 @@ func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info
 }
 
 func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *AnthropicRequest, provider, originalModel string) (*AnthropicResponse, error) {
-	policy, ok := anthropicForwardingPolicyFor(provider)
-	if !ok {
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderOpenAI:
+		return s.forwardAnthropicViaOpenAI(ctx, anthReq, originalModel)
+	case constants.ProviderAnthropic:
+		return s.forwardAnthropicViaAnthropic(ctx, anthReq, originalModel)
+	case constants.ProviderGoogle:
+		return s.forwardAnthropicViaGoogle(ctx, anthReq, originalModel)
+	case constants.ProviderArgo:
+		return s.forwardAnthropicViaArgo(ctx, anthReq, originalModel)
+	default:
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
-
-	forward, err := policy.requireResponseForwarder(s)
-	if err != nil {
-		return nil, err
-	}
-
-	return forward(ctx, anthReq, originalModel)
 }
 
 func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
@@ -312,16 +309,17 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	policy, ok := anthropicForwardingPolicyFor(provider)
-	if !ok {
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderOpenAI:
+		err = s.streamFromOpenAI(ctx, anthReq, handler)
+	case constants.ProviderAnthropic:
+		err = s.streamFromAnthropic(ctx, anthReq, handler)
+	case constants.ProviderGoogle:
+		err = s.streamFromGoogle(ctx, anthReq, handler)
+	case constants.ProviderArgo:
+		err = s.streamFromArgo(ctx, anthReq, handler)
+	default:
 		err = fmt.Errorf("unknown provider: %s", provider)
-	} else {
-		forward, lookupErr := policy.requireStreamForwarder(s)
-		if lookupErr != nil {
-			err = lookupErr
-		} else {
-			err = forward(ctx, anthReq, handler)
-		}
 	}
 
 	if err != nil {
