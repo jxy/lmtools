@@ -154,7 +154,7 @@ func (s *Server) sendOpenAIResponsesRequest(ctx context.Context, reqBody *OpenAI
 		RawBody:      rawBody,
 		ExtraHeaders: extraHeaders,
 		Configure: func(req *http.Request) error {
-			return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.OpenAIAPIKey)
+			return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 		},
 	})
 	return resp, err

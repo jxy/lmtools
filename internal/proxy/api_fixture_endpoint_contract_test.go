@@ -175,7 +175,7 @@ func TestMessagesCountTokensContract(t *testing.T) {
 		config := &Config{
 			Provider:           constants.ProviderArgo,
 			ProviderURL:        backend.URL,
-			ArgoAPIKey:         fixtureArgoAPIKey,
+			ProviderKeySet:     ProviderKeySet{ArgoAPIKey: fixtureArgoAPIKey},
 			ArgoUser:           "fixture-user",
 			MaxRequestBodySize: fixtureMaxBodySize,
 		}
@@ -222,7 +222,7 @@ func TestMessagesCountTokensContract(t *testing.T) {
 		config := &Config{
 			Provider:           constants.ProviderOpenAI,
 			ProviderURL:        "http://unused.local",
-			OpenAIAPIKey:       fixtureOpenAIKey,
+			ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: fixtureOpenAIKey},
 			MaxRequestBodySize: fixtureMaxBodySize,
 		}
 		server, cleanup := NewTestServer(t, config)
@@ -380,11 +380,13 @@ func fixtureProxyConfig(meta apifixtures.CaseMeta, clientFamily, targetBase, pro
 	cfg := &Config{
 		ProviderURL:        providerURL,
 		MaxRequestBodySize: fixtureMaxBodySize,
-		OpenAIAPIKey:       fixtureOpenAIKey,
-		AnthropicAPIKey:    fixtureAnthropicKey,
-		GoogleAPIKey:       fixtureGoogleKey,
-		ArgoAPIKey:         fixtureArgoAPIKey,
-		ArgoUser:           argoUser,
+		ProviderKeySet: ProviderKeySet{
+			OpenAIAPIKey:    fixtureOpenAIKey,
+			AnthropicAPIKey: fixtureAnthropicKey,
+			GoogleAPIKey:    fixtureGoogleKey,
+			ArgoAPIKey:      fixtureArgoAPIKey,
+		},
+		ArgoUser: argoUser,
 	}
 	if shouldMapFixtureModel(clientFamily, targetBase) && targetModel != "" {
 		cfg.ModelMapRules = []ModelMapRule{{Pattern: ".*", Model: targetModel}}

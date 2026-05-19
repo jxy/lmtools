@@ -22,7 +22,7 @@ func TestIntegrationBasicChat(t *testing.T) {
 	t.Cleanup(openAIMock.Close)
 
 	config := &Config{
-		OpenAIAPIKey:       "test-openai-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-openai-key"},
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        openAIMock.URL + "/v1",
 		MaxRequestBodySize: 10 * 1024 * 1024,
@@ -464,7 +464,7 @@ func TestIntegrationSimulatedStreamingWithTools(t *testing.T) {
 	t.Cleanup(openAIMock.Close)
 
 	config := &Config{
-		OpenAIAPIKey:       "test-openai-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-openai-key"},
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        openAIMock.URL + "/v1",
 		MaxRequestBodySize: 10 * 1024 * 1024,
@@ -653,8 +653,10 @@ func TestCustomProviderURL(t *testing.T) {
 				}))
 
 				config := &Config{
-					OpenAIAPIKey:       "test-key",
-					GoogleAPIKey:       "test-key",
+					ProviderKeySet: ProviderKeySet{
+						OpenAIAPIKey: "test-key",
+						GoogleAPIKey: "test-key",
+					},
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderOpenAI,
@@ -701,8 +703,10 @@ func TestCustomProviderURL(t *testing.T) {
 				}))
 
 				config := &Config{
-					OpenAIAPIKey:       "test-key",
-					GoogleAPIKey:       "test-key",
+					ProviderKeySet: ProviderKeySet{
+						OpenAIAPIKey: "test-key",
+						GoogleAPIKey: "test-key",
+					},
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderGoogle,
@@ -752,8 +756,10 @@ func TestCustomProviderURL(t *testing.T) {
 				}))
 
 				config := &Config{
-					OpenAIAPIKey:       "test-key",
-					GoogleAPIKey:       "test-key",
+					ProviderKeySet: ProviderKeySet{
+						OpenAIAPIKey: "test-key",
+						GoogleAPIKey: "test-key",
+					},
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderArgo,
@@ -801,8 +807,10 @@ func TestCustomProviderURL(t *testing.T) {
 				}))
 
 				config := &Config{
-					OpenAIAPIKey:       "test-key",
-					GoogleAPIKey:       "test-key",
+					ProviderKeySet: ProviderKeySet{
+						OpenAIAPIKey: "test-key",
+						GoogleAPIKey: "test-key",
+					},
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					Provider:           constants.ProviderArgo,
@@ -836,8 +844,10 @@ func TestCustomProviderURL(t *testing.T) {
 				}))
 
 				config := &Config{
-					OpenAIAPIKey:       "test-key",
-					GoogleAPIKey:       "test-key",
+					ProviderKeySet: ProviderKeySet{
+						OpenAIAPIKey: "test-key",
+						GoogleAPIKey: "test-key",
+					},
 					ArgoUser:           "testuser",
 					ArgoEnv:            "test",
 					ArgoLegacy:         true,

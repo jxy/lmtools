@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/providerconfig"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,11 +15,13 @@ import (
 
 func newMockConfig(mock *MockServer, model string) config.Config {
 	return config.Config{
-		Provider:    constants.ProviderArgo,
-		ArgoUser:    "testuser",
-		Model:       model,
-		ProviderURL: mock.URL(),
-		Timeout:     5 * time.Second,
+		Options: providerconfig.Options{
+			Provider:    constants.ProviderArgo,
+			ArgoUser:    "testuser",
+			ProviderURL: mock.URL(),
+		},
+		Model:   model,
+		Timeout: 5 * time.Second,
 	}
 }
 

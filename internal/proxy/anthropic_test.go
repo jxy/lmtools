@@ -26,8 +26,8 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		{
 			name: "anthropic provider with claude model passes through without model map",
 			config: &Config{
-				Provider:        constants.ProviderAnthropic,
-				AnthropicAPIKey: "test-key",
+				Provider:       constants.ProviderAnthropic,
+				ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-key"},
 			},
 			inputModel:   "claude-3-opus-20240229",
 			wantProvider: constants.ProviderAnthropic,
@@ -36,8 +36,8 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		{
 			name: "anthropic provider with haiku model passes through without model map",
 			config: &Config{
-				Provider:        constants.ProviderAnthropic,
-				AnthropicAPIKey: "test-key",
+				Provider:       constants.ProviderAnthropic,
+				ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-key"},
 			},
 			inputModel:   "claude-3-haiku-20240307",
 			wantProvider: constants.ProviderAnthropic,
@@ -46,9 +46,9 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		{
 			name: "anthropic provider uses explicit model map",
 			config: &Config{
-				Provider:        constants.ProviderAnthropic,
-				AnthropicAPIKey: "test-key",
-				ModelMapRules:   []ModelMapRule{mustModelMapRule(t, "^claude-3-opus.*=claude-3-opus-20240229")},
+				Provider:       constants.ProviderAnthropic,
+				ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-key"},
+				ModelMapRules:  []ModelMapRule{mustModelMapRule(t, "^claude-3-opus.*=claude-3-opus-20240229")},
 			},
 			inputModel:   "claude-3-opus",
 			wantProvider: constants.ProviderAnthropic,
@@ -57,8 +57,8 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		{
 			name: "anthropic provider with non-claude model",
 			config: &Config{
-				Provider:        constants.ProviderAnthropic,
-				AnthropicAPIKey: "test-key",
+				Provider:       constants.ProviderAnthropic,
+				ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-key"},
 			},
 			inputModel:   "gpt-4",
 			wantProvider: constants.ProviderAnthropic,
@@ -67,9 +67,9 @@ func TestMapperAnthropicProvider(t *testing.T) {
 		{
 			name: "anthropic provider maps haiku only with explicit model map",
 			config: &Config{
-				Provider:        constants.ProviderAnthropic,
-				AnthropicAPIKey: "test-key",
-				ModelMapRules:   []ModelMapRule{mustModelMapRule(t, "^claude-3-haiku.*=claude-3-haiku-20240307")},
+				Provider:       constants.ProviderAnthropic,
+				ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-key"},
+				ModelMapRules:  []ModelMapRule{mustModelMapRule(t, "^claude-3-haiku.*=claude-3-haiku-20240307")},
 			},
 			inputModel:   "claude-3-haiku-20240307",
 			wantProvider: constants.ProviderAnthropic,
@@ -103,8 +103,8 @@ func TestConfigValidationAnthropic(t *testing.T) {
 		{
 			name: "valid anthropic config",
 			config: &Config{
-				Provider:        constants.ProviderAnthropic,
-				AnthropicAPIKey: "test-key",
+				Provider:       constants.ProviderAnthropic,
+				ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-key"},
 			},
 			wantErr: false,
 		},
@@ -190,9 +190,9 @@ func TestForwardToAnthropic(t *testing.T) {
 
 	// Create server with mock config
 	config := &Config{
-		Provider:        constants.ProviderAnthropic,
-		AnthropicAPIKey: "test-anthropic-key",
-		ProviderURL:     mockServer.URL,
+		Provider:       constants.ProviderAnthropic,
+		ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-anthropic-key"},
+		ProviderURL:    mockServer.URL,
 	}
 
 	s := &Server{
@@ -295,9 +295,9 @@ func TestStreamFromAnthropic(t *testing.T) {
 
 	// Create server with mock config
 	config := &Config{
-		Provider:        constants.ProviderAnthropic,
-		AnthropicAPIKey: "test-anthropic-key",
-		ProviderURL:     mockServer.URL,
+		Provider:       constants.ProviderAnthropic,
+		ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "test-anthropic-key"},
+		ProviderURL:    mockServer.URL,
 	}
 
 	s := &Server{
@@ -402,7 +402,7 @@ func TestAnthropicIntegration(t *testing.T) {
 	// Create apiproxy server
 	config := &Config{
 		Provider:            constants.ProviderAnthropic,
-		AnthropicAPIKey:     "test-key",
+		ProviderKeySet:      ProviderKeySet{AnthropicAPIKey: "test-key"},
 		ProviderURL:         mockAnthropic.URL,
 		MaxRequestBodySize:  10 * 1024 * 1024, // 10MB
 		MaxResponseBodySize: 10 * 1024 * 1024, // 10MB

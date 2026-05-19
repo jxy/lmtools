@@ -33,8 +33,10 @@ func SetupE2ETestSuite(t *testing.T) *E2ETestSuite {
 
 	// Create config
 	config := &Config{
-		OpenAIAPIKey:       "test-openai-key",
-		GoogleAPIKey:       "test-google-key",
+		ProviderKeySet: ProviderKeySet{
+			OpenAIAPIKey: "test-openai-key",
+			GoogleAPIKey: "test-google-key",
+		},
 		ArgoUser:           "testuser",
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        openAIMock.URL + "/v1/chat/completions",
@@ -1007,10 +1009,10 @@ func TestProviderFlagPrecedence(t *testing.T) {
 
 			// Set credentials based on test case
 			if tc.hasOpenAI {
-				config.OpenAIAPIKey = "test-key"
+				config.ProviderKeySet.OpenAIAPIKey = "test-key"
 			}
 			if tc.hasGoogle {
-				config.GoogleAPIKey = "test-key"
+				config.ProviderKeySet.GoogleAPIKey = "test-key"
 			}
 			if tc.hasArgo {
 				config.ArgoUser = "testuser"
@@ -1151,13 +1153,15 @@ func TestE2ERealAPIs(t *testing.T) {
 	// This test would use real API keys and endpoints
 	// Only run in CI/CD or with proper credentials
 	config := &Config{
-		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
-		GoogleAPIKey: os.Getenv("GOOGLE_API_KEY"),
-		ArgoUser:     os.Getenv("ARGO_USER"),
+		ProviderKeySet: ProviderKeySet{
+			OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+			GoogleAPIKey: os.Getenv("GOOGLE_API_KEY"),
+		},
+		ArgoUser: os.Getenv("ARGO_USER"),
 		// ... other config
 	}
 
-	if config.OpenAIAPIKey == "" || config.GoogleAPIKey == "" {
+	if config.ProviderKeySet.OpenAIAPIKey == "" || config.ProviderKeySet.GoogleAPIKey == "" {
 		t.Skip("Missing API keys for real API tests")
 	}
 

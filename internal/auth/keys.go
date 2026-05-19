@@ -12,6 +12,18 @@ import (
 	"strings"
 )
 
+type ProviderKey struct {
+	Provider string
+	Value    string
+}
+
+type ProviderKeySet struct {
+	AnthropicAPIKey string
+	OpenAIAPIKey    string
+	GoogleAPIKey    string
+	ArgoAPIKey      string
+}
+
 // ReadKeyFile reads an API key from a file and returns it trimmed
 func ReadKeyFile(path string) (string, error) {
 	if path == "" {
@@ -30,6 +42,59 @@ func ReadKeyFile(path string) (string, error) {
 	}
 
 	return key, nil
+}
+
+func NewProviderKey(provider, value string) (ProviderKey, error) {
+	normalized := constants.NormalizeProvider(provider)
+	if !constants.IsValidProvider(normalized) {
+		return ProviderKey{}, fmt.Errorf("unknown provider: %s", provider)
+	}
+	if strings.TrimSpace(value) == "" {
+		return ProviderKey{}, errors.WrapError("validate API key", stdErrors.New("API key is empty"))
+	}
+	return ProviderKey{Provider: normalized, Value: value}, nil
+}
+
+func LoadProviderKeyFile(provider, path string) (ProviderKey, error) {
+	key, err := ReadKeyFile(path)
+	if err != nil {
+		return ProviderKey{}, err
+	}
+	return NewProviderKey(provider, key)
+}
+
+func (k ProviderKey) Apply(req *http.Request) error {
+	return ApplyProviderCredentials(req, k.Provider, k.Value)
+}
+
+func (k ProviderKey) Set() ProviderKeySet {
+	switch k.Provider {
+	case constants.ProviderAnthropic:
+		return ProviderKeySet{AnthropicAPIKey: k.Value}
+	case constants.ProviderOpenAI:
+		return ProviderKeySet{OpenAIAPIKey: k.Value}
+	case constants.ProviderGoogle:
+		return ProviderKeySet{GoogleAPIKey: k.Value}
+	case constants.ProviderArgo:
+		return ProviderKeySet{ArgoAPIKey: k.Value}
+	default:
+		return ProviderKeySet{}
+	}
+}
+
+func (s ProviderKeySet) KeyForProvider(provider string) string {
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderAnthropic:
+		return s.AnthropicAPIKey
+	case constants.ProviderOpenAI:
+		return s.OpenAIAPIKey
+	case constants.ProviderGoogle:
+		return s.GoogleAPIKey
+	case constants.ProviderArgo:
+		return s.ArgoAPIKey
+	default:
+		return ""
+	}
 }
 
 // HashAPIKey creates a hash of an API key for use as a pseudo-username

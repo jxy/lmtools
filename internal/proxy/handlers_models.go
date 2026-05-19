@@ -8,6 +8,8 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/modelcatalog"
+	"lmtools/internal/providerconfig"
+	"lmtools/internal/providerrequest"
 	"lmtools/internal/providers"
 	"net/http"
 	neturl "net/url"
@@ -167,18 +169,33 @@ func (s *Server) fetchModels(ctx context.Context, url string, prepareRequest fun
 func (s *Server) fetchModelsWithCapability(ctx context.Context, capability modelProviderCapability) ([]ModelItem, error) {
 	log := logger.From(ctx)
 
-	url, err := providers.ResolveModelsURL(s.config.Provider, s.config.ProviderURL, s.config.ArgoEnv)
+	var providerKey *auth.ProviderKey
+	if apiKey := s.config.ProviderKeySet.KeyForProvider(s.config.Provider); apiKey != "" {
+		key, err := auth.NewProviderKey(s.config.Provider, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		providerKey = &key
+	}
+	req, err := providerrequest.BuildModelsRequest(providerrequest.ModelsRequestOptions{
+		ProviderOptions: providerconfig.Options{
+			Provider:    s.config.Provider,
+			ProviderURL: s.config.ProviderURL,
+			ArgoEnv:     s.config.ArgoEnv,
+			ArgoLegacy:  s.config.ArgoLegacy,
+		},
+		ProviderKey: providerKey,
+	})
 	if err != nil {
 		return nil, err
 	}
+	url := req.URL.String()
 
 	sanitizedURL := sanitizeURLForLogging(url)
 	log.Debugf("Fetching %s models from: %s", capability.displayName(), sanitizedURL)
 
-	prepareRequest := func(req *http.Request) {
-		if apiKey := s.apiKeyForProvider(s.config.Provider); apiKey != "" {
-			_ = auth.ApplyProviderCredentials(req, s.config.Provider, apiKey)
-		}
+	prepareRequest := func(pageReq *http.Request) {
+		pageReq.Header = req.Header.Clone()
 	}
 
 	return s.fetchModelPages(ctx, capability, url, prepareRequest)
@@ -296,23 +313,6 @@ func (s *Server) fetchGoogleModelPages(ctx context.Context, capability modelProv
 	}
 
 	return nil, fmt.Errorf("google models pagination exceeded %d pages", maxModelListPages)
-}
-
-func (s *Server) apiKeyForProvider(provider string) string {
-	if s == nil || s.config == nil {
-		return ""
-	}
-
-	switch provider {
-	case constants.ProviderOpenAI:
-		return s.config.OpenAIAPIKey
-	case constants.ProviderAnthropic:
-		return s.config.AnthropicAPIKey
-	case constants.ProviderGoogle:
-		return s.config.GoogleAPIKey
-	default:
-		return ""
-	}
 }
 
 const maxModelListPages = 100

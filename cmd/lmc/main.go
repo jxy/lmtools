@@ -7,7 +7,6 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"io"
-	"lmtools/internal/auth"
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
@@ -15,6 +14,7 @@ import (
 	"lmtools/internal/limitio"
 	"lmtools/internal/logger"
 	"lmtools/internal/modelcatalog"
+	"lmtools/internal/providerrequest"
 	"lmtools/internal/providers"
 	"lmtools/internal/retry"
 	"lmtools/internal/session"
@@ -661,41 +661,10 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 }
 
 func buildListModelsRequest(cfg config.Config) (*http.Request, error) {
-	provider := cfg.Provider
-	provider = providers.ResolveProvider(provider)
-
-	url, err := providers.ResolveModelsURLWithArgoOptions(provider, cfg.ProviderURL, cfg.ArgoEnv, cfg.ArgoLegacy)
-	if err != nil {
-		return nil, errors.WrapError("validate provider", err)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, errors.WrapError("create request", err)
-	}
-
-	// Add authentication headers if needed
-	if providers.RequiresAPIKey(provider) && cfg.ProviderURL == "" {
-		// Standard non-Argo providers need API key
-		if cfg.APIKeyFile == "" {
-			return nil, errors.WrapError("validate config", fmt.Errorf("-api-key-file is required for %s provider when listing models", provider))
-		}
-
-		apiKey, err := auth.ReadKeyFile(cfg.APIKeyFile)
-		if err != nil {
-			return nil, errors.WrapError("read API key", err)
-		}
-
-		if err := auth.ApplyProviderCredentials(req, provider, apiKey); err != nil {
-			if provider == constants.ProviderGoogle {
-				return nil, errors.WrapError("apply Google API key", err)
-			}
-			return nil, errors.WrapError("apply provider credentials", err)
-		}
-	}
-
-	return req, nil
+	return providerrequest.BuildModelsRequest(providerrequest.ModelsRequestOptions{
+		ProviderOptions:                 cfg.Options,
+		RequireAPIKeyWithoutProviderURL: true,
+	})
 }
 
 func parseModelsForDisplay(provider string, data []byte) ([]modelcatalog.Item, error) {

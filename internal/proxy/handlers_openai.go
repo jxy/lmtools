@@ -207,7 +207,7 @@ func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
-	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.OpenAI, s.config.OpenAIAPIKey, "OpenAI", constants.ProviderOpenAI)
+	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.OpenAI, s.config.ProviderKeySet.OpenAIAPIKey, "OpenAI", constants.ProviderOpenAI)
 }
 
 func (s *Server) forwardArgoOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
@@ -241,7 +241,7 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 
 	var googleResp GoogleResponse
 	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
-		req.Header.Set("x-goog-api-key", s.config.GoogleAPIKey)
+		req.Header.Set("x-goog-api-key", s.config.ProviderKeySet.GoogleAPIKey)
 	}, &googleResp, "Google")
 	if err != nil {
 		s.sendProviderErrorAsOpenAI(ctx, w, constants.ProviderGoogle, err)

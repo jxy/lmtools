@@ -32,7 +32,10 @@ func TestConfigureArgoOpenAIRequestUsesArgoUserAsBearerToken(t *testing.T) {
 }
 
 func TestConfigureArgoRequestPrefersExplicitAPIKey(t *testing.T) {
-	server := &Server{config: &Config{ArgoAPIKey: "file-key", ArgoUser: "argo-user-key"}}
+	server := &Server{config: &Config{
+		ProviderKeySet: ProviderKeySet{ArgoAPIKey: "file-key"},
+		ArgoUser:       "argo-user-key",
+	}}
 	req := httptest.NewRequest(http.MethodPost, "http://argo.test/v1/messages", nil)
 
 	server.configureArgoAnthropicRequest(req)

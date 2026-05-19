@@ -48,7 +48,7 @@ func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
 	// Create proxy config with increased body size limit
 	config := &Config{
 		ProviderURL:        mockServer.URL + "/v1/chat/completions",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		Provider:           constants.ProviderOpenAI,
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}
@@ -107,6 +107,91 @@ func TestOpenAIChatCompletionsEndpoint(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatCompletionsProviderURLAuthentication(t *testing.T) {
+	tests := []struct {
+		name     string
+		apiKey   string
+		wantAuth string
+	}{
+		{
+			name:     "api key provided",
+			apiKey:   "test-key",
+			wantAuth: "Bearer test-key",
+		},
+		{
+			name: "provider URL without api key remains allowed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotAuth string
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/chat/completions" {
+					t.Errorf("path = %q, want /v1/chat/completions", r.URL.Path)
+				}
+				gotAuth = r.Header.Get("Authorization")
+				resp := OpenAIResponse{
+					ID:      "chatcmpl-test",
+					Object:  "chat.completion",
+					Created: 1234567890,
+					Model:   "gpt-4",
+					Choices: []OpenAIChoice{
+						{
+							Index: 0,
+							Message: OpenAIMessage{
+								Role:    "assistant",
+								Content: "ok",
+							},
+							FinishReason: "stop",
+						},
+					},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					t.Fatalf("encode response: %v", err)
+				}
+			}))
+			defer mockServer.Close()
+
+			config := &Config{
+				ProviderURL:        mockServer.URL + "/v1/chat/completions",
+				ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: tt.apiKey},
+				Provider:           constants.ProviderOpenAI,
+				MaxRequestBodySize: 100 * 1024 * 1024,
+			}
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
+
+			reqBody := OpenAIRequest{
+				Model: "gpt-4",
+				Messages: []OpenAIMessage{
+					{
+						Role:    "user",
+						Content: "Hello!",
+					},
+				},
+				MaxTokens: intPtr(100),
+			}
+			body, err := json.Marshal(reqBody)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			if gotAuth != tt.wantAuth {
+				t.Fatalf("Authorization = %q, want %q", gotAuth, tt.wantAuth)
+			}
+		})
+	}
+}
+
 func TestOpenAIChatCompletionsWithTools(t *testing.T) {
 	// Create mock provider
 	mockProvider := NewMockProvider(t, constants.ProviderOpenAI)
@@ -151,7 +236,7 @@ func TestOpenAIChatCompletionsWithTools(t *testing.T) {
 	// Create proxy config with increased body size limit
 	config := &Config{
 		ProviderURL:        mockServer.URL + "/v1/chat/completions",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		Provider:           constants.ProviderOpenAI,
 		MaxRequestBodySize: 100 * 1024 * 1024, // 100 MB to avoid body size issues
 	}

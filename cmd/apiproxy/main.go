@@ -7,6 +7,8 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/providerconfig"
+	"lmtools/internal/providers"
 	"lmtools/internal/proxy"
 	"net/http"
 	"os"
@@ -88,16 +90,6 @@ Examples:
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
-func resolveArgoEnvironment(dev, test bool) string {
-	if dev {
-		return "dev"
-	}
-	if test {
-		return "test"
-	}
-	return "prod"
-}
-
 func main() {
 	// Set custom usage function
 	flag.Usage = printUsage
@@ -106,16 +98,8 @@ func main() {
 		host string
 		port int
 
-		// API Key File (unified)
-		apiKeyFile string
-
 		// Configuration
-		argoUser           string
-		argoDev            bool
-		argoTest           bool
-		argoLegacy         bool
-		preferredProvider  string
-		providerURL        string
+		providerOpts       providerconfig.Options
 		modelMapSpecs      repeatableStringFlag
 		maxRequestBodySize int64
 		sessionsDir        string
@@ -129,16 +113,8 @@ func main() {
 	flag.StringVar(&host, "host", "127.0.0.1", "Host to bind the server to")
 	flag.IntVar(&port, "port", 8082, "Port to bind the server to")
 
-	// API Key file flag (unified)
-	flag.StringVar(&apiKeyFile, "api-key-file", "", "Path to file containing API key for the selected provider (required for openai/google/anthropic unless using custom URL; also accepted for argo)")
-
 	// Configuration flags
-	flag.StringVar(&argoUser, "argo-user", "", "Argo user/API key (or use -api-key-file)")
-	flag.BoolVar(&argoDev, "argo-dev", false, "Use the Argo dev environment instead of prod")
-	flag.BoolVar(&argoTest, "argo-test", false, "Use the Argo test environment instead of prod")
-	flag.BoolVar(&argoLegacy, "argo-legacy", false, "Use legacy Argo /api/v1/resource chat endpoints")
-	flag.StringVar(&preferredProvider, "provider", constants.ProviderArgo, "Provider (argo, anthropic, openai, google)")
-	flag.StringVar(&providerURL, "provider-url", "", "Custom URL for the selected provider (overrides default)")
+	providerconfig.RegisterFlags(flag.CommandLine, &providerOpts, providerconfig.Defaults{Provider: constants.ProviderArgo})
 	flag.Var(&modelMapSpecs, "model-map", "Map matching request models to a backend model as REGEX=MODEL (repeatable, first match wins)")
 	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", 10, "Maximum request body size in MB")
 	flag.StringVar(&sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
@@ -150,32 +126,17 @@ func main() {
 	flag.Parse()
 
 	// Read API key from file based on provider
-	var anthropicAPIKey, openAIAPIKey, googleAPIKey, argoAPIKey string
-
-	if apiKeyFile != "" {
-		apiKey, err := auth.ReadKeyFile(apiKeyFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to read API key file: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Assign the API key to the appropriate provider
-		switch preferredProvider {
-		case constants.ProviderAnthropic:
-			anthropicAPIKey = apiKey
-		case constants.ProviderOpenAI:
-			openAIAPIKey = apiKey
-		case constants.ProviderGoogle:
-			googleAPIKey = apiKey
-		case constants.ProviderArgo:
-			argoAPIKey = apiKey
-		default:
-			fmt.Fprintf(os.Stderr, "Unknown provider: %s\n", preferredProvider)
-			os.Exit(1)
-		}
-	} else if preferredProvider != constants.ProviderArgo && providerURL == "" {
-		// For non-Argo providers without custom URL, API key is required
-		fmt.Fprintf(os.Stderr, "API key file is required for %s provider. Use -api-key-file flag.\n", preferredProvider)
+	if err := providerOpts.Normalize(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
+		os.Exit(1)
+	}
+	providerKeys, err := loadProviderKeys(providerOpts.Provider, providerOpts.APIKeyFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load API key file: %v\n", err)
+		os.Exit(1)
+	}
+	if err := providerOpts.ValidateCredentials(providers.ValidationSurfaceProxy, providerKeys, false); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -191,17 +152,14 @@ func main() {
 
 	// Create configuration from flags
 	config := &proxy.Config{
-		AnthropicAPIKey:    anthropicAPIKey,
-		OpenAIAPIKey:       openAIAPIKey,
-		GoogleAPIKey:       googleAPIKey,
-		ArgoAPIKey:         argoAPIKey,
-		ArgoUser:           argoUser,
-		ArgoDev:            argoDev,
-		ArgoTest:           argoTest,
-		ArgoLegacy:         argoLegacy,
-		ArgoEnv:            resolveArgoEnvironment(argoDev, argoTest),
-		Provider:           preferredProvider,
-		ProviderURL:        providerURL,
+		ProviderKeySet:     providerKeys,
+		ArgoUser:           providerOpts.ArgoUser,
+		ArgoDev:            providerOpts.ArgoDev,
+		ArgoTest:           providerOpts.ArgoTest,
+		ArgoLegacy:         providerOpts.ArgoLegacy,
+		ArgoEnv:            providerOpts.ArgoEnv,
+		Provider:           providerOpts.Provider,
+		ProviderURL:        providerOpts.ProviderURL,
 		ModelMapRules:      modelMapRules,
 		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
 		SessionsDir:        sessionsDir,
@@ -272,4 +230,15 @@ func main() {
 
 	// No request context available during shutdown
 	logger.GetLogger().Infof("Server exited")
+}
+
+func loadProviderKeys(preferredProvider, apiKeyFile string) (auth.ProviderKeySet, error) {
+	if apiKeyFile == "" {
+		return auth.ProviderKeySet{}, nil
+	}
+	providerKey, err := auth.LoadProviderKeyFile(preferredProvider, apiKeyFile)
+	if err != nil {
+		return auth.ProviderKeySet{}, err
+	}
+	return providerKey.Set(), nil
 }

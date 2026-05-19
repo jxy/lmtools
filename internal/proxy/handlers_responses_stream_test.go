@@ -337,7 +337,7 @@ func TestOpenAIResponsesStreamAnthropicUsesUpstreamStreaming(t *testing.T) {
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        backend.URL,
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -390,7 +390,7 @@ func TestOpenAIResponsesStreamGoogleUsesUpstreamStreaming(t *testing.T) {
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        backend.URL,
-		GoogleAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{GoogleAPIKey: "test-key"},
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 	})
 	defer cleanup()
@@ -527,7 +527,7 @@ func TestOpenAIResponsesStreamAnthropicErrorEventSendsResponseFailed(t *testing.
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        backend.URL,
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
 		SessionsDir:        t.TempDir(),
 	})

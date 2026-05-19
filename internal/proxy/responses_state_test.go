@@ -292,7 +292,7 @@ func TestOpenAIResponsesBackgroundCommitRequiresActiveRecordBeforeSessionAppend(
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -366,7 +366,7 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -703,7 +703,7 @@ func TestOpenAIResponsesStatePreviousResponseLifecycle(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -817,7 +817,7 @@ func TestOpenAIResponsesConversationReplayPreservesAnthropicSignedThinking(t *te
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -916,7 +916,7 @@ func TestOpenAIResponsesPreviousResponseBranchesFromSnapshot(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1001,7 +1001,7 @@ func TestOpenAIResponsesConversationPreviousResponseUsesResponseSnapshot(t *test
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1108,7 +1108,7 @@ func TestOpenAIResponsesStoreFalsePreviousResponseDoesNotWriteState(t *testing.T
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1192,7 +1192,7 @@ func TestOpenAIResponsesStoreFalseConversationDoesNotWriteState(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1290,7 +1290,7 @@ func TestOpenAIResponsesStoreFalseAutoConversationDoesNotCreateState(t *testing.
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        sessionsDir,
 	}
@@ -1347,7 +1347,7 @@ func TestOpenAIResponsesGeneratedConversationIDReturnedAndRetrieved(t *testing.T
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1409,7 +1409,7 @@ func TestOpenAIResponsesResponseMetadataDoesNotOverwriteConversationMetadata(t *
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1513,7 +1513,7 @@ func TestOpenAIResponsesInputTokensReadOnlyAndPagination(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1594,7 +1594,7 @@ func TestOpenAIResponsesInputTokensUsesAnthropicNativeCount(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local/v1",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1646,7 +1646,7 @@ func TestOpenAIResponsesInputTokensUsesGoogleCountTokens(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        "http://google.local/v1beta/models",
-		GoogleAPIKey:       "google-key",
+		ProviderKeySet:     ProviderKeySet{GoogleAPIKey: "google-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1677,7 +1677,7 @@ func TestOpenAIResponsesInputTokensArgoNonClaudeUsesEstimate(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        "http://argo.local",
-		ArgoAPIKey:         "argo-key",
+		ProviderKeySet:     ProviderKeySet{ArgoAPIKey: "argo-key"},
 		ArgoUser:           "fixture-user",
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
@@ -1734,7 +1734,7 @@ func TestOpenAIResponsesCompactCreatesContinuationState(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1800,7 +1800,7 @@ func TestOpenAIConversationItemsPagination(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1838,7 +1838,7 @@ func TestOpenAIConversationAppendItemsReturnsOnlyAppendedItems(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -1960,7 +1960,7 @@ func TestOpenAIConversationAppendSurfacesSaveStateError(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2060,7 +2060,7 @@ func TestOpenAIResponsesCollectionUtilityRoutesPassThrough(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-haiku-20240307$", Model: "gpt-small"}, {Pattern: "^claude-3-5-sonnet-20241022$", Model: "gpt-big"}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
@@ -2109,7 +2109,7 @@ func TestOpenAIRawLifecyclePassThroughEnforcesRequestBodyLimit(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		MaxRequestBodySize: 32,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2147,7 +2147,7 @@ func TestOpenAIResponsesRejectsUnfinishedPreviousResponse(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2214,7 +2214,7 @@ func TestOpenAIResponsesBackgroundDeletePreservesResponseTombstone(t *testing.T)
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2275,7 +2275,7 @@ func TestOpenAIResponsesBackgroundCompletionPreservesCreatedAt(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -2337,7 +2337,7 @@ func TestOpenAIResponsesBackgroundConversationDeleteDoesNotCompleteResponse(t *t
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}

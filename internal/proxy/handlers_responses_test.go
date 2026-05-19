@@ -38,7 +38,7 @@ func TestOpenAIResponsesPromptOnlyPassesThroughToOpenAI(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -106,7 +106,7 @@ func TestOpenAIResponsesDirectPassThroughPreservesCustomTools(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -164,7 +164,7 @@ func TestOpenAIResponsesDirectPassThroughPreservesUnmodeledFields(t *testing.T) 
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -213,7 +213,7 @@ func TestOpenAIResponsesDirectStreamPassThroughPreservesUnmodeledFields(t *testi
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -274,7 +274,7 @@ func TestOpenAIResponsesDirectPassThroughRewritesOnlyMappedModel(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://openai.local/v1",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-sonnet$", Model: "gpt-upstream"}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
@@ -456,7 +456,7 @@ func TestOpenAIResponsesAnthropicPreservesStrictFunctionTool(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local/v1",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -693,7 +693,7 @@ func TestOpenAIResponsesConvertedProviderDropsUnsupportedTools(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -753,7 +753,7 @@ func TestOpenAIResponsesConvertedProviderWrapsCustomToolsForAnthropic(t *testing
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
@@ -834,7 +834,7 @@ func TestOpenAIResponsesConvertedProviderWrapsCustomToolsForGoogle(t *testing.T)
 	config := &Config{
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        "http://google.local/v1beta",
-		GoogleAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{GoogleAPIKey: "test-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}

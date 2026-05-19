@@ -21,7 +21,7 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 
 	var openAIResp OpenAIResponse
 	err = s.doJSON(ctx, s.endpoints.OpenAI, openAIReq, func(req *http.Request) {
-		_ = auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.OpenAIAPIKey)
+		_ = auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 	}, &openAIResp, "OpenAI")
 	if err != nil {
 		return nil, err
@@ -38,8 +38,8 @@ func (s *Server) argoAPIKey() string {
 	if s == nil || s.config == nil {
 		return ""
 	}
-	if s.config.ArgoAPIKey != "" {
-		return s.config.ArgoAPIKey
+	if s.config.ProviderKeySet.ArgoAPIKey != "" {
+		return s.config.ProviderKeySet.ArgoAPIKey
 	}
 	// Argo currently expects -argo-user to act as the native API key; keep this
 	// fallback until Argo changes authentication.
@@ -154,7 +154,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 
 	var googleResp GoogleResponse
 	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
-		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.GoogleAPIKey); err != nil {
+		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey); err != nil {
 			// Note: We can't return the error directly here, but the request will fail later.
 			logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
 		}
@@ -177,7 +177,7 @@ func (s *Server) forwardGoogleCountTokens(ctx context.Context, googleReq *Google
 	payload := &GoogleCountTokensRequest{GenerateContentRequest: googleReq}
 	var googleResp GoogleCountTokensResponse
 	err = s.doJSON(ctx, url, payload, func(req *http.Request) {
-		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.GoogleAPIKey); err != nil {
+		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey); err != nil {
 			logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
 		}
 	}, &googleResp, "Google countTokens")
@@ -215,7 +215,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
 	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
-		_ = auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
+		_ = auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
 		applyAnthropicBetaHeader(req, anthReq.Betas)
 	}, &anthResp, "Anthropic")
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/mockserver"
+	"lmtools/internal/providerconfig"
 	"lmtools/internal/retry"
 	"lmtools/internal/session"
 	"net/http"
@@ -102,9 +103,11 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 	// Create config
 	cfg := config.Config{
-		ArgoUser:        "testuser",
-		Provider:        "anthropic",
-		ProviderURL:     serverURL,
+		Options: providerconfig.Options{
+			ArgoUser:    "testuser",
+			Provider:    "anthropic",
+			ProviderURL: serverURL,
+		},
 		Model:           "claude-3-opus",
 		SessionsDir:     sessionDir,
 		LogDir:          logDir,
@@ -520,9 +523,11 @@ func TestMultiRoundToolExecution(t *testing.T) {
 
 	// Create config
 	cfg := config.Config{
-		ArgoUser:           "testuser",
-		Provider:           "anthropic",
-		ProviderURL:        serverURL + "/messages",
+		Options: providerconfig.Options{
+			ArgoUser:    "testuser",
+			Provider:    "anthropic",
+			ProviderURL: serverURL + "/messages",
+		},
 		Model:              "claude-3-opus",
 		EnableTool:         true,
 		ToolWhitelist:      whitelistFile,
@@ -764,8 +769,10 @@ func TestToolExecutionWithStreamingDowngrade(t *testing.T) {
 
 	// Create config with streaming enabled
 	cfg := config.Config{
-		ArgoUser:   "testuser",
-		Provider:   "anthropic",
+		Options: providerconfig.Options{
+			ArgoUser: "testuser",
+			Provider: "anthropic",
+		},
 		Model:      "claude-3-opus",
 		StreamChat: true, // Enable streaming
 		EnableTool: true,

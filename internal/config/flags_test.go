@@ -1,6 +1,7 @@
 package config
 
 import (
+	"lmtools/internal/providerconfig"
 	"os"
 	"reflect"
 	"strings"
@@ -112,17 +113,17 @@ func TestParseFlagsCustom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := Config{
-		Model:               "modelA",
-		StreamChat:          true,
-		ArgoDev:             false,
-		ArgoLegacy:          false,
-		ArgoUser:            "alice",
+		Model:      "modelA",
+		StreamChat: true,
+		Options: providerconfig.Options{
+			ArgoUser: "alice",
+			ArgoEnv:  "prod",
+			Provider: "argo",
+		},
 		System:              "sys",
 		SystemExplicitlySet: true, // -s flag was provided
-		ArgoEnv:             "prod",
 		Timeout:             10 * time.Minute,
 		Retries:             3,                // Default value
-		Provider:            "argo",           // Default value
 		ToolTimeout:         30 * time.Second, // Default value
 		MaxToolRounds:       32,               // Default value
 		MaxToolParallel:     4,                // Default value

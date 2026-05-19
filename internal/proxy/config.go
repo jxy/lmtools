@@ -2,17 +2,17 @@ package proxy
 
 import (
 	"fmt"
+	"lmtools/internal/auth"
 	"lmtools/internal/constants"
+	"lmtools/internal/providerconfig"
 	"time"
 )
 
+type ProviderKeySet = auth.ProviderKeySet
+
 // Config holds the configuration for the API proxy
 type Config struct {
-	// API Keys
-	AnthropicAPIKey string
-	OpenAIAPIKey    string
-	GoogleAPIKey    string
-	ArgoAPIKey      string
+	ProviderKeySet auth.ProviderKeySet
 
 	// Argo Configuration
 	ArgoUser   string
@@ -39,18 +39,12 @@ type Config struct {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
-	if c.ArgoDev && c.ArgoTest {
-		return fmt.Errorf("invalid flag combination: -argo-dev and -argo-test cannot be used together")
+	if err := providerconfig.ValidateArgoEnvironmentFlags(c.ArgoDev, c.ArgoTest); err != nil {
+		return err
 	}
 
 	if c.ArgoEnv == "" {
-		if c.ArgoDev {
-			c.ArgoEnv = "dev"
-		} else if c.ArgoTest {
-			c.ArgoEnv = "test"
-		} else {
-			c.ArgoEnv = "prod"
-		}
+		c.ArgoEnv = providerconfig.ResolveArgoEnvironment(c.ArgoDev, c.ArgoTest)
 	}
 
 	c.Provider = constants.NormalizeProvider(c.Provider)

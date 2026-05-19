@@ -107,7 +107,7 @@ func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicR
 	}
 
 	return s.sendStreamingJSONRequest(ctx, constants.ProviderGoogle, "Google", url, googleReq, nil, func(req *http.Request) error {
-		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.GoogleAPIKey)
+		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
 	})
 }
 
@@ -132,7 +132,7 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 		anthReq,
 		extraHeaders,
 		func(req *http.Request) error {
-			return auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
+			return auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
 		},
 	)
 }
@@ -148,7 +148,7 @@ func (s *Server) openAIStreamingRequest(ctx context.Context, anthReq *AnthropicR
 	openAIReq.Stream = true
 
 	return s.sendStreamingJSONRequest(ctx, constants.ProviderOpenAI, "OpenAI", s.endpoints.OpenAI, openAIReq, nil, func(req *http.Request) error {
-		return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.OpenAIAPIKey)
+		return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 	})
 }
 

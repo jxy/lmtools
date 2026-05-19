@@ -190,11 +190,13 @@ func TestUnifiedAPIKeyValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{
-				Provider:     tt.provider,
-				OpenAIAPIKey: tt.openAIKey,
-				GoogleAPIKey: tt.googleKey,
-				ArgoUser:     tt.argoUser,
-				ProviderURL:  tt.providerURL,
+				Provider: tt.provider,
+				ProviderKeySet: ProviderKeySet{
+					OpenAIAPIKey: tt.openAIKey,
+					GoogleAPIKey: tt.googleKey,
+				},
+				ArgoUser:    tt.argoUser,
+				ProviderURL: tt.providerURL,
 			}
 
 			err := config.Validate()

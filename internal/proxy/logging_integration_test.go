@@ -475,7 +475,12 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{
+		Provider:           constants.ProviderAnthropic,
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "k"},
+		ProviderURL:        mockAnthropic.URL,
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
@@ -536,7 +541,12 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		}
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{
+		Provider:           constants.ProviderAnthropic,
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "k"},
+		ProviderURL:        mockAnthropic.URL,
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()
@@ -647,7 +657,12 @@ func TestJSONLog_ToolCallInfo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer mockAnthropic.Close()
-	config := &Config{Provider: constants.ProviderAnthropic, AnthropicAPIKey: "k", ProviderURL: mockAnthropic.URL, MaxRequestBodySize: 10 * 1024 * 1024}
+	config := &Config{
+		Provider:           constants.ProviderAnthropic,
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "k"},
+		ProviderURL:        mockAnthropic.URL,
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
 	server, cleanup := NewTestServer(t, config)
 	t.Cleanup(cleanup)
 	r, w, _ := os.Pipe()

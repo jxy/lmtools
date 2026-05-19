@@ -88,10 +88,12 @@ func statefulFixtureConfig(t *testing.T, scenario apifixtures.StatefulScenario) 
 	}
 
 	return &Config{
-		Provider:           provider,
-		ProviderURL:        providerURL,
-		OpenAIAPIKey:       fixtureOpenAIKey,
-		AnthropicAPIKey:    fixtureAnthropicKey,
+		Provider:    provider,
+		ProviderURL: providerURL,
+		ProviderKeySet: ProviderKeySet{
+			OpenAIAPIKey:    fixtureOpenAIKey,
+			AnthropicAPIKey: fixtureAnthropicKey,
+		},
 		ModelMapRules:      []ModelMapRule{{Pattern: ".*", Model: model}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),

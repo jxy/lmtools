@@ -142,11 +142,11 @@ func TestModelsEndpointURLConstruction(t *testing.T) {
 			// Set API keys for providers that need them
 			switch tt.provider {
 			case constants.ProviderOpenAI:
-				config.OpenAIAPIKey = "test-key"
+				config.ProviderKeySet.OpenAIAPIKey = "test-key"
 			case constants.ProviderAnthropic:
-				config.AnthropicAPIKey = "test-key"
+				config.ProviderKeySet.AnthropicAPIKey = "test-key"
 			case constants.ProviderGoogle:
-				config.GoogleAPIKey = "test-key"
+				config.ProviderKeySet.GoogleAPIKey = "test-key"
 			}
 
 			// Create server (NewEndpoints is called internally)
@@ -304,7 +304,7 @@ func TestModelsEndpointIntegration(t *testing.T) {
 			mockResponse: `{"object":"list","data":[{"id":"gpt-4","object":"model","created":1234,"owned_by":"openai"}]}`,
 			setupConfig: func(c *Config, url string) {
 				c.ProviderURL = url + "/v1"
-				c.OpenAIAPIKey = "test-key"
+				c.ProviderKeySet.OpenAIAPIKey = "test-key"
 			},
 		},
 		{
@@ -313,7 +313,7 @@ func TestModelsEndpointIntegration(t *testing.T) {
 			mockResponse: `{"data":[{"id":"claude-3-opus","display_name":"Claude 3 Opus"}]}`,
 			setupConfig: func(c *Config, url string) {
 				c.ProviderURL = url + "/v1"
-				c.AnthropicAPIKey = "test-key"
+				c.ProviderKeySet.AnthropicAPIKey = "test-key"
 			},
 		},
 		{
@@ -323,7 +323,7 @@ func TestModelsEndpointIntegration(t *testing.T) {
 			setupConfig: func(c *Config, url string) {
 				// Google appends v1beta/models to the base URL
 				c.ProviderURL = url
-				c.GoogleAPIKey = "test-key"
+				c.ProviderKeySet.GoogleAPIKey = "test-key"
 			},
 		},
 		{

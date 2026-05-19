@@ -20,10 +20,10 @@ func newProviderCredentialState(cfg *Config) providerCredentialState {
 	}
 	return providerCredentialState{
 		ProviderURL:  cfg.ProviderURL != "",
-		OpenAIKey:    cfg.OpenAIAPIKey != "",
-		AnthropicKey: cfg.AnthropicAPIKey != "",
-		GoogleKey:    cfg.GoogleAPIKey != "",
-		ArgoKey:      cfg.ArgoAPIKey != "",
+		OpenAIKey:    cfg.ProviderKeySet.OpenAIAPIKey != "",
+		AnthropicKey: cfg.ProviderKeySet.AnthropicAPIKey != "",
+		GoogleKey:    cfg.ProviderKeySet.GoogleAPIKey != "",
+		ArgoKey:      cfg.ProviderKeySet.ArgoAPIKey != "",
 		ArgoUser:     cfg.ArgoUser != "",
 	}
 }

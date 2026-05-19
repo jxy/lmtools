@@ -537,11 +537,11 @@ func TestModelsEndpointAuthentication(t *testing.T) {
 			// Set API key based on provider
 			switch tt.provider {
 			case constants.ProviderOpenAI:
-				config.OpenAIAPIKey = tt.apiKey
+				config.ProviderKeySet.OpenAIAPIKey = tt.apiKey
 			case constants.ProviderAnthropic:
-				config.AnthropicAPIKey = tt.apiKey
+				config.ProviderKeySet.AnthropicAPIKey = tt.apiKey
 			case constants.ProviderGoogle:
-				config.GoogleAPIKey = tt.apiKey
+				config.ProviderKeySet.GoogleAPIKey = tt.apiKey
 			}
 
 			// Create proxy server (NewEndpoints is called internally)
@@ -676,7 +676,7 @@ func TestModelsEndpointFetchesAnthropicPagination(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        mockServer.URL + "/v1",
-		AnthropicAPIKey:    "sk-ant-test",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "sk-ant-test"},
 		MaxRequestBodySize: 1024 * 1024,
 	}
 	server, cleanup := NewTestServer(t, config)
@@ -763,7 +763,7 @@ func TestModelsEndpointFetchesGooglePagination(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        mockServer.URL,
-		GoogleAPIKey:       "google-key",
+		ProviderKeySet:     ProviderKeySet{GoogleAPIKey: "google-key"},
 		MaxRequestBodySize: 1024 * 1024,
 	}
 	server, cleanup := NewTestServer(t, config)

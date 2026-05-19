@@ -109,7 +109,7 @@ func TestLocalOpenAIErrorLogsClientResponseBody(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
 		ProviderURL:        "http://example.test",
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 	server, cleanup := NewTestServer(t, config)
@@ -145,7 +145,7 @@ func TestLocalAnthropicErrorLogsClientResponseBody(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://example.test",
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 	server, cleanup := NewTestServer(t, config)

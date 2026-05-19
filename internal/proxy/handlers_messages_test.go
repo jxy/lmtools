@@ -217,7 +217,7 @@ func TestHandleCountTokensUsesAnthropicNativeCount(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local/v1",
-		AnthropicAPIKey:    "anthropic-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "anthropic-key"},
 		ModelMapRules:      []ModelMapRule{{Pattern: "^claude-3-5-sonnet-latest$", Model: "claude-count"}},
 		MaxRequestBodySize: fixtureMaxBodySize,
 	}
@@ -264,7 +264,7 @@ func TestHandleCountTokensUsesGoogleCountTokens(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderGoogle,
 		ProviderURL:        "http://google.local/v1beta/models",
-		GoogleAPIKey:       "google-key",
+		ProviderKeySet:     ProviderKeySet{GoogleAPIKey: "google-key"},
 		MaxRequestBodySize: fixtureMaxBodySize,
 	}
 	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
@@ -296,7 +296,7 @@ func TestHandleCountTokensArgoNonClaudeUsesEstimate(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        "http://argo.local",
-		ArgoAPIKey:         "argo-key",
+		ProviderKeySet:     ProviderKeySet{ArgoAPIKey: "argo-key"},
 		ArgoUser:           "fixture-user",
 		MaxRequestBodySize: fixtureMaxBodySize,
 	}

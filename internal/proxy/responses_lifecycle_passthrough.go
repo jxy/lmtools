@@ -39,7 +39,7 @@ func (s *Server) forwardOpenAIRawLifecycleWithBody(w http.ResponseWriter, r *htt
 	} else if len(body) > 0 {
 		upstreamReq.Header.Set("Content-Type", "application/json")
 	}
-	if err := auth.ApplyProviderCredentials(upstreamReq, constants.ProviderOpenAI, s.config.OpenAIAPIKey); err != nil {
+	if err := auth.ApplyProviderCredentials(upstreamReq, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey); err != nil {
 		s.sendOpenAIError(w, ErrTypeAuthentication, err.Error(), "unauthorized", http.StatusUnauthorized)
 		return
 	}

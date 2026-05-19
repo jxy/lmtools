@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/providerconfig"
 	"lmtools/internal/session"
 	"net/http"
 	"os"
@@ -141,6 +142,124 @@ func TestRenderCurlCommandAvoidsHeredocDelimiterCollision(t *testing.T) {
 	if !strings.Contains(got, "<<'EOJ_1'\n") || !strings.HasSuffix(got, "\nEOJ_1") {
 		t.Fatalf("renderCurlCommand() = %q, want EOJ_1 delimiter", got)
 	}
+}
+
+func TestBuildListModelsRequestProviderURLAppliesAPIKeyFile(t *testing.T) {
+	tests := []struct {
+		name        string
+		provider    string
+		wantHeader  string
+		wantValue   string
+		wantVersion bool
+	}{
+		{
+			name:       "openai",
+			provider:   constants.ProviderOpenAI,
+			wantHeader: "Authorization",
+			wantValue:  "Bearer test_key",
+		},
+		{
+			name:        "anthropic",
+			provider:    constants.ProviderAnthropic,
+			wantHeader:  "x-api-key",
+			wantValue:   "test_key",
+			wantVersion: true,
+		},
+		{
+			name:       "google",
+			provider:   constants.ProviderGoogle,
+			wantHeader: "x-goog-api-key",
+			wantValue:  "test_key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			apiKeyFile := writeTestAPIKeyFile(t, "test_key")
+			req, err := buildListModelsRequest(config.Config{
+				Options: providerconfig.Options{
+					Provider:    tt.provider,
+					ProviderURL: "http://localhost:8080/v1",
+					APIKeyFile:  apiKeyFile,
+				},
+			})
+			if err != nil {
+				t.Fatalf("buildListModelsRequest() error = %v", err)
+			}
+			if got := req.Header.Get(tt.wantHeader); got != tt.wantValue {
+				t.Fatalf("%s = %q, want %q", tt.wantHeader, got, tt.wantValue)
+			}
+			if tt.wantVersion {
+				if got := req.Header.Get("anthropic-version"); got != "2023-06-01" {
+					t.Fatalf("anthropic-version = %q, want 2023-06-01", got)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildListModelsRequestProviderURLWithoutAPIKeyAllowed(t *testing.T) {
+	req, err := buildListModelsRequest(config.Config{
+		Options: providerconfig.Options{
+			Provider:    constants.ProviderOpenAI,
+			ProviderURL: "http://localhost:8080/v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildListModelsRequest() error = %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want empty", got)
+	}
+}
+
+func TestBuildListModelsRequestRequiresAPIKeyWithoutProviderURL(t *testing.T) {
+	_, err := buildListModelsRequest(config.Config{
+		Options: providerconfig.Options{
+			Provider: constants.ProviderOpenAI,
+		},
+	})
+	if err == nil {
+		t.Fatal("buildListModelsRequest() succeeded without API key or provider URL")
+	}
+	if !strings.Contains(err.Error(), "-api-key-file is required for openai provider when listing models") {
+		t.Fatalf("buildListModelsRequest() error = %q, want missing key error", err)
+	}
+}
+
+func TestListModelsPrintCurlProviderURLIncludesAPIKeyHeader(t *testing.T) {
+	apiKeyFile := writeTestAPIKeyFile(t, "test_key")
+	req, err := buildListModelsRequest(config.Config{
+		Options: providerconfig.Options{
+			Provider:    constants.ProviderOpenAI,
+			ProviderURL: "http://localhost:8080/v1",
+			APIKeyFile:  apiKeyFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildListModelsRequest() error = %v", err)
+	}
+
+	got := renderCurlCommand(req, nil)
+	wants := []string{
+		"curl -X GET",
+		"-H 'Authorization: Bearer test_key'",
+		"http://localhost:8080/v1/models",
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderCurlCommand() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func writeTestAPIKeyFile(t *testing.T, key string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(path, []byte(key), constants.FilePerm); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	return path
 }
 
 func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testing.T) {
@@ -287,57 +406,71 @@ func TestGetActualModel(t *testing.T) {
 		{
 			name: "explicit model provided",
 			cfg: config.Config{
-				Model:    "custom-model",
-				Provider: "argo",
+				Model: "custom-model",
+				Options: providerconfig.Options{
+					Provider: "argo",
+				},
 			},
 			expected: "custom-model",
 		},
 		{
 			name: "embed mode without explicit model",
 			cfg: config.Config{
-				Model:    "",
-				Embed:    true,
-				Provider: "argo",
+				Model: "",
+				Embed: true,
+				Options: providerconfig.Options{
+					Provider: "argo",
+				},
 			},
 			expected: core.DefaultEmbedModel,
 		},
 		{
 			name: "argo provider default",
 			cfg: config.Config{
-				Model:    "",
-				Provider: "argo",
+				Model: "",
+				Options: providerconfig.Options{
+					Provider: "argo",
+				},
 			},
 			expected: "gpt5",
 		},
 		{
 			name: "empty provider defaults to argo",
 			cfg: config.Config{
-				Model:    "",
-				Provider: "",
+				Model: "",
+				Options: providerconfig.Options{
+					Provider: "",
+				},
 			},
 			expected: "gpt5",
 		},
 		{
 			name: "openai provider default",
 			cfg: config.Config{
-				Model:    "",
-				Provider: "openai",
+				Model: "",
+				Options: providerconfig.Options{
+					Provider: "openai",
+				},
 			},
 			expected: "gpt-5",
 		},
 		{
 			name: "google provider default",
 			cfg: config.Config{
-				Model:    "",
-				Provider: "google",
+				Model: "",
+				Options: providerconfig.Options{
+					Provider: "google",
+				},
 			},
 			expected: "gemini-2.5-pro",
 		},
 		{
 			name: "anthropic provider default",
 			cfg: config.Config{
-				Model:    "",
-				Provider: "anthropic",
+				Model: "",
+				Options: providerconfig.Options{
+					Provider: "anthropic",
+				},
 			},
 			expected: "claude-opus-4-1-20250805",
 		},

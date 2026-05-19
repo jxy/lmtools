@@ -243,7 +243,7 @@ func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicToken
 func (s *Server) forwardAnthropicCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
 	var resp AnthropicTokenCountResponse
 	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) {
-		_ = auth.ApplyProviderCredentials(httpReq, constants.ProviderAnthropic, s.config.AnthropicAPIKey)
+		_ = auth.ApplyProviderCredentials(httpReq, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
 		httpReq.Header.Set("anthropic-version", "2023-06-01")
 	}, &resp, "Anthropic count_tokens")
 	if err != nil {

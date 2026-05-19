@@ -41,7 +41,7 @@ func TestMessagesEndpointLogging(t *testing.T) {
 	// Create server config
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		ProviderURL:        mockAnthropic.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
@@ -162,7 +162,7 @@ func TestChatCompletionsEndpointLogging(t *testing.T) {
 	// Create server config
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		ProviderURL:        mockOpenAI.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
@@ -278,7 +278,7 @@ func TestModelsEndpointLogging(t *testing.T) {
 	// Create server config
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,
-		OpenAIAPIKey:       "test-key",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
 		ProviderURL:        mockModels.URL, // Use ProviderURL to override the models endpoint
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
@@ -423,10 +423,12 @@ func TestAllEndpointsLogging(t *testing.T) {
 
 	// Create server config
 	config := &Config{
-		Provider:           constants.ProviderOpenAI,
-		OpenAIAPIKey:       "test-key",
+		Provider: constants.ProviderOpenAI,
+		ProviderKeySet: ProviderKeySet{
+			OpenAIAPIKey:    "test-key",
+			AnthropicAPIKey: "test-key",
+		},
 		ProviderURL:        mockServer.URL,
-		AnthropicAPIKey:    "test-key",
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
 
@@ -563,7 +565,7 @@ func TestStreamingEndpointLogging(t *testing.T) {
 	// Create server config
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
-		AnthropicAPIKey:    "test-key",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
 		ProviderURL:        mockServer.URL,
 		MaxRequestBodySize: 10 * 1024 * 1024,
 	}
