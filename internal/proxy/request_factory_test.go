@@ -62,3 +62,19 @@ func TestBuildProviderJSONRequestConfigureError(t *testing.T) {
 		t.Fatalf("buildProviderJSONRequest() error = %v, want %v", err, wantErr)
 	}
 }
+
+func TestDoJSONReturnsConfigureError(t *testing.T) {
+	server := NewMinimalTestServer(t, &Config{})
+	wantErr := errors.New("missing provider configuration")
+	var out map[string]interface{}
+
+	err := server.doJSON(context.Background(), "https://example.com/v1/test", map[string]string{
+		"hello": "world",
+	}, func(*http.Request) error {
+		return wantErr
+	}, &out, "OpenAI")
+
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("doJSON() error = %v, want %v", err, wantErr)
+	}
+}

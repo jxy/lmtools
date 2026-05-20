@@ -56,7 +56,7 @@ func (s *Server) doJSON(
 	ctx context.Context,
 	url string,
 	reqBody interface{},
-	headerFn func(*http.Request),
+	configure func(*http.Request) error,
 	respBody interface{},
 	provider string,
 ) error {
@@ -70,7 +70,7 @@ func (s *Server) doJSON(
 		Provider:    provider,
 		RequestName: provider,
 		Payload:     reqBody,
-		Configure:   noErrorRequestConfigurer(headerFn),
+		Configure:   configure,
 	})
 	if err != nil {
 		return err

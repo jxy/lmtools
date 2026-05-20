@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/providers"
@@ -240,8 +241,8 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 	}
 
 	var googleResp GoogleResponse
-	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
-		req.Header.Set("x-goog-api-key", s.config.ProviderKeySet.GoogleAPIKey)
+	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) error {
+		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
 	}, &googleResp, "Google")
 	if err != nil {
 		s.sendProviderErrorAsOpenAI(ctx, w, constants.ProviderGoogle, err)

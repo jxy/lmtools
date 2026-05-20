@@ -125,9 +125,9 @@ func TestOpenAIResponsesStatePreparationPreviousResponseHistoryMatchesReadOnly(t
 
 	req := &OpenAIResponsesRequest{Model: "claude-test", PreviousResponseID: respID, Input: "next"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "next")}}
-	stateCtx, foregroundTyped, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, foregroundTyped, err := server.prepareOpenAIResponsesStateForeground(ctx, req, typed)
 	if err != nil {
-		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
+		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
 	if stateCtx == nil || stateCtx.Session == nil {
 		t.Fatalf("foreground state = %#v, want loaded state", stateCtx)
@@ -178,9 +178,9 @@ func TestOpenAIResponsesForegroundStoreFalseWithoutHistoryReturnsNilState(t *tes
 	req := &OpenAIResponsesRequest{Model: "claude-test", Store: &store, Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
 
-	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateForeground(ctx, req, typed)
 	if err != nil {
-		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
+		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
 	if stateCtx != nil {
 		t.Fatalf("stateCtx = %#v, want nil", stateCtx)
@@ -200,9 +200,9 @@ func TestOpenAIResponsesBackgroundStoreFalseAllocatesState(t *testing.T) {
 	req := &OpenAIResponsesRequest{Model: "claude-test", Store: &store, Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
 
-	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateBackground, responsesStoreRequested(req))
+	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateBackground(ctx, req, typed)
 	if err != nil {
-		t.Fatalf("prepareOpenAIResponsesStateWithMode(background) error = %v", err)
+		t.Fatalf("prepareOpenAIResponsesStateBackground() error = %v", err)
 	}
 	if stateCtx == nil || stateCtx.Session == nil {
 		t.Fatalf("stateCtx = %#v, want background session state", stateCtx)
@@ -226,9 +226,9 @@ func TestOpenAIResponsesCommitMarshalErrorDoesNotAppendSession(t *testing.T) {
 	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
 	req := &OpenAIResponsesRequest{Model: "claude-test", Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
-	stateCtx, _, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, _, err := server.prepareOpenAIResponsesStateForeground(ctx, req, typed)
 	if err != nil {
-		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
+		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
 	if stateCtx == nil || stateCtx.Session == nil {
 		t.Fatalf("stateCtx = %#v, want writable session state", stateCtx)
@@ -382,13 +382,13 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 
 	firstReq := &OpenAIResponsesRequest{Model: "claude-test", Conversation: conv.ID, Input: "first question"}
 	firstTyped := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "first question")}}
-	firstState, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), firstReq, firstTyped, responsesStateForeground, responsesStoreRequested(firstReq))
+	firstState, _, err := server.prepareOpenAIResponsesStateForeground(context.Background(), firstReq, firstTyped)
 	if err != nil {
 		t.Fatalf("prepare first state error = %v", err)
 	}
 	secondReq := &OpenAIResponsesRequest{Model: "claude-test", Conversation: conv.ID, Input: "second question"}
 	secondTyped := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "second question")}}
-	secondState, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), secondReq, secondTyped, responsesStateForeground, responsesStoreRequested(secondReq))
+	secondState, _, err := server.prepareOpenAIResponsesStateForeground(context.Background(), secondReq, secondTyped)
 	if err != nil {
 		t.Fatalf("prepare second state error = %v", err)
 	}
@@ -596,17 +596,6 @@ func TestPaginatedListPayloadRejectsInvalidParameters(t *testing.T) {
 				t.Fatalf("paginatedListPayload() error = %v, want %q", err, tt.want)
 			}
 		})
-	}
-}
-
-func TestOpenAIResponsesStateModeRejectsUnknownMode(t *testing.T) {
-	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
-	req := &OpenAIResponsesRequest{Model: "claude-test", Input: "hello"}
-	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
-
-	_, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), req, typed, openAIResponsesStateMode(99), true)
-	if err == nil || !strings.Contains(err.Error(), "unknown responses state mode") {
-		t.Fatalf("prepareOpenAIResponsesStateWithMode() error = %v, want unknown mode", err)
 	}
 }
 

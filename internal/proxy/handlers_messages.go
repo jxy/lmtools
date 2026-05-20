@@ -219,11 +219,19 @@ func logToolUseBlocks(ctx context.Context, content []AnthropicContentBlock, info
 func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *AnthropicRequest, provider, originalModel string) (*AnthropicResponse, error) {
 	switch constants.NormalizeProvider(provider) {
 	case constants.ProviderOpenAI:
-		return s.forwardAnthropicViaOpenAI(ctx, anthReq, originalModel)
+		openAIResp, err := s.forwardToOpenAI(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		return s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel), nil
 	case constants.ProviderAnthropic:
-		return s.forwardAnthropicViaAnthropic(ctx, anthReq, originalModel)
+		return s.forwardToAnthropic(ctx, anthReq)
 	case constants.ProviderGoogle:
-		return s.forwardAnthropicViaGoogle(ctx, anthReq, originalModel)
+		googleResp, err := s.forwardToGoogle(ctx, anthReq)
+		if err != nil {
+			return nil, err
+		}
+		return s.converter.ConvertGoogleToAnthropic(googleResp, originalModel), nil
 	case constants.ProviderArgo:
 		return s.forwardAnthropicViaArgo(ctx, anthReq, originalModel)
 	default:
@@ -242,9 +250,12 @@ func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicToken
 
 func (s *Server) forwardAnthropicCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
 	var resp AnthropicTokenCountResponse
-	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) {
-		_ = auth.ApplyProviderCredentials(httpReq, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
+	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) error {
+		if err := auth.ApplyProviderCredentials(httpReq, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey); err != nil {
+			return err
+		}
 		httpReq.Header.Set("anthropic-version", "2023-06-01")
+		return nil
 	}, &resp, "Anthropic count_tokens")
 	if err != nil {
 		return nil, err

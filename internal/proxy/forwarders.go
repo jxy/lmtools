@@ -20,8 +20,8 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	var openAIResp OpenAIResponse
-	err = s.doJSON(ctx, s.endpoints.OpenAI, openAIReq, func(req *http.Request) {
-		_ = auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
+	err = s.doJSON(ctx, s.endpoints.OpenAI, openAIReq, func(req *http.Request) error {
+		return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 	}, &openAIResp, "OpenAI")
 	if err != nil {
 		return nil, err
@@ -46,17 +46,19 @@ func (s *Server) argoAPIKey() string {
 	return s.config.ArgoUser
 }
 
-func (s *Server) configureArgoOpenAIRequest(req *http.Request) {
+func (s *Server) configureArgoOpenAIRequest(req *http.Request) error {
 	if apiKey := s.argoAPIKey(); apiKey != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	}
+	return nil
 }
 
-func (s *Server) configureArgoAnthropicRequest(req *http.Request) {
+func (s *Server) configureArgoAnthropicRequest(req *http.Request) error {
 	if apiKey := s.argoAPIKey(); apiKey != "" {
 		req.Header.Set("x-api-key", apiKey)
 	}
 	req.Header.Set("anthropic-version", "2023-06-01")
+	return nil
 }
 
 func applyAnthropicBetaHeader(req *http.Request, beta string) {
@@ -83,9 +85,12 @@ func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequ
 
 func (s *Server) forwardToArgoAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
-	err := s.doJSON(ctx, s.endpoints.ArgoAnthropic, anthReq, func(req *http.Request) {
-		s.configureArgoAnthropicRequest(req)
+	err := s.doJSON(ctx, s.endpoints.ArgoAnthropic, anthReq, func(req *http.Request) error {
+		if err := s.configureArgoAnthropicRequest(req); err != nil {
+			return err
+		}
 		applyAnthropicBetaHeader(req, anthReq.Betas)
+		return nil
 	}, &anthResp, "Argo Anthropic")
 	if err != nil {
 		return nil, err
@@ -105,7 +110,7 @@ func (s *Server) argoOpenAIStreamingRequest(ctx context.Context, openAIReq *Open
 		s.endpoints.ArgoOpenAI,
 		openAIReq,
 		map[string]string{"Accept": "text/event-stream"},
-		noErrorRequestConfigurer(s.configureArgoOpenAIRequest),
+		s.configureArgoOpenAIRequest,
 	)
 }
 
@@ -134,7 +139,7 @@ func (s *Server) argoAnthropicStreamingRequest(ctx context.Context, anthReq *Ant
 		s.endpoints.ArgoAnthropic,
 		anthReq,
 		extraHeaders,
-		noErrorRequestConfigurer(s.configureArgoAnthropicRequest),
+		s.configureArgoAnthropicRequest,
 	)
 }
 
@@ -153,11 +158,8 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	var googleResp GoogleResponse
-	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
-		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey); err != nil {
-			// Note: We can't return the error directly here, but the request will fail later.
-			logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
-		}
+	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) error {
+		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
 	}, &googleResp, "Google")
 	if err != nil {
 		return nil, err
@@ -176,10 +178,8 @@ func (s *Server) forwardGoogleCountTokens(ctx context.Context, googleReq *Google
 	}
 	payload := &GoogleCountTokensRequest{GenerateContentRequest: googleReq}
 	var googleResp GoogleCountTokensResponse
-	err = s.doJSON(ctx, url, payload, func(req *http.Request) {
-		if err := auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey); err != nil {
-			logger.From(ctx).Errorf("Failed to apply Google API key: %v", err)
-		}
+	err = s.doJSON(ctx, url, payload, func(req *http.Request) error {
+		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
 	}, &googleResp, "Google countTokens")
 	if err != nil {
 		return nil, err
@@ -214,9 +214,12 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 // forwardToAnthropic forwards a request to the Anthropic API
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
-	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
-		_ = auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
+	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) error {
+		if err := auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey); err != nil {
+			return err
+		}
 		applyAnthropicBetaHeader(req, anthReq.Betas)
+		return nil
 	}, &anthResp, "Anthropic")
 	if err != nil {
 		return nil, err

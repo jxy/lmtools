@@ -237,7 +237,7 @@ func (s *Server) conversationItemsForRecord(ctx context.Context, conv *conversat
 }
 
 func conversationItemsFromMessages(messages []core.TypedMessage, startIndex int, deleted map[string]bool, includeDeleted bool) []interface{} {
-	items := coreResponsesInput(messages)
+	items := core.OpenAIResponsesInput(messages)
 	out := make([]interface{}, 0, len(items))
 	for i, item := range items {
 		itemMap, ok := item.(map[string]interface{})
@@ -276,7 +276,7 @@ func filterConversationHistoryDeletedItems(messages []core.TypedMessage, deleted
 	if len(deleted) == 0 {
 		return messages
 	}
-	projections := coreResponsesInputProjection(messages)
+	projections := core.OpenAIResponsesInputProjection(messages)
 	visibleItemsByMessage := make(map[int]int)
 	keptVisibleItemByMessage := make(map[int]bool)
 	deletedBlocksByMessage := make(map[int]map[int]bool)
@@ -388,7 +388,7 @@ func compactedResponseOutputItems(stateCtx *openAIResponsesStateContext, inputMe
 	if stateCtx != nil {
 		historyLen = len(stateCtx.History)
 	}
-	for i, projected := range coreResponsesInputProjection(inputMessages) {
+	for i, projected := range core.OpenAIResponsesInputProjection(inputMessages) {
 		itemMap, ok := projected.Item.(map[string]interface{})
 		if !ok || itemMap["type"] != "message" {
 			continue

@@ -364,6 +364,55 @@ func TestMarshalOpenAIResponsesInputPreservesItemOrder(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesInputProjectionPreservesIndexesAndNamespace(t *testing.T) {
+	projection := OpenAIResponsesInputProjection([]TypedMessage{
+		{
+			Role: string(RoleUser),
+			Blocks: []Block{
+				TextBlock{Text: "look"},
+				ImageBlock{URL: "https://example.test/image.png", Detail: "low"},
+			},
+		},
+		{
+			Role: string(RoleAssistant),
+			Blocks: []Block{
+				ReasoningBlock{Provider: "openai", Type: "reasoning", ID: "rs_1"},
+				ToolUseBlock{
+					ID:           "call_1",
+					Namespace:    "web",
+					OriginalName: "search",
+					Name:         "web__search",
+					Input:        json.RawMessage(`{"q":"x"}`),
+				},
+				&ToolUseBlock{
+					ID:          "call_2",
+					Type:        "custom",
+					Name:        "patch",
+					InputString: "raw input",
+				},
+			},
+		},
+	})
+
+	if len(projection) != 4 {
+		t.Fatalf("projection len = %d, want 4: %#v", len(projection), projection)
+	}
+	if projection[0].MessageIndex != 0 || len(projection[0].BlockIndexes) != 2 || projection[0].BlockIndexes[0] != 0 || projection[0].BlockIndexes[1] != 1 {
+		t.Fatalf("message projection indexes = %#v, want message 0 blocks 0,1", projection[0])
+	}
+	functionCall, _ := projection[2].Item.(map[string]interface{})
+	if functionCall["type"] != "function_call" || functionCall["namespace"] != "web" || functionCall["name"] != "search" {
+		t.Fatalf("namespaced function call = %#v", functionCall)
+	}
+	if projection[2].MessageIndex != 1 || len(projection[2].BlockIndexes) != 1 || projection[2].BlockIndexes[0] != 1 {
+		t.Fatalf("function projection indexes = %#v, want message 1 block 1", projection[2])
+	}
+	customCall, _ := projection[3].Item.(map[string]interface{})
+	if customCall["type"] != "custom_tool_call" || customCall["input"] != "raw input" {
+		t.Fatalf("custom call = %#v", customCall)
+	}
+}
+
 func TestOpenAIResponsesStreamState(t *testing.T) {
 	state := NewOpenAIResponsesStreamState()
 

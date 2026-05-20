@@ -191,7 +191,7 @@ func responsesInputItemToTypedMessages(rawItem interface{}, toolNamesByCallID ma
 		if callID != "" && name != "" {
 			toolNamesByCallID[callID] = name
 		}
-		input := responseCustomToolInput(item["input"])
+		input, _ := item["input"].(string)
 		return []core.TypedMessage{{
 			Role: string(core.RoleAssistant),
 			Blocks: []core.Block{core.ToolUseBlock{
@@ -550,7 +550,7 @@ func TypedToOpenAIResponsesRequest(typed TypedRequest, model string) (*OpenAIRes
 	}
 	req := &OpenAIResponsesRequest{
 		Model:           model,
-		Input:           coreResponsesInput(prepared.Messages),
+		Input:           core.OpenAIResponsesInput(prepared.Messages),
 		Instructions:    combineInstructionText(typed.System, typed.Developer),
 		Tools:           proxyOpenAIResponsesToolsFromDefinitions(typed.Tools),
 		ToolChoice:      proxyOpenAIResponsesToolChoiceFromDefinition(typed.ToolChoice, typed.Tools, prepared.ToolChoice),
@@ -569,172 +569,6 @@ func TypedToOpenAIResponsesRequest(typed TypedRequest, model string) (*OpenAIRes
 		req.Instructions = nil
 	}
 	return req, nil
-}
-
-type coreResponsesInputProjectionItem struct {
-	Item         interface{}
-	MessageIndex int
-	BlockIndexes []int
-}
-
-func coreResponsesInput(messages []core.TypedMessage) []interface{} {
-	projected := coreResponsesInputProjection(messages)
-	input := make([]interface{}, 0, len(projected))
-	for _, item := range projected {
-		input = append(input, item.Item)
-	}
-	return input
-}
-
-func coreResponsesInputProjection(messages []core.TypedMessage) []coreResponsesInputProjectionItem {
-	input := make([]coreResponsesInputProjectionItem, 0, len(messages))
-	for msgIndex, msg := range messages {
-		var content []map[string]interface{}
-		var contentBlockIndexes []int
-		flushContent := func() {
-			if len(content) == 0 {
-				return
-			}
-			input = append(input, coreResponsesInputProjectionItem{
-				Item: map[string]interface{}{
-					"type":    "message",
-					"role":    msg.Role,
-					"content": content,
-				},
-				MessageIndex: msgIndex,
-				BlockIndexes: append([]int(nil), contentBlockIndexes...),
-			})
-			content = nil
-			contentBlockIndexes = nil
-		}
-		for blockIndex, block := range msg.Blocks {
-			switch value := block.(type) {
-			case core.TextBlock:
-				if value.Text != "" {
-					content = append(content, responsesTextPart(msg.Role, value.Text))
-					contentBlockIndexes = append(contentBlockIndexes, blockIndex)
-				}
-			case core.ImageBlock:
-				part := map[string]interface{}{"type": "input_image", "image_url": value.URL}
-				if value.Detail != "" {
-					part["detail"] = value.Detail
-				}
-				content = append(content, part)
-				contentBlockIndexes = append(contentBlockIndexes, blockIndex)
-			case core.FileBlock:
-				content = append(content, map[string]interface{}{"type": "input_file", "file_id": value.FileID})
-				contentBlockIndexes = append(contentBlockIndexes, blockIndex)
-			case core.ToolUseBlock:
-				flushContent()
-				if value.Type == "custom" {
-					name := value.Name
-					item := map[string]interface{}{
-						"type":    "custom_tool_call",
-						"call_id": value.ID,
-						"name":    name,
-						"input":   firstNonEmpty(value.InputString, rawJSONStringValue(value.Input)),
-					}
-					if value.Namespace != "" {
-						item["namespace"] = value.Namespace
-						if value.OriginalName != "" {
-							item["name"] = value.OriginalName
-						}
-					}
-					input = append(input, coreResponsesInputProjectionItem{
-						Item:         item,
-						MessageIndex: msgIndex,
-						BlockIndexes: []int{blockIndex},
-					})
-					continue
-				}
-				name := value.Name
-				item := map[string]interface{}{
-					"type":      "function_call",
-					"call_id":   value.ID,
-					"name":      name,
-					"arguments": string(value.Input),
-				}
-				if value.Namespace != "" {
-					item["namespace"] = value.Namespace
-					if value.OriginalName != "" {
-						item["name"] = value.OriginalName
-					}
-				}
-				input = append(input, coreResponsesInputProjectionItem{
-					Item:         item,
-					MessageIndex: msgIndex,
-					BlockIndexes: []int{blockIndex},
-				})
-			case core.ToolResultBlock:
-				flushContent()
-				itemType := "function_call_output"
-				if value.Type == "custom" {
-					itemType = "custom_tool_call_output"
-				}
-				item := map[string]interface{}{
-					"type":    itemType,
-					"call_id": value.ToolUseID,
-					"output":  value.Content,
-				}
-				if value.IsError {
-					item["status"] = "incomplete"
-				}
-				input = append(input, coreResponsesInputProjectionItem{
-					Item:         item,
-					MessageIndex: msgIndex,
-					BlockIndexes: []int{blockIndex},
-				})
-			case core.ReasoningBlock:
-				flushContent()
-				if value.Provider != "openai" || value.Type != "reasoning" {
-					continue
-				}
-				if item := openAIReasoningBlockInputItem(value); item != nil {
-					input = append(input, coreResponsesInputProjectionItem{
-						Item:         item,
-						MessageIndex: msgIndex,
-						BlockIndexes: []int{blockIndex},
-					})
-				}
-			}
-		}
-		flushContent()
-	}
-	return input
-}
-
-func responsesTextPart(role, text string) map[string]interface{} {
-	partType := "input_text"
-	if role == string(core.RoleAssistant) {
-		partType = "output_text"
-	}
-	return map[string]interface{}{"type": partType, "text": text}
-}
-
-func openAIReasoningBlockInputItem(block core.ReasoningBlock) map[string]interface{} {
-	if len(block.Raw) > 0 {
-		var item map[string]interface{}
-		if err := json.Unmarshal(block.Raw, &item); err == nil {
-			return item
-		}
-	}
-	item := map[string]interface{}{"type": "reasoning"}
-	if block.ID != "" {
-		item["id"] = block.ID
-	}
-	if block.Status != "" {
-		item["status"] = block.Status
-	}
-	if len(block.Summary) > 0 {
-		var summary interface{}
-		if err := json.Unmarshal(block.Summary, &summary); err == nil {
-			item["summary"] = summary
-		}
-	}
-	if block.EncryptedContent != "" {
-		item["encrypted_content"] = block.EncryptedContent
-	}
-	return item
 }
 
 func proxyOpenAIResponsesToolsFromDefinitions(tools []core.ToolDefinition) []map[string]interface{} {

@@ -18,16 +18,6 @@ type providerJSONRequest struct {
 	Configure    func(*http.Request) error
 }
 
-func noErrorRequestConfigurer(fn func(*http.Request)) func(*http.Request) error {
-	if fn == nil {
-		return nil
-	}
-	return func(req *http.Request) error {
-		fn(req)
-		return nil
-	}
-}
-
 func buildProviderJSONRequest(ctx context.Context, spec providerJSONRequest) (*http.Request, []byte, error) {
 	requestName := spec.RequestName
 	if requestName == "" {

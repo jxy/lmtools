@@ -991,7 +991,7 @@ func (b *openAIChatToolDeltaBuffer) Apply(tc core.ParsedOpenAIStreamToolCall) er
 	}
 
 	state.name = tc.Name
-	if isResponsesCustomToolName(b.writer.toolNameRegistry, tc.Name) {
+	if _, ok := b.writer.toolNameRegistry.resolve(tc.Name, "custom"); ok {
 		state.custom = true
 		state.arguments += tc.Arguments
 		return nil
@@ -1095,9 +1095,4 @@ func logResponsesStreamError(ctx context.Context, err error) {
 	if err != nil {
 		logger.From(ctx).Errorf("Responses stream failed: %v", err)
 	}
-}
-
-func isResponsesCustomToolName(registry responseToolNameRegistry, name string) bool {
-	_, ok := registry.resolve(name, "custom")
-	return ok
 }

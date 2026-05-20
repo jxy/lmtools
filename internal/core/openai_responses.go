@@ -65,75 +65,122 @@ func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interf
 }
 
 func marshalOpenAIResponsesInput(messages []TypedMessage) []interface{} {
-	input := make([]interface{}, 0, len(messages))
-	for _, msg := range messages {
+	return OpenAIResponsesInput(messages)
+}
+
+type OpenAIResponsesInputProjectionItem struct {
+	Item         interface{}
+	MessageIndex int
+	BlockIndexes []int
+}
+
+func OpenAIResponsesInput(messages []TypedMessage) []interface{} {
+	projected := OpenAIResponsesInputProjection(messages)
+	input := make([]interface{}, 0, len(projected))
+	for _, item := range projected {
+		input = append(input, item.Item)
+	}
+	return input
+}
+
+func OpenAIResponsesInputProjection(messages []TypedMessage) []OpenAIResponsesInputProjectionItem {
+	projected := make([]OpenAIResponsesInputProjectionItem, 0, len(messages))
+	for msgIndex, msg := range messages {
 		var content []map[string]interface{}
+		var contentBlockIndexes []int
 		flushContent := func() {
 			if len(content) == 0 {
 				return
 			}
-			input = append(input, map[string]interface{}{
-				"type":    "message",
-				"role":    msg.Role,
-				"content": content,
+			projected = append(projected, OpenAIResponsesInputProjectionItem{
+				Item: map[string]interface{}{
+					"type":    "message",
+					"role":    msg.Role,
+					"content": content,
+				},
+				MessageIndex: msgIndex,
+				BlockIndexes: append([]int(nil), contentBlockIndexes...),
 			})
 			content = nil
+			contentBlockIndexes = nil
 		}
-		for _, block := range msg.Blocks {
+		appendToolUse := func(blockIndex int, value ToolUseBlock) {
+			flushContent()
+			projected = append(projected, OpenAIResponsesInputProjectionItem{
+				Item:         openAIResponsesToolCallItem(value),
+				MessageIndex: msgIndex,
+				BlockIndexes: []int{blockIndex},
+			})
+		}
+		appendToolResult := func(blockIndex int, value ToolResultBlock) {
+			flushContent()
+			projected = append(projected, OpenAIResponsesInputProjectionItem{
+				Item:         openAIResponsesToolCallOutputItem(value),
+				MessageIndex: msgIndex,
+				BlockIndexes: []int{blockIndex},
+			})
+		}
+		appendReasoning := func(blockIndex int, value ReasoningBlock) {
+			flushContent()
+			if item := openAIResponsesReasoningItem(value); item != nil {
+				projected = append(projected, OpenAIResponsesInputProjectionItem{
+					Item:         item,
+					MessageIndex: msgIndex,
+					BlockIndexes: []int{blockIndex},
+				})
+			}
+		}
+		for blockIndex, block := range msg.Blocks {
 			switch value := block.(type) {
 			case TextBlock:
 				if value.Text != "" {
 					content = append(content, openAIResponsesTextPart(msg.Role, value.Text))
+					contentBlockIndexes = append(contentBlockIndexes, blockIndex)
 				}
 			case *TextBlock:
 				if value != nil && value.Text != "" {
 					content = append(content, openAIResponsesTextPart(msg.Role, value.Text))
+					contentBlockIndexes = append(contentBlockIndexes, blockIndex)
 				}
 			case ImageBlock:
 				content = append(content, openAIResponsesImagePart(value))
+				contentBlockIndexes = append(contentBlockIndexes, blockIndex)
 			case *ImageBlock:
 				if value != nil {
 					content = append(content, openAIResponsesImagePart(*value))
+					contentBlockIndexes = append(contentBlockIndexes, blockIndex)
 				}
 			case FileBlock:
 				content = append(content, openAIResponsesFilePart(value))
+				contentBlockIndexes = append(contentBlockIndexes, blockIndex)
 			case *FileBlock:
 				if value != nil {
 					content = append(content, openAIResponsesFilePart(*value))
+					contentBlockIndexes = append(contentBlockIndexes, blockIndex)
 				}
 			case ToolUseBlock:
-				flushContent()
-				input = append(input, openAIResponsesToolCallItem(value))
+				appendToolUse(blockIndex, value)
 			case *ToolUseBlock:
 				if value != nil {
-					flushContent()
-					input = append(input, openAIResponsesToolCallItem(*value))
+					appendToolUse(blockIndex, *value)
 				}
 			case ToolResultBlock:
-				flushContent()
-				input = append(input, openAIResponsesToolCallOutputItem(value))
+				appendToolResult(blockIndex, value)
 			case *ToolResultBlock:
 				if value != nil {
-					flushContent()
-					input = append(input, openAIResponsesToolCallOutputItem(*value))
+					appendToolResult(blockIndex, *value)
 				}
 			case ReasoningBlock:
-				flushContent()
-				if item := openAIResponsesReasoningItem(value); item != nil {
-					input = append(input, item)
-				}
+				appendReasoning(blockIndex, value)
 			case *ReasoningBlock:
 				if value != nil {
-					flushContent()
-					if item := openAIResponsesReasoningItem(*value); item != nil {
-						input = append(input, item)
-					}
+					appendReasoning(blockIndex, *value)
 				}
 			}
 		}
 		flushContent()
 	}
-	return input
+	return projected
 }
 
 func openAIResponsesReasoningItem(block ReasoningBlock) map[string]interface{} {
@@ -190,12 +237,19 @@ func openAIResponsesFilePart(block FileBlock) map[string]interface{} {
 }
 
 func openAIResponsesFunctionCallItem(block ToolUseBlock) map[string]interface{} {
-	return map[string]interface{}{
+	item := map[string]interface{}{
 		"type":      "function_call",
 		"call_id":   block.ID,
 		"name":      block.Name,
 		"arguments": string(block.Input),
 	}
+	if block.Namespace != "" {
+		item["namespace"] = block.Namespace
+		if block.OriginalName != "" {
+			item["name"] = block.OriginalName
+		}
+	}
+	return item
 }
 
 func openAIResponsesToolCallItem(block ToolUseBlock) map[string]interface{} {

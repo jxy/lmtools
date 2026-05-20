@@ -194,7 +194,7 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
 	}
-	beforeItemCount := len(coreResponsesInput(beforeMessages))
+	beforeItemCount := len(core.OpenAIResponsesInput(beforeMessages))
 	if err := appendConversationMessages(ctx, sess, messages); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return

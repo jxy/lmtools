@@ -84,11 +84,6 @@ func responsesCustomToolFormatFromChat(format interface{}) interface{} {
 	return src
 }
 
-func responseCustomToolInput(value interface{}) string {
-	text, _ := value.(string)
-	return text
-}
-
 func rawJSONStringValue(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

@@ -67,35 +67,7 @@ func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
 
-	select {
-	case <-firstChunkSeen:
-	case <-time.After(2 * time.Second):
-		t.Fatal("backend did not receive streaming request")
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	gotDeltaBeforeFinal := false
-	deadline := time.After(2 * time.Second)
-	for !gotDeltaBeforeFinal {
-		lineCh := make(chan string, 1)
-		go func() {
-			if scanner.Scan() {
-				lineCh <- scanner.Text()
-				return
-			}
-			lineCh <- ""
-		}()
-		select {
-		case line := <-lineCh:
-			if strings.Contains(line, "response.output_text.delta") || strings.Contains(line, `"delta":"hi"`) {
-				gotDeltaBeforeFinal = true
-			}
-		case <-deadline:
-			t.Fatal("did not receive downstream delta before backend final chunk")
-		}
-	}
-	close(releaseFinalChunk)
-	_, _ = io.Copy(io.Discard, resp.Body)
+	assertResponsesDeltaBeforeFinal(t, resp, firstChunkSeen, releaseFinalChunk)
 
 	if !sawStream {
 		t.Fatal("backend request did not set stream=true")
@@ -247,35 +219,7 @@ func TestOpenAIResponsesStreamArgoAnthropicUsesUpstreamStreaming(t *testing.T) {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
 
-	select {
-	case <-firstChunkSeen:
-	case <-time.After(2 * time.Second):
-		t.Fatal("backend did not receive streaming request")
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	gotDeltaBeforeFinal := false
-	deadline := time.After(2 * time.Second)
-	for !gotDeltaBeforeFinal {
-		lineCh := make(chan string, 1)
-		go func() {
-			if scanner.Scan() {
-				lineCh <- scanner.Text()
-				return
-			}
-			lineCh <- ""
-		}()
-		select {
-		case line := <-lineCh:
-			if strings.Contains(line, "response.output_text.delta") || strings.Contains(line, `"delta":"hi"`) {
-				gotDeltaBeforeFinal = true
-			}
-		case <-deadline:
-			t.Fatal("did not receive downstream delta before backend final chunk")
-		}
-	}
-	close(releaseFinalChunk)
-	_, _ = io.Copy(io.Discard, resp.Body)
+	assertResponsesDeltaBeforeFinal(t, resp, firstChunkSeen, releaseFinalChunk)
 
 	if !sawStream {
 		t.Fatal("backend request did not set stream=true")
@@ -657,9 +601,9 @@ func TestOpenAIResponsesStreamFailureCommitSurvivesCanceledContext(t *testing.T)
 	if err != nil {
 		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
-	stateCtx, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), req, typedCurrent, responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, _, err := server.prepareOpenAIResponsesStateForeground(context.Background(), req, typedCurrent)
 	if err != nil {
-		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
+		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
 
 	streamCtx, cancel := context.WithCancel(context.Background())
