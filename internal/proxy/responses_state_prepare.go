@@ -42,11 +42,11 @@ func responsesStoreRequested(req *OpenAIResponsesRequest) bool {
 	return req == nil || req.Store == nil || *req.Store
 }
 
-func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string) (*openAIResponsesStateContext, TypedRequest, error) {
-	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, originalModel, responsesStateReadOnly, false)
+func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
+	return s.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateReadOnly, false)
 }
 
-func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, originalModel string, mode openAIResponsesStateMode, store bool) (*openAIResponsesStateContext, TypedRequest, error) {
+func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, mode openAIResponsesStateMode, store bool) (*openAIResponsesStateContext, TypedRequest, error) {
 	convSpec, err := parseConversationSpec(req.Conversation)
 	if err != nil {
 		return nil, typed, err
@@ -153,9 +153,6 @@ func (s *Server) prepareOpenAIResponsesStateWithMode(ctx context.Context, req *O
 	}
 	if typed.Developer == "" {
 		typed.Developer = stateCtx.Instructions
-	}
-	if originalModel != "" && typed.Metadata == nil {
-		typed.Metadata = map[string]interface{}{}
 	}
 	return stateCtx, typed, nil
 }

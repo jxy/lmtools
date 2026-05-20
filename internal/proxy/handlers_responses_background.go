@@ -15,7 +15,7 @@ func responsesBackgroundRequested(req *OpenAIResponsesRequest) bool {
 
 func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter, r *http.Request, responsesReq *OpenAIResponsesRequest, typedCurrent TypedRequest, route *endpointRoute) {
 	ctx := r.Context()
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateWithMode(ctx, responsesReq, typedCurrent, route.OriginalModel, responsesStateBackground, responsesStoreRequested(responsesReq))
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateWithMode(ctx, responsesReq, typedCurrent, responsesStateBackground, responsesStoreRequested(responsesReq))
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
 		return

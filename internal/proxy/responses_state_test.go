@@ -125,14 +125,14 @@ func TestOpenAIResponsesStatePreparationPreviousResponseHistoryMatchesReadOnly(t
 
 	req := &OpenAIResponsesRequest{Model: "claude-test", PreviousResponseID: respID, Input: "next"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "next")}}
-	stateCtx, foregroundTyped, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, "claude-test", responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, foregroundTyped, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateForeground, responsesStoreRequested(req))
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
 	}
 	if stateCtx == nil || stateCtx.Session == nil {
 		t.Fatalf("foreground state = %#v, want loaded state", stateCtx)
 	}
-	readOnlyStateCtx, readOnlyTyped, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed, "claude-test")
+	readOnlyStateCtx, readOnlyTyped, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed)
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v", err)
 	}
@@ -155,7 +155,7 @@ func TestOpenAIResponsesReadOnlyAutoConversationDoesNotCreateState(t *testing.T)
 	req := &OpenAIResponsesRequest{Model: "claude-test", Conversation: "auto", Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
 
-	stateCtx, _, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed, "claude-test")
+	stateCtx, _, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed)
 	if err == nil || !strings.Contains(err.Error(), "conversation id is required") {
 		t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v, want conversation id error", err)
 	}
@@ -178,7 +178,7 @@ func TestOpenAIResponsesForegroundStoreFalseWithoutHistoryReturnsNilState(t *tes
 	req := &OpenAIResponsesRequest{Model: "claude-test", Store: &store, Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
 
-	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, "claude-test", responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateForeground, responsesStoreRequested(req))
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
 	}
@@ -187,6 +187,9 @@ func TestOpenAIResponsesForegroundStoreFalseWithoutHistoryReturnsNilState(t *tes
 	}
 	if got := strings.Join(responseTypedTextLines(typedWithState.Messages), "\n"); got != "user:hello" {
 		t.Fatalf("messages = %q, want current request only", got)
+	}
+	if typedWithState.Metadata != nil {
+		t.Fatalf("metadata = %#v, want nil", typedWithState.Metadata)
 	}
 }
 
@@ -197,7 +200,7 @@ func TestOpenAIResponsesBackgroundStoreFalseAllocatesState(t *testing.T) {
 	req := &OpenAIResponsesRequest{Model: "claude-test", Store: &store, Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
 
-	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, "claude-test", responsesStateBackground, responsesStoreRequested(req))
+	stateCtx, typedWithState, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateBackground, responsesStoreRequested(req))
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateWithMode(background) error = %v", err)
 	}
@@ -223,7 +226,7 @@ func TestOpenAIResponsesCommitMarshalErrorDoesNotAppendSession(t *testing.T) {
 	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
 	req := &OpenAIResponsesRequest{Model: "claude-test", Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
-	stateCtx, _, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, "claude-test", responsesStateForeground, responsesStoreRequested(req))
+	stateCtx, _, err := server.prepareOpenAIResponsesStateWithMode(ctx, req, typed, responsesStateForeground, responsesStoreRequested(req))
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateWithMode(foreground) error = %v", err)
 	}
@@ -379,13 +382,13 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 
 	firstReq := &OpenAIResponsesRequest{Model: "claude-test", Conversation: conv.ID, Input: "first question"}
 	firstTyped := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "first question")}}
-	firstState, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), firstReq, firstTyped, "claude-test", responsesStateForeground, responsesStoreRequested(firstReq))
+	firstState, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), firstReq, firstTyped, responsesStateForeground, responsesStoreRequested(firstReq))
 	if err != nil {
 		t.Fatalf("prepare first state error = %v", err)
 	}
 	secondReq := &OpenAIResponsesRequest{Model: "claude-test", Conversation: conv.ID, Input: "second question"}
 	secondTyped := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "second question")}}
-	secondState, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), secondReq, secondTyped, "claude-test", responsesStateForeground, responsesStoreRequested(secondReq))
+	secondState, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), secondReq, secondTyped, responsesStateForeground, responsesStoreRequested(secondReq))
 	if err != nil {
 		t.Fatalf("prepare second state error = %v", err)
 	}
@@ -601,7 +604,7 @@ func TestOpenAIResponsesStateModeRejectsUnknownMode(t *testing.T) {
 	req := &OpenAIResponsesRequest{Model: "claude-test", Input: "hello"}
 	typed := TypedRequest{Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hello")}}
 
-	_, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), req, typed, "claude-test", openAIResponsesStateMode(99), true)
+	_, _, err := server.prepareOpenAIResponsesStateWithMode(context.Background(), req, typed, openAIResponsesStateMode(99), true)
 	if err == nil || !strings.Contains(err.Error(), "unknown responses state mode") {
 		t.Fatalf("prepareOpenAIResponsesStateWithMode() error = %v, want unknown mode", err)
 	}

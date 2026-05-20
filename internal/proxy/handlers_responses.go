@@ -85,7 +85,7 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateWithMode(ctx, responsesReq, typed, route.OriginalModel, responsesStateForeground, responsesStoreRequested(responsesReq))
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateWithMode(ctx, responsesReq, typed, responsesStateForeground, responsesStoreRequested(responsesReq))
 	if err != nil {
 		logger.From(ctx).Errorf("Failed to prepare OpenAI responses state: %v", err)
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
@@ -230,9 +230,6 @@ func (s *Server) forwardOpenAIResponsesStreamDirectly(w http.ResponseWriter, r *
 	for scanner.Scan() {
 		line := s.rewriteResponsesStreamModel(scanner.Text(), responsesReq.Model, visibleModel)
 		payload := line + "\n"
-		if strings.HasPrefix(line, "data: ") || line == "" {
-			payload = line + "\n"
-		}
 		logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
 		fmt.Fprint(w, payload)
 		flusher.Flush()

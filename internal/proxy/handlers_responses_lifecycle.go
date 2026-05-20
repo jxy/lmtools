@@ -55,7 +55,7 @@ func (s *Server) handleOpenAIResponsesInputTokens(w http.ResponseWriter, r *http
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "conversion_error", http.StatusBadRequest)
 		return
 	}
-	_, typedWithState, err := s.prepareOpenAIResponsesStateReadOnly(ctx, req, typed, route.OriginalModel)
+	_, typedWithState, err := s.prepareOpenAIResponsesStateReadOnly(ctx, req, typed)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
 		return
@@ -151,7 +151,7 @@ func (s *Server) handleOpenAIResponsesCompact(w http.ResponseWriter, r *http.Req
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "conversion_error", http.StatusBadRequest)
 		return
 	}
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateReadOnly(ctx, req, typed, route.OriginalModel)
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateReadOnly(ctx, req, typed)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
 		return

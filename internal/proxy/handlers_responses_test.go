@@ -378,6 +378,62 @@ func TestOpenAIResponsesDirectStreamRegistersModelAliasByResponseID(t *testing.T
 	}
 }
 
+func TestOpenAIResponsesDirectStreamPassThroughPreservesNonDataLines(t *testing.T) {
+	upstreamBody := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_stream","model":"gpt-upstream"}}`,
+		"",
+		": keepalive",
+		"",
+		`data: {"type":"response.output_text.delta","delta":"hi"}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}, nil
+	})
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	server := NewTestServerDirectWithClient(t, &Config{
+		Provider:           constants.ProviderOpenAI,
+		ProviderURL:        "http://openai.local/v1",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: fixtureMaxBodySize,
+		SessionsDir:        t.TempDir(),
+	}, client)
+	recorder := newFlushableRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-3-sonnet","stream":true,"input":"hi"}`))
+
+	server.forwardOpenAIResponsesStreamDirectly(
+		recorder,
+		req,
+		&OpenAIResponsesRequest{Model: "gpt-upstream", Stream: true},
+		[]byte(`{"model":"gpt-upstream","stream":true,"input":"hi"}`),
+		"claude-3-sonnet",
+	)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: response.created\n") {
+		t.Fatalf("stream dropped event line: %q", body)
+	}
+	if !strings.Contains(body, ": keepalive\n") {
+		t.Fatalf("stream dropped comment line: %q", body)
+	}
+	if !strings.Contains(body, "data: [DONE]\n") {
+		t.Fatalf("stream dropped DONE marker: %q", body)
+	}
+	if !strings.Contains(body, `"model":"claude-3-sonnet"`) {
+		t.Fatalf("stream did not rewrite response model: %q", body)
+	}
+	if !strings.Contains(body, `"delta":"hi"`) {
+		t.Fatalf("stream dropped data event: %q", body)
+	}
+}
+
 func TestOpenAIResponsesArgoLegacyNonClaudeUsesLegacyChat(t *testing.T) {
 	var captured ArgoChatRequest
 	var sawPath string

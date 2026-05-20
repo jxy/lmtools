@@ -59,8 +59,7 @@ func simulatedTextChunkSize(content string) int {
 }
 
 func emitSimulatedTextChunks(ctx context.Context, content string, emit func(string) error) error {
-	splitter := NewContentSplitter(ctx, TextMode, simulatedTextChunkSize(content))
-	for _, chunk := range splitter.Split(content) {
+	for _, chunk := range splitTextForStreaming(ctx, content, simulatedTextChunkSize(content)) {
 		if err := emit(chunk); err != nil {
 			return err
 		}
@@ -74,8 +73,7 @@ func emitSimulatedToolInputChunks(ctx context.Context, input interface{}, emit f
 		return err
 	}
 
-	splitter := NewContentSplitter(ctx, JSONMode, constants.DefaultJSONChunkSize)
-	for _, chunk := range splitter.Split(string(inputJSON)) {
+	for _, chunk := range splitJSONForStreaming(ctx, string(inputJSON), constants.DefaultJSONChunkSize) {
 		if err := emit(chunk); err != nil {
 			return err
 		}
