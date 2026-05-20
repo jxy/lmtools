@@ -243,7 +243,7 @@ func captureCase(root, caseID, targetID string) error {
 		return err
 	}
 
-	target, err := parseTarget(targetID)
+	target, err := apifixtures.ParseCaptureTarget(targetID)
 	if err != nil {
 		return err
 	}
@@ -298,43 +298,17 @@ func captureTokenCountCaseWithClient(root string, meta apifixtures.CaseMeta, tar
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, data, err := apifixtures.DoCaptureRequest(context.Background(), client, req, body, targetHost(target), nil)
+	resp, data, err := doCaptureHTTPRequest(context.Background(), client, http.MethodPost, url, headers, body, targetHost(target))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	metaOut := captureMetadata{
-		CaseID:         meta.ID,
-		Target:         target.ID,
-		URL:            url,
-		StatusCode:     resp.StatusCode,
-		ContentType:    resp.Header.Get("Content-Type"),
-		CapturedAt:     time.Now().Format(time.RFC3339),
-		ResponseHeader: resp.Header,
-	}
-
-	capturesDir := filepath.Join(apifixtures.CaseDir(root, meta.ID), "captures")
-	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
-		return err
-	}
+	metaOut := newCaptureMetadata(meta, target, url, resp)
 	if err := writeTokenCountCaptureRequest(root, meta.ID, filepath.Join("captures", target.ID+".request.json"), url, body); err != nil {
 		return err
 	}
-	metaBytes, err := json.MarshalIndent(metaOut, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".meta.json"), append(metaBytes, '\n'), 0o644); err != nil {
+	if err := writeCaptureMetadata(root, meta.ID, target.ID, metaOut); err != nil {
 		return err
 	}
 	if err := apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("captures", target.ID+".response.json"), data); err != nil {
@@ -356,44 +330,18 @@ func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetCon
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, data, err := apifixtures.DoCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
+	resp, data, err := doCaptureHTTPRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, http.MethodPost, url, headers, body, targetHost(target))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	metaOut := captureMetadata{
-		CaseID:         meta.ID,
-		Target:         target.ID,
-		URL:            url,
-		StatusCode:     resp.StatusCode,
-		ContentType:    resp.Header.Get("Content-Type"),
-		CapturedAt:     time.Now().Format(time.RFC3339),
-		ResponseHeader: resp.Header,
+	metaOut := newCaptureMetadata(meta, target, url, resp)
+	if err := writeCaptureMetadata(root, meta.ID, target.ID, metaOut); err != nil {
+		return err
 	}
 
 	capturesDir := filepath.Join(apifixtures.CaseDir(root, meta.ID), "captures")
-	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
-		return err
-	}
-
-	metaBytes, err := json.MarshalIndent(metaOut, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".meta.json"), append(metaBytes, '\n'), 0o644); err != nil {
-		return err
-	}
-
 	if target.Stream {
 		data = normalizeStreamCapture(data)
 		if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".stream.txt"), data, 0o644); err != nil {
@@ -412,6 +360,30 @@ func captureRequestCase(root string, meta apifixtures.CaseMeta, target targetCon
 
 	fmt.Printf("captured %s -> %s (%d)\n", meta.ID, target.ID, resp.StatusCode)
 	return nil
+}
+
+func newCaptureMetadata(meta apifixtures.CaseMeta, target targetConfig, url string, resp *http.Response) captureMetadata {
+	return captureMetadata{
+		CaseID:         meta.ID,
+		Target:         target.ID,
+		URL:            url,
+		StatusCode:     resp.StatusCode,
+		ContentType:    resp.Header.Get("Content-Type"),
+		CapturedAt:     time.Now().Format(time.RFC3339),
+		ResponseHeader: resp.Header,
+	}
+}
+
+func writeCaptureMetadata(root, caseID, targetID string, metaOut captureMetadata) error {
+	capturesDir := filepath.Join(apifixtures.CaseDir(root, caseID), "captures")
+	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
+		return err
+	}
+	metaBytes, err := json.MarshalIndent(metaOut, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(capturesDir, targetID+".meta.json"), append(metaBytes, '\n'), 0o644)
 }
 
 func captureStatefulCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {
@@ -481,7 +453,7 @@ func captureStatefulStep(root string, meta apifixtures.CaseMeta, target targetCo
 		return statefulCaptureMetadata{}, err
 	}
 
-	resp, respBody, err := doStatefulCaptureRequest(context.Background(), client, method, url, headers, body, targetHost(target))
+	resp, respBody, err := doCaptureHTTPRequest(context.Background(), client, method, url, headers, body, targetHost(target))
 	if err != nil {
 		return statefulCaptureMetadata{}, err
 	}
@@ -491,6 +463,9 @@ func captureStatefulStep(root string, meta apifixtures.CaseMeta, target targetCo
 	if len(pollUntil) > 0 {
 		resp, respBody, err = pollStatefulCapture(context.Background(), client, method, url, headers, body, targetHost(target), pollUntil, vars)
 		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
 			return statefulCaptureMetadata{}, err
 		}
 		defer resp.Body.Close()
@@ -538,30 +513,44 @@ func captureStatefulStep(root string, meta apifixtures.CaseMeta, target targetCo
 	return captured, nil
 }
 
-func doStatefulCaptureRequest(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte, provider string) (*http.Response, []byte, error) {
+func newCaptureHTTPRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) (*http.Request, error) {
 	var reader io.Reader
-	if len(body) > 0 {
+	if body != nil {
 		reader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if len(body) > 0 {
+	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for key, value := range headers {
 		req.Header.Set(key, value)
+	}
+	return req, nil
+}
+
+func doCaptureHTTPRequest(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte, provider string) (*http.Response, []byte, error) {
+	req, err := newCaptureHTTPRequest(ctx, method, url, headers, body)
+	if err != nil {
+		return nil, nil, err
 	}
 	return apifixtures.DoCaptureRequest(ctx, client, req, body, provider, nil)
 }
 
 func pollStatefulCapture(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte, provider string, fields map[string]interface{}, vars map[string]string) (*http.Response, []byte, error) {
 	deadline := time.Now().Add(2 * time.Minute)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
 	var lastResp *http.Response
 	var lastBody []byte
 	for {
-		resp, data, err := doStatefulCaptureRequest(ctx, client, method, url, headers, body, provider)
+		if time.Now().After(deadline) {
+			return lastResp, lastBody, statefulCapturePollTimeoutError(url, fields, lastResp)
+		}
+		resp, data, err := doCaptureHTTPRequest(ctx, client, method, url, headers, body, provider)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -575,10 +564,25 @@ func pollStatefulCapture(ctx context.Context, client *http.Client, method, url s
 			return lastResp, lastBody, nil
 		}
 		if time.Now().After(deadline) {
-			return lastResp, lastBody, nil
+			return lastResp, lastBody, statefulCapturePollTimeoutError(url, fields, lastResp)
 		}
-		time.Sleep(1 * time.Second)
+		sleepFor := time.Until(deadline)
+		if sleepFor > time.Second {
+			sleepFor = time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return lastResp, lastBody, fmt.Errorf("stateful capture poll canceled for %s: %w", url, ctx.Err())
+		case <-time.After(sleepFor):
+		}
 	}
+}
+
+func statefulCapturePollTimeoutError(url string, fields map[string]interface{}, lastResp *http.Response) error {
+	if lastResp == nil {
+		return fmt.Errorf("stateful capture poll timed out for %s waiting for %v without a response", url, fields)
+	}
+	return fmt.Errorf("stateful capture poll timed out for %s waiting for %v; last status %d", url, fields, lastResp.StatusCode)
 }
 
 func statefulCaptureBindings(step apifixtures.StatefulStep) map[string]string {
@@ -708,12 +712,9 @@ func captureModelsCase(root string, meta apifixtures.CaseMeta, target targetConf
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := newCaptureHTTPRequest(context.Background(), http.MethodGet, url, headers, nil)
 	if err != nil {
 		return err
-	}
-	for key, value := range headers {
-		req.Header.Set(key, value)
 	}
 
 	resp, data, err := doCaptureModelsRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, target)
@@ -722,26 +723,8 @@ func captureModelsCase(root string, meta apifixtures.CaseMeta, target targetConf
 	}
 	defer resp.Body.Close()
 
-	metaOut := captureMetadata{
-		CaseID:         meta.ID,
-		Target:         target.ID,
-		URL:            url,
-		StatusCode:     resp.StatusCode,
-		ContentType:    resp.Header.Get("Content-Type"),
-		CapturedAt:     time.Now().Format(time.RFC3339),
-		ResponseHeader: resp.Header,
-	}
-
-	capturesDir := filepath.Join(apifixtures.CaseDir(root, meta.ID), "captures")
-	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
-		return err
-	}
-
-	metaBytes, err := json.MarshalIndent(metaOut, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(capturesDir, target.ID+".meta.json"), append(metaBytes, '\n'), 0o644); err != nil {
+	metaOut := newCaptureMetadata(meta, target, url, resp)
+	if err := writeCaptureMetadata(root, meta.ID, target.ID, metaOut); err != nil {
 		return err
 	}
 	if err := apifixtures.CanonicalizeToFile(root, meta.ID, filepath.Join("captures", target.ID+".response.json"), data); err != nil {
@@ -1057,10 +1040,6 @@ func prepareCaptureRequestBody(meta apifixtures.CaseMeta, target targetConfig, b
 	}
 
 	return json.Marshal(decoded)
-}
-
-func parseTarget(targetID string) (targetConfig, error) {
-	return apifixtures.ParseCaptureTarget(targetID)
 }
 
 func tokenCountEndpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, map[string]string, error) {

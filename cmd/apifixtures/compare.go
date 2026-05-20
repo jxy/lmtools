@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -86,7 +85,7 @@ func runCompareAll(args []string) error {
 			targets = []string{fs.targetID}
 		}
 		for _, targetID := range targets {
-			target, err := parseTarget(targetID)
+			target, err := apifixtures.ParseCaptureTarget(targetID)
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s %s: %v", meta.ID, targetID, err))
 				continue
@@ -151,7 +150,7 @@ func compareCase(root, caseID, targetID, againstID string, liveAgainst bool) (ap
 		return apifixtures.CompareResult{}, fmt.Errorf("case %q is not a request fixture", caseID)
 	}
 
-	target, err := parseTarget(targetID)
+	target, err := apifixtures.ParseCaptureTarget(targetID)
 	if err != nil {
 		return apifixtures.CompareResult{}, err
 	}
@@ -171,7 +170,7 @@ func compareCase(root, caseID, targetID, againstID string, liveAgainst bool) (ap
 	selfCompare := true
 	if strings.TrimSpace(againstID) != "" {
 		selfCompare = false
-		comparisonTarget, err = parseTarget(againstID)
+		comparisonTarget, err = apifixtures.ParseCaptureTarget(againstID)
 		if err != nil {
 			return apifixtures.CompareResult{}, err
 		}
@@ -227,16 +226,7 @@ func captureArtifact(root string, meta apifixtures.CaseMeta, target targetConfig
 		return compareArtifact{}, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return compareArtifact{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, data, err := apifixtures.DoCaptureRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, req, body, targetHost(target), nil)
+	resp, data, err := doCaptureHTTPRequest(context.Background(), &http.Client{Timeout: 2 * time.Minute}, http.MethodPost, url, headers, body, targetHost(target))
 	if err != nil {
 		return compareArtifact{}, err
 	}

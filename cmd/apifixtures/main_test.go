@@ -177,6 +177,50 @@ func TestCaptureRequestRelFallsBackToWireFormatForArgoHostedTarget(t *testing.T)
 	}
 }
 
+func TestDoCaptureHTTPRequestSetsHeadersAndBody(t *testing.T) {
+	client := &http.Client{Transport: captureRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if r.Method != http.MethodPost {
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"bad method"}`), nil
+		}
+		if r.URL.Path != "/v1/messages" {
+			return captureJSONResponse(http.StatusBadRequest, `{"error":"bad path"}`), nil
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			return captureJSONResponse(http.StatusBadRequest, fmt.Sprintf(`{"error":"bad content type %q"}`, got)), nil
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			return captureJSONResponse(http.StatusBadRequest, fmt.Sprintf(`{"error":"bad authorization %q"}`, got)), nil
+		}
+		if string(body) != `{"message":"hi"}` {
+			return captureJSONResponse(http.StatusBadRequest, fmt.Sprintf(`{"error":"bad body %q"}`, body)), nil
+		}
+		return captureJSONResponse(http.StatusOK, `{"ok":true}`), nil
+	})}
+
+	resp, data, err := doCaptureHTTPRequest(
+		context.Background(),
+		client,
+		http.MethodPost,
+		"https://api.example.test/v1/messages",
+		map[string]string{"Authorization": "Bearer test-key"},
+		[]byte(`{"message":"hi"}`),
+		"openai",
+	)
+	if err != nil {
+		t.Fatalf("doCaptureHTTPRequest() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, data)
+	}
+	if !bytes.Contains(data, []byte(`"ok":true`)) {
+		t.Fatalf("response body = %s, want ok", data)
+	}
+}
+
 func TestCaptureCaseRejectsUnsupportedTarget(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, "testdata/api-fixtures/cases", "fixture-case")
@@ -348,6 +392,83 @@ func TestCaptureStatefulCaseWritesStepArtifacts(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(caseDir, rel)); err != nil {
 			t.Fatalf("expected capture artifact %s: %v", rel, err)
 		}
+	}
+}
+
+func TestPollStatefulCaptureSucceedsAfterRetry(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: captureRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return captureJSONResponse(http.StatusOK, `{"status":"queued"}`), nil
+		}
+		return captureJSONResponse(http.StatusOK, `{"status":"completed"}`), nil
+	})}
+
+	resp, body, err := pollStatefulCapture(
+		context.Background(),
+		client,
+		http.MethodGet,
+		"https://api.example.test/v1/responses/resp_1",
+		nil,
+		nil,
+		"openai",
+		map[string]interface{}{"status": "completed"},
+		nil,
+	)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("pollStatefulCapture() error = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if !bytes.Contains(body, []byte(`"completed"`)) {
+		t.Fatalf("body = %s, want completed response", body)
+	}
+}
+
+func TestPollStatefulCaptureTimeoutIsError(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Millisecond))
+	defer cancel()
+
+	resp, _, err := pollStatefulCapture(
+		ctx,
+		&http.Client{Transport: captureRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return captureJSONResponse(http.StatusOK, `{"status":"queued"}`), nil
+		})},
+		http.MethodGet,
+		"https://api.example.test/v1/responses/resp_1",
+		nil,
+		nil,
+		"openai",
+		map[string]interface{}{"status": "completed"},
+		nil,
+	)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("pollStatefulCapture() error = nil, want timeout")
+	}
+	if !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "/v1/responses/resp_1") {
+		t.Fatalf("pollStatefulCapture() error = %q, want timeout with URL", err)
+	}
+}
+
+func TestStatefulCapturePollTimeoutErrorIncludesLastStatus(t *testing.T) {
+	err := statefulCapturePollTimeoutError(
+		"https://api.example.test/v1/responses/resp_1",
+		map[string]interface{}{"status": "completed"},
+		&http.Response{StatusCode: http.StatusAccepted},
+	)
+	if err == nil {
+		t.Fatal("statefulCapturePollTimeoutError() error = nil")
+	}
+	if !strings.Contains(err.Error(), "last status 202") {
+		t.Fatalf("statefulCapturePollTimeoutError() = %q, want last status", err)
 	}
 }
 

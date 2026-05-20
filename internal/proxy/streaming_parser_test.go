@@ -52,6 +52,44 @@ func TestOpenAIStreamParser_SharedStateTransitions(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamHandler_ParsedStateHelpersCloseTextAndReuseToolBlock(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+	if err := handler.SendTextDelta("Before tool"); err != nil {
+		t.Fatalf("SendTextDelta() error = %v", err)
+	}
+
+	streamIndex := 0
+	blockIndex, err := handler.BeginParsedToolUseBlock(&streamIndex, "toolu_1", "lookup")
+	if err != nil {
+		t.Fatalf("BeginParsedToolUseBlock() error = %v", err)
+	}
+	sameBlockIndex, err := handler.BeginParsedToolUseBlock(&streamIndex, "toolu_ignored", "ignored")
+	if err != nil {
+		t.Fatalf("BeginParsedToolUseBlock() second call error = %v", err)
+	}
+	if sameBlockIndex != blockIndex {
+		t.Fatalf("same upstream tool index mapped to block %d, want %d", sameBlockIndex, blockIndex)
+	}
+	if err := handler.CloseParsedTextBlockIfNeeded(); err != nil {
+		t.Fatalf("CloseParsedTextBlockIfNeeded() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if count := strings.Count(body, "event: content_block_stop"); count != 1 {
+		t.Fatalf("content_block_stop count = %d, want 1\nbody=%s", count, body)
+	}
+	if count := strings.Count(body, `"type":"tool_use"`); count != 1 {
+		t.Fatalf("tool_use starts = %d, want 1\nbody=%s", count, body)
+	}
+}
+
 func TestOpenAIStreamParser_UsageAfterFinishReasonCompletesOnce(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
@@ -213,6 +251,82 @@ func TestConvertGoogleStreamToOpenAI_SSE_FinishChunkCarriesText(t *testing.T) {
 	}
 	if !strings.Contains(body, `"finish_reason":"stop"`) {
 		t.Fatalf("expected finish_reason stop, body=%s", body)
+	}
+}
+
+func TestConvertGoogleStreamToOpenAI_MalformedChunkReturnsError(t *testing.T) {
+	recorder := newFlushableRecorder()
+	writer, err := NewOpenAIStreamWriter(recorder, "gpt-5.4-nano", context.Background())
+	if err != nil {
+		t.Fatalf("NewOpenAIStreamWriter() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"candidates":{"not":"an array"}}`,
+		"",
+	}, "\n")
+
+	server := &Server{}
+	if err := server.convertGoogleStreamToOpenAI(context.Background(), strings.NewReader(stream), writer); err == nil {
+		t.Fatal("convertGoogleStreamToOpenAI() error = nil, want malformed chunk error")
+	}
+}
+
+func TestConvertGoogleStreamToOpenAI_FunctionCallWithoutIDGetsGeneratedID(t *testing.T) {
+	recorder := newFlushableRecorder()
+	writer, err := NewOpenAIStreamWriter(recorder, "gpt-5.4-nano", context.Background())
+	if err != nil {
+		t.Fatalf("NewOpenAIStreamWriter() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"weather"}}}]}}]}`,
+		"",
+		`data: {"candidates":[{"finishReason":"STOP"}]}`,
+		"",
+	}, "\n")
+
+	server := &Server{}
+	if err := server.convertGoogleStreamToOpenAI(context.Background(), strings.NewReader(stream), writer); err != nil {
+		t.Fatalf("convertGoogleStreamToOpenAI() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"id":"call_`) {
+		t.Fatalf("expected generated call_ id, body=%s", body)
+	}
+	if !strings.Contains(body, `"name":"lookup"`) {
+		t.Fatalf("expected lookup function name, body=%s", body)
+	}
+	argsDelta := `"arguments":"{\"q\":\"weather\"}"`
+	if !strings.Contains(body, argsDelta) {
+		t.Fatalf("expected serialized tool arguments, body=%s", body)
+	}
+	if count := strings.Count(body, argsDelta); count != 1 {
+		t.Fatalf("serialized tool arguments count = %d, want 1\nbody=%s", count, body)
+	}
+}
+
+func TestConvertGoogleStreamToOpenAI_IncludesUsageFromTypedParser(t *testing.T) {
+	recorder := newFlushableRecorder()
+	writer, err := NewOpenAIStreamWriter(recorder, "gpt-5.4-nano", context.Background(), WithIncludeUsage(true))
+	if err != nil {
+		t.Fatalf("NewOpenAIStreamWriter() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":12},"candidates":[{"finishReason":"STOP"}]}`,
+		"",
+	}, "\n")
+
+	server := &Server{}
+	if err := server.convertGoogleStreamToOpenAI(context.Background(), strings.NewReader(stream), writer); err != nil {
+		t.Fatalf("convertGoogleStreamToOpenAI() error = %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}`) {
+		t.Fatalf("expected usage from Google stream chunk, body=%s", body)
 	}
 }
 

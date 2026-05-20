@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/core"
 	"time"
 )
 
@@ -153,67 +154,60 @@ func (c *OpenAIStreamConverter) HandleAnthropicEvent(eventType string, data json
 	return nil
 }
 
-// HandleGoogleChunk processes a Google streaming chunk and converts to OpenAI format.
-func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) error {
-	if usage, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
-		c.lastUsage = &OpenAIUsage{
-			PromptTokens:     int(usage["promptTokenCount"].(float64)),
-			CompletionTokens: int(usage["candidatesTokenCount"].(float64)),
-			TotalTokens:      int(usage["totalTokenCount"].(float64)),
+// HandleGoogleChunk processes a parsed Google streaming chunk and converts it to OpenAI format.
+func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk core.ParsedGoogleStreamChunk) error {
+	if chunk.Usage.InputTokens != nil || chunk.Usage.OutputTokens != nil || chunk.Usage.TotalTokens != nil {
+		c.lastUsage = parsedUsageToOpenAIUsage(chunk.Usage)
+	}
+
+	for _, text := range chunk.TextParts {
+		if text == "" {
+			continue
+		}
+		if err := c.ensureTextStart(); err != nil {
+			return err
+		}
+		if err := c.writer.WriteContent(text); err != nil {
+			return err
 		}
 	}
 
-	candidates, ok := chunk["candidates"].([]interface{})
-	if !ok || len(candidates) == 0 {
-		return nil
-	}
+	for _, functionCall := range chunk.FunctionCalls {
+		toolID := functionCall.ID
+		if toolID == "" {
+			toolID = fmt.Sprintf("call_%x", time.Now().UnixNano())
+		}
+		args := string(functionCall.Args)
 
-	candidate := candidates[0].(map[string]interface{})
-	finishReason, _ := candidate["finishReason"].(string)
+		toolCall := &ToolCallDelta{
+			Index: c.currentToolIndex,
+			ID:    toolID,
+			Type:  "function",
+			Function: &FunctionCallDelta{
+				Name:      functionCall.Name,
+				Arguments: "",
+			},
+		}
 
-	if content, ok := candidate["content"].(map[string]interface{}); ok {
-		if parts, ok := content["parts"].([]interface{}); ok {
-			for _, part := range parts {
-				partMap := part.(map[string]interface{})
-
-				if text, ok := partMap["text"].(string); ok && text != "" {
-					if err := c.ensureTextStart(); err != nil {
-						return err
-					}
-					if err := c.writer.WriteContent(text); err != nil {
-						return err
-					}
-				}
-
-				if functionCall, ok := partMap["functionCall"].(map[string]interface{}); ok {
-					name := functionCall["name"].(string)
-					args, _ := json.Marshal(functionCall["args"])
-					toolID, _ := functionCall["id"].(string)
-					if toolID == "" {
-						toolID = fmt.Sprintf("call_%x", time.Now().UnixNano())
-					}
-
-					toolCall := &ToolCallDelta{
-						Index: c.currentToolIndex,
-						ID:    toolID,
-						Type:  "function",
-						Function: &FunctionCallDelta{
-							Name:      name,
-							Arguments: string(args),
-						},
-					}
-
-					if err := c.writeToolCallStart(c.currentToolIndex, toolCall); err != nil {
-						return err
-					}
-					c.currentToolIndex++
-				}
+		if err := c.writeToolCallStart(c.currentToolIndex, toolCall); err != nil {
+			return err
+		}
+		if args != "" {
+			argDelta := &ToolCallDelta{
+				Index: c.currentToolIndex,
+				Function: &FunctionCallDelta{
+					Arguments: args,
+				},
+			}
+			if err := c.writer.WriteToolCallDelta(c.currentToolIndex, argDelta, nil, nil); err != nil {
+				return err
 			}
 		}
+		c.currentToolIndex++
 	}
 
-	if finishReason != "" {
-		mapped := mapGoogleFinishReason(finishReason)
+	if chunk.FinishReason != "" {
+		mapped := mapGoogleFinishReason(chunk.FinishReason)
 		if !c.hasStarted {
 			if err := c.ensureTextStart(); err != nil {
 				return err
@@ -225,17 +219,28 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk map[string]interface{}) 
 	return nil
 }
 
+func parsedUsageToOpenAIUsage(usage core.ParsedStreamUsage) *OpenAIUsage {
+	result := &OpenAIUsage{}
+	if usage.InputTokens != nil {
+		result.PromptTokens = *usage.InputTokens
+	}
+	if usage.OutputTokens != nil {
+		result.CompletionTokens = *usage.OutputTokens
+	}
+	if usage.TotalTokens != nil {
+		result.TotalTokens = *usage.TotalTokens
+	} else {
+		result.TotalTokens = result.PromptTokens + result.CompletionTokens
+	}
+	return result
+}
+
 // HandleArgoText processes plain text from Argo and converts to OpenAI format.
 func (c *OpenAIStreamConverter) HandleArgoText(text string) error {
 	if err := c.ensureTextStart(); err != nil {
 		return err
 	}
 	return c.writer.WriteContent(text)
-}
-
-// Complete sends the completion sequence for OpenAI format.
-func (c *OpenAIStreamConverter) Complete(finishReason string) error {
-	return c.FinishStream(finishReason, nil)
 }
 
 // FinishStream sends the completion sequence with optional usage information.

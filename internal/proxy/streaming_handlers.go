@@ -7,6 +7,7 @@ import (
 	"io"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/providers"
 	"net/http"
@@ -613,18 +614,16 @@ func (s *Server) convertGoogleStreamToOpenAI(ctx context.Context, body io.Reader
 
 	if err := consumeSSEStream(body, func(_ string, data json.RawMessage) error {
 		warnUnknownFields(ctx, data, GoogleResponse{}, "Google stream chunk")
-		var chunk map[string]interface{}
-		if err := json.Unmarshal(data, &chunk); err != nil {
-			return handleStreamError(ctx, nil, "GoogleToOpenAIChunk", err)
+		chunk, err := core.ParseGoogleStreamChunk(data)
+		if err != nil {
+			return err
 		}
 		if err := converter.HandleGoogleChunk(chunk); err != nil {
 			return handleStreamError(ctx, writer, "GoogleToOpenAIConverter", err)
 		}
 		return nil
 	}); err != nil {
-		if handleErr := handleStreamError(ctx, nil, "GoogleToOpenAISSEScanner", err); handleErr != nil {
-			return handleErr
-		}
+		return err
 	}
 
 	return nil

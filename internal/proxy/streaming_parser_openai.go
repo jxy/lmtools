@@ -71,10 +71,12 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 }
 
 func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) error {
-	updateParsedStreamUsage(p.handler, chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
+	p.handler.SetParsedUsage(chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
 
-	if err := emitParsedTextDelta(p.handler, chunk.Content); err != nil {
-		return err
+	if chunk.Content != "" {
+		if err := p.handler.SendTextDelta(chunk.Content); err != nil {
+			return err
+		}
 	}
 
 	for _, tc := range chunk.ToolCalls {
@@ -84,13 +86,15 @@ func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) er
 			toolID = fmt.Sprintf("toolu_%x", time.Now().UnixNano())
 		}
 
-		blockIndex, err := beginParsedToolUseBlock(p.handler, &index, toolID, tc.Name)
+		blockIndex, err := p.handler.BeginParsedToolUseBlock(&index, toolID, tc.Name)
 		if err != nil {
 			return err
 		}
 
-		if err := emitParsedToolInputDelta(p.handler, blockIndex, tc.Arguments); err != nil {
-			return err
+		if tc.Arguments != "" {
+			if err := p.handler.SendToolInputDelta(blockIndex, tc.Arguments); err != nil {
+				return err
+			}
 		}
 	}
 

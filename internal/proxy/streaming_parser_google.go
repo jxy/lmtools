@@ -55,11 +55,13 @@ func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 }
 
 func (p *GoogleStreamParser) processChunk(chunk core.ParsedGoogleStreamChunk) error {
-	updateParsedStreamUsage(p.handler, chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
+	p.handler.SetParsedUsage(chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
 
 	for _, text := range chunk.TextParts {
-		if err := emitParsedTextDelta(p.handler, text); err != nil {
-			return err
+		if text != "" {
+			if err := p.handler.SendTextDelta(text); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -68,13 +70,13 @@ func (p *GoogleStreamParser) processChunk(chunk core.ParsedGoogleStreamChunk) er
 		if toolID == "" {
 			toolID = generateToolUseID()
 		}
-		blockIndex, err := beginParsedToolUseBlock(p.handler, nil, toolID, functionCall.Name)
+		blockIndex, err := p.handler.BeginParsedToolUseBlock(nil, toolID, functionCall.Name)
 		if err != nil {
 			return err
 		}
 
 		if len(functionCall.Args) > 0 {
-			if err := emitParsedToolInputDelta(p.handler, blockIndex, string(functionCall.Args)); err != nil {
+			if err := p.handler.SendToolInputDelta(blockIndex, string(functionCall.Args)); err != nil {
 				return err
 			}
 		}

@@ -698,10 +698,6 @@ func (s *sessionStoreAdapter) GetPath() string {
 	return s.sess.Path
 }
 
-func (s *sessionStoreAdapter) UpdatePath(newPath string) {
-	s.sess.Path = newPath
-}
-
 func (s *sessionStoreAdapter) SaveAssistant(ctx context.Context, text string, toolCalls []core.ToolCall, model string) (string, string, error) {
 	result, err := session.SaveAssistantResponseWithTools(ctx, s.sess, text, toolCalls, model)
 	if err != nil {

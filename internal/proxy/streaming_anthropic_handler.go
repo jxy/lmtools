@@ -18,7 +18,6 @@ type StreamingState struct {
 	AccumulatedText string
 	InputTokens     int
 	OutputTokens    int
-	ToolCalls       []AnthropicContentBlock
 	ClosedBlocks    map[int]bool
 }
 
@@ -31,12 +30,11 @@ func newStreamingState(messageID string) *StreamingState {
 
 // AnthropicStreamHandler handles streaming for Anthropic format.
 type AnthropicStreamHandler struct {
-	mu                 sync.Mutex
-	sse                *SSEWriter
-	state              *StreamingState
-	originalModel      string
-	simulatedStreaming bool
-	ctx                context.Context
+	mu            sync.Mutex
+	sse           *SSEWriter
+	state         *StreamingState
+	originalModel string
+	ctx           context.Context
 }
 
 // NewAnthropicStreamHandler creates a new Anthropic stream handler.
@@ -83,17 +81,6 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 
 // SendToolUseStart sends a tool_use block start.
 func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string) error {
-	h.mu.Lock()
-	if !h.simulatedStreaming {
-		h.state.ToolCalls = append(h.state.ToolCalls, AnthropicContentBlock{
-			Type:  "tool_use",
-			ID:    toolID,
-			Name:  name,
-			Input: make(map[string]interface{}),
-		})
-	}
-	h.mu.Unlock()
-
 	return h.SendEvent(EventContentBlockStart, NewToolUseStart(index, toolID, name))
 }
 
@@ -200,8 +187,6 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	textSent := h.state.TextSent
 	toolIndex := h.state.ToolIndex
 	lastToolIndex := h.state.LastToolIndex
-	simulatedStreaming := h.simulatedStreaming
-	toolCallsLen := len(h.state.ToolCalls)
 	h.mu.Unlock()
 
 	if needToCloseText {
@@ -224,13 +209,6 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 				return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 			}
 		}
-	}
-
-	if simulatedStreaming {
-		h.mu.Lock()
-		accTextLen := len(h.state.AccumulatedText)
-		h.mu.Unlock()
-		logger.From(h.ctx).Debugf("Stream complete: stop_reason=%s, text=%d chars, tools=%d", stopReason, accTextLen, toolCallsLen)
 	}
 
 	return h.FinishStream(stopReason, nil)
@@ -256,21 +234,68 @@ func (h *AnthropicStreamHandler) SetUsage(inputTokens, outputTokens int) {
 	h.state.OutputTokens = outputTokens
 }
 
-// SendMessage sends a complete message for simulated streaming.
-func (h *AnthropicStreamHandler) SendMessage(message string) error {
-	if err := h.SendMessageStart(); err != nil {
-		return err
+func (h *AnthropicStreamHandler) SetParsedUsage(inputTokens, outputTokens *int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if inputTokens != nil {
+		h.state.InputTokens = *inputTokens
 	}
-	if err := h.SendContentBlockStart(0, "text"); err != nil {
-		return err
+	if outputTokens != nil {
+		h.state.OutputTokens = *outputTokens
 	}
-	if err := h.SendTextDelta(message); err != nil {
-		return err
+}
+
+func (h *AnthropicStreamHandler) CloseParsedTextBlockIfNeeded() error {
+	h.mu.Lock()
+	if h.state.TextBlockClosed {
+		h.mu.Unlock()
+		return nil
+	}
+	needTextDelta := h.state.AccumulatedText != "" && !h.state.TextSent
+	accumulatedText := h.state.AccumulatedText
+	h.mu.Unlock()
+
+	if needTextDelta {
+		if err := h.SendTextDelta(accumulatedText); err != nil {
+			return err
+		}
 	}
 	if err := h.SendContentBlockStop(0); err != nil {
 		return err
 	}
-	return h.Complete("end_turn")
+
+	h.mu.Lock()
+	h.state.TextBlockClosed = true
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *AnthropicStreamHandler) BeginParsedToolUseBlock(streamIndex *int, toolID, name string) (int, error) {
+	h.mu.Lock()
+	if streamIndex != nil && h.state.ToolIndex != nil && *streamIndex == *h.state.ToolIndex {
+		blockIndex := h.state.LastToolIndex
+		h.mu.Unlock()
+		return blockIndex, nil
+	}
+	h.mu.Unlock()
+
+	if err := h.CloseParsedTextBlockIfNeeded(); err != nil {
+		return 0, err
+	}
+
+	h.mu.Lock()
+	if streamIndex != nil {
+		index := *streamIndex
+		h.state.ToolIndex = &index
+	}
+	h.state.LastToolIndex++
+	blockIndex := h.state.LastToolIndex
+	h.mu.Unlock()
+
+	if err := h.SendToolUseStart(blockIndex, toolID, name); err != nil {
+		return 0, err
+	}
+	return blockIndex, nil
 }
 
 // SendEvent sends a generic event with JSON data.

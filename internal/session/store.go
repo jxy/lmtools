@@ -80,16 +80,6 @@ func (s *Store) SaveToolResults(ctx context.Context, results []core.ToolResult, 
 	return s.finalizeSave(result, "Tool results saved to sibling branch %s as message %s")
 }
 
-// UpdatePath updates the current session path
-func (s *Store) UpdatePath(newPath string) {
-	if s.session != nil && newPath != "" && newPath != s.session.Path {
-		s.session.Path = newPath
-		if s.log != nil {
-			s.log.Debugf("Session path updated to %s", GetSessionID(newPath))
-		}
-	}
-}
-
 // GetPath returns the current session path
 func (s *Store) GetPath() string {
 	if s.session == nil {

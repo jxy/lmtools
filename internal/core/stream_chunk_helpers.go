@@ -11,6 +11,7 @@ import (
 type ParsedStreamUsage struct {
 	InputTokens  *int
 	OutputTokens *int
+	TotalTokens  *int
 }
 
 // ParsedOpenAIStreamToolCall captures a single streamed OpenAI tool-call delta.
@@ -91,6 +92,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 		Usage struct {
 			PromptTokens     *int `json:"prompt_tokens"`
 			CompletionTokens *int `json:"completion_tokens"`
+			TotalTokens      *int `json:"total_tokens"`
 		} `json:"usage"`
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
@@ -120,6 +122,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 		Usage: ParsedStreamUsage{
 			InputTokens:  raw.Usage.PromptTokens,
 			OutputTokens: raw.Usage.CompletionTokens,
+			TotalTokens:  raw.Usage.TotalTokens,
 		},
 	}
 	if len(raw.Choices) == 0 {
@@ -193,6 +196,7 @@ func ParseGoogleStreamChunk(data []byte) (ParsedGoogleStreamChunk, error) {
 		UsageMetadata struct {
 			PromptTokenCount     *int `json:"promptTokenCount"`
 			CandidatesTokenCount *int `json:"candidatesTokenCount"`
+			TotalTokenCount      *int `json:"totalTokenCount"`
 		} `json:"usageMetadata"`
 		Candidates []struct {
 			FinishReason string `json:"finishReason"`
@@ -217,6 +221,7 @@ func ParseGoogleStreamChunk(data []byte) (ParsedGoogleStreamChunk, error) {
 		Usage: ParsedStreamUsage{
 			InputTokens:  raw.UsageMetadata.PromptTokenCount,
 			OutputTokens: raw.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:  raw.UsageMetadata.TotalTokenCount,
 		},
 	}
 	if len(raw.Candidates) == 0 {

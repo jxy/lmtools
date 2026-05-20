@@ -25,10 +25,6 @@ func (m *mockSessionStore) GetPath() string {
 	return m.path
 }
 
-func (m *mockSessionStore) UpdatePath(newPath string) {
-	m.path = newPath
-}
-
 func (m *mockSessionStore) SaveAssistant(ctx context.Context, text string, toolCalls []ToolCall, model string) (string, string, error) {
 	m.messageCounter++
 	m.savedMessages = append(m.savedMessages, savedMessage{

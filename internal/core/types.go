@@ -158,9 +158,6 @@ type SessionStore interface {
 	// SaveToolResults saves tool execution results with optional additional text
 	SaveToolResults(ctx context.Context, results []ToolResult, additionalText string) (path, messageID string, err error)
 
-	// UpdatePath updates the current session path (e.g., when a sibling is created)
-	UpdatePath(newPath string)
-
 	// GetPath returns the current session path
 	GetPath() string
 }

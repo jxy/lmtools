@@ -76,74 +76,26 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		}
 	}
 
-	currentRequest, err := marshalJSONRaw(req)
+	stateCtx, err := newOpenAIResponsesStateContext(req, typed, access)
 	if err != nil {
 		return nil, typed, err
 	}
-	stateCtx := &openAIResponsesStateContext{
-		Store:          access.store,
-		Background:     access.background,
-		Instructions:   responsesInstructionText(req.Instructions),
-		CurrentRequest: currentRequest,
-	}
-	if stateCtx.Instructions == "" {
-		stateCtx.Instructions = typed.Developer
+
+	sessionPath, err := s.loadOpenAIResponsesPreviousState(req, stateCtx)
+	if err != nil {
+		return nil, typed, err
 	}
 
-	var sessionPath string
-	if req.PreviousResponseID != "" {
-		prev, err := s.loadCompletedPreviousResponse(req.PreviousResponseID)
-		if err != nil {
-			return nil, typed, err
-		}
-		stateCtx.Previous = prev
-		sessionPath = prev.SessionPath
-		if stateCtx.Instructions == "" {
-			stateCtx.Instructions = prev.Instructions
-		}
+	conversationSessionPath, err := s.prepareOpenAIResponsesConversationForRequest(stateCtx, convSpec, access)
+	if err != nil {
+		return nil, typed, err
+	}
+	if sessionPath == "" {
+		sessionPath = conversationSessionPath
 	}
 
-	if convSpec.requested && (access.readOnly || !convSpec.create || access.writable) {
-		conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, access.writable)
-		if err != nil {
-			return nil, typed, err
-		}
-		if stateCtx.Previous == nil {
-			sessionPath = conv.SessionPath
-			stateCtx.Session = sess
-		}
-		stateCtx.Conversation = conv
-		if !access.readOnly {
-			if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
-				return nil, typed, err
-			}
-		}
-		if stateCtx.Instructions == "" {
-			stateCtx.Instructions = conv.Instructions
-		}
-	}
-
-	if stateCtx.Previous != nil && access.writable {
-		forkedSession, err := s.forkOpenAIResponsesResponseSnapshot(ctx, stateCtx.Previous)
-		if err != nil {
-			return nil, typed, err
-		}
-		stateCtx.Session = forkedSession
-		sessionPath = forkedSession.Path
-	}
-
-	if sessionPath == "" && access.writable {
-		sess, err := s.responsesState.createSession()
-		if err != nil {
-			return nil, typed, err
-		}
-		stateCtx.Session = sess
-	} else if sessionPath != "" && stateCtx.Session == nil {
-		sess, err := s.responsesState.loadSession(sessionPath)
-		if err != nil {
-			return nil, typed, err
-		}
-		stateCtx.Session = sess
+	if err := s.prepareOpenAIResponsesSession(ctx, stateCtx, sessionPath, access.writable); err != nil {
+		return nil, typed, err
 	}
 
 	if stateCtx.Session != nil {
@@ -156,6 +108,92 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		typed.Developer = stateCtx.Instructions
 	}
 	return stateCtx, typed, nil
+}
+
+func newOpenAIResponsesStateContext(req *OpenAIResponsesRequest, typed TypedRequest, access openAIResponsesStateAccess) (*openAIResponsesStateContext, error) {
+	currentRequest, err := marshalJSONRaw(req)
+	if err != nil {
+		return nil, err
+	}
+	stateCtx := &openAIResponsesStateContext{
+		Store:          access.store,
+		Background:     access.background,
+		Instructions:   responsesInstructionText(req.Instructions),
+		CurrentRequest: currentRequest,
+	}
+	if stateCtx.Instructions == "" {
+		stateCtx.Instructions = typed.Developer
+	}
+	return stateCtx, nil
+}
+
+func (s *Server) loadOpenAIResponsesPreviousState(req *OpenAIResponsesRequest, stateCtx *openAIResponsesStateContext) (string, error) {
+	if req.PreviousResponseID == "" {
+		return "", nil
+	}
+	prev, err := s.loadCompletedPreviousResponse(req.PreviousResponseID)
+	if err != nil {
+		return "", err
+	}
+	stateCtx.Previous = prev
+	if stateCtx.Instructions == "" {
+		stateCtx.Instructions = prev.Instructions
+	}
+	return prev.SessionPath, nil
+}
+
+func (s *Server) prepareOpenAIResponsesConversationForRequest(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, access openAIResponsesStateAccess) (string, error) {
+	if !convSpec.requested || (!access.readOnly && convSpec.create && !access.writable) {
+		return "", nil
+	}
+	conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, access.writable)
+	if err != nil {
+		return "", err
+	}
+	if stateCtx.Previous == nil {
+		stateCtx.Session = sess
+	}
+	stateCtx.Conversation = conv
+	if !access.readOnly {
+		if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
+			return "", err
+		}
+	}
+	if stateCtx.Instructions == "" {
+		stateCtx.Instructions = conv.Instructions
+	}
+	if stateCtx.Previous != nil {
+		return "", nil
+	}
+	return conv.SessionPath, nil
+}
+
+func (s *Server) prepareOpenAIResponsesSession(ctx context.Context, stateCtx *openAIResponsesStateContext, sessionPath string, writable bool) error {
+	if stateCtx.Previous != nil && writable {
+		forkedSession, err := s.forkOpenAIResponsesResponseSnapshot(ctx, stateCtx.Previous)
+		if err != nil {
+			return err
+		}
+		stateCtx.Session = forkedSession
+		sessionPath = forkedSession.Path
+	}
+
+	if sessionPath == "" && writable {
+		sess, err := s.responsesState.createSession()
+		if err != nil {
+			return err
+		}
+		stateCtx.Session = sess
+		return nil
+	}
+	if sessionPath != "" && stateCtx.Session == nil {
+		sess, err := s.responsesState.loadSession(sessionPath)
+		if err != nil {
+			return err
+		}
+		stateCtx.Session = sess
+	}
+	return nil
 }
 
 func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, writable bool) (*conversationRecord, *session.Session, error) {

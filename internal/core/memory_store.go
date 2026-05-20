@@ -105,14 +105,6 @@ func (s *MemorySessionStore) SaveToolResults(ctx context.Context, results []Tool
 	return s.path, s.nextMessageIDLocked(), nil
 }
 
-func (s *MemorySessionStore) UpdatePath(newPath string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if newPath != "" {
-		s.path = newPath
-	}
-}
-
 func (s *MemorySessionStore) GetPath() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
