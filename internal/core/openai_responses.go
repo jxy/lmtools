@@ -40,7 +40,7 @@ func buildOpenAIResponsesChatRequest(cfg RequestOptions, typedMessages []TypedMe
 func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 	reqMap := map[string]interface{}{
 		"model":  payload.Model,
-		"input":  marshalOpenAIResponsesInput(payload.Messages),
+		"input":  OpenAIResponsesInput(payload.Messages),
 		"stream": payload.Stream,
 	}
 	if payload.System != "" {
@@ -62,10 +62,6 @@ func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interf
 		reqMap["text"] = text
 	}
 	return reqMap
-}
-
-func marshalOpenAIResponsesInput(messages []TypedMessage) []interface{} {
-	return OpenAIResponsesInput(messages)
 }
 
 type OpenAIResponsesInputProjectionItem struct {

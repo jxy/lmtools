@@ -167,8 +167,8 @@ func TestBuildOpenAIResponsesRequestPreservesFunctionToolStrict(t *testing.T) {
 	}
 }
 
-func TestMarshalOpenAIResponsesInputPreservesCustomToolCalls(t *testing.T) {
-	input := marshalOpenAIResponsesInput([]TypedMessage{
+func TestOpenAIResponsesInputPreservesCustomToolCalls(t *testing.T) {
+	input := OpenAIResponsesInput([]TypedMessage{
 		{
 			Role: string(RoleAssistant),
 			Blocks: []Block{ToolUseBlock{
@@ -332,8 +332,8 @@ func TestParseOpenAIResponsesRefusalContent(t *testing.T) {
 	}
 }
 
-func TestMarshalOpenAIResponsesInputPreservesItemOrder(t *testing.T) {
-	input := marshalOpenAIResponsesInput([]TypedMessage{{
+func TestOpenAIResponsesInputPreservesItemOrder(t *testing.T) {
+	input := OpenAIResponsesInput([]TypedMessage{{
 		Role: string(RoleAssistant),
 		Blocks: []Block{
 			ReasoningBlock{

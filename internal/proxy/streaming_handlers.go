@@ -214,7 +214,7 @@ func (s *Server) streamLegacyArgo(ctx context.Context, anthReq *AnthropicRequest
 		if pingInterval <= 0 {
 			pingInterval = constants.DefaultPingInterval * time.Second
 		}
-		return s.streamFromArgoWithPings(ctx, anthReq, handler, pingInterval)
+		return s.simulateStreamingFromArgoWithInterval(ctx, anthReq, handler, pingInterval)
 	}
 
 	body, err := s.forwardToArgoStream(ctx, anthReq)
@@ -265,13 +265,6 @@ func (s *Server) streamNativeArgoOpenAI(ctx context.Context, anthReq *AnthropicR
 
 	parser := NewOpenAIStreamParser(handler)
 	return parser.Parse(resp.Body)
-}
-
-// streamFromArgoWithPings handles streaming simulation when tools are present
-// Since Argo doesn't support streaming with tools, we call the non-streaming endpoint
-// and simulate streaming while sending pings to keep the connection alive
-func (s *Server) streamFromArgoWithPings(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
-	return s.simulateStreamingFromArgoWithInterval(ctx, anthReq, handler, pingInterval)
 }
 
 // streamFromAnthropic handles streaming from Anthropic API
@@ -515,40 +508,6 @@ func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *Anthro
 		ctx:     ctx,
 		handler: handler,
 	})
-}
-
-// streamTextBlock streams a text content block
-func (s *Server) streamTextBlock(content string, blockIndex int, handler *AnthropicStreamHandler) error {
-	emitter := anthropicSimulatedContentEmitter{
-		ctx:     handler.ctx,
-		handler: handler,
-	}
-	if err := emitter.StartTextBlock(blockIndex, content); err != nil {
-		return err
-	}
-	if err := emitSimulatedTextChunks(handler.ctx, content, func(chunk string) error {
-		return emitter.WriteTextChunk(blockIndex, chunk)
-	}); err != nil {
-		return err
-	}
-	return emitter.EndTextBlock(blockIndex, content)
-}
-
-// streamToolBlock streams a tool use content block
-func (s *Server) streamToolBlock(ctx context.Context, block AnthropicContentBlock, blockIndex int, handler *AnthropicStreamHandler) error {
-	emitter := anthropicSimulatedContentEmitter{
-		ctx:     ctx,
-		handler: handler,
-	}
-	if err := emitter.StartToolBlock(blockIndex, block); err != nil {
-		return err
-	}
-	if err := emitSimulatedToolInputChunks(ctx, block.Input, func(chunk string) error {
-		return emitter.WriteToolInputChunk(blockIndex, chunk)
-	}); err != nil {
-		return err
-	}
-	return emitter.EndToolBlock(blockIndex, block)
 }
 
 // simulateStreamingFromArgoWithInterval simulates streaming with a specific interval

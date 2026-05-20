@@ -9,10 +9,29 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/retry"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestSendErrorWritesPlainJSONPayload(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	sendError(recorder, http.StatusBadRequest, map[string]string{
+		"error": "invalid",
+	})
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := recorder.Body.String(); got != "{\"error\":\"invalid\"}\n" {
+		t.Fatalf("body = %q, want JSON payload with newline", got)
+	}
+}
 
 // TestReadResponseBody tests the simplified response body reading function
 func TestReadResponseBody(t *testing.T) {

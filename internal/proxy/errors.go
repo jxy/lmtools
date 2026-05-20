@@ -56,19 +56,9 @@ type AnthropicErrorDetail struct {
 	Message string `json:"message"`
 }
 
-// ErrorPayload is an interface for error payloads
-type ErrorPayload interface {
-	// Marker interface for type safety
-	isErrorPayload()
-}
-
-// Implement the marker interface
-func (OpenAIError) isErrorPayload()    {}
-func (AnthropicError) isErrorPayload() {}
-
 // sendError is a unified function to send JSON error responses
-// It accepts any ErrorPayload and writes it as JSON
-func sendError(w http.ResponseWriter, status int, payload ErrorPayload) {
+// It accepts any JSON-serializable payload and writes it as JSON.
+func sendError(w http.ResponseWriter, status int, payload any) {
 	ctx := context.Background()
 	if rw, ok := w.(*proxyResponseWriter); ok && rw.request != nil {
 		ctx = rw.request.Context()

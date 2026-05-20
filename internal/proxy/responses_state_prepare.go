@@ -147,7 +147,7 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 	}
 
 	if stateCtx.Session != nil {
-		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, access.readOnly, access.writable)
+		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, access.writable)
 		if err != nil {
 			return nil, typed, err
 		}
@@ -189,10 +189,10 @@ func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIRespons
 	return conv, sess, nil
 }
 
-func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, readOnly bool, writable bool) (TypedRequest, error) {
+func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, writable bool) (TypedRequest, error) {
 	var history []core.TypedMessage
 	var err error
-	if stateCtx.Previous != nil && (!writable || readOnly) {
+	if stateCtx.Previous != nil && !writable {
 		history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
 	} else if stateCtx.Conversation != nil && stateCtx.Previous == nil {
 		history, err = s.conversationHistory(ctx, stateCtx.Conversation)

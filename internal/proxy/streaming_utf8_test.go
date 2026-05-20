@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 )
 
-// TestStreamTextBlockUTF8Boundaries tests that streamTextBlock respects UTF-8 boundaries
-func TestStreamTextBlockUTF8Boundaries(t *testing.T) {
+// TestSimulatedTextStreamingUTF8Boundaries tests that simulated text streaming respects UTF-8 boundaries.
+func TestSimulatedTextStreamingUTF8Boundaries(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
@@ -50,9 +50,6 @@ func TestStreamTextBlockUTF8Boundaries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a test server
-			s := NewMinimalTestServer(t, &Config{})
-
 			// Create a test response writer
 			recorder := httptest.NewRecorder()
 
@@ -64,8 +61,12 @@ func TestStreamTextBlockUTF8Boundaries(t *testing.T) {
 			}
 
 			// Stream the text block
-			if err := s.streamTextBlock(tt.content, 0, handler); err != nil {
-				t.Fatalf("streamTextBlock failed: %v", err)
+			err = streamSimulatedContentBlocks(ctx, []AnthropicContentBlock{{
+				Type: "text",
+				Text: tt.content,
+			}}, anthropicSimulatedContentEmitter{ctx: ctx, handler: handler})
+			if err != nil {
+				t.Fatalf("streamSimulatedContentBlocks() error = %v", err)
 			}
 
 			// Parse the response to extract text chunks
@@ -124,8 +125,8 @@ func TestStreamTextBlockUTF8Boundaries(t *testing.T) {
 	}
 }
 
-// TestStreamToolBlockUTF8Boundaries tests that streamToolBlock respects UTF-8 boundaries in JSON
-func TestStreamToolBlockUTF8Boundaries(t *testing.T) {
+// TestSimulatedToolStreamingUTF8Boundaries tests that simulated tool streaming respects UTF-8 boundaries in JSON.
+func TestSimulatedToolStreamingUTF8Boundaries(t *testing.T) {
 	tests := []struct {
 		name  string
 		block AnthropicContentBlock
@@ -175,9 +176,6 @@ func TestStreamToolBlockUTF8Boundaries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a test server
-			s := NewMinimalTestServer(t, &Config{})
-
 			// Create a test response writer
 			recorder := httptest.NewRecorder()
 
@@ -189,8 +187,12 @@ func TestStreamToolBlockUTF8Boundaries(t *testing.T) {
 			}
 
 			// Stream the tool block
-			if err := s.streamToolBlock(ctx, tt.block, 0, handler); err != nil {
-				t.Fatalf("streamToolBlock failed: %v", err)
+			err = streamSimulatedContentBlocks(ctx, []AnthropicContentBlock{tt.block}, anthropicSimulatedContentEmitter{
+				ctx:     ctx,
+				handler: handler,
+			})
+			if err != nil {
+				t.Fatalf("streamSimulatedContentBlocks() error = %v", err)
 			}
 
 			// Parse the response to extract JSON chunks
@@ -273,9 +275,6 @@ func TestStreamingWithSmallChunkSize(t *testing.T) {
 	// This tests the edge case where chunk size is smaller than a multi-byte character
 	content := "Test 你好 🌍 World"
 
-	// Create a test server
-	s := NewMinimalTestServer(t, &Config{})
-
 	// Create a test response writer
 	recorder := httptest.NewRecorder()
 
@@ -288,8 +287,12 @@ func TestStreamingWithSmallChunkSize(t *testing.T) {
 
 	// Note: The actual chunk size is determined by constants.DefaultTextChunkSize
 	// which is 20 bytes by default, but our function will handle UTF-8 boundaries correctly
-	if err := s.streamTextBlock(content, 0, handler); err != nil {
-		t.Fatalf("streamTextBlock failed: %v", err)
+	err = streamSimulatedContentBlocks(ctx, []AnthropicContentBlock{{
+		Type: "text",
+		Text: content,
+	}}, anthropicSimulatedContentEmitter{ctx: ctx, handler: handler})
+	if err != nil {
+		t.Fatalf("streamSimulatedContentBlocks() error = %v", err)
 	}
 
 	// Parse the response

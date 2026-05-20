@@ -67,8 +67,8 @@ func TestToolUseStreamingFormat(t *testing.T) {
 	}
 }
 
-// TestStreamToolBlockWithServer tests the streamToolBlock function
-func TestStreamToolBlockWithServer(t *testing.T) {
+// TestSimulatedToolStreamingWithAnthropicHandler tests simulated tool streaming through the Anthropic handler.
+func TestSimulatedToolStreamingWithAnthropicHandler(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx := context.Background()
 
@@ -76,9 +76,6 @@ func TestStreamToolBlockWithServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
-
-	// Create server
-	server := NewMinimalTestServer(t, &Config{})
 
 	// Create a tool block
 	toolBlock := AnthropicContentBlock{
@@ -93,9 +90,12 @@ func TestStreamToolBlockWithServer(t *testing.T) {
 	}
 
 	// Stream the tool block
-	err = server.streamToolBlock(ctx, toolBlock, 0, handler)
+	err = streamSimulatedContentBlocks(ctx, []AnthropicContentBlock{toolBlock}, anthropicSimulatedContentEmitter{
+		ctx:     ctx,
+		handler: handler,
+	})
 	if err != nil {
-		t.Fatalf("streamToolBlock failed: %v", err)
+		t.Fatalf("streamSimulatedContentBlocks() error = %v", err)
 	}
 
 	// Parse events
