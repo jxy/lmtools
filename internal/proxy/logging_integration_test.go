@@ -496,7 +496,8 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	lines := strings.Split(buf.String(), "\n")
-	found := false
+	foundWireRequest := false
+	foundRequestDetails := false
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -507,17 +508,19 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		}
 		msg, _ := m["message"].(string)
 		if strings.HasPrefix(msg, "Request details: ") {
-			payload := strings.TrimPrefix(msg, "Request details: ")
-			var pj map[string]interface{}
-			if json.Unmarshal([]byte(payload), &pj) == nil && pj["model"] != nil {
-				found = true
-				break
-			}
+			foundRequestDetails = true
+		}
+		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST:") && strings.Contains(msg, `"max_tokens":10`) {
+			foundWireRequest = true
 		}
 	}
-	if !found {
+	if !foundWireRequest {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON Request details log")
+		t.Errorf("missing JSON wire client request log")
+	}
+	if foundRequestDetails {
+		t.Logf("Captured logs:\n%s", buf.String())
+		t.Errorf("unexpected duplicate JSON Request details log")
 	}
 }
 
@@ -562,7 +565,8 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	lines := strings.Split(buf.String(), "\n")
-	found := false
+	foundWireRequest := false
+	foundStreamingDetails := false
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -573,17 +577,19 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		}
 		msg, _ := m["message"].(string)
 		if strings.HasPrefix(msg, "Streaming request details: ") {
-			payload := strings.TrimPrefix(msg, "Streaming request details: ")
-			var pj map[string]interface{}
-			if json.Unmarshal([]byte(payload), &pj) == nil && pj["stream"] == true {
-				found = true
-				break
-			}
+			foundStreamingDetails = true
+		}
+		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST:") && strings.Contains(msg, `"stream":true`) {
+			foundWireRequest = true
 		}
 	}
-	if !found {
+	if !foundWireRequest {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON Streaming request details log")
+		t.Errorf("missing JSON wire client streaming request log")
+	}
+	if foundStreamingDetails {
+		t.Logf("Captured logs:\n%s", buf.String())
+		t.Errorf("unexpected duplicate JSON Streaming request details log")
 	}
 }
 

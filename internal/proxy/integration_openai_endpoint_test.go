@@ -642,6 +642,124 @@ func TestArgoOpenAIDirectUsesArgoUserAuthFallback(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatArgoAnthropicDefaultsMaxTokens(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		model     string
+		maxTokens *int
+		want      int
+	}{
+		{name: "opus_default", model: "claudeopus46", want: defaultClaudeOpusMaxTokens},
+		{name: "claude_default", model: "claude-3-haiku-20240307", want: defaultClaudeDefaultMaxTokens},
+		{name: "explicit_preserved", model: "claudeopus46", maxTokens: intPtr(17), want: 17},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured AnthropicRequest
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/messages" {
+					t.Errorf("path = %s, want /v1/messages", r.URL.Path)
+				}
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(AnthropicResponse{
+					ID:         "msg-test",
+					Type:       "message",
+					Role:       "assistant",
+					Model:      captured.Model,
+					Content:    []AnthropicContentBlock{{Type: "text", Text: "ok"}},
+					StopReason: "end_turn",
+				})
+			}))
+			defer mockServer.Close()
+
+			config := &Config{
+				ProviderURL:        mockServer.URL,
+				Provider:           constants.ProviderArgo,
+				ArgoUser:           "argo-user-key",
+				MaxRequestBodySize: 100 * 1024 * 1024,
+			}
+			server, cleanup := NewTestServer(t, config)
+			t.Cleanup(cleanup)
+
+			payload := map[string]interface{}{
+				"model": tt.model,
+				"messages": []interface{}{
+					map[string]interface{}{"role": "user", "content": "Hello!"},
+				},
+			}
+			if tt.maxTokens != nil {
+				payload["max_tokens"] = *tt.maxTokens
+			}
+			body, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			server.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+			}
+			if captured.MaxTokens != tt.want {
+				t.Fatalf("max_tokens = %d, want %d", captured.MaxTokens, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIChatArgoAnthropicErrorLogsSingleProviderWarning(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}`))
+	}))
+	defer mockServer.Close()
+
+	config := &Config{
+		ProviderURL:        mockServer.URL,
+		Provider:           constants.ProviderArgo,
+		ArgoUser:           "argo-user-key",
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+
+	body := []byte(`{"model":"claudeopus46","messages":[{"role":"user","content":"Hello!"}]}`)
+	logs := captureStderr(t, func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		server.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	for _, want := range []string{
+		"WIRE BACKEND REQUEST Argo Anthropic",
+		"WIRE BACKEND RESPONSE BODY Argo Anthropic",
+		"Provider argo client error (status 400):",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+	for _, unwanted := range []string{
+		"Argo Anthropic request:",
+		"Raw Argo Anthropic error response:",
+		"Provider Argo Anthropic returned error:",
+	} {
+		if strings.Contains(logs, unwanted) {
+			t.Fatalf("logs contain %q\nlogs:\n%s", unwanted, logs)
+		}
+	}
+}
+
 func TestModelsEndpoint(t *testing.T) {
 	// Create mock server for models endpoint
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

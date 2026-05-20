@@ -122,11 +122,6 @@ func normalizeJSONDecodeError(err error) error {
 func logEndpointRequest(ctx context.Context, info endpointRequestInfo) {
 	log := logger.From(ctx)
 	log.Debugf("Request received: model=%s, streaming=%v, messages=%d", info.Model, info.Stream, info.MessageCount)
-	if info.Stream {
-		logger.DebugJSON(log, "Streaming request details", info.Payload)
-	} else {
-		logger.DebugJSON(log, "Request details", info.Payload)
-	}
 	if info.ToolCount > 0 {
 		logger.DebugJSON(log, "Tool information", info.Tools)
 	}

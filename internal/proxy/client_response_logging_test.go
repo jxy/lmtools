@@ -68,6 +68,32 @@ func TestClientResponseHeadersLoggedForImplicitOK(t *testing.T) {
 	}
 }
 
+func TestClientJSONResponseHeadersLoggedBeforeBody(t *testing.T) {
+	logs := captureStderr(t, func() {
+		server := &Server{}
+		handler := NewProxyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = server.sendJSONResponse(r.Context(), w, map[string]bool{"ok": true})
+		}), &Config{MaxRequestBodySize: 1024})
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	})
+
+	headerIndex := strings.Index(logs, "WIRE CLIENT RESPONSE HEADERS")
+	bodyIndex := strings.Index(logs, "WIRE CLIENT RESPONSE BODY")
+	if headerIndex < 0 || bodyIndex < 0 {
+		t.Fatalf("missing client response wire logs\nlogs:\n%s", logs)
+	}
+	if headerIndex > bodyIndex {
+		t.Fatalf("client response body logged before headers\nlogs:\n%s", logs)
+	}
+}
+
 func TestClientSSEHeadersAndStreamLoggedWithoutDuplicateSemanticClientLog(t *testing.T) {
 	logs := captureStderr(t, func() {
 		handler := NewProxyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

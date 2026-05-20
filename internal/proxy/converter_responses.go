@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	defaultResponsesClaudeOpusMaxTokens    = 128000
-	defaultResponsesClaudeDefaultMaxTokens = 64000
+	defaultClaudeOpusMaxTokens             = 128000
+	defaultClaudeDefaultMaxTokens          = 64000
+	defaultResponsesClaudeOpusMaxTokens    = defaultClaudeOpusMaxTokens
+	defaultResponsesClaudeDefaultMaxTokens = defaultClaudeDefaultMaxTokens
 )
 
 func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
@@ -77,19 +79,26 @@ func ensureResponsesAnthropicMaxTokens(typed TypedRequest, model string) TypedRe
 	if typed.MaxTokens != nil {
 		return typed
 	}
-	maxTokens := defaultResponsesClaudeMaxTokens(model)
+	maxTokens := defaultClaudeMaxTokens(model)
 	typed.MaxTokens = &maxTokens
 	return typed
 }
 
 func ensureResponsesAnthropicWireMaxTokens(typed TypedRequest, provider, model string) TypedRequest {
-	if !responsesProviderRequiresClaudeMaxTokens(provider, model) {
+	if !providerRequiresClaudeMaxTokens(provider, model) {
 		return typed
 	}
 	return ensureResponsesAnthropicMaxTokens(typed, model)
 }
 
-func responsesProviderRequiresClaudeMaxTokens(provider, model string) bool {
+func ensureAnthropicRequestWireMaxTokens(req *AnthropicRequest, provider, model string) {
+	if req == nil || req.MaxTokens > 0 || !providerRequiresClaudeMaxTokens(provider, model) {
+		return
+	}
+	req.MaxTokens = defaultClaudeMaxTokens(model)
+}
+
+func providerRequiresClaudeMaxTokens(provider, model string) bool {
 	switch constants.NormalizeProvider(provider) {
 	case constants.ProviderAnthropic:
 		return true
@@ -100,11 +109,11 @@ func responsesProviderRequiresClaudeMaxTokens(provider, model string) bool {
 	}
 }
 
-func defaultResponsesClaudeMaxTokens(model string) int {
+func defaultClaudeMaxTokens(model string) int {
 	if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "opus") {
-		return defaultResponsesClaudeOpusMaxTokens
+		return defaultClaudeOpusMaxTokens
 	}
-	return defaultResponsesClaudeDefaultMaxTokens
+	return defaultClaudeDefaultMaxTokens
 }
 
 func responsesInputToTypedMessages(input interface{}) ([]core.TypedMessage, error) {

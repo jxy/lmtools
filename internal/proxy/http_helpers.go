@@ -60,11 +60,6 @@ func (s *Server) doJSON(
 	respBody interface{},
 	provider string,
 ) error {
-	log := logger.From(ctx)
-
-	// Log request if debug enabled
-	logger.DebugJSON(log, fmt.Sprintf("%s request", provider), reqBody)
-
 	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
 		URL:         url,
 		Provider:    provider,
@@ -85,24 +80,12 @@ func (s *Server) doJSON(
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {
-		if log.IsDebugEnabled() {
-			log.Debugf("Raw %s error response: %s", provider, string(body))
-		}
-		logErrorResponse(ctx, provider, resp.StatusCode, body)
 		return NewResponseError(resp.StatusCode, string(body))
-	}
-
-	// Log raw response for debugging
-	if log.IsDebugEnabled() {
-		log.Debugf("Raw %s response: %s", provider, string(body))
 	}
 
 	// Parse response
 	warnUnknownFields(ctx, body, respBody, provider+" response")
 	if err := json.Unmarshal(body, respBody); err != nil {
-		if log.IsDebugEnabled() {
-			log.Debugf("Raw %s response (parse failed): %s", provider, string(body))
-		}
 		return fmt.Errorf("parse %s response: %w", provider, err)
 	}
 
@@ -119,6 +102,7 @@ func (s *Server) sendJSONResponse(ctx context.Context, w http.ResponseWriter, da
 		return err
 	}
 	body = append(body, '\n')
+	w.WriteHeader(http.StatusOK)
 	logWireBytes(ctx, "WIRE CLIENT RESPONSE BODY", body)
 	if _, err := w.Write(body); err != nil {
 		logger.From(ctx).Errorf("Failed to write JSON response: %v", err)

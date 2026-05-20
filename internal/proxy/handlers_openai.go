@@ -90,6 +90,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Failed to process request", "conversion_error", http.StatusBadRequest)
 		return
 	}
+	ensureAnthropicRequestWireMaxTokens(anthReq, route.Provider, route.MappedModel)
 
 	// Handle streaming vs non-streaming
 	if info.Stream {
