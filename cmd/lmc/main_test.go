@@ -51,6 +51,25 @@ func TestMain(t *testing.T) {
 	}
 }
 
+func TestPersistAssistantOnlyWarnsButDoesNotFailOnSaveError(t *testing.T) {
+	notifier := core.NewTestNotifier()
+	persistAssistantOnly(
+		context.Background(),
+		core.Response{Text: "assistant text"},
+		&session.Session{Path: filepath.Join(t.TempDir(), "missing-session")},
+		&config.Config{},
+		notifier,
+		"gpt-test",
+	)
+
+	if len(notifier.WarnMessages) == 0 {
+		t.Fatal("persistAssistantOnly() warning count = 0, want save failure warning")
+	}
+	if !strings.Contains(notifier.WarnMessages[0], "failed to save response to session") {
+		t.Fatalf("warning = %q, want save failure warning", notifier.WarnMessages[0])
+	}
+}
+
 func TestGetExitCode(t *testing.T) {
 	tests := []struct {
 		name     string

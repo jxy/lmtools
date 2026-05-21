@@ -109,7 +109,11 @@ func TestGoogleToolResponseParsing(t *testing.T) {
 		}]
 	}`
 
-	response, err := parseResponse("google", []byte(responseJSON), false)
+	spec, err := providerSpecForName("google")
+	if err != nil {
+		t.Fatalf("Failed to load Google provider spec: %v", err)
+	}
+	response, err := spec.parseResponseData([]byte(responseJSON), false)
 	if err != nil {
 		t.Fatalf("Failed to parse Google response: %v", err)
 	}

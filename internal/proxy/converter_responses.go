@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/logger"
 	"lmtools/internal/providers"
 	"strings"
 	"time"
 )
 
 const (
-	defaultClaudeOpusMaxTokens             = 128000
-	defaultClaudeDefaultMaxTokens          = 64000
-	defaultResponsesClaudeOpusMaxTokens    = defaultClaudeOpusMaxTokens
-	defaultResponsesClaudeDefaultMaxTokens = defaultClaudeDefaultMaxTokens
+	defaultClaudeOpusMaxTokens    = 128000
+	defaultClaudeDefaultMaxTokens = 64000
 )
 
 func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
@@ -52,7 +51,7 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 		typed.Metadata[constants.IncludeUsageKey] = true
 	}
 	if req.Instructions != nil {
-		typed.Developer = responsesInstructionText(req.Instructions)
+		typed.Developer = responsesInstructionText(ctx, req.Instructions)
 	}
 	if req.Text != nil {
 		typed.ResponseFormat = responsesTextToResponseFormat(req.Text)
@@ -61,7 +60,7 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 		return TypedRequest{}, fmt.Errorf("prompt is only supported for direct OpenAI Responses passthrough")
 	}
 
-	messages, err := responsesInputToTypedMessages(req.Input)
+	messages, err := responsesInputToTypedMessages(ctx, req.Input)
 	if err != nil {
 		return TypedRequest{}, err
 	}
@@ -116,7 +115,7 @@ func defaultClaudeMaxTokens(model string) int {
 	return defaultClaudeDefaultMaxTokens
 }
 
-func responsesInputToTypedMessages(input interface{}) ([]core.TypedMessage, error) {
+func responsesInputToTypedMessages(ctx context.Context, input interface{}) ([]core.TypedMessage, error) {
 	switch value := input.(type) {
 	case nil:
 		return nil, nil
@@ -129,7 +128,7 @@ func responsesInputToTypedMessages(input interface{}) ([]core.TypedMessage, erro
 		messages := make([]core.TypedMessage, 0, len(value))
 		toolNamesByCallID := make(map[string]string)
 		for _, rawItem := range value {
-			msgs, err := responsesInputItemToTypedMessages(rawItem, toolNamesByCallID)
+			msgs, err := responsesInputItemToTypedMessages(ctx, rawItem, toolNamesByCallID)
 			if err != nil {
 				return nil, err
 			}
@@ -141,7 +140,7 @@ func responsesInputToTypedMessages(input interface{}) ([]core.TypedMessage, erro
 	}
 }
 
-func responsesInputItemToTypedMessages(rawItem interface{}, toolNamesByCallID map[string]string) ([]core.TypedMessage, error) {
+func responsesInputItemToTypedMessages(ctx context.Context, rawItem interface{}, toolNamesByCallID map[string]string) ([]core.TypedMessage, error) {
 	item, ok := rawItem.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("input item must be an object")
@@ -158,7 +157,7 @@ func responsesInputItemToTypedMessages(rawItem interface{}, toolNamesByCallID ma
 		if role == "" {
 			role = string(core.RoleUser)
 		}
-		blocks := responsesContentToBlocks(role, item["content"])
+		blocks := responsesContentToBlocks(ctx, role, item["content"])
 		return []core.TypedMessage{{Role: role, Blocks: blocks}}, nil
 	case "function_call":
 		callID, _ := item["call_id"].(string)
@@ -183,7 +182,7 @@ func responsesInputItemToTypedMessages(rawItem interface{}, toolNamesByCallID ma
 				Namespace:    namespace,
 				OriginalName: originalName,
 				Name:         name,
-				Input:        normalizeResponsesArguments(arguments),
+				Input:        core.NormalizeOpenAIResponsesArguments(arguments),
 			}},
 		}}, nil
 	case "custom_tool_call":
@@ -263,6 +262,7 @@ func responsesInputItemToTypedMessages(rawItem interface{}, toolNamesByCallID ma
 		}
 		return []core.TypedMessage{core.NewTextMessage(string(core.RoleAssistant), "Compacted conversation state:\n"+encryptedContent)}, nil
 	default:
+		logger.From(ctx).Warnf("Dropping unsupported Responses input item type %q while converting to TypedRequest", itemType)
 		return nil, nil
 	}
 }
@@ -303,7 +303,7 @@ func responsesFunctionCallOutputText(output interface{}) string {
 	return string(encoded)
 }
 
-func responsesContentToBlocks(role string, content interface{}) []core.Block {
+func responsesContentToBlocks(ctx context.Context, role string, content interface{}) []core.Block {
 	switch value := content.(type) {
 	case string:
 		if value == "" {
@@ -312,9 +312,10 @@ func responsesContentToBlocks(role string, content interface{}) []core.Block {
 		return []core.Block{core.TextBlock{Text: value}}
 	case []interface{}:
 		blocks := make([]core.Block, 0, len(value))
-		for _, rawPart := range value {
+		for i, rawPart := range value {
 			part, ok := rawPart.(map[string]interface{})
 			if !ok {
+				logger.From(ctx).Warnf("Dropping malformed Responses content part at index %d in %s message while converting to TypedRequest", i, role)
 				continue
 			}
 			partType, _ := part["type"].(string)
@@ -340,6 +341,8 @@ func responsesContentToBlocks(role string, content interface{}) []core.Block {
 				if fileID != "" {
 					blocks = append(blocks, core.FileBlock{FileID: fileID})
 				}
+			default:
+				logger.From(ctx).Warnf("Dropping unsupported Responses content part type %q in %s message while converting to TypedRequest", partType, role)
 			}
 		}
 		return blocks
@@ -348,7 +351,7 @@ func responsesContentToBlocks(role string, content interface{}) []core.Block {
 	}
 }
 
-func responsesInstructionText(value interface{}) string {
+func responsesInstructionText(ctx context.Context, value interface{}) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
@@ -359,7 +362,7 @@ func responsesInstructionText(value interface{}) string {
 			if !ok {
 				continue
 			}
-			for _, block := range responsesContentToBlocks(string(core.RoleDeveloper), partMap["content"]) {
+			for _, block := range responsesContentToBlocks(ctx, string(core.RoleDeveloper), partMap["content"]) {
 				if text, ok := block.(core.TextBlock); ok && text.Text != "" {
 					parts = append(parts, text.Text)
 				}
@@ -538,20 +541,6 @@ func responsesTextToResponseFormat(text *OpenAIResponsesText) *ResponseFormat {
 	}
 }
 
-func normalizeResponsesArguments(arguments string) json.RawMessage {
-	if strings.TrimSpace(arguments) == "" {
-		return json.RawMessage("{}")
-	}
-	if json.Valid([]byte(arguments)) {
-		return json.RawMessage(arguments)
-	}
-	encoded, err := json.Marshal(arguments)
-	if err != nil {
-		return json.RawMessage(`""`)
-	}
-	return encoded
-}
-
 func TypedToOpenAIResponsesRequest(typed TypedRequest, model string) (*OpenAIResponsesRequest, error) {
 	prepared, err := prepareTypedRequestPayload(constants.ProviderOpenAI, typed, typedRenderContext{Model: model})
 	if err != nil {
@@ -641,7 +630,7 @@ func openAIResponsesToolFromDefinition(tool core.ToolDefinition) map[string]inte
 			item["description"] = tool.Description
 		}
 		if tool.Format != nil {
-			item["format"] = responsesCustomToolFormatFromChat(tool.Format)
+			item["format"] = core.OpenAIResponsesCustomToolFormat(tool.Format)
 		}
 		return item
 	}
@@ -774,7 +763,7 @@ func (c *Converter) ConvertOpenAIResponsesToAnthropic(resp *OpenAIResponsesRespo
 				ID:        firstNonEmpty(item.CallID, item.ID),
 				Namespace: item.Namespace,
 				Name:      item.Name,
-				Input:     rawJSONToMap(normalizeResponsesArguments(item.Arguments)),
+				Input:     rawJSONToMap(core.NormalizeOpenAIResponsesArguments(item.Arguments)),
 			})
 		case "custom_tool_call":
 			hasTool = true
@@ -969,60 +958,6 @@ func responsesResponseID(upstreamID string) string {
 		return upstreamID
 	}
 	return generateUUID("resp_")
-}
-
-func TypedToOpenAIResponsesResponse(typed TypedRequest, content string, toolCalls []core.ToolCall, usage *OpenAIUsage, model string, status string) *OpenAIResponsesResponse {
-	if status == "" {
-		status = "completed"
-	}
-	output := make([]OpenAIResponsesOutputItem, 0, 1+len(toolCalls))
-	if content != "" {
-		output = append(output, OpenAIResponsesOutputItem{
-			ID:     generateUUID("msg_"),
-			Type:   "message",
-			Status: "completed",
-			Role:   core.RoleAssistant,
-			Content: []OpenAIResponsesContentPart{{
-				Type: "output_text",
-				Text: content,
-			}},
-		})
-	}
-	for _, call := range toolCalls {
-		if call.Type == "custom" {
-			callID := firstNonEmpty(call.ID, generateUUID("call_"))
-			output = append(output, OpenAIResponsesOutputItem{
-				ID:        firstNonEmpty(call.ID, generateUUID("ctc_")),
-				Type:      "custom_tool_call",
-				Status:    "completed",
-				CallID:    callID,
-				Namespace: call.Namespace,
-				Name:      firstNonEmpty(call.OriginalName, call.Name),
-				Input:     firstNonEmpty(call.Input, rawJSONStringValue(call.Args)),
-			})
-			continue
-		}
-		output = append(output, OpenAIResponsesOutputItem{
-			ID:        firstNonEmpty(call.ID, generateUUID("fc_")),
-			Type:      "function_call",
-			Status:    "completed",
-			CallID:    firstNonEmpty(call.ID, generateUUID("call_")),
-			Namespace: call.Namespace,
-			Name:      firstNonEmpty(call.OriginalName, call.Name),
-			Arguments: string(call.Args),
-		})
-	}
-	return &OpenAIResponsesResponse{
-		ID:          generateUUID("resp_"),
-		Object:      "response",
-		CreatedAt:   time.Now().Unix(),
-		Status:      status,
-		Model:       model,
-		Output:      output,
-		OutputText:  content,
-		Usage:       openAIUsageToResponsesUsage(usage),
-		ServiceTier: typed.ServiceTier,
-	}
 }
 
 func stringFromInterface(value interface{}) string {

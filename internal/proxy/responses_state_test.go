@@ -36,6 +36,76 @@ func TestNewMinimalTestServerDefaultsResponsesStateToTempDir(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesStatePreparationModes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("read only allocates context without writable session", func(t *testing.T) {
+		server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+		req := &OpenAIResponsesRequest{Model: "gpt-5", Input: "count tokens"}
+		typed, err := OpenAIResponsesRequestToTyped(ctx, req)
+		if err != nil {
+			t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+		}
+		stateCtx, _, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed)
+		if err != nil {
+			t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v", err)
+		}
+		if stateCtx == nil || stateCtx.Store || stateCtx.Background || stateCtx.Session != nil {
+			t.Fatalf("read-only state = %#v, want non-stored non-background context without session", stateCtx)
+		}
+	})
+
+	t.Run("foreground store false stays transient", func(t *testing.T) {
+		server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+		store := false
+		req := &OpenAIResponsesRequest{Model: "gpt-5", Input: "hi", Store: &store}
+		typed, err := OpenAIResponsesRequestToTyped(ctx, req)
+		if err != nil {
+			t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+		}
+		stateCtx, _, err := server.prepareOpenAIResponsesStateForeground(ctx, req, typed)
+		if err != nil {
+			t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
+		}
+		if stateCtx != nil {
+			t.Fatalf("foreground store:false state = %#v, want nil", stateCtx)
+		}
+	})
+
+	t.Run("foreground stored creates writable state", func(t *testing.T) {
+		server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+		req := &OpenAIResponsesRequest{Model: "gpt-5", Input: "hi"}
+		typed, err := OpenAIResponsesRequestToTyped(ctx, req)
+		if err != nil {
+			t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+		}
+		stateCtx, _, err := server.prepareOpenAIResponsesStateForeground(ctx, req, typed)
+		if err != nil {
+			t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
+		}
+		if stateCtx == nil || !stateCtx.Store || stateCtx.Background || stateCtx.Session == nil {
+			t.Fatalf("foreground stored state = %#v, want stored writable session", stateCtx)
+		}
+	})
+
+	t.Run("background store false still creates writable state", func(t *testing.T) {
+		server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
+		store := false
+		req := &OpenAIResponsesRequest{Model: "gpt-5", Input: "hi", Store: &store}
+		typed, err := OpenAIResponsesRequestToTyped(ctx, req)
+		if err != nil {
+			t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+		}
+		stateCtx, _, err := server.prepareOpenAIResponsesStateBackground(ctx, req, typed)
+		if err != nil {
+			t.Fatalf("prepareOpenAIResponsesStateBackground() error = %v", err)
+		}
+		if stateCtx == nil || stateCtx.Store || !stateCtx.Background || stateCtx.Session == nil {
+			t.Fatalf("background store:false state = %#v, want non-persistent background session", stateCtx)
+		}
+	})
+}
+
 func TestOpenAIResponsesReasoningInputRoundTrip(t *testing.T) {
 	req := &OpenAIResponsesRequest{
 		Model: "gpt-5",

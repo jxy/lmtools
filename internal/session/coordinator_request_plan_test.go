@@ -45,6 +45,18 @@ func TestCoordinatorPrepareRequestNewSessionDefersWritesUntilCommit(t *testing.T
 	}
 }
 
+func TestLoadSessionWithRetryPreservesNotExistError(t *testing.T) {
+	setupCoordinatorTestEnv(t)
+
+	_, err := loadSessionWithRetry("missing-session")
+	if err == nil {
+		t.Fatal("loadSessionWithRetry() error = nil, want missing session error")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("loadSessionWithRetry() error = %v, want errors.Is(os.ErrNotExist)", err)
+	}
+}
+
 func TestCoordinatorPrepareRequestResumeAppendsInputWithoutWritingUntilCommit(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "session system")

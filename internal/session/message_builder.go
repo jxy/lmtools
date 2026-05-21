@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"lmtools/internal/core"
-	"lmtools/internal/errors"
 	"lmtools/internal/logger"
 )
 
@@ -34,33 +33,14 @@ func BuildMessagesWithToolInteractionsWithManager(ctx context.Context, manager *
 // This is especially important for sessions with sibling branches where messages
 // may be scattered across multiple directories.
 func BuildMessagesWithIndex(ctx context.Context, messages []Message, messageIndex map[string]string, sessionPath string) ([]core.TypedMessage, error) {
-	// Reconstruct messages with tool interactions
-	var result []core.TypedMessage
-	toolNamesByID := make(map[string]string)
-
+	refs := make([]lineageMessageRef, 0, len(messages))
 	for _, msg := range messages {
-		// Load any tool interactions for this message using the index
-		msgDir := resolveIndexedMessageDir(ctx, messageIndex, msg.ID, sessionPath)
-
-		toolInteraction, err := LoadToolInteraction(msgDir, msg.ID)
-		if err != nil {
-			return nil, errors.WrapError("load tool interaction for message "+msg.ID, err)
-		}
-
-		if blocks, ok, err := loadMessageBlocks(msgDir, msg.ID); err != nil {
-			return nil, err
-		} else if ok {
-			result = append(result, core.TypedMessage{
-				Role:   string(msg.Role),
-				Blocks: applyToolNameIndex(blocks, toolNamesByID),
-			})
-			continue
-		}
-
-		result = append(result, buildTypedMessage(msg, toolInteraction, toolNamesByID))
+		refs = append(refs, lineageMessageRef{
+			path:    resolveIndexedMessageDir(ctx, messageIndex, msg.ID, sessionPath),
+			message: msg,
+		})
 	}
-
-	return result, nil
+	return buildTypedMessagesFromLineageRefs(ctx, refs)
 }
 
 func resolveIndexedMessageDir(ctx context.Context, messageIndex map[string]string, messageID, fallbackPath string) string {

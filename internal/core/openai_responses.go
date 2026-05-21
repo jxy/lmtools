@@ -313,7 +313,7 @@ func openAIResponsesToolsFromOpenAITools(raw interface{}) []map[string]interface
 				item["description"] = tool.Custom.Description
 			}
 			if tool.Custom.Format != nil {
-				item["format"] = openAIResponsesCustomToolFormat(tool.Custom.Format)
+				item["format"] = OpenAIResponsesCustomToolFormat(tool.Custom.Format)
 			}
 			result = append(result, item)
 			continue
@@ -335,7 +335,8 @@ func openAIResponsesToolsFromOpenAITools(raw interface{}) []map[string]interface
 	return result
 }
 
-func openAIResponsesCustomToolFormat(format interface{}) interface{} {
+// OpenAIResponsesCustomToolFormat renders a custom tool format in Responses shape.
+func OpenAIResponsesCustomToolFormat(format interface{}) interface{} {
 	formatMap, ok := customToolFormatMap(format)
 	if !ok {
 		return format
@@ -514,12 +515,12 @@ func parseOpenAIResponsesDetailed(data []byte) (string, []ToolCall, []Block, err
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   id,
 				Name: item.Name,
-				Args: normalizeOpenAIResponsesArguments(item.Arguments),
+				Args: NormalizeOpenAIResponsesArguments(item.Arguments),
 			})
 			blocks = append(blocks, ToolUseBlock{
 				ID:    id,
 				Name:  item.Name,
-				Input: normalizeOpenAIResponsesArguments(item.Arguments),
+				Input: NormalizeOpenAIResponsesArguments(item.Arguments),
 			})
 		case "custom_tool_call":
 			id := item.CallID
@@ -549,12 +550,13 @@ func parseOpenAIResponsesDetailed(data []byte) (string, []ToolCall, []Block, err
 	return strings.Join(textParts, ""), toolCalls, blocks, nil
 }
 
-func normalizeOpenAIResponsesArguments(arguments string) json.RawMessage {
+// NormalizeOpenAIResponsesArguments returns valid JSON for Responses tool-call arguments.
+func NormalizeOpenAIResponsesArguments(arguments string) json.RawMessage {
 	if strings.TrimSpace(arguments) == "" {
 		return json.RawMessage("{}")
 	}
 	if json.Valid([]byte(arguments)) {
-		return json.RawMessage(arguments)
+		return normalizeOpenAIToolArguments(json.RawMessage(arguments))
 	}
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
@@ -697,7 +699,7 @@ func (s *OpenAIResponsesStreamState) captureOutputItem(index int, raw json.RawMe
 			tc.Input = args
 			tc.Args = jsonStringRawMessage(args)
 		} else {
-			tc.Args = normalizeOpenAIResponsesArguments(args)
+			tc.Args = NormalizeOpenAIResponsesArguments(args)
 		}
 	} else if item.Input != "" {
 		tc.Input = item.Input
@@ -715,7 +717,7 @@ func (s *OpenAIResponsesStreamState) finalizeToolCalls() ([]ToolCall, bool, erro
 					tc.Input = buf.String()
 					tc.Args = jsonStringRawMessage(buf.String())
 				} else {
-					tc.Args = normalizeOpenAIResponsesArguments(buf.String())
+					tc.Args = NormalizeOpenAIResponsesArguments(buf.String())
 				}
 			}
 		}
@@ -799,7 +801,7 @@ func openAIResponsesOutputItemBlocks(rawItem json.RawMessage) []Block {
 		return []Block{ToolUseBlock{
 			ID:    id,
 			Name:  item.Name,
-			Input: normalizeOpenAIResponsesArguments(item.Arguments),
+			Input: NormalizeOpenAIResponsesArguments(item.Arguments),
 		}}
 	case "custom_tool_call":
 		id := item.CallID

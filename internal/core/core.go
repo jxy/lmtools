@@ -334,15 +334,6 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 	return spec.parseResponseData(data, cfg.IsEmbed())
 }
 
-// parseResponse routes to provider-specific parser
-func parseResponse(provider string, data []byte, isEmbed bool) (Response, error) {
-	spec, err := providerSpecForName(provider)
-	if err != nil {
-		return Response{}, err
-	}
-	return spec.parseResponseData(data, isEmbed)
-}
-
 // ConvertedTools represents the result of converting tools for a specific provider
 type ConvertedTools struct {
 	Tools      interface{}
@@ -463,9 +454,9 @@ func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestOptions, s
 // Streaming Response Handlers
 // ============================================================================
 
-// handleGenericStream is a unified stream handler that processes streaming responses
+// RunStream processes streaming responses
 // using a provider-specific stream state that may return tool calls.
-func handleGenericStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, state StreamState, provider string) (string, []ToolCall, error) {
+func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, state StreamState, provider string) (string, []ToolCall, error) {
 	// Body is closed by HandleResponse, not here
 
 	var accumulated strings.Builder

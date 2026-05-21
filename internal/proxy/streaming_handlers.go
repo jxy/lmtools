@@ -503,14 +503,6 @@ func (s *Server) waitForArgoResponseWithPings(ctx context.Context, anthReq *Anth
 	}
 }
 
-// streamArgoResponseContent streams the content from an Argo response
-func (s *Server) streamArgoResponseContent(ctx context.Context, anthResp *AnthropicResponse, handler *AnthropicStreamHandler) error {
-	return streamSimulatedContentBlocks(ctx, anthResp.Content, anthropicSimulatedContentEmitter{
-		ctx:     ctx,
-		handler: handler,
-	})
-}
-
 // simulateStreamingFromArgoWithInterval simulates streaming with a specific interval
 func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anthReq *AnthropicRequest, handler *AnthropicStreamHandler, pingInterval time.Duration) error {
 	log := logger.From(ctx)
@@ -537,13 +529,16 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 	}
 
 	// Convert to Anthropic format
-	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+	anthResp := s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 
 	// Update model in handler
 	handler.UpdateModel(anthResp.Model)
 
 	// Stream the content
-	if err := s.streamArgoResponseContent(ctx, anthResp, handler); err != nil {
+	if err := streamSimulatedContentBlocks(ctx, anthResp.Content, anthropicSimulatedContentEmitter{
+		ctx:     ctx,
+		handler: handler,
+	}); err != nil {
 		return err
 	}
 
@@ -687,7 +682,7 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 	}
 
 	// Convert to Anthropic format
-	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+	anthResp := s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 
 	// Log tool calls from response if present
 	logToolUseBlocks(ctx, anthResp.Content, false)

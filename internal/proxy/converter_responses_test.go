@@ -56,6 +56,74 @@ func TestOpenAIResponsesRequestToTyped(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesRequestToTypedWarnsAndDropsUnsupportedInputItem(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model: "gpt-5.4-nano",
+		Input: []interface{}{
+			map[string]interface{}{
+				"type": "message",
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "input_text", "text": "kept"},
+				},
+			},
+			map[string]interface{}{"type": "file_search_call", "id": "fs_1"},
+		},
+	}
+
+	var typed TypedRequest
+	var err error
+	logs := captureWarnLogs(t, func() {
+		typed, err = OpenAIResponsesRequestToTyped(context.Background(), req)
+	})
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if len(typed.Messages) != 1 {
+		t.Fatalf("messages = %#v, want only supported message item", typed.Messages)
+	}
+	if want := `Dropping unsupported Responses input item type "file_search_call"`; !strings.Contains(logs, want) {
+		t.Fatalf("warning %q not found in logs:\n%s", want, logs)
+	}
+}
+
+func TestOpenAIResponsesRequestToTypedWarnsAndDropsUnsupportedContentPart(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model: "gpt-5.4-nano",
+		Input: []interface{}{
+			map[string]interface{}{
+				"type": "message",
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "input_text", "text": "kept"},
+					map[string]interface{}{"type": "input_audio", "audio": "ignored"},
+					"not an object",
+				},
+			},
+		},
+	}
+
+	var typed TypedRequest
+	var err error
+	logs := captureWarnLogs(t, func() {
+		typed, err = OpenAIResponsesRequestToTyped(context.Background(), req)
+	})
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if len(typed.Messages) != 1 || len(typed.Messages[0].Blocks) != 1 {
+		t.Fatalf("messages = %#v, want one supported text block", typed.Messages)
+	}
+	for _, want := range []string{
+		`Dropping unsupported Responses content part type "input_audio"`,
+		`Dropping malformed Responses content part at index 2`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("warning %q not found in logs:\n%s", want, logs)
+		}
+	}
+}
+
 func TestOpenAIResponsesRefusalPartsReadRefusalField(t *testing.T) {
 	req := &OpenAIResponsesRequest{
 		Model: "gpt-5.4-nano",
@@ -108,31 +176,31 @@ func TestOpenAIResponsesAnthropicWireDefaultMaxTokens(t *testing.T) {
 			name:     "anthropic opus uses max opus default",
 			provider: constants.ProviderAnthropic,
 			model:    "claude-opus-4-1-20250805",
-			want:     defaultResponsesClaudeOpusMaxTokens,
+			want:     defaultClaudeOpusMaxTokens,
 		},
 		{
 			name:     "anthropic sonnet uses default claude max",
 			provider: constants.ProviderAnthropic,
 			model:    "claude-sonnet-4-5-20250929",
-			want:     defaultResponsesClaudeDefaultMaxTokens,
+			want:     defaultClaudeDefaultMaxTokens,
 		},
 		{
 			name:     "anthropic haiku uses default claude max",
 			provider: constants.ProviderAnthropic,
 			model:    "claude-haiku-4-5",
-			want:     defaultResponsesClaudeDefaultMaxTokens,
+			want:     defaultClaudeDefaultMaxTokens,
 		},
 		{
 			name:     "argo claude opus uses max opus default",
 			provider: constants.ProviderArgo,
 			model:    "claude-opus-4-1",
-			want:     defaultResponsesClaudeOpusMaxTokens,
+			want:     defaultClaudeOpusMaxTokens,
 		},
 		{
 			name:     "argo claude alias uses default claude max",
 			provider: constants.ProviderArgo,
 			model:    "claudesonnet4",
-			want:     defaultResponsesClaudeDefaultMaxTokens,
+			want:     defaultClaudeDefaultMaxTokens,
 		},
 	}
 
@@ -652,7 +720,7 @@ func TestOpenAIChatNamespacedToolCallsRestoreResponsesNamespace(t *testing.T) {
 		}},
 	}
 
-	converter := NewConverter(nil)
+	converter := NewConverter()
 	anth := converter.ConvertOpenAIToAnthropicWithToolNameRegistry(chatResp, "gpt-public", responseToolNameRegistryFromCoreTools(typed.Tools))
 	responses := converter.ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
 	if len(responses.Output) != 2 {
@@ -673,7 +741,7 @@ func TestOpenAIChatNamespacedToolCallsRestoreResponsesNamespace(t *testing.T) {
 }
 
 func TestAnthropicCustomToolWrapperConvertsToOpenAIResponsesCustomCall(t *testing.T) {
-	converter := NewConverter(nil)
+	converter := NewConverter()
 	registry := responseToolNameRegistryFromCoreTools([]core.ToolDefinition{{
 		Type: "custom",
 		Name: "apply_patch",
@@ -708,7 +776,7 @@ func TestAnthropicCustomToolWrapperConvertsToOpenAIResponsesCustomCall(t *testin
 }
 
 func TestAnthropicNamespacedCustomToolWrapperRestoresResponsesNamespace(t *testing.T) {
-	converter := NewConverter(nil)
+	converter := NewConverter()
 	registry := responseToolNameRegistryFromCoreTools([]core.ToolDefinition{{
 		Type:         "custom",
 		Namespace:    "mcp__computer_use__",
@@ -771,7 +839,7 @@ func TestOpenAIResponsesPromptRejectedByConvertedProviderConversion(t *testing.T
 }
 
 func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t *testing.T) {
-	converter := NewConverter(nil)
+	converter := NewConverter()
 	resp := converter.ConvertAnthropicResponseToOpenAIResponses(&AnthropicResponse{
 		ID:         "msg_backend",
 		Type:       "message",
@@ -797,7 +865,7 @@ func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t 
 }
 
 func TestConvertOpenAIResponsesToOpenAIChat(t *testing.T) {
-	converter := NewConverter(nil)
+	converter := NewConverter()
 	resp := &OpenAIResponsesResponse{
 		ID:     "resp_1",
 		Status: "completed",
@@ -836,7 +904,7 @@ func TestConvertOpenAIResponsesToOpenAIChat(t *testing.T) {
 }
 
 func TestOpenAIResponsesCustomToolCallsConvertToChat(t *testing.T) {
-	converter := NewConverter(nil)
+	converter := NewConverter()
 	resp := &OpenAIResponsesResponse{
 		ID:     "resp_1",
 		Status: "completed",

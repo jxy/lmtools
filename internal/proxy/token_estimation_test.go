@@ -149,7 +149,7 @@ func TestEstimateRequestTokens(t *testing.T) {
 }
 
 func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
-	converter := NewConverter(NewModelMapper(&Config{}))
+	converter := NewConverter()
 
 	// Test request with known content
 	request := &AnthropicRequest{

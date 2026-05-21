@@ -752,7 +752,7 @@ func TestCommitOrdering(t *testing.T) {
 
 		// Stage files
 		mc := newMessageCommitter(testSession)
-		staged, err := mc.Stage(msg, toolInteraction)
+		staged, err := stageMessageFiles(mc.sessionPath, msg, toolInteraction)
 		if err != nil {
 			t.Fatalf("Failed to stage files: %v", err)
 		}
@@ -851,7 +851,7 @@ func TestMessageCommitterConcurrentConflict(t *testing.T) {
 		}
 
 		mc := newMessageCommitter(testSession)
-		staged, err := mc.Stage(newMsg, nil)
+		staged, err := stageMessageFiles(mc.sessionPath, newMsg, nil)
 		if err != nil {
 			t.Fatalf("Failed to stage new message: %v", err)
 		}

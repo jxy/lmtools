@@ -141,13 +141,21 @@ func (c *Converter) setArgoMaxTokens(ctx context.Context, req *AnthropicRequest,
 
 // ConvertArgoToAnthropicWithRequest converts an Argo response to Anthropic format with request for token estimation.
 func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
+	return c.convertArgoToAnthropicWithRequest(resp, originalModel, req, false)
+}
+
+func (c *Converter) ConvertLegacyArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
+	return c.convertArgoToAnthropicWithRequest(resp, originalModel, req, true)
+}
+
+func (c *Converter) convertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest, allowEmbeddedExtraction bool) *AnthropicResponse {
 	responseID := generateResponseID()
 
 	switch r := resp.Response.(type) {
 	case string:
 		return anthropicResponseFromText(responseID, originalModel, r, req)
 	case map[string]interface{}:
-		return c.convertArgoMapResponseToAnthropic(r, responseID, originalModel, req)
+		return c.convertArgoMapResponseToAnthropic(r, responseID, originalModel, req, allowEmbeddedExtraction)
 	default:
 		return anthropicResponseFromText(responseID, originalModel, fmt.Sprintf("%v", resp.Response), req)
 	}
@@ -182,20 +190,20 @@ func anthropicResponseFromContent(responseID, originalModel string, content []An
 	}
 }
 
-func (c *Converter) convertArgoMapResponseToAnthropic(response map[string]interface{}, responseID, originalModel string, req *AnthropicRequest) *AnthropicResponse {
-	content := c.extractArgoContentBlocks(response, req)
+func (c *Converter) convertArgoMapResponseToAnthropic(response map[string]interface{}, responseID, originalModel string, req *AnthropicRequest, allowEmbeddedExtraction bool) *AnthropicResponse {
+	content := c.extractArgoContentBlocks(response, req, allowEmbeddedExtraction)
 	content = append(content, extractArgoToolUseBlocks(response["tool_calls"])...)
 	return anthropicResponseFromContent(responseID, originalModel, content, req)
 }
 
-func (c *Converter) extractArgoContentBlocks(response map[string]interface{}, req *AnthropicRequest) []AnthropicContentBlock {
+func (c *Converter) extractArgoContentBlocks(response map[string]interface{}, req *AnthropicRequest, allowEmbeddedExtraction bool) []AnthropicContentBlock {
 	contentValue, ok := response["content"]
 	if !ok {
 		return nil
 	}
 
 	if contentStr, ok := contentValue.(string); ok && contentStr != "" {
-		return parseArgoStringContent(contentStr, response["tool_calls"], req, c.useLegacyArgo())
+		return parseArgoStringContent(contentStr, response["tool_calls"], req, allowEmbeddedExtraction)
 	}
 
 	contentArray, ok := contentValue.([]interface{})
@@ -216,10 +224,6 @@ func (c *Converter) extractArgoContentBlocks(response map[string]interface{}, re
 		content = append(content, block)
 	}
 	return content
-}
-
-func (c *Converter) useLegacyArgo() bool {
-	return c != nil && c.mapper != nil && c.mapper.config != nil && c.mapper.config.ArgoLegacy
 }
 
 func parseArgoStringContent(contentStr string, rawToolCalls interface{}, req *AnthropicRequest, allowEmbeddedExtraction bool) []AnthropicContentBlock {

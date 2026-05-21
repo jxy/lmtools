@@ -7,7 +7,6 @@ import (
 	"io"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	"lmtools/internal/logger"
 	"lmtools/internal/providers"
 	"net/http"
 	"sort"
@@ -574,7 +573,7 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 				Namespace:    item.Namespace,
 				OriginalName: item.Name,
 				Name:         responseOutputToolName(item),
-				Input:        normalizeResponsesArguments(item.Arguments),
+				Input:        core.NormalizeOpenAIResponsesArguments(item.Arguments),
 			})
 		case "custom_tool_call":
 			blocks = append(blocks, core.ToolUseBlock{
@@ -670,19 +669,25 @@ func (s *Server) streamResponsesFromProvider(ctx context.Context, anthReq *Anthr
 	return resp, writer.Blocks(), err
 }
 
-func (s *Server) streamResponsesFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, writer *responsesStreamWriter) (string, error) {
-	resp, err := s.openAIStreamingRequest(ctx, anthReq)
-	if err != nil {
-		return "", err
-	}
+func (s *Server) streamResponsesHTTP(ctx context.Context, provider string, resp *http.Response, writer *responsesStreamWriter, convert func(io.Reader) (string, error)) (string, error) {
 	defer resp.Body.Close()
-	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderOpenAI, resp); err != nil {
+	if err := s.ensureStreamingResponseOK(ctx, provider, resp); err != nil {
 		return "", err
 	}
 	if err := writer.start(); err != nil {
 		return "", err
 	}
-	return s.convertOpenAIChatStreamToResponses(ctx, resp.Body, writer)
+	return convert(resp.Body)
+}
+
+func (s *Server) streamResponsesFromOpenAI(ctx context.Context, anthReq *AnthropicRequest, writer *responsesStreamWriter) (string, error) {
+	resp, err := s.openAIStreamingRequest(ctx, anthReq)
+	if err != nil {
+		return "", err
+	}
+	return s.streamResponsesHTTP(ctx, constants.ProviderOpenAI, resp, writer, func(body io.Reader) (string, error) {
+		return s.convertOpenAIChatStreamToResponses(ctx, body, writer)
+	})
 }
 
 func (s *Server) streamResponsesFromAnthropic(ctx context.Context, anthReq *AnthropicRequest, writer *responsesStreamWriter) (string, error) {
@@ -690,14 +695,9 @@ func (s *Server) streamResponsesFromAnthropic(ctx context.Context, anthReq *Anth
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderAnthropic, resp); err != nil {
-		return "", err
-	}
-	if err := writer.start(); err != nil {
-		return "", err
-	}
-	return s.convertAnthropicStreamToResponses(ctx, resp.Body, writer)
+	return s.streamResponsesHTTP(ctx, constants.ProviderAnthropic, resp, writer, func(body io.Reader) (string, error) {
+		return s.convertAnthropicStreamToResponses(ctx, body, writer)
+	})
 }
 
 func (s *Server) streamResponsesFromGoogle(ctx context.Context, anthReq *AnthropicRequest, writer *responsesStreamWriter) (string, error) {
@@ -705,14 +705,9 @@ func (s *Server) streamResponsesFromGoogle(ctx context.Context, anthReq *Anthrop
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderGoogle, resp); err != nil {
-		return "", err
-	}
-	if err := writer.start(); err != nil {
-		return "", err
-	}
-	return s.convertGoogleStreamToResponses(ctx, resp.Body, writer)
+	return s.streamResponsesHTTP(ctx, constants.ProviderGoogle, resp, writer, func(body io.Reader) (string, error) {
+		return s.convertGoogleStreamToResponses(ctx, body, writer)
+	})
 }
 
 func (s *Server) streamResponsesFromArgo(ctx context.Context, anthReq *AnthropicRequest, writer *responsesStreamWriter) (string, error) {
@@ -724,14 +719,9 @@ func (s *Server) streamResponsesFromArgo(ctx context.Context, anthReq *Anthropic
 		if err != nil {
 			return "", err
 		}
-		defer resp.Body.Close()
-		if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
-			return "", err
-		}
-		if err := writer.start(); err != nil {
-			return "", err
-		}
-		return s.convertAnthropicStreamToResponses(ctx, resp.Body, writer)
+		return s.streamResponsesHTTP(ctx, constants.ProviderArgo, resp, writer, func(body io.Reader) (string, error) {
+			return s.convertAnthropicStreamToResponses(ctx, body, writer)
+		})
 	}
 	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
@@ -741,14 +731,9 @@ func (s *Server) streamResponsesFromArgo(ctx context.Context, anthReq *Anthropic
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
-		return "", err
-	}
-	if err := writer.start(); err != nil {
-		return "", err
-	}
-	return s.convertOpenAIChatStreamToResponses(ctx, resp.Body, writer)
+	return s.streamResponsesHTTP(ctx, constants.ProviderArgo, resp, writer, func(body io.Reader) (string, error) {
+		return s.convertOpenAIChatStreamToResponses(ctx, body, writer)
+	})
 }
 
 func (s *Server) streamResponsesFromArgoOpenAIRequest(ctx context.Context, openAIReq *OpenAIRequest, writer *responsesStreamWriter) (*OpenAIResponsesResponse, []core.Block, error) {
@@ -756,14 +741,9 @@ func (s *Server) streamResponsesFromArgoOpenAIRequest(ctx context.Context, openA
 	if err != nil {
 		return nil, nil, err
 	}
-	defer resp.Body.Close()
-	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
-		return nil, nil, err
-	}
-	if err := writer.start(); err != nil {
-		return nil, nil, err
-	}
-	finishReason, err := s.convertOpenAIChatStreamToResponses(ctx, resp.Body, writer)
+	finishReason, err := s.streamResponsesHTTP(ctx, constants.ProviderArgo, resp, writer, func(body io.Reader) (string, error) {
+		return s.convertOpenAIChatStreamToResponses(ctx, body, writer)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -779,7 +759,7 @@ func (s *Server) simulateLegacyArgoResponsesStream(ctx context.Context, anthReq 
 	if err != nil {
 		return "", err
 	}
-	anthResp := s.converter.ConvertArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+	anthResp := s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 	if err := writer.start(); err != nil {
 		return "", err
 	}
@@ -1089,10 +1069,4 @@ func (s *Server) convertGoogleStreamToResponses(ctx context.Context, body io.Rea
 		return "", err
 	}
 	return finishReason, nil
-}
-
-func logResponsesStreamError(ctx context.Context, err error) {
-	if err != nil {
-		logger.From(ctx).Errorf("Responses stream failed: %v", err)
-	}
 }

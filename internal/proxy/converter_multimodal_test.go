@@ -11,8 +11,7 @@ import (
 // TestConvertAnthropicResponseToOpenAI_WithMultimodal tests the conversion of Anthropic responses
 // with multimodal content to OpenAI format
 func TestConvertAnthropicResponseToOpenAI_WithMultimodal(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	tests := []struct {
 		name          string
@@ -252,8 +251,7 @@ func TestConvertAnthropicResponseToOpenAI_WithMultimodal(t *testing.T) {
 // TestConvertArgoToAnthropicWithRequest_IDGeneration tests that ConvertArgoToAnthropicWithRequest
 // always generates an ID if one is missing
 func TestConvertArgoToAnthropicWithRequest_IDGeneration(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	tests := []struct {
 		name     string
@@ -393,8 +391,7 @@ func TestConvertArgoToAnthropicWithRequest_IDGeneration(t *testing.T) {
 
 // TestOpenAIRequestToAnthropic_ImageURL tests conversion of OpenAI image_url to Anthropic format
 func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	tests := []struct {
 		name     string
@@ -565,8 +562,7 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 // TestMultimodalContentPipeline tests the complete conversion pipeline
 // OpenAI -> Anthropic -> Argo -> Anthropic -> OpenAI
 func TestMultimodalContentPipeline(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 	ctx := context.Background()
 
 	// Start with an OpenAI request with image content

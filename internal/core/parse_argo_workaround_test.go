@@ -92,7 +92,7 @@ func TestParseArgoResponse_LegacyOptionsExtractEmbeddedFunction(t *testing.T) {
 func TestParseArgoResponse_Workaround_PythonLiteralsAndTrailingComma(t *testing.T) {
 	resp := `{
         "response": {
-            "content": "Grep the code:{'type': 'tool_use', 'id': 'toolu_vrtx_01Lqh8RQBCiMqYRCYkxRsXjf', 'name': 'Grep', 'input': {'glob': '*.go', 'output_mode': 'content', '-A': 30, '-n': True, 'path': '/path/to/project/internal/proxy', 'pattern': 'func.*streamArgoResponseContent',}},",
+            "content": "Grep the code:{'type': 'tool_use', 'id': 'toolu_vrtx_01Lqh8RQBCiMqYRCYkxRsXjf', 'name': 'Grep', 'input': {'glob': '*.go', 'output_mode': 'content', '-A': 30, '-n': True, 'path': '/path/to/project/internal/proxy', 'pattern': 'func.*streamSimulatedContentBlocks',}},",
             "tool_calls": []
         }
     }`

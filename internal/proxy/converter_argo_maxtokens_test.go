@@ -72,8 +72,7 @@ func TestConvertAnthropicToArgo_MaxTokensHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			mapper := NewModelMapper(&Config{})
-			converter := NewConverter(mapper)
+			converter := NewConverter()
 
 			// Create request
 			req := &AnthropicRequest{
@@ -138,8 +137,7 @@ func TestConvertAnthropicToArgo_MaxTokensHandling(t *testing.T) {
 // omitted from JSON when set to 0
 func TestConvertAnthropicToArgo_MaxTokensJSON(t *testing.T) {
 	ctx := context.Background()
-	mapper := NewModelMapper(&Config{})
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	// Create request that should have max_tokens dropped
 	req := &AnthropicRequest{

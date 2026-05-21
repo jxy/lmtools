@@ -62,12 +62,6 @@ func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 
-	// Create endpoints - fail via test API for better debugging
-	endpoints, err := NewEndpoints(config)
-	if err != nil {
-		t.Fatalf("NewTestServer: NewEndpoints failed: %v", err)
-	}
-
 	transport := &http.Transport{
 		DisableKeepAlives:   true,
 		MaxIdleConns:        1,
@@ -79,21 +73,8 @@ func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
 	}
 	client := retry.NewClientWithTransport(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
 
-	// Create server
-	mapper := NewModelMapper(config)
-	server := &Server{
-		config:           config,
-		endpoints:        endpoints,
-		mapper:           mapper,
-		converter:        NewConverter(mapper),
-		client:           client,
-		responsesState:   newResponsesState(config.SessionsDir),
-		backgroundCancel: make(map[string]context.CancelFunc),
-	}
-
-	// Wrap with consolidated middleware
-	handler := http.Handler(server)
-	handler = NewProxyMiddleware(handler, config)
+	server := newTestServerCore(t, config, client, "NewTestServer")
+	handler := NewProxyMiddleware(http.Handler(server), config)
 
 	// Create cleanup function
 	cleanup := func() {
@@ -110,14 +91,6 @@ func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 
-	// Create endpoints - fail via test API for better debugging
-	endpoints, err := NewEndpoints(config)
-	if err != nil {
-		t.Fatalf("NewTestServerWithFastRetries: NewEndpoints failed: %v", err)
-	}
-
-	mapper := NewModelMapper(config)
-
 	// Create a custom retry client with fast backoff for testing
 	// Uses millisecond delays instead of seconds to speed up tests
 	testRetryClient := retry.NewClientForTesting(
@@ -127,21 +100,8 @@ func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 		extractRequestLogger,
 	)
 
-	server := &Server{
-		config:           config,
-		endpoints:        endpoints,
-		mapper:           mapper,
-		converter:        NewConverter(mapper),
-		client:           testRetryClient,
-		responsesState:   newResponsesState(config.SessionsDir),
-		backgroundCancel: make(map[string]context.CancelFunc),
-	}
-
-	// Wrap with middleware
-	handler := http.Handler(server)
-	handler = NewProxyMiddleware(handler, config)
-
-	return handler
+	server := newTestServerCore(t, config, testRetryClient, "NewTestServerWithFastRetries")
+	return NewProxyMiddleware(http.Handler(server), config)
 }
 
 // NewTestServerDirectWithClient creates a Server with a custom retry client.
@@ -149,25 +109,25 @@ func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 func NewTestServerDirectWithClient(t *testing.T, config *Config, client *retry.Client) *Server {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
+	return newTestServerCore(t, config, client, "NewTestServerDirectWithClient")
+}
 
-	// Create endpoints - fail via test API for better debugging
+func newTestServerCore(t *testing.T, config *Config, client *retry.Client, caller string) *Server {
+	t.Helper()
 	endpoints, err := NewEndpoints(config)
 	if err != nil {
-		t.Fatalf("NewTestServerDirectWithClient: NewEndpoints failed: %v", err)
+		t.Fatalf("%s: NewEndpoints failed: %v", caller, err)
 	}
-
 	mapper := NewModelMapper(config)
-	server := &Server{
+	return &Server{
 		config:           config,
 		endpoints:        endpoints,
 		mapper:           mapper,
-		converter:        NewConverter(mapper),
+		converter:        NewConverter(),
 		client:           client,
 		responsesState:   newResponsesState(config.SessionsDir),
 		backgroundCancel: make(map[string]context.CancelFunc),
 	}
-
-	return server
 }
 
 // NewMinimalTestServer creates a Server with only config and mapper set.

@@ -84,17 +84,6 @@ func responsesCustomToolFormatFromChat(format interface{}) interface{} {
 	return src
 }
 
-func rawJSONStringValue(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return text
-	}
-	return string(raw)
-}
-
 func flattenNamespaceToolName(namespace, name string) string {
 	namespace = strings.TrimSpace(namespace)
 	name = strings.TrimSpace(name)

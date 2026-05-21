@@ -154,9 +154,7 @@ func finishToolExecution(result core.ToolExecutionResult) error {
 }
 
 func handleNormalResponse(ctx context.Context, cfg *config.Config, notifier core.Notifier, response *core.Response, sess *session.Session, model string) error {
-	if err := persistAssistantOnly(ctx, *response, sess, cfg, notifier, model); err != nil {
-		return err
-	}
+	persistAssistantOnly(ctx, *response, sess, cfg, notifier, model)
 
 	if response.Text != "" && !response.Streamed {
 		fmt.Print(response.Text)
@@ -587,7 +585,7 @@ func logWireHTTPResponseHeaders(ctx context.Context, resp *http.Response) {
 }
 
 // persistAssistantOnly saves assistant response when there are no tool calls
-func persistAssistantOnly(ctx context.Context, response core.Response, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) error {
+func persistAssistantOnly(ctx context.Context, response core.Response, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) {
 	// Save assistant response to session if enabled (but NOT when there are tool calls - HandleToolExecution will do it)
 	if sess != nil && (response.Text != "" || response.ThoughtSignature != "" || len(response.Blocks) > 0) {
 		logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(response.Text), cfg.StreamChat)
@@ -606,8 +604,6 @@ func persistAssistantOnly(ctx context.Context, response core.Response, sess *ses
 	} else {
 		logger.From(ctx).Debugf("Not saving response | Session: %v | Output length: %d", sess != nil, len(response.Text))
 	}
-
-	return nil
 }
 
 // listModels queries and displays available models for the configured provider

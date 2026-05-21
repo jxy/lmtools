@@ -620,9 +620,9 @@ event: ping
 			ctx := context.Background()
 			var output strings.Builder
 			testNotifier := &testNotifier{}
-			_, _, err = handleGenericStream(ctx, io.NopCloser(reader), logFile, &output, testNotifier, state, "test")
+			_, _, err = RunStream(ctx, io.NopCloser(reader), logFile, &output, testNotifier, state, "test")
 			if err != nil {
-				t.Fatalf("handleGenericStream failed: %v", err)
+				t.Fatalf("RunStream failed: %v", err)
 			}
 
 			// Verify collected content

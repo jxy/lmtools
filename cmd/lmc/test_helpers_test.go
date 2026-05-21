@@ -3,123 +3,11 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
-	"lmtools/internal/mockserver"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
-
-var (
-	cachedLmcBinary string
-	buildOnce       sync.Once
-	buildErr        error
-)
-
-// LmcCommandOption is a functional option for runLmcCommand
-type LmcCommandOption func(*lmcCommandConfig)
-
-type lmcCommandConfig struct {
-	logDir       string
-	useCustomLog bool
-}
-
-// WithLogDir sets a specific log directory for the command
-func WithLogDir(dir string) LmcCommandOption {
-	return func(c *lmcCommandConfig) {
-		c.logDir = dir
-		c.useCustomLog = true
-	}
-}
-
-// WithTempLogDir creates and uses a temporary log directory
-func WithTempLogDir(t *testing.T) LmcCommandOption {
-	return func(c *lmcCommandConfig) {
-		c.logDir = t.TempDir()
-		c.useCustomLog = true
-	}
-}
-
-// getLmcBinary returns the path to a temporary lmc binary built from the
-// current cmd/lmc sources. Integration tests must exercise the code under test
-// rather than a potentially stale ../../bin/lmc from a previous build.
-func getLmcBinary(t *testing.T) string {
-	t.Helper()
-
-	buildOnce.Do(func() {
-		tmpDir, err := os.MkdirTemp("", "lmc-test-*")
-		if err != nil {
-			buildErr = err
-			return
-		}
-
-		lmcBin := filepath.Join(tmpDir, "lmc.test")
-
-		cmd := exec.Command("go", "build", "-o", lmcBin, ".")
-		cmd.Dir = "." // Run in cmd/lmc directory
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			buildErr = fmt.Errorf("build failed: %v\nOutput:\n%s", err, string(out))
-			return
-		}
-
-		cachedLmcBinary = lmcBin
-	})
-
-	if buildErr != nil {
-		t.Fatalf("Failed to get lmc binary: %v", buildErr)
-	}
-
-	return cachedLmcBinary
-}
-
-// runLmcCommand runs lmc with the given arguments and input.
-// By default, it creates a temporary log directory to isolate test logs.
-// Use WithLogDir option to specify a custom log directory.
-func runLmcCommand(t *testing.T, lmcBin string, args []string, input string, opts ...LmcCommandOption) (stdout, stderr string, err error) {
-	t.Helper()
-
-	// Apply options
-	config := &lmcCommandConfig{}
-	for _, opt := range opts {
-		opt(config)
-	}
-
-	// If no log dir specified, create a temp one
-	if !config.useCustomLog {
-		config.logDir = t.TempDir()
-	}
-
-	// Add log directory to args
-	args = append(args, "-log-dir", config.logDir)
-
-	cmd := exec.Command(lmcBin, args...)
-	cmd.Stdin = strings.NewReader(input)
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	err = cmd.Run()
-	return stdoutBuf.String(), stderrBuf.String(), err
-}
-
-// extractFirstSessionID parses the first session ID from -show-sessions output
-func extractFirstSessionID(output string) string {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			return strings.TrimSpace(strings.Split(line, " • ")[0])
-		}
-	}
-	return ""
-}
 
 // assertRecentLogFiles checks that recent log files exist with given substring and suffix
 func assertRecentLogFiles(t *testing.T, dir string, includeSubstr string, suffix string) bool {
@@ -203,26 +91,4 @@ func waitForLogFiles(t *testing.T, dir string, pattern string, expectedCount int
 		}
 	}
 	return count
-}
-
-// setupTestEnvironment creates a temporary HOME and a mock server that supports
-// both Argo legacy endpoints and the native OpenAI/Anthropic compatibility endpoints.
-func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
-	t.Helper()
-
-	tmpHome = t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	// Create .lmc directory under HOME
-	argoDir := filepath.Join(tmpHome, ".lmc")
-	if err := os.MkdirAll(argoDir, 0o755); err != nil {
-		t.Fatalf("Failed to create .lmc directory: %v", err)
-	}
-
-	server := mockserver.NewMockServer(
-		mockserver.WithDefaultResponse("Mock response for testing"),
-	)
-	t.Cleanup(server.Close)
-
-	return tmpHome, server.URL()
 }

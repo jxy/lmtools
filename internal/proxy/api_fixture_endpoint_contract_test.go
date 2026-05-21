@@ -621,7 +621,7 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			return json.Marshal(converter.ConvertArgoToAnthropicWithRequest(&resp, clientModel, &req))
+			return json.Marshal(converter.ConvertLegacyArgoToAnthropicWithRequest(&resp, clientModel, &req))
 		}
 
 	case "openai":
@@ -660,7 +660,7 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			anthResp := converter.ConvertArgoToAnthropicWithRequest(&resp, clientModel, anthReq)
+			anthResp := converter.ConvertLegacyArgoToAnthropicWithRequest(&resp, clientModel, anthReq)
 			return json.Marshal(converter.ConvertAnthropicResponseToOpenAI(anthResp, clientModel))
 		}
 	}
@@ -885,7 +885,7 @@ func extractRequestModel(body []byte) (string, error) {
 }
 
 func newFixtureConverter() *Converter {
-	return NewConverter(NewModelMapper(&Config{}))
+	return NewConverter()
 }
 
 func renderAnthropicStreamFromOpenAI(raw []byte, model string) ([]byte, error) {

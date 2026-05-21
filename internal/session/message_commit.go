@@ -213,15 +213,6 @@ func newMessageCommitter(sessionPath string) *messageCommitter {
 	return &messageCommitter{sessionPath: sessionPath}
 }
 
-// Stage prepares temporary files for a message with optional tool interaction.
-func (mc *messageCommitter) Stage(msg Message, toolInteraction *core.ToolInteraction) (*MessageStaging, error) {
-	return stageMessageFiles(mc.sessionPath, msg, toolInteraction)
-}
-
-func (mc *messageCommitter) StageWithBlocks(msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (*MessageStaging, error) {
-	return stageMessageFilesWithBlocks(mc.sessionPath, msg, toolInteraction, blocks)
-}
-
 // Commit atomically commits staged message files to the session.
 // Returns: msgID, needSibling, siblingPath, error.
 func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging) (string, bool, string, error) {
@@ -281,7 +272,7 @@ func (mc *messageCommitter) CommitMessageWithRetries(ctx context.Context, msg Me
 func (mc *messageCommitter) CommitMessageWithBlocksWithRetries(ctx context.Context, msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (SaveResult, error) {
 	const maxRetries = core.MaxRetries
 
-	staged, err := mc.StageWithBlocks(msg, toolInteraction, blocks)
+	staged, err := stageMessageFilesWithBlocks(mc.sessionPath, msg, toolInteraction, blocks)
 	if err != nil {
 		return SaveResult{}, err
 	}
@@ -339,7 +330,7 @@ func (mc *messageCommitter) CommitMessageWithBlocksWithRetries(ctx context.Conte
 
 		staged.Close()
 		mc = newMessageCommitter(siblingPath)
-		staged, err = mc.StageWithBlocks(msg, toolInteraction, blocks)
+		staged, err = stageMessageFilesWithBlocks(mc.sessionPath, msg, toolInteraction, blocks)
 		if err != nil {
 			return SaveResult{}, errors.WrapError("restage in sibling directory", err)
 		}

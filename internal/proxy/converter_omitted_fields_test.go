@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"os"
@@ -264,7 +263,7 @@ func TestAnthropicToGoogleWarningsForDroppedModernFields(t *testing.T) {
 }
 
 func TestArgoConversionWarningsUseWarnLevel(t *testing.T) {
-	converter := NewConverter(NewModelMapper(&Config{Provider: constants.ProviderArgo}))
+	converter := NewConverter()
 
 	logs := captureWarnLogs(t, func() {
 		topK := 5

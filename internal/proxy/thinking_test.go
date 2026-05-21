@@ -8,8 +8,7 @@ import (
 )
 
 func TestThinkingFieldConversion(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 	ctx := context.Background()
 
 	tests := []struct {

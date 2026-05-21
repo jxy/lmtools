@@ -30,11 +30,36 @@ type conversationBaseRef struct {
 	TerminalMessageID string
 }
 
-type openAIResponsesStateAccess struct {
-	store      bool
-	writable   bool
-	readOnly   bool
-	background bool
+type openAIResponsesStateMode int
+
+const (
+	responsesStateModeReadOnly openAIResponsesStateMode = iota
+	responsesStateModeForegroundStored
+	responsesStateModeForegroundTransient
+	responsesStateModeBackground
+)
+
+func (m openAIResponsesStateMode) readOnly() bool {
+	return m == responsesStateModeReadOnly
+}
+
+func (m openAIResponsesStateMode) writable() bool {
+	return m == responsesStateModeForegroundStored || m == responsesStateModeBackground
+}
+
+func (m openAIResponsesStateMode) background() bool {
+	return m == responsesStateModeBackground
+}
+
+func (m openAIResponsesStateMode) store(req *OpenAIResponsesRequest) bool {
+	switch m {
+	case responsesStateModeForegroundStored:
+		return true
+	case responsesStateModeBackground:
+		return responsesStoreRequested(req)
+	default:
+		return false
+	}
 }
 
 func responsesStoreRequested(req *OpenAIResponsesRequest) bool {
@@ -42,41 +67,36 @@ func responsesStoreRequested(req *OpenAIResponsesRequest) bool {
 }
 
 func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
-	return s.prepareOpenAIResponsesState(ctx, req, typed, openAIResponsesStateAccess{readOnly: true})
+	return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeReadOnly)
 }
 
 func (s *Server) prepareOpenAIResponsesStateForeground(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
-	store := responsesStoreRequested(req)
-	return s.prepareOpenAIResponsesState(ctx, req, typed, openAIResponsesStateAccess{
-		store:    store,
-		writable: store,
-	})
+	if responsesStoreRequested(req) {
+		return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeForegroundStored)
+	}
+	return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeForegroundTransient)
 }
 
 func (s *Server) prepareOpenAIResponsesStateBackground(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
-	return s.prepareOpenAIResponsesState(ctx, req, typed, openAIResponsesStateAccess{
-		store:      responsesStoreRequested(req),
-		writable:   true,
-		background: true,
-	})
+	return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeBackground)
 }
 
-func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, access openAIResponsesStateAccess) (*openAIResponsesStateContext, TypedRequest, error) {
+func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, mode openAIResponsesStateMode) (*openAIResponsesStateContext, TypedRequest, error) {
 	convSpec, err := parseConversationSpec(req.Conversation)
 	if err != nil {
 		return nil, typed, err
 	}
-	if access.readOnly && convSpec.create {
+	if mode.readOnly() && convSpec.create {
 		return nil, typed, fmt.Errorf("conversation id is required")
 	}
-	if !access.readOnly {
-		needsState := access.writable || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
+	if !mode.readOnly() {
+		needsState := mode.writable() || req.PreviousResponseID != "" || (convSpec.requested && !convSpec.create)
 		if !needsState {
 			return nil, typed, nil
 		}
 	}
 
-	stateCtx, err := newOpenAIResponsesStateContext(req, typed, access)
+	stateCtx, err := newOpenAIResponsesStateContext(ctx, req, typed, mode)
 	if err != nil {
 		return nil, typed, err
 	}
@@ -86,7 +106,7 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		return nil, typed, err
 	}
 
-	conversationSessionPath, err := s.prepareOpenAIResponsesConversationForRequest(stateCtx, convSpec, access)
+	conversationSessionPath, err := s.prepareOpenAIResponsesConversationForRequest(stateCtx, convSpec, mode)
 	if err != nil {
 		return nil, typed, err
 	}
@@ -94,12 +114,12 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		sessionPath = conversationSessionPath
 	}
 
-	if err := s.prepareOpenAIResponsesSession(ctx, stateCtx, sessionPath, access.writable); err != nil {
+	if err := s.prepareOpenAIResponsesSession(ctx, stateCtx, sessionPath, mode.writable()); err != nil {
 		return nil, typed, err
 	}
 
 	if stateCtx.Session != nil {
-		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, access.writable)
+		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, mode.writable())
 		if err != nil {
 			return nil, typed, err
 		}
@@ -110,15 +130,15 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 	return stateCtx, typed, nil
 }
 
-func newOpenAIResponsesStateContext(req *OpenAIResponsesRequest, typed TypedRequest, access openAIResponsesStateAccess) (*openAIResponsesStateContext, error) {
+func newOpenAIResponsesStateContext(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, mode openAIResponsesStateMode) (*openAIResponsesStateContext, error) {
 	currentRequest, err := marshalJSONRaw(req)
 	if err != nil {
 		return nil, err
 	}
 	stateCtx := &openAIResponsesStateContext{
-		Store:          access.store,
-		Background:     access.background,
-		Instructions:   responsesInstructionText(req.Instructions),
+		Store:          mode.store(req),
+		Background:     mode.background(),
+		Instructions:   responsesInstructionText(ctx, req.Instructions),
 		CurrentRequest: currentRequest,
 	}
 	if stateCtx.Instructions == "" {
@@ -142,11 +162,11 @@ func (s *Server) loadOpenAIResponsesPreviousState(req *OpenAIResponsesRequest, s
 	return prev.SessionPath, nil
 }
 
-func (s *Server) prepareOpenAIResponsesConversationForRequest(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, access openAIResponsesStateAccess) (string, error) {
-	if !convSpec.requested || (!access.readOnly && convSpec.create && !access.writable) {
+func (s *Server) prepareOpenAIResponsesConversationForRequest(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, mode openAIResponsesStateMode) (string, error) {
+	if !convSpec.requested || (!mode.readOnly() && convSpec.create && !mode.writable()) {
 		return "", nil
 	}
-	conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, access.writable)
+	conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, mode.writable())
 	if err != nil {
 		return "", err
 	}
@@ -154,7 +174,7 @@ func (s *Server) prepareOpenAIResponsesConversationForRequest(stateCtx *openAIRe
 		stateCtx.Session = sess
 	}
 	stateCtx.Conversation = conv
-	if !access.readOnly {
+	if !mode.readOnly() {
 		if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
 			return "", err
 		}

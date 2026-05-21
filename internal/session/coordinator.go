@@ -2,12 +2,12 @@ package session
 
 import (
 	"context"
+	stdErrors "errors"
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -342,7 +342,7 @@ func loadSessionWithRetry(sessionID string) (*Session, error) {
 		}
 
 		// If it's not a "not found" error, fail immediately
-		if !os.IsNotExist(loadErr) && !strings.Contains(loadErr.Error(), "not found") {
+		if !stdErrors.Is(loadErr, os.ErrNotExist) {
 			return nil, errors.WrapError("load session "+sessionID, loadErr)
 		}
 

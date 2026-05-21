@@ -2,9 +2,40 @@ package core
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestNormalizeOpenAIResponsesArguments(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "empty", args: "", want: `{}`},
+		{name: "valid object", args: `{"city":"Chicago"}`, want: `{"city":"Chicago"}`},
+		{name: "plain text", args: `not json`, want: `"not json"`},
+		{name: "encoded json", args: `"{\"city\":\"Chicago\"}"`, want: `{"city":"Chicago"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeOpenAIResponsesArguments(tt.args)
+			var gotValue interface{}
+			if err := json.Unmarshal(got, &gotValue); err != nil {
+				t.Fatalf("NormalizeOpenAIResponsesArguments() returned invalid JSON %s: %v", got, err)
+			}
+			var wantValue interface{}
+			if err := json.Unmarshal([]byte(tt.want), &wantValue); err != nil {
+				t.Fatalf("test want is invalid JSON: %v", err)
+			}
+			if !reflect.DeepEqual(gotValue, wantValue) {
+				t.Fatalf("NormalizeOpenAIResponsesArguments() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestBuildOpenAIResponsesRequest(t *testing.T) {
 	cfg := RequestOptions{

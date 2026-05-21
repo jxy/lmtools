@@ -303,7 +303,7 @@ func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, newSe
 			Timestamp:        msg.Timestamp,
 			Model:            msg.Model,
 		}
-		staged, err := mc.StageWithBlocks(newMsg, toolInteraction, blocks)
+		staged, err := stageMessageFilesWithBlocks(mc.sessionPath, newMsg, toolInteraction, blocks)
 		if err != nil {
 			return errors.WrapError("stage message", err)
 		}

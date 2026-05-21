@@ -57,7 +57,7 @@ func (s *Server) createOpenAIConversation(ctx context.Context, w http.ResponseWr
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
-	instructions := responsesInstructionText(body.Instructions)
+	instructions := responsesInstructionText(ctx, body.Instructions)
 	messages, err := conversationMessagesFromRequest(ctx, body)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
@@ -111,7 +111,7 @@ func (s *Server) updateOpenAIConversation(ctx context.Context, w http.ResponseWr
 	if body.Metadata != nil {
 		conv.Metadata = cloneStringInterfaceMap(body.Metadata)
 	}
-	if instructions := responsesInstructionText(body.Instructions); instructions != "" {
+	if instructions := responsesInstructionText(ctx, body.Instructions); instructions != "" {
 		conv.Instructions = instructions
 	}
 	if err := s.responsesState.saveConversation(conv); err != nil {

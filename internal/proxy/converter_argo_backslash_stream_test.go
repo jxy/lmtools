@@ -23,7 +23,7 @@ func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
 	}}
 
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}, Tools: []AnthropicTool{{Name: "Write"}}}
-	anth := converter.ConvertArgoToAnthropicWithRequest(argo, req.Model, req)
+	anth := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, req.Model, req)
 	if anth == nil {
 		t.Fatal("converter returned nil")
 		return
@@ -57,9 +57,11 @@ func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler: %v", err)
 	}
-	srv := NewMinimalTestServer(t, &Config{})
-	if err := srv.streamArgoResponseContent(ctx, anth, handler); err != nil {
-		t.Fatalf("streamArgoResponseContent: %v", err)
+	if err := streamSimulatedContentBlocks(ctx, anth.Content, anthropicSimulatedContentEmitter{
+		ctx:     ctx,
+		handler: handler,
+	}); err != nil {
+		t.Fatalf("streamSimulatedContentBlocks: %v", err)
 	}
 
 	// Parse SSE and extract partial_json chunks

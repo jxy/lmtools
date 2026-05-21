@@ -68,7 +68,7 @@ func TestMessageCommitterOrphanCleanup(t *testing.T) {
 	}
 
 	mc := newMessageCommitter(tmpDir)
-	staging, err := mc.Stage(msg, toolInteraction)
+	staging, err := stageMessageFiles(mc.sessionPath, msg, toolInteraction)
 	if err != nil {
 		t.Fatalf("Failed to stage message: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestMessageCommitterEmptyContent(t *testing.T) {
 	}
 
 	mc := newMessageCommitter(tmpDir)
-	staging, err := mc.Stage(msg, nil)
+	staging, err := stageMessageFiles(mc.sessionPath, msg, nil)
 	if err != nil {
 		t.Fatalf("Failed to stage message: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestMessageCommitterToolOnlyMessage(t *testing.T) {
 	}
 
 	mc := newMessageCommitter(tmpDir)
-	staging, err := mc.Stage(msg, toolInteraction)
+	staging, err := stageMessageFiles(mc.sessionPath, msg, toolInteraction)
 	if err != nil {
 		t.Fatalf("Failed to stage message: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestMessageCommitterCommitInvariant(t *testing.T) {
 	}
 
 	mc := newMessageCommitter(tmpDir)
-	staging, err := mc.Stage(msg, toolInteraction)
+	staging, err := stageMessageFiles(mc.sessionPath, msg, toolInteraction)
 	if err != nil {
 		t.Fatalf("Failed to stage message: %v", err)
 	}

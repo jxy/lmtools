@@ -199,8 +199,6 @@ func TestAnthropicStreaming_NoSplitInPartialJSON(t *testing.T) {
 			},
 		},
 	}
-	server := NewMinimalTestServer(t, &Config{})
-
 	recorder := httptest.NewRecorder()
 	ctx := context.Background()
 	handler, err := NewAnthropicStreamHandler(recorder, anthResp.Model, ctx)
@@ -208,8 +206,11 @@ func TestAnthropicStreaming_NoSplitInPartialJSON(t *testing.T) {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
 
-	if err := server.streamArgoResponseContent(ctx, anthResp, handler); err != nil {
-		t.Fatalf("streamArgoResponseContent failed: %v", err)
+	if err := streamSimulatedContentBlocks(ctx, anthResp.Content, anthropicSimulatedContentEmitter{
+		ctx:     ctx,
+		handler: handler,
+	}); err != nil {
+		t.Fatalf("streamSimulatedContentBlocks failed: %v", err)
 	}
 
 	output := recorder.Body.String()

@@ -236,7 +236,7 @@ func TestOpenAIRequestToTypedStrictRejectsUnmatchedLegacyFunctionResult(t *testi
 }
 
 func TestConvertOpenAIRequestToAnthropicRejectsMalformedContentPart(t *testing.T) {
-	converter := NewConverter(NewModelMapper(&Config{Provider: "anthropic"}))
+	converter := NewConverter()
 	req := &OpenAIRequest{
 		Model: "gpt-4.1",
 		Messages: []OpenAIMessage{

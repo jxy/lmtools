@@ -4,20 +4,10 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"strings"
-	"time"
 )
 
-// ARCHITECTURAL PRINCIPLE: TypedRequest is our canonical internal representation.
-// All provider-specific formats (OpenAI, Anthropic, Google, Argo) are converted
-// to/from TypedRequest at API boundaries. This ensures:
-// 1. Single source of truth for message handling and business logic
-// 2. Provider-specific details are isolated to edge converters
-// 3. Core logic remains provider-agnostic
-//
-// Conversion flow:
-//   Incoming: ProviderFormat -> TypedRequest -> Internal Processing
-//   Outgoing: Internal Processing -> TypedRequest -> ProviderFormat
-//
+// TypedRequest is the proxy's canonical request representation at provider
+// conversion boundaries.
 // NEVER convert directly between provider formats. Always go through TypedRequest.
 // This ensures consistency and maintainability.
 
@@ -364,60 +354,4 @@ func cloneStringInterfaceMap(input map[string]interface{}) map[string]interface{
 		output[key] = value
 	}
 	return output
-}
-
-// TypedToOpenAIResponse converts a typed response to OpenAI format
-func TypedToOpenAIResponse(typed TypedRequest, content string, toolCalls []core.ToolCall, usage *OpenAIUsage, model string, finishReason string) *OpenAIResponse {
-	response := &OpenAIResponse{
-		ID:      generateUUID("chatcmpl-"),
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   model,
-		Usage:   usage,
-	}
-
-	// Build the message
-	message := OpenAIMessage{
-		Role:    core.RoleAssistant,
-		Content: content,
-	}
-
-	// Convert tool calls if present
-	if len(toolCalls) > 0 {
-		message.ToolCalls = make([]ToolCall, len(toolCalls))
-		for i, tc := range toolCalls {
-			message.ToolCalls[i] = ToolCall{
-				ID:   tc.ID,
-				Type: "function",
-				Function: FunctionCall{
-					Name:      tc.Name,
-					Arguments: string(tc.Args),
-				},
-			}
-		}
-	}
-
-	// Add single choice
-	response.Choices = []OpenAIChoice{
-		{
-			Index:        0,
-			Message:      message,
-			FinishReason: finishReason,
-		},
-	}
-
-	return response
-}
-
-// TypedToAnthropicResponse converts a typed response to Anthropic format
-func TypedToAnthropicResponse(typed TypedRequest, content []AnthropicContentBlock, usage *AnthropicUsage, model string, stopReason string) *AnthropicResponse {
-	return &AnthropicResponse{
-		ID:         generateUUID("msg_"),
-		Type:       "message",
-		Role:       core.RoleAssistant,
-		Content:    content,
-		Model:      model,
-		StopReason: stopReason,
-		Usage:      usage,
-	}
 }

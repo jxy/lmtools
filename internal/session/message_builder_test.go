@@ -3,9 +3,59 @@ package session
 import (
 	"context"
 	"lmtools/internal/core"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestBuildMessagesWithIndexMatchesSnapshotBuilder(t *testing.T) {
+	WithTestSessionDir(t, func(sessionsDir string) {
+		ctx := context.Background()
+		sess, err := CreateSession("", core.NewTestLogger(false))
+		if err != nil {
+			t.Fatalf("CreateSession() error = %v", err)
+		}
+		if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{
+			Role:      core.RoleUser,
+			Content:   "list files",
+			Timestamp: time.Now(),
+		}, nil, nil); err != nil {
+			t.Fatalf("append user: %v", err)
+		}
+		if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{
+			Role:      core.RoleAssistant,
+			Content:   "I'll inspect the directory.",
+			Timestamp: time.Now(),
+			Model:     "test-model",
+		}, []core.ToolCall{{
+			ID:   "call_1",
+			Name: "universal_command",
+			Args: []byte(`{"command":["ls"]}`),
+		}}, nil); err != nil {
+			t.Fatalf("append assistant: %v", err)
+		}
+
+		lineage, err := GetLineage(sess.Path)
+		if err != nil {
+			t.Fatalf("GetLineage() error = %v", err)
+		}
+		index, err := indexMessagesAlongPathWithManager(DefaultManager(), sess.Path)
+		if err != nil {
+			t.Fatalf("indexMessagesAlongPath() error = %v", err)
+		}
+		withIndex, err := BuildMessagesWithIndex(ctx, lineage, index, sess.Path)
+		if err != nil {
+			t.Fatalf("BuildMessagesWithIndex() error = %v", err)
+		}
+		fromSnapshot, err := BuildMessagesWithToolInteractions(ctx, sess.Path)
+		if err != nil {
+			t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+		}
+		if !reflect.DeepEqual(withIndex, fromSnapshot) {
+			t.Fatalf("BuildMessagesWithIndex() = %#v, want %#v", withIndex, fromSnapshot)
+		}
+	})
+}
 
 // TestCheckForPendingToolCallsWithFindMessageDirectory tests that CheckForPendingToolCalls
 // efficiently finds the last message directory without building a full index

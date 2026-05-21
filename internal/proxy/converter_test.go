@@ -15,8 +15,7 @@ func intPtr(i int) *int {
 }
 
 func TestConvertAnthropicToOpenAI(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	tests := []struct {
 		name     string
@@ -247,8 +246,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 }
 
 func TestConvertOpenAIToAnthropic(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	tests := []struct {
 		name          string
@@ -384,8 +382,7 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 }
 
 func TestConvertAnthropicToArgo(t *testing.T) {
-	mapper := &ModelMapper{config: &Config{}}
-	converter := NewConverter(mapper)
+	converter := NewConverter()
 
 	tests := []struct {
 		name     string

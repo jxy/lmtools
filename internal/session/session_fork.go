@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	stdErrors "errors"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
@@ -127,64 +126,15 @@ func copyForkLineageWithManager(ctx context.Context, manager *Manager, originalP
 		return errors.WrapError("index lineage messages", err)
 	}
 
-	mc := newMessageCommitter(newSession.Path)
-
+	refs := make([]lineageMessageRef, 0, len(messages))
 	for _, msg := range messages {
-		if msg.Role == core.RoleSystem {
-			continue
-		}
-
-		var toolInteraction *core.ToolInteraction
-		var blocks []core.Block
 		originalMsgPath := msgIndex[msg.ID]
+		if originalMsgPath == "" {
+			originalMsgPath = originalPath
+		}
 		logger.From(ctx).Debugf("Processing message %s (role=%s) from path %s", msg.ID, msg.Role, originalMsgPath)
-
-		if originalMsgPath != "" {
-			ti, err := LoadToolInteraction(originalMsgPath, msg.ID)
-			if err != nil {
-				logger.From(ctx).Debugf("Failed to load tool interaction for message %s: %v", msg.ID, err)
-			} else if ti != nil {
-				toolInteraction = ti
-				logger.From(ctx).Debugf("Loaded tool interaction for message %s: %d calls, %d results",
-					msg.ID, len(ti.Calls), len(ti.Results))
-			} else {
-				logger.From(ctx).Debugf("No tool file found for message %s at %s", msg.ID, buildMessageFilePaths(originalMsgPath, msg.ID).ToolsPath)
-			}
-
-			loadedBlocks, ok, err := loadMessageBlocks(originalMsgPath, msg.ID)
-			if err != nil {
-				logger.From(ctx).Debugf("Failed to load typed blocks for message %s: %v", msg.ID, err)
-			} else if ok {
-				blocks = loadedBlocks
-				logger.From(ctx).Debugf("Loaded %d typed blocks for message %s", len(blocks), msg.ID)
-			}
-		}
-
-		newMsg := Message{
-			Role:      msg.Role,
-			Content:   msg.Content,
-			Timestamp: msg.Timestamp,
-			Model:     msg.Model,
-		}
-
-		staged, err := mc.StageWithBlocks(newMsg, toolInteraction, blocks)
-		if err != nil {
-			return errors.WrapError("stage message", err)
-		}
-
-		newMsgID, needSibling, _, err := mc.Commit(ctx, staged)
-		staged.Close()
-
-		if err != nil {
-			return errors.WrapError("place message", err)
-		}
-		if needSibling {
-			return errors.WrapError("copy message", stdErrors.New("unexpected conflict when copying message"))
-		}
-
-		logger.From(ctx).Debugf("Copied message %s -> %s (role=%s, hasTools=%v)",
-			msg.ID, newMsgID, msg.Role, toolInteraction != nil)
+		refs = append(refs, lineageMessageRef{path: originalMsgPath, message: msg})
 	}
 
-	return nil
+	return copyLineageMessageRefs(ctx, refs, newSession)
 }

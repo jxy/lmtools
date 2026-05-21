@@ -83,7 +83,7 @@ func NewServer(config *Config) (http.Handler, error) {
 		config:                config,
 		endpoints:             endpoints,
 		mapper:                mapper,
-		converter:             NewConverter(mapper),
+		converter:             NewConverter(),
 		client:                retry.NewClientWithOptions(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
 		responsesState:        newResponsesState(config.SessionsDir),
 		responsesModelAliases: make(map[string]string),

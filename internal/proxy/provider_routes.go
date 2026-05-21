@@ -12,7 +12,7 @@ func (s *Server) forwardAnthropicViaArgo(ctx context.Context, anthReq *Anthropic
 		if err != nil {
 			return nil, err
 		}
-		return s.converter.ConvertArgoToAnthropicWithRequest(argoResp, originalModel, anthReq), nil
+		return s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, originalModel, anthReq), nil
 	}
 
 	switch providers.DetermineArgoModelProvider(anthReq.Model) {

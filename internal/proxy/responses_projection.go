@@ -499,7 +499,7 @@ func openAIResponsesOutputToolCalls(output []OpenAIResponsesOutputItem) []core.T
 			Namespace:    item.Namespace,
 			OriginalName: item.Name,
 			Name:         responseOutputToolName(item),
-			Args:         normalizeResponsesArguments(item.Arguments),
+			Args:         core.NormalizeOpenAIResponsesArguments(item.Arguments),
 		})
 	}
 	return calls
@@ -533,7 +533,7 @@ func openAIResponsesOutputBlocks(output []OpenAIResponsesOutputItem) []core.Bloc
 				Namespace:    item.Namespace,
 				OriginalName: item.Name,
 				Name:         responseOutputToolName(item),
-				Input:        normalizeResponsesArguments(item.Arguments),
+				Input:        core.NormalizeOpenAIResponsesArguments(item.Arguments),
 			})
 		case "custom_tool_call":
 			blocks = append(blocks, core.ToolUseBlock{

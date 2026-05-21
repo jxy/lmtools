@@ -1,11 +1,8 @@
 package core
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 )
 
@@ -318,9 +315,4 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 func (s *GoogleStreamState) generateToolCallID() string {
 	s.nextID++
 	return fmt.Sprintf("call_%d", s.nextID)
-}
-
-// RunStream is a unified helper for running provider-specific streaming parsers
-func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, state StreamState, providerName string) (string, []ToolCall, error) {
-	return handleGenericStream(ctx, body, logFile, out, notifier, state, providerName)
 }

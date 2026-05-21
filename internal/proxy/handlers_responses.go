@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"net/http"
 	"strings"
@@ -376,22 +377,9 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 		}
 		openAIReq.Model = mappedModel
 		openAIReq.Stream = true
-		writer, ok := s.newConfiguredResponsesStreamWriter(ctx, w, stateCtx, originalModel, typed)
-		if !ok {
-			return
-		}
-		resp, blocks, err := s.streamResponsesFromArgoOpenAIRequest(ctx, openAIReq, writer)
-		if err != nil {
-			if !writer.started {
-				s.sendProviderErrorAsOpenAI(ctx, w, provider, err)
-				return
-			}
-			s.failAndCommitOpenAIResponsesStream(ctx, stateCtx, responsesReq, typedCurrent, writer, err, originalModel)
-			return
-		}
-		if err := s.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, responsesReq, typedCurrent, resp, originalModel, blocks); err != nil {
-			logger.From(ctx).Errorf("Failed to save OpenAI responses stream state: %v", err)
-		}
+		s.runAndCommitConvertedOpenAIResponsesStream(ctx, w, responsesReq, typedCurrent, stateCtx, provider, originalModel, typed, func(writer *responsesStreamWriter) (*OpenAIResponsesResponse, []core.Block, error) {
+			return s.streamResponsesFromArgoOpenAIRequest(ctx, openAIReq, writer)
+		})
 		return
 	}
 	typed = ensureResponsesAnthropicWireMaxTokens(typed, provider, mappedModel)
@@ -403,11 +391,17 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 	anthReq.Model = mappedModel
 	anthReq.Stream = true
 
-	writer, ok := s.newConfiguredResponsesStreamWriter(ctx, w, stateCtx, originalModel, typed)
+	s.runAndCommitConvertedOpenAIResponsesStream(ctx, w, responsesReq, typedCurrent, stateCtx, provider, originalModel, typed, func(writer *responsesStreamWriter) (*OpenAIResponsesResponse, []core.Block, error) {
+		return s.streamResponsesFromProvider(ctx, anthReq, provider, originalModel, writer)
+	})
+}
+
+func (s *Server) runAndCommitConvertedOpenAIResponsesStream(ctx context.Context, w http.ResponseWriter, responsesReq *OpenAIResponsesRequest, typedCurrent TypedRequest, stateCtx *openAIResponsesStateContext, provider, originalModel string, typedForWriter TypedRequest, stream func(*responsesStreamWriter) (*OpenAIResponsesResponse, []core.Block, error)) {
+	writer, ok := s.newConfiguredResponsesStreamWriter(ctx, w, stateCtx, originalModel, typedForWriter)
 	if !ok {
 		return
 	}
-	resp, blocks, err := s.streamResponsesFromProvider(ctx, anthReq, provider, originalModel, writer)
+	resp, blocks, err := stream(writer)
 	if err != nil {
 		if !writer.started {
 			s.sendProviderErrorAsOpenAI(ctx, w, provider, err)
@@ -418,7 +412,6 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 	}
 	if err := s.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, responsesReq, typedCurrent, resp, originalModel, blocks); err != nil {
 		logger.From(ctx).Errorf("Failed to save OpenAI responses stream state: %v", err)
-		return
 	}
 }
 
@@ -437,7 +430,9 @@ func (s *Server) newConfiguredResponsesStreamWriter(ctx context.Context, rw http
 }
 
 func (s *Server) failAndCommitOpenAIResponsesStream(ctx context.Context, stateCtx *openAIResponsesStateContext, responsesReq *OpenAIResponsesRequest, typedCurrent TypedRequest, writer *responsesStreamWriter, streamErr error, originalModel string) {
-	logResponsesStreamError(ctx, streamErr)
+	if streamErr != nil {
+		logger.From(ctx).Warnf("OpenAI responses stream failed after start: %v", streamErr)
+	}
 	resp, failErr := writer.Fail(streamErr)
 	if failErr != nil {
 		logger.From(ctx).Errorf("Failed to send OpenAI responses stream failure event: %v", failErr)
