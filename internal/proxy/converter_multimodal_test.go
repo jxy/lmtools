@@ -11,8 +11,6 @@ import (
 // TestConvertAnthropicResponseToOpenAI_WithMultimodal tests the conversion of Anthropic responses
 // with multimodal content to OpenAI format
 func TestConvertAnthropicResponseToOpenAI_WithMultimodal(t *testing.T) {
-	converter := NewConverter()
-
 	tests := []struct {
 		name          string
 		input         *AnthropicResponse
@@ -242,7 +240,7 @@ func TestConvertAnthropicResponseToOpenAI_WithMultimodal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := converter.ConvertAnthropicResponseToOpenAI(tt.input, tt.originalModel)
+			got := ConvertAnthropicResponseToOpenAI(tt.input, tt.originalModel)
 			tt.validateFunc(t, got)
 		})
 	}
@@ -251,8 +249,6 @@ func TestConvertAnthropicResponseToOpenAI_WithMultimodal(t *testing.T) {
 // TestConvertArgoToAnthropicWithRequest_IDGeneration tests that ConvertArgoToAnthropicWithRequest
 // always generates an ID if one is missing
 func TestConvertArgoToAnthropicWithRequest_IDGeneration(t *testing.T) {
-	converter := NewConverter()
-
 	tests := []struct {
 		name     string
 		input    *ArgoChatResponse
@@ -383,7 +379,7 @@ func TestConvertArgoToAnthropicWithRequest_IDGeneration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := converter.ConvertArgoToAnthropicWithRequest(tt.input, tt.model, tt.request)
+			got := ConvertArgoToAnthropicWithRequest(tt.input, tt.model, tt.request)
 			tt.validate(t, got)
 		})
 	}
@@ -391,8 +387,6 @@ func TestConvertArgoToAnthropicWithRequest_IDGeneration(t *testing.T) {
 
 // TestOpenAIRequestToAnthropic_ImageURL tests conversion of OpenAI image_url to Anthropic format
 func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
-	converter := NewConverter()
-
 	tests := []struct {
 		name     string
 		input    *OpenAIRequest
@@ -541,7 +535,7 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), tt.input)
+			got, err := ConvertOpenAIRequestToAnthropic(context.Background(), tt.input)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error %q", tt.wantErr)
@@ -562,7 +556,6 @@ func TestOpenAIRequestToAnthropic_ImageURL(t *testing.T) {
 // TestMultimodalContentPipeline tests the complete conversion pipeline
 // OpenAI -> Anthropic -> Argo -> Anthropic -> OpenAI
 func TestMultimodalContentPipeline(t *testing.T) {
-	converter := NewConverter()
 	ctx := context.Background()
 
 	// Start with an OpenAI request with image content
@@ -589,7 +582,7 @@ func TestMultimodalContentPipeline(t *testing.T) {
 	}
 
 	// Step 1: OpenAI -> Anthropic
-	anthReq, err := converter.ConvertOpenAIRequestToAnthropic(ctx, openAIReq)
+	anthReq, err := ConvertOpenAIRequestToAnthropic(ctx, openAIReq)
 	if err != nil {
 		t.Fatalf("OpenAI to Anthropic conversion failed: %v", err)
 	}
@@ -604,7 +597,7 @@ func TestMultimodalContentPipeline(t *testing.T) {
 	}
 
 	// Step 2: Anthropic -> Argo
-	argoReq, err := converter.ConvertAnthropicToArgo(ctx, anthReq, "testuser")
+	argoReq, err := ConvertAnthropicToArgo(ctx, anthReq, "testuser")
 	if err != nil {
 		t.Fatalf("Anthropic to Argo conversion failed: %v", err)
 	}
@@ -636,7 +629,7 @@ func TestMultimodalContentPipeline(t *testing.T) {
 	}
 
 	// Step 4: Argo -> Anthropic (response)
-	anthResp := converter.ConvertArgoToAnthropicWithRequest(argoResp, "gpt-4-vision", anthReq)
+	anthResp := ConvertArgoToAnthropicWithRequest(argoResp, "gpt-4-vision", anthReq)
 
 	// Verify ID was generated
 	if anthResp.ID == "" {
@@ -652,7 +645,7 @@ func TestMultimodalContentPipeline(t *testing.T) {
 	}
 
 	// Step 5: Anthropic -> OpenAI (response)
-	openAIResp := converter.ConvertAnthropicResponseToOpenAI(anthResp, "gpt-4-vision")
+	openAIResp := ConvertAnthropicResponseToOpenAI(anthResp, "gpt-4-vision")
 
 	// Verify final OpenAI response
 	if openAIResp.ID == "" || openAIResp.ID == "chatcmpl-" {

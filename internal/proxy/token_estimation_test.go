@@ -149,8 +149,6 @@ func TestEstimateRequestTokens(t *testing.T) {
 }
 
 func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
-	converter := NewConverter()
-
 	// Test request with known content
 	request := &AnthropicRequest{
 		System: json.RawMessage(`"You are a helpful coding assistant."`),
@@ -168,7 +166,7 @@ func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
 			Response: "Here's a fibonacci function:\n\nfunc fibonacci(n int) int {\n    if n <= 1 {\n        return n\n    }\n    return fibonacci(n-1) + fibonacci(n-2)\n}",
 		}
 
-		anthResp := converter.ConvertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request)
+		anthResp := ConvertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request)
 
 		if anthResp.Usage == nil {
 			t.Fatal("Expected Usage to be set")
@@ -203,7 +201,7 @@ func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
 			},
 		}
 
-		anthResp := converter.ConvertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request)
+		anthResp := ConvertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request)
 
 		if anthResp.Usage == nil {
 			t.Fatal("Expected Usage to be set")

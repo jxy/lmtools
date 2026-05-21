@@ -9,9 +9,10 @@ import (
 )
 
 func TestBuildMessagesWithIndexMatchesSnapshotBuilder(t *testing.T) {
-	WithTestSessionDir(t, func(sessionsDir string) {
+	WithTestManager(t, func(manager *Manager, sessionsDir string) {
 		ctx := context.Background()
-		sess, err := CreateSession("", core.NewTestLogger(false))
+		_ = sessionsDir
+		sess, err := manager.CreateSession("", core.NewTestLogger(false))
 		if err != nil {
 			t.Fatalf("CreateSession() error = %v", err)
 		}
@@ -35,11 +36,11 @@ func TestBuildMessagesWithIndexMatchesSnapshotBuilder(t *testing.T) {
 			t.Fatalf("append assistant: %v", err)
 		}
 
-		lineage, err := GetLineage(sess.Path)
+		lineage, err := GetLineageWithManager(manager, sess.Path)
 		if err != nil {
 			t.Fatalf("GetLineage() error = %v", err)
 		}
-		index, err := indexMessagesAlongPathWithManager(DefaultManager(), sess.Path)
+		index, err := indexMessagesAlongPathWithManager(manager, sess.Path)
 		if err != nil {
 			t.Fatalf("indexMessagesAlongPath() error = %v", err)
 		}
@@ -47,7 +48,7 @@ func TestBuildMessagesWithIndexMatchesSnapshotBuilder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildMessagesWithIndex() error = %v", err)
 		}
-		fromSnapshot, err := BuildMessagesWithToolInteractions(ctx, sess.Path)
+		fromSnapshot, err := BuildMessagesWithToolInteractionsWithManager(ctx, manager, sess.Path)
 		if err != nil {
 			t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
 		}

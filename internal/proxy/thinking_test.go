@@ -8,7 +8,6 @@ import (
 )
 
 func TestThinkingFieldConversion(t *testing.T) {
-	converter := NewConverter()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -73,7 +72,7 @@ func TestThinkingFieldConversion(t *testing.T) {
 					Thinking: tt.thinking,
 				}
 
-				openAIReq, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+				openAIReq, err := ConvertAnthropicToOpenAI(ctx, req)
 				if err != nil {
 					t.Fatalf("Failed to convert to OpenAI: %v", err)
 				}
@@ -99,7 +98,7 @@ func TestThinkingFieldConversion(t *testing.T) {
 				Thinking: tt.thinking,
 			}
 
-			argoReq, err := converter.ConvertAnthropicToArgo(ctx, req, "testuser")
+			argoReq, err := ConvertAnthropicToArgo(ctx, req, "testuser")
 			if err != nil {
 				t.Fatalf("Failed to convert to Argo: %v", err)
 			}

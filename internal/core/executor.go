@@ -127,8 +127,8 @@ type preparedExecution struct {
 func NewExecutor(cfg RequestOptions, log ExecLogger, notifier Notifier, approver Approver) (*Executor, error) {
 	e := &Executor{
 		defaultTimeout: cfg.GetToolTimeout(),
-		autoApprove:    cfg.GetToolAutoApprove(),
-		nonInteractive: cfg.GetToolNonInteractive(),
+		autoApprove:    cfg.ToolAutoApprove,
+		nonInteractive: cfg.ToolNonInteractive,
 		maxOutputSize:  int64(cfg.GetToolMaxOutputBytes()),
 		maxParallel:    cfg.GetMaxToolParallel(),
 		log:            log,
@@ -137,7 +137,7 @@ func NewExecutor(cfg RequestOptions, log ExecLogger, notifier Notifier, approver
 	}
 
 	// Load whitelist
-	if whitelistPath := cfg.GetToolWhitelist(); whitelistPath != "" {
+	if whitelistPath := cfg.ToolWhitelist; whitelistPath != "" {
 		whitelist, err := loadList(whitelistPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load whitelist: %w", err)
@@ -147,7 +147,7 @@ func NewExecutor(cfg RequestOptions, log ExecLogger, notifier Notifier, approver
 	}
 
 	// Load blacklist
-	if blacklistPath := cfg.GetToolBlacklist(); blacklistPath != "" {
+	if blacklistPath := cfg.ToolBlacklist; blacklistPath != "" {
 		blacklist, err := loadList(blacklistPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load blacklist: %w", err)
@@ -211,7 +211,7 @@ func loadList(path string) ([][]string, error) {
 // ExecuteParallel executes multiple tool calls in parallel with a concurrency limit
 func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall) []ToolResult {
 	results := make([]ToolResult, len(calls))
-	prepared := make([]preparedExecution, 0, minInt(len(calls), DefaultMaxToolCalls))
+	prepared := make([]preparedExecution, 0, min(len(calls), DefaultMaxToolCalls))
 
 	for i, call := range calls {
 		if i >= DefaultMaxToolCalls {
@@ -240,7 +240,7 @@ func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall) []Tool
 	}
 
 	maxParallel := e.effectiveMaxParallel()
-	workers := minInt(maxParallel, len(prepared))
+	workers := min(maxParallel, len(prepared))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 
@@ -521,13 +521,6 @@ func commandHasPrefix(cmd, pattern []string) bool {
 	}
 
 	return true
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // isInteractive checks if the current environment supports interactive prompts

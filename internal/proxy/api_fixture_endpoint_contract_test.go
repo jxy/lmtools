@@ -488,7 +488,6 @@ func loadExpectedBackendBody(root string, meta apifixtures.CaseMeta, clientFamil
 	_ = root
 	_ = stream
 
-	converter := newFixtureConverter()
 	argoUser := meta.ArgoUser
 	if argoUser == "" {
 		argoUser = apifixtures.DefaultArgoUser
@@ -506,19 +505,19 @@ func loadExpectedBackendBody(root string, meta apifixtures.CaseMeta, clientFamil
 		case "anthropic", "argo-anthropic":
 			return json.Marshal(req)
 		case "openai", "argo-openai":
-			rendered, err := converter.ConvertAnthropicToOpenAI(context.Background(), &req)
+			rendered, err := ConvertAnthropicToOpenAI(context.Background(), &req)
 			if err != nil {
 				return nil, err
 			}
 			return json.Marshal(rendered)
 		case "google":
-			rendered, err := converter.ConvertAnthropicToGoogle(context.Background(), &req)
+			rendered, err := ConvertAnthropicToGoogle(context.Background(), &req)
 			if err != nil {
 				return nil, err
 			}
 			return json.Marshal(rendered)
 		case "argo":
-			rendered, err := converter.ConvertAnthropicToArgo(context.Background(), &req, argoUser)
+			rendered, err := ConvertAnthropicToArgo(context.Background(), &req, argoUser)
 			if err != nil {
 				return nil, err
 			}
@@ -536,7 +535,7 @@ func loadExpectedBackendBody(root string, meta apifixtures.CaseMeta, clientFamil
 			return json.Marshal(req)
 		case "anthropic", "argo-anthropic":
 			req.Model = fixtureModelForTarget(meta, targetBase)
-			rendered, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), &req)
+			rendered, err := ConvertOpenAIRequestToAnthropic(context.Background(), &req)
 			if err != nil {
 				return nil, err
 			}
@@ -544,11 +543,11 @@ func loadExpectedBackendBody(root string, meta apifixtures.CaseMeta, clientFamil
 		case "google":
 			req.Model = fixtureModelForTarget(meta, targetBase)
 			if stream {
-				anthReq, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), &req)
+				anthReq, err := ConvertOpenAIRequestToAnthropic(context.Background(), &req)
 				if err != nil {
 					return nil, err
 				}
-				rendered, err := converter.ConvertAnthropicToGoogle(context.Background(), anthReq)
+				rendered, err := ConvertAnthropicToGoogle(context.Background(), anthReq)
 				if err != nil {
 					return nil, err
 				}
@@ -561,11 +560,11 @@ func loadExpectedBackendBody(root string, meta apifixtures.CaseMeta, clientFamil
 			return json.Marshal(rendered)
 		case "argo":
 			req.Model = fixtureModelForTarget(meta, targetBase)
-			anthReq, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), &req)
+			anthReq, err := ConvertOpenAIRequestToAnthropic(context.Background(), &req)
 			if err != nil {
 				return nil, err
 			}
-			rendered, err := converter.ConvertAnthropicToArgo(context.Background(), anthReq, argoUser)
+			rendered, err := ConvertAnthropicToArgo(context.Background(), anthReq, argoUser)
 			if err != nil {
 				return nil, err
 			}
@@ -584,7 +583,6 @@ func loadExpectedClientPayload(root string, meta apifixtures.CaseMeta, clientFam
 }
 
 func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily, targetBase string, clientBody []byte) ([]byte, error) {
-	converter := newFixtureConverter()
 	clientModel, err := extractRequestModel(clientBody)
 	if err != nil {
 		return nil, err
@@ -598,7 +596,7 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			return json.Marshal(converter.ConvertOpenAIToAnthropic(&resp, clientModel))
+			return json.Marshal(ConvertOpenAIToAnthropic(&resp, clientModel))
 		case "anthropic", "argo-anthropic":
 			var resp AnthropicResponse
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
@@ -611,7 +609,7 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			return json.Marshal(converter.ConvertGoogleToAnthropic(&resp, clientModel))
+			return json.Marshal(ConvertGoogleToAnthropic(&resp, clientModel))
 		case "argo":
 			var req AnthropicRequest
 			if err := json.Unmarshal(clientBody, &req); err != nil {
@@ -621,7 +619,7 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			return json.Marshal(converter.ConvertLegacyArgoToAnthropicWithRequest(&resp, clientModel, &req))
+			return json.Marshal(ConvertLegacyArgoToAnthropicWithRequest(&resp, clientModel, &req))
 		}
 
 	case "openai":
@@ -639,20 +637,20 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 				return nil, err
 			}
 			resp.Model = clientModel
-			return json.Marshal(converter.ConvertAnthropicResponseToOpenAI(&resp, clientModel))
+			return json.Marshal(ConvertAnthropicResponseToOpenAI(&resp, clientModel))
 		case "google":
 			var resp GoogleResponse
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			anthResp := converter.ConvertGoogleToAnthropic(&resp, clientModel)
-			return json.Marshal(converter.ConvertAnthropicResponseToOpenAI(anthResp, clientModel))
+			anthResp := ConvertGoogleToAnthropic(&resp, clientModel)
+			return json.Marshal(ConvertAnthropicResponseToOpenAI(anthResp, clientModel))
 		case "argo":
 			var openAIReq OpenAIRequest
 			if err := json.Unmarshal(clientBody, &openAIReq); err != nil {
 				return nil, err
 			}
-			anthReq, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), &openAIReq)
+			anthReq, err := ConvertOpenAIRequestToAnthropic(context.Background(), &openAIReq)
 			if err != nil {
 				return nil, err
 			}
@@ -660,8 +658,8 @@ func loadExpectedClientJSON(root string, meta apifixtures.CaseMeta, clientFamily
 			if err := readFixtureJSON(root, meta.ID, fixtureCaptureRel(targetBase, false), &resp); err != nil {
 				return nil, err
 			}
-			anthResp := converter.ConvertLegacyArgoToAnthropicWithRequest(&resp, clientModel, anthReq)
-			return json.Marshal(converter.ConvertAnthropicResponseToOpenAI(anthResp, clientModel))
+			anthResp := ConvertLegacyArgoToAnthropicWithRequest(&resp, clientModel, anthReq)
+			return json.Marshal(ConvertAnthropicResponseToOpenAI(anthResp, clientModel))
 		}
 	}
 
@@ -678,7 +676,7 @@ func loadExpectedClientStream(root string, meta apifixtures.CaseMeta, clientFami
 		return nil, err
 	}
 
-	server := &Server{converter: newFixtureConverter()}
+	server := &Server{}
 
 	switch clientFamily {
 	case "anthropic":
@@ -882,10 +880,6 @@ func extractRequestModel(body []byte) (string, error) {
 		return "", fmt.Errorf("request model missing")
 	}
 	return model, nil
-}
-
-func newFixtureConverter() *Converter {
-	return NewConverter()
 }
 
 func renderAnthropicStreamFromOpenAI(raw []byte, model string) ([]byte, error) {

@@ -105,7 +105,7 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	registry := responseToolNameRegistryFromCoreTools(typed.Tools)
-	resp := s.converter.ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(upstreamResp, route.OriginalModel, registry)
+	resp := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(upstreamResp, route.OriginalModel, registry)
 	if err := s.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, responsesReq, typedCurrent, resp, route.OriginalModel, AnthropicBlocksToCoreWithToolNameRegistry(upstreamResp.Content, registry)); err != nil {
 		logger.From(ctx).Errorf("Failed to save OpenAI responses state: %v", err)
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to save response state", "state_error", http.StatusInternalServerError)
@@ -131,7 +131,7 @@ func (s *Server) forwardTypedAsAnthropic(ctx context.Context, typed TypedRequest
 		if err := s.doJSON(ctx, s.endpoints.ArgoOpenAI, openAIReq, s.configureArgoOpenAIRequest, &openAIResp, "Argo OpenAI"); err != nil {
 			return nil, err
 		}
-		return s.converter.ConvertOpenAIToAnthropicWithToolNameRegistry(&openAIResp, originalModel, responseToolNameRegistryFromCoreTools(typed.Tools)), nil
+		return ConvertOpenAIToAnthropicWithToolNameRegistry(&openAIResp, originalModel, responseToolNameRegistryFromCoreTools(typed.Tools)), nil
 	}
 	typed = ensureResponsesAnthropicWireMaxTokens(typed, provider, mappedModel)
 	anthReq, err := TypedToAnthropicRequest(typed, mappedModel)

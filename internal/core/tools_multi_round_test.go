@@ -192,7 +192,7 @@ func TestDuplicateDetectionInRequests(t *testing.T) {
 	}
 }
 
-func TestInitialToolResponsePreservesResponseBlocks(t *testing.T) {
+func TestPersistAssistantRoundPreservesResponseBlocks(t *testing.T) {
 	toolCalls := []ToolCall{{
 		ID:   "call_001",
 		Name: "lookup",
@@ -216,16 +216,12 @@ func TestInitialToolResponsePreservesResponseBlocks(t *testing.T) {
 		},
 	}
 
-	response := initialToolResponse(ToolContext{
-		InitialResponse: initial,
-		InitialCalls:    toolCalls,
-	})
-	if len(response.Blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(response.Blocks))
+	if len(initial.Blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(initial.Blocks))
 	}
 
 	store := NewMemorySessionStore("", "")
-	if err := persistAssistantRound(context.Background(), store, response, "gpt-5", nil); err != nil {
+	if err := persistAssistantRound(context.Background(), store, initial, "gpt-5", nil); err != nil {
 		t.Fatalf("persistAssistantRound() error = %v", err)
 	}
 	messages, err := store.Messages("")

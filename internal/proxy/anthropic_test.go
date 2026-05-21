@@ -199,7 +199,6 @@ func TestForwardToAnthropic(t *testing.T) {
 		config:    config,
 		endpoints: &Endpoints{Anthropic: mockServer.URL},
 		mapper:    NewModelMapper(config),
-		converter: NewConverter(),
 		client:    retry.NewClient(5*time.Second, logger.GetLogger()),
 	}
 
@@ -304,7 +303,6 @@ func TestStreamFromAnthropic(t *testing.T) {
 		config:    config,
 		endpoints: &Endpoints{Anthropic: mockServer.URL},
 		mapper:    NewModelMapper(config),
-		converter: NewConverter(),
 		client:    retry.NewClient(5*time.Second, logger.GetLogger()),
 	}
 

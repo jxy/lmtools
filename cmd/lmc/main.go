@@ -52,7 +52,7 @@ func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOp
 	}
 
 	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), notifier, core.ResponseParseOptions{
-		ArgoLegacy: opts.IsArgoLegacy(),
+		ArgoLegacy: opts.ArgoLegacy,
 		ToolDefs:   rb.ToolDefs,
 	})
 	if err != nil {
@@ -115,9 +115,6 @@ func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOp
 		MessagesFn:      messageBuilder,
 		UI:              ui,
 		InitialResponse: *response,
-		InitialText:     response.Text,
-		InitialCalls:    response.ToolCalls,
-		InitialStreamed: response.Streamed,
 	}
 }
 
@@ -379,7 +376,7 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 		toolDefs = toolDefinitionsForOptions(opts)
 		req, body, err = core.BuildChatRequest(opts, plan.Messages, core.ChatBuildOptions{
 			ToolDefs: toolDefs,
-			Stream:   opts.IsStreamChat(),
+			Stream:   opts.StreamChat,
 		})
 		if err != nil {
 			return core.RequestBuild{}, errors.WrapError("build request", err)
@@ -418,7 +415,7 @@ func actualModelForConfig(cfg *config.Config, opts core.RequestOptions) string {
 }
 
 func toolDefinitionsForOptions(opts core.RequestOptions) []core.ToolDefinition {
-	if opts.IsToolEnabled() {
+	if opts.ToolEnabled {
 		return core.GetBuiltinUniversalCommandTool()
 	}
 	return nil

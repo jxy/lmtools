@@ -49,21 +49,3 @@ func TestMarshalTypedMessages(messages []TypedMessage) []interface{} {
 	}
 	return result
 }
-
-// TestMarshalOpenAIMessages converts OpenAI messages to []interface{} for test request bodies
-// This is a test-specific wrapper around MarshalOpenAIMessagesForRequest
-func TestMarshalOpenAIMessages(messages []OpenAIMessage) []interface{} {
-	return MarshalOpenAIMessagesForRequest(messages)
-}
-
-// TestMarshalAnthropicMessages converts Anthropic messages to []interface{} for test request bodies
-// This is a test-specific wrapper around MarshalAnthropicMessagesForRequest
-func TestMarshalAnthropicMessages(messages []AnthropicMessage) []interface{} {
-	return MarshalAnthropicMessagesForRequest(messages)
-}
-
-// TestMarshalGoogleMessages converts Google messages to []interface{} for test request bodies
-// This is a test-specific wrapper around MarshalGoogleMessagesForRequest
-func TestMarshalGoogleMessages(messages []GoogleMessage) []interface{} {
-	return MarshalGoogleMessagesForRequest(messages)
-}

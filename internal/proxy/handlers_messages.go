@@ -223,7 +223,7 @@ func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *Anthropic
 		if err != nil {
 			return nil, err
 		}
-		return s.converter.ConvertOpenAIToAnthropic(openAIResp, originalModel), nil
+		return ConvertOpenAIToAnthropic(openAIResp, originalModel), nil
 	case constants.ProviderAnthropic:
 		return s.forwardToAnthropic(ctx, anthReq)
 	case constants.ProviderGoogle:
@@ -231,7 +231,7 @@ func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *Anthropic
 		if err != nil {
 			return nil, err
 		}
-		return s.converter.ConvertGoogleToAnthropic(googleResp, originalModel), nil
+		return ConvertGoogleToAnthropic(googleResp, originalModel), nil
 	case constants.ProviderArgo:
 		return s.forwardAnthropicViaArgo(ctx, anthReq, originalModel)
 	default:

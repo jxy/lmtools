@@ -970,6 +970,29 @@ func TestTokenCountEndpointForTarget(t *testing.T) {
 	})
 }
 
+func TestFixtureAuthHeaders(t *testing.T) {
+	t.Run("missing env", func(t *testing.T) {
+		_, err := fixtureAuthHeaders("openai", "openai", false)
+		if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY is required for target openai") {
+			t.Fatalf("error = %v, want missing OPENAI_API_KEY", err)
+		}
+	})
+
+	t.Run("stream accept", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "openai-key")
+		headers, err := fixtureAuthHeaders("openai", "openai-stream", true)
+		if err != nil {
+			t.Fatalf("fixtureAuthHeaders() error = %v", err)
+		}
+		if got := headers["Authorization"]; got != "Bearer openai-key" {
+			t.Fatalf("Authorization = %q, want bearer key", got)
+		}
+		if got := headers["Accept"]; got != "text/event-stream" {
+			t.Fatalf("Accept = %q, want text/event-stream", got)
+		}
+	})
+}
+
 func TestEndpointForTargetAcceptsRootOrLegacyArgoBase(t *testing.T) {
 	t.Run("legacy resource base", func(t *testing.T) {
 		got, err := argoFixtureEndpoints("https://apps.inside.anl.gov/argoapi/api/v1/resource")

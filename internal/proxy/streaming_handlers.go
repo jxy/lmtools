@@ -96,7 +96,7 @@ func consumeSSEStream(reader io.Reader, onData func(event string, data json.RawM
 // Returns the response for streaming, caller is responsible for closing the body.
 func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
 	// Convert to Google format
-	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
+	googleReq, err := ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Google format: %w", err)
 	}
@@ -142,7 +142,7 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 // Returns the response for streaming, caller is responsible for closing the body.
 func (s *Server) openAIStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
 	// Convert to OpenAI format
-	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	openAIReq, err := ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert to OpenAI format: %w", err)
 	}
@@ -529,7 +529,7 @@ func (s *Server) simulateStreamingFromArgoWithInterval(ctx context.Context, anth
 	}
 
 	// Convert to Anthropic format
-	anthResp := s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+	anthResp := ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 
 	// Update model in handler
 	handler.UpdateModel(anthResp.Model)
@@ -682,7 +682,7 @@ func (s *Server) simulateOpenAIStreamFromArgo(ctx context.Context, anthReq *Anth
 	}
 
 	// Convert to Anthropic format
-	anthResp := s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+	anthResp := ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 
 	// Log tool calls from response if present
 	logToolUseBlocks(ctx, anthResp.Content, false)

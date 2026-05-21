@@ -728,7 +728,7 @@ func responseFormatToResponsesText(format *ResponseFormat) *OpenAIResponsesText 
 	}
 }
 
-func (c *Converter) ConvertOpenAIResponsesToAnthropic(resp *OpenAIResponsesResponse, originalModel string) *AnthropicResponse {
+func ConvertOpenAIResponsesToAnthropic(resp *OpenAIResponsesResponse, originalModel string) *AnthropicResponse {
 	if resp == nil {
 		return &AnthropicResponse{Type: "message", Model: originalModel}
 	}
@@ -789,7 +789,7 @@ func (c *Converter) ConvertOpenAIResponsesToAnthropic(resp *OpenAIResponsesRespo
 	return anthResp
 }
 
-func (c *Converter) ConvertOpenAIResponsesToOpenAI(resp *OpenAIResponsesResponse, originalModel string) *OpenAIResponse {
+func ConvertOpenAIResponsesToOpenAI(resp *OpenAIResponsesResponse, originalModel string) *OpenAIResponse {
 	if resp == nil {
 		return &OpenAIResponse{Object: "chat.completion", Model: originalModel}
 	}
@@ -848,11 +848,11 @@ func (c *Converter) ConvertOpenAIResponsesToOpenAI(resp *OpenAIResponsesResponse
 	}
 }
 
-func (c *Converter) ConvertAnthropicResponseToOpenAIResponses(resp *AnthropicResponse, originalModel string) *OpenAIResponsesResponse {
-	return c.ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp, originalModel, nil)
+func ConvertAnthropicResponseToOpenAIResponses(resp *AnthropicResponse, originalModel string) *OpenAIResponsesResponse {
+	return ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp, originalModel, nil)
 }
 
-func (c *Converter) ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *AnthropicResponse, originalModel string, registry responseToolNameRegistry) *OpenAIResponsesResponse {
+func ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *AnthropicResponse, originalModel string, registry responseToolNameRegistry) *OpenAIResponsesResponse {
 	if resp == nil {
 		return &OpenAIResponsesResponse{Object: "response", Model: originalModel, Status: "completed"}
 	}

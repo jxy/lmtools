@@ -13,8 +13,6 @@ import (
 // converts to Anthropic blocks and streams input_json_delta that reconstructs
 // to JSON where the "content" string has actual newlines (not literal \n).
 func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
-
 	// Simulate Argo response (post JSON-decoding), with single-quoted embedded tool_use
 	embedded := "Intro:{'id': 'toolu_vrtx_01TsVcJnKKDvVtJdKqYCDKzr', 'input': {'content': 'package core\\n\\nimport (\\n\\t\"testing\"\\n)'}, 'name': 'Write', 'type': 'tool_use'}"
 	argo := &ArgoChatResponse{Response: map[string]interface{}{
@@ -23,7 +21,7 @@ func TestArgoEmbeddedBackslashes_ConvertAndStream(t *testing.T) {
 	}}
 
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}, Tools: []AnthropicTool{{Name: "Write"}}}
-	anth := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, req.Model, req)
+	anth := ConvertLegacyArgoToAnthropicWithRequest(argo, req.Model, req)
 	if anth == nil {
 		t.Fatal("converter returned nil")
 		return

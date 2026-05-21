@@ -81,14 +81,14 @@ func (c *Coordinator) PrepareSession(ctx context.Context, inputStr string, isReg
 
 // PrepareRequest builds request messages without committing new session state.
 func (c *Coordinator) PrepareRequest(ctx context.Context, inputStr string, isRegeneration bool, approver core.Approver, opts PrepareRequestOptions) (*RequestPlan, error) {
-	if resume := c.cfg.GetResume(); resume != "" {
+	if resume := c.cfg.Resume; resume != "" {
 		info := interpretResumeArg(resume)
 		if info.argType == resumeArgMessage {
 			return c.prepareMessageResumeRequest(ctx, resume, inputStr, isRegeneration)
 		}
 		return c.prepareSessionResumeRequest(ctx, resume, inputStr, isRegeneration, approver, opts)
 	}
-	if branch := c.cfg.GetBranch(); branch != "" {
+	if branch := c.cfg.Branch; branch != "" {
 		return c.prepareBranchRequest(ctx, branch, inputStr, isRegeneration)
 	}
 	return c.prepareNewRequest(inputStr, isRegeneration), nil
@@ -281,7 +281,7 @@ func appendPendingToolPreviewResults(messages []core.TypedMessage, calls []core.
 }
 
 func (c *Coordinator) maybeResolvePendingTools(ctx context.Context, sess *Session, isRegeneration bool, approver core.Approver, mode PendingToolMode) (pendingToolResolution, error) {
-	if sess == nil || c.cfg.GetResume() == "" || isRegeneration || mode == PendingToolSkip {
+	if sess == nil || c.cfg.Resume == "" || isRegeneration || mode == PendingToolSkip {
 		return pendingToolResolution{}, nil
 	}
 	return resolvePendingTools(ctx, sess, c.cfg, logger.From(ctx), c.notifier, approver, mode)

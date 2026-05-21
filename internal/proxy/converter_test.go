@@ -15,8 +15,6 @@ func intPtr(i int) *int {
 }
 
 func TestConvertAnthropicToOpenAI(t *testing.T) {
-	converter := NewConverter()
-
 	tests := []struct {
 		name     string
 		input    *AnthropicRequest
@@ -233,7 +231,7 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := converter.ConvertAnthropicToOpenAI(context.Background(), tt.input)
+			got, err := ConvertAnthropicToOpenAI(context.Background(), tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertAnthropicToOpenAI() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -246,8 +244,6 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 }
 
 func TestConvertOpenAIToAnthropic(t *testing.T) {
-	converter := NewConverter()
-
 	tests := []struct {
 		name          string
 		input         *OpenAIResponse
@@ -352,7 +348,7 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := converter.ConvertOpenAIToAnthropic(tt.input, tt.originalModel)
+			got := ConvertOpenAIToAnthropic(tt.input, tt.originalModel)
 			// Compare without checking generated IDs
 			if got.Type != tt.expected.Type ||
 				got.Role != tt.expected.Role ||
@@ -382,8 +378,6 @@ func TestConvertOpenAIToAnthropic(t *testing.T) {
 }
 
 func TestConvertAnthropicToArgo(t *testing.T) {
-	converter := NewConverter()
-
 	tests := []struct {
 		name     string
 		input    *AnthropicRequest
@@ -716,7 +710,7 @@ func TestConvertAnthropicToArgo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := converter.ConvertAnthropicToArgo(context.Background(), tt.input, tt.user)
+			got, err := ConvertAnthropicToArgo(context.Background(), tt.input, tt.user)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertAnthropicToArgo() error = %v, wantErr %v", err, tt.wantErr)
 				return

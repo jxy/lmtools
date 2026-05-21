@@ -12,7 +12,6 @@ func float64Ptr(v float64) *float64 {
 }
 
 func TestConvertAnthropicToGoogle_TypedRenderer(t *testing.T) {
-	converter := &Converter{}
 	topK := 7
 
 	req := &AnthropicRequest{
@@ -57,7 +56,7 @@ func TestConvertAnthropicToGoogle_TypedRenderer(t *testing.T) {
 		},
 	}
 
-	googleReq, err := converter.ConvertAnthropicToGoogle(context.Background(), req)
+	googleReq, err := ConvertAnthropicToGoogle(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToGoogle() error = %v", err)
 	}

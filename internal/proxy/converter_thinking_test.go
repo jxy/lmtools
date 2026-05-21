@@ -8,7 +8,6 @@ import (
 )
 
 func TestConvertAnthropicToOpenAI_DropsThinking(t *testing.T) {
-	c := &Converter{}
 	ctx := context.Background()
 
 	req := &AnthropicRequest{
@@ -33,7 +32,7 @@ func TestConvertAnthropicToOpenAI_DropsThinking(t *testing.T) {
 		},
 	}
 
-	openAIReq, err := c.ConvertAnthropicToOpenAI(ctx, req)
+	openAIReq, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("Failed to convert: %v", err)
 	}
@@ -65,7 +64,6 @@ func TestConvertAnthropicToOpenAI_DropsThinking(t *testing.T) {
 }
 
 func TestConvertAnthropicToArgo_DropsThinkingForOpenAI(t *testing.T) {
-	c := &Converter{}
 	ctx := context.Background()
 
 	req := &AnthropicRequest{
@@ -86,7 +84,7 @@ func TestConvertAnthropicToArgo_DropsThinkingForOpenAI(t *testing.T) {
 		},
 	}
 
-	argoReq, err := c.ConvertAnthropicToArgo(ctx, req, "testuser")
+	argoReq, err := ConvertAnthropicToArgo(ctx, req, "testuser")
 	if err != nil {
 		t.Fatalf("Failed to convert: %v", err)
 	}
@@ -119,7 +117,6 @@ func TestConvertAnthropicToArgo_DropsThinkingForOpenAI(t *testing.T) {
 }
 
 func TestConvertAnthropicToArgo_PreservesThinkingForClaude(t *testing.T) {
-	c := &Converter{}
 	ctx := context.Background()
 
 	req := &AnthropicRequest{
@@ -140,7 +137,7 @@ func TestConvertAnthropicToArgo_PreservesThinkingForClaude(t *testing.T) {
 		},
 	}
 
-	argoReq, err := c.ConvertAnthropicToArgo(ctx, req, "testuser")
+	argoReq, err := ConvertAnthropicToArgo(ctx, req, "testuser")
 	if err != nil {
 		t.Fatalf("Failed to convert: %v", err)
 	}

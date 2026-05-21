@@ -14,7 +14,7 @@ import (
 // forwardToOpenAI forwards a request to the OpenAI API
 func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
 	// Convert to OpenAI format
-	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	openAIReq, err := ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert to OpenAI format: %w", err)
 	}
@@ -68,7 +68,7 @@ func applyAnthropicBetaHeader(req *http.Request, beta string) {
 }
 
 func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequest) (*OpenAIResponse, error) {
-	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	openAIReq, err := ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Argo OpenAI format: %w", err)
 	}
@@ -115,7 +115,7 @@ func (s *Server) argoOpenAIStreamingRequest(ctx context.Context, openAIReq *Open
 }
 
 func (s *Server) argoOpenAIStreamingRequestFromAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
-	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	openAIReq, err := ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Argo OpenAI format: %w", err)
 	}
@@ -146,7 +146,7 @@ func (s *Server) argoAnthropicStreamingRequest(ctx context.Context, anthReq *Ant
 // forwardToGoogle forwards a request to the Google Gemini API
 func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest) (*GoogleResponse, error) {
 	// Convert to Google format
-	googleReq, err := s.converter.ConvertAnthropicToGoogle(ctx, anthReq)
+	googleReq, err := ConvertAnthropicToGoogle(ctx, anthReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Google format: %w", err)
 	}
@@ -197,7 +197,7 @@ func googleModelResourceName(model string) string {
 // forwardToArgo forwards a request to the Argo API
 func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (*ArgoChatResponse, error) {
 	// Convert to Argo format
-	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
+	argoReq, err := ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Argo format: %w", err)
 	}
@@ -234,7 +234,7 @@ func (s *Server) forwardToArgoStream(ctx context.Context, anthReq *AnthropicRequ
 	log := logger.From(ctx)
 
 	// Convert to Argo format
-	argoReq, err := s.converter.ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
+	argoReq, err := ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Argo format: %w", err)
 	}

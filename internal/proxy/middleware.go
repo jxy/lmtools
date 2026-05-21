@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// ProxyMiddleware combines all middleware functionality into a single handler
-// This simplifies the middleware stack from 5 layers to 1
+// ProxyMiddleware handles request IDs, body limits, request logging, response
+// header logging, streaming timeout handling, and panic recovery.
 type ProxyMiddleware struct {
 	next   http.Handler
 	config *Config
@@ -36,11 +36,10 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-ID", requestID)
 	ctx = context.WithValue(ctx, logger.RequestIDKey{}, requestID)
 
-	// 3. Security - Apply request body size limit (was SecurityMiddleware)
+	// 3. Apply request body size limit.
 	r.Body = http.MaxBytesReader(w, r.Body, m.config.MaxRequestBodySize)
 
-	// 4. Request logging setup (was RequestLogger)
-	// Log with counter ID and X-Request-ID for correlation
+	// 4. Log with counter ID and X-Request-ID for correlation.
 	logger.From(ctx).Debugf("Request start | X-Request-ID: %s", requestID)
 
 	r = r.WithContext(ctx)
@@ -48,12 +47,10 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 5. Response writer wrapper for status capture and streaming detection
 	rw := &proxyResponseWriter{
 		ResponseWriter: w,
-		statusCode:     http.StatusOK,
 		request:        r,
-		startTime:      time.Now(),
 	}
 
-	// 6. Error handling with panic recovery (was ErrorMiddleware)
+	// 6. Error handling with panic recovery.
 	defer func() {
 		if err := recover(); err != nil {
 			logger.From(ctx).Errorf("Panic in %s %s: %v", r.Method, r.URL.Path, err)
@@ -75,20 +72,16 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.next.ServeHTTP(rw, r)
 }
 
-// proxyResponseWriter combines all response writer functionality
+// proxyResponseWriter logs response headers and handles streaming flushes.
 type proxyResponseWriter struct {
 	http.ResponseWriter
-	statusCode     int
 	written        bool
 	request        *http.Request
 	streamDetected bool
-	startTime      time.Time
 }
 
-// WriteHeader captures the status code
 func (rw *proxyResponseWriter) WriteHeader(code int) {
 	if !rw.written {
-		rw.statusCode = code
 		if rw.request != nil {
 			logWireHTTPClientResponseHeaders(rw.request.Context(), "WIRE CLIENT RESPONSE HEADERS", code, rw.Header())
 		}
@@ -97,13 +90,11 @@ func (rw *proxyResponseWriter) WriteHeader(code int) {
 	}
 }
 
-// Write handles both normal writes and streaming detection
 func (rw *proxyResponseWriter) Write(b []byte) (int, error) {
 	if !rw.written {
 		rw.WriteHeader(http.StatusOK)
 	}
 
-	// Streaming detection (was StreamingMiddleware)
 	if !rw.streamDetected {
 		if rw.Header().Get("Content-Type") == "text/event-stream" {
 			rw.streamDetected = true

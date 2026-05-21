@@ -107,7 +107,7 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 		return
 	}
 	registry := responseToolNameRegistryFromCoreTools(typedWithState.Tools)
-	resp := s.converter.ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(upstreamResp, route.OriginalModel, registry)
+	resp := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(upstreamResp, route.OriginalModel, registry)
 	resp.ID = respID
 	stateCtx.ExistingRecordID = respID
 	if err := s.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, responsesReq, typedCurrent, resp, route.OriginalModel, AnthropicBlocksToCoreWithToolNameRegistry(upstreamResp.Content, registry)); err != nil {

@@ -65,7 +65,7 @@ const (
 
 // getProviderWithDefault returns the provider from config or a default value
 func getProviderWithDefault(cfg RequestOptions, defaultProvider string) string {
-	return providers.ResolveProviderWithFallback(cfg.GetProvider(), defaultProvider)
+	return providers.ResolveProviderWithFallback(cfg.Provider, defaultProvider)
 }
 
 // BuildRequest builds an HTTP request based on configuration and input
@@ -73,7 +73,7 @@ func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, erro
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 
 	// Handle embed mode separately
-	if cfg.IsEmbed() {
+	if cfg.Embed {
 		return buildEmbedRequest(cfg, provider, input)
 	}
 
@@ -93,11 +93,11 @@ func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, erro
 
 	// Prepare options
 	opts := ChatBuildOptions{
-		Stream: cfg.IsStreamChat(),
+		Stream: cfg.StreamChat,
 	}
 
 	// Add tools if enabled
-	if cfg.IsToolEnabled() {
+	if cfg.ToolEnabled {
 		opts.ToolDefs = GetBuiltinUniversalCommandTool()
 	}
 
@@ -120,13 +120,13 @@ func buildEmbedRequest(cfg RequestOptions, provider, input string) (*http.Reques
 
 // buildArgoEmbedRequest handles Argo embedding requests
 func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
-	model := cfg.GetModel()
+	model := cfg.Model
 	if model == "" {
 		model = DefaultEmbedModel
 	}
 
 	req := map[string]interface{}{
-		"user":   cfg.GetUser(),
+		"user":   cfg.User,
 		"model":  model,
 		"prompt": []string{input},
 	}
@@ -135,7 +135,7 @@ func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []b
 		return nil, nil, fmt.Errorf("failed to marshal embed request: %w", err)
 	}
 
-	endpoint, err := providers.ResolveEmbedURLWithArgoOptions(constants.ProviderArgo, cfg.GetProviderURL(), cfg.GetEnv(), isArgoLegacyMode(cfg))
+	endpoint, err := providers.ResolveEmbedURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, isArgoLegacyMode(cfg))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,13 +144,13 @@ func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []b
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	auth.SetRequestHeaders(httpReq, true, cfg.IsStreamChat(), constants.ProviderArgo)
+	auth.SetRequestHeaders(httpReq, true, cfg.StreamChat, constants.ProviderArgo)
 	return httpReq, body, nil
 }
 
 // buildOpenAIEmbedRequest handles OpenAI embedding requests
 func buildOpenAIEmbedRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
-	model := cfg.GetModel()
+	model := cfg.Model
 	if model == "" {
 		model = GetDefaultChatModel(constants.ProviderOpenAI)
 	}
@@ -166,7 +166,7 @@ func buildOpenAIEmbedRequest(cfg RequestOptions, input string) (*http.Request, [
 		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url, err := providers.ResolveEmbedURL(constants.ProviderOpenAI, cfg.GetProviderURL(), "")
+	url, err := providers.ResolveEmbedURL(constants.ProviderOpenAI, cfg.ProviderURL, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -246,18 +246,18 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 
 func effectiveResponseProvider(cfg RequestOptions) string {
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
-	if provider != constants.ProviderArgo || cfg.IsEmbed() {
+	if provider != constants.ProviderArgo || cfg.Embed {
 		return provider
 	}
 	if isArgoLegacyMode(cfg) {
 		return constants.ProviderArgo
 	}
 
-	return providers.DetermineArgoModelProvider(cfg.GetModel())
+	return providers.DetermineArgoModelProvider(cfg.Model)
 }
 
 func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *http.Response) bool {
-	if !cfg.IsStreamChat() {
+	if !cfg.StreamChat {
 		return false
 	}
 	if provider != constants.ProviderArgo || !isArgoLegacyMode(cfg) {
@@ -270,7 +270,7 @@ func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *ht
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
 func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
-	if provider == constants.ProviderOpenAI && cfg.UseOpenAIResponses() {
+	if provider == constants.ProviderOpenAI && cfg.OpenAIResponses {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
 			return Response{}, fmt.Errorf("failed to create log file: %w", err)
@@ -309,7 +309,7 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 
 	// Log response
 	logPrefix := "chat_output"
-	if cfg.IsEmbed() {
+	if cfg.Embed {
 		logPrefix = "embed_output"
 	}
 	if err := logger.LogJSON(logger.GetLogDir(), logPrefix, data); err != nil {
@@ -322,16 +322,16 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 		return Response{}, err
 	}
 	if provider == constants.ProviderArgo && opts.ArgoLegacy {
-		text, toolCalls, err := parseArgoResponseWithToolsOptions(data, cfg.IsEmbed(), ArgoResponseParseOptions{
+		text, toolCalls, err := parseArgoResponseWithToolsOptions(data, cfg.Embed, ArgoResponseParseOptions{
 			ExtractEmbeddedTools: true,
 			ToolDefs:             opts.ToolDefs,
 		})
 		return Response{Text: text, ToolCalls: toolCalls}, err
 	}
-	if provider == constants.ProviderOpenAI && cfg.UseOpenAIResponses() {
-		return parseOpenAIResponses(data, cfg.IsEmbed())
+	if provider == constants.ProviderOpenAI && cfg.OpenAIResponses {
+		return parseOpenAIResponses(data, cfg.Embed)
 	}
-	return spec.parseResponseData(data, cfg.IsEmbed())
+	return spec.parseResponseData(data, cfg.Embed)
 }
 
 // ConvertedTools represents the result of converting tools for a specific provider
@@ -364,7 +364,7 @@ func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts Cha
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 	model := opts.ModelOverride
 	if model == "" {
-		model = cfg.GetModel()
+		model = cfg.Model
 		if model == "" {
 			model = GetDefaultChatModel(provider)
 		}
@@ -372,13 +372,6 @@ func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts Cha
 
 	// Determine system prompt
 	system, systemExplicit := resolvedBuildSystemPrompt(cfg, opts.SystemOverride, opts.SystemOverrideSet)
-
-	// Validate tool support if tools are requested
-	if len(opts.ToolDefs) > 0 {
-		if err := ValidateToolSupport(provider, model); err != nil {
-			return nil, nil, err
-		}
-	}
 
 	// Use the existing unified builder
 	return buildChatRequestFromTyped(cfg, typedMessages, model, system, systemExplicit, opts.ToolDefs, nil, opts.Stream)
@@ -388,7 +381,7 @@ func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts Cha
 func BuildToolResultRequest(cfg RequestOptions, model string, system string, toolDefs []ToolDefinition, typedMessages []TypedMessage) (*http.Request, []byte, error) {
 	// Preserve follow-up request behavior for callers that rely on tool mode in the
 	// config rather than passing tool definitions explicitly.
-	if len(toolDefs) == 0 && cfg.IsToolEnabled() {
+	if len(toolDefs) == 0 && cfg.ToolEnabled {
 		toolDefs = GetBuiltinUniversalCommandTool()
 	}
 
@@ -398,7 +391,7 @@ func BuildToolResultRequest(cfg RequestOptions, model string, system string, too
 		SystemOverride:    system,
 		SystemOverrideSet: system != "",
 		ToolDefs:          toolDefs,
-		Stream:            cfg.IsStreamChat(),
+		Stream:            cfg.StreamChat,
 	}
 	return BuildChatRequest(cfg, typedMessages, opts)
 }
@@ -409,7 +402,7 @@ func BuildToolResultRequest(cfg RequestOptions, model string, system string, too
 
 // BuildRequestWithToolInteractions builds a request using messages that include tool interactions
 func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestOptions, sess Session, getMessagesWithTools func(context.Context, string) ([]TypedMessage, error)) (RequestBuild, error) {
-	if cfg.IsEmbed() {
+	if cfg.Embed {
 		return RequestBuild{}, fmt.Errorf("embed mode does not support sessions")
 	}
 
@@ -421,11 +414,11 @@ func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestOptions, s
 
 	// Prepare options
 	opts := ChatBuildOptions{
-		Stream: cfg.IsStreamChat(),
+		Stream: cfg.StreamChat,
 	}
 
 	// Load tool if configured
-	if cfg.IsToolEnabled() {
+	if cfg.ToolEnabled {
 		opts.ToolDefs = GetBuiltinUniversalCommandTool()
 	}
 
@@ -437,7 +430,7 @@ func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestOptions, s
 
 	// Get the actual model used
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
-	model := cfg.GetModel()
+	model := cfg.Model
 	if model == "" {
 		model = GetDefaultChatModel(provider)
 	}

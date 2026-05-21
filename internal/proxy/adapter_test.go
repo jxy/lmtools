@@ -236,7 +236,6 @@ func TestOpenAIRequestToTypedStrictRejectsUnmatchedLegacyFunctionResult(t *testi
 }
 
 func TestConvertOpenAIRequestToAnthropicRejectsMalformedContentPart(t *testing.T) {
-	converter := NewConverter()
 	req := &OpenAIRequest{
 		Model: "gpt-4.1",
 		Messages: []OpenAIMessage{
@@ -249,7 +248,7 @@ func TestConvertOpenAIRequestToAnthropicRejectsMalformedContentPart(t *testing.T
 		},
 	}
 
-	_, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), req)
+	_, err := ConvertOpenAIRequestToAnthropic(context.Background(), req)
 	if err == nil {
 		t.Fatal("ConvertOpenAIRequestToAnthropic() error = nil, want malformed content error")
 	}

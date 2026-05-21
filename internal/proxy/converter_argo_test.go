@@ -9,8 +9,6 @@ import (
 )
 
 func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
-	converter := &Converter{}
-
 	tests := []struct {
 		name     string
 		response *ArgoChatResponse
@@ -81,7 +79,7 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 				},
 			}
 
-			result := converter.ConvertArgoToAnthropicWithRequest(tt.response, "claude-3-sonnet-20240229", req)
+			result := ConvertArgoToAnthropicWithRequest(tt.response, "claude-3-sonnet-20240229", req)
 
 			if result == nil {
 				t.Fatal("Expected non-nil result")
@@ -118,12 +116,7 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 	}
 }
 
-func newLegacyArgoTestConverter() *Converter {
-	return NewConverter()
-}
-
 func TestConvertArgoToAnthropicWithRequest_EmbeddedToolIgnoredOutsideLegacy(t *testing.T) {
-	converter := &Converter{}
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content":    "Use a tool:{'type':'tool_use','id':'toolu_1','name':'Read','input':{'file_path':'/tmp/a'}}",
@@ -136,7 +129,7 @@ func TestConvertArgoToAnthropicWithRequest_EmbeddedToolIgnoredOutsideLegacy(t *t
 		Tools:    []AnthropicTool{{Name: "Read"}},
 	}
 
-	result := converter.ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 		return
@@ -150,7 +143,6 @@ func TestConvertArgoToAnthropicWithRequest_EmbeddedToolIgnoredOutsideLegacy(t *t
 }
 
 func TestConvertArgoToAnthropicWithRequest_LegacyModeIsExplicit(t *testing.T) {
-	converter := &Converter{}
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content":    "Use a tool:{'type':'tool_use','id':'toolu_1','name':'Read','input':{'file_path':'/tmp/a'}}",
@@ -163,8 +155,8 @@ func TestConvertArgoToAnthropicWithRequest_LegacyModeIsExplicit(t *testing.T) {
 		Tools:    []AnthropicTool{{Name: "Read"}},
 	}
 
-	normal := converter.ConvertArgoToAnthropicWithRequest(argo, req.Model, req)
-	legacy := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, req.Model, req)
+	normal := ConvertArgoToAnthropicWithRequest(argo, req.Model, req)
+	legacy := ConvertLegacyArgoToAnthropicWithRequest(argo, req.Model, req)
 	if len(normal.Content) != 1 || normal.Content[0].Type != "text" {
 		t.Fatalf("normal content = %#v, want embedded tool left as text", normal.Content)
 	}
@@ -174,7 +166,6 @@ func TestConvertArgoToAnthropicWithRequest_LegacyModeIsExplicit(t *testing.T) {
 }
 
 func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbeddedInContent(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content":    "Now let me read the openai_convert.go file to understand the current ConvertBlocksToOpenAIContent implementation:{'type': 'tool_use', 'id': 'toolu_vrtx_01TCVSw8Ff8eJHs5nSaZsPBt', 'name': 'Read', 'input': {'file_path': '/path/to/project/internal/core/openai_convert.go'}}",
@@ -188,7 +179,7 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbe
 		Tools:    []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}},
 	}
 
-	result := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 		return
@@ -214,7 +205,6 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_AnthropicToolUseEmbe
 
 // Ensure trailing punctuation/formatting suffix after embedded tool call is preserved
 func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctuation(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			// Note trailing period after the embedded JSON
@@ -224,7 +214,7 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctu
 	}
 
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"go"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}}}
-	result := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
@@ -247,8 +237,6 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_PreserveSuffixPunctu
 
 // Simplified case: single-quoted embedded tool_use with content and file_path; ensure full input preserved
 func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuotedSimplified(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
-
 	// This string simulates the content after Argo JSON decoding (first-level escapes resolved):
 	// single-quoted JSON-like object embedded in content, with inner content containing newlines and double quotes.
 	// Use raw string to avoid Go escaping; include backslashes before apostrophes inside the single-quoted string.
@@ -262,7 +250,7 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuoted
 	}
 
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"check"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}}}
-	result := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
@@ -293,7 +281,6 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_EmbeddedSingleQuoted
 
 // Full-case derived from DEBUG: ensure both content and file_path are present
 func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentAndFilePath(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content": `Let me create the refactored version with the content parameter:
@@ -304,7 +291,7 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentA
 	}
 
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"please write"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Write"}, {Name: "Edit"}}}
-	result := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
@@ -328,7 +315,6 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_EmbeddedWithContentA
 }
 
 func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbeddedInContent(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
 	embedded := `{'id': 'call_123', 'type': 'function', 'function': {'name': 'universal_command', 'arguments': '{"command":["ls","-la"]}'}}`
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
@@ -338,7 +324,7 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbedd
 	}
 
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}, Tools: []AnthropicTool{{Name: "universal_command"}}}
-	result := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
@@ -354,14 +340,13 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_OpenAIFunctionEmbedd
 }
 
 func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCalls(t *testing.T) {
-	converter := newLegacyArgoTestConverter()
 	argo := &ArgoChatResponse{
 		Response: map[string]interface{}{
 			"content": "Step 1: read file:{'type': 'tool_use', 'id': 'toolu_r1', 'name': 'Read', 'input': {'file_path': '/path/a'}} Next, grep it:{'type': 'tool_use', 'id': 'toolu_r2', 'name': 'Grep', 'input': {'pattern': 'foo', 'glob': '*.go'}}",
 		},
 	}
 	req := &AnthropicRequest{Model: "claude-3-sonnet-20240229", Messages: []AnthropicMessage{{Role: core.RoleUser, Content: json.RawMessage(`"do test"`)}}, Tools: []AnthropicTool{{Name: "Read"}, {Name: "Grep"}}}
-	result := converter.ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := ConvertLegacyArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
@@ -385,8 +370,6 @@ func TestConvertLegacyArgoToAnthropicWithRequest_Workaround_MultipleEmbeddedCall
 }
 
 func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
-	converter := &Converter{}
-
 	tests := []struct {
 		name       string
 		messages   []AnthropicMessage
@@ -452,7 +435,7 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 				Messages: tt.messages,
 			}
 
-			result, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")
+			result, err := ConvertAnthropicToArgo(context.Background(), req, "testuser")
 
 			if tt.wantError {
 				if err == nil {
@@ -506,8 +489,6 @@ func TestConvertAnthropicToArgo_GoogleMessages(t *testing.T) {
 }
 
 func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
-	converter := &Converter{}
-
 	// Test that OpenAI models keep their original format
 	req := &AnthropicRequest{
 		Model: "gpt4o",
@@ -532,7 +513,7 @@ func TestConvertAnthropicToArgo_OpenAIMessages(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")
+	result, err := ConvertAnthropicToArgo(context.Background(), req, "testuser")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

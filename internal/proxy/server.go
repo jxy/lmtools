@@ -58,7 +58,6 @@ type Server struct {
 	config         *Config
 	endpoints      *Endpoints
 	mapper         *ModelMapper
-	converter      *Converter
 	client         *retry.Client
 	responsesState *responsesState
 	// responsesModelAliases maps OpenAI response IDs to client-visible model aliases.
@@ -83,7 +82,6 @@ func NewServer(config *Config) (http.Handler, error) {
 		config:                config,
 		endpoints:             endpoints,
 		mapper:                mapper,
-		converter:             NewConverter(),
 		client:                retry.NewClientWithOptions(10*time.Minute, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
 		responsesState:        newResponsesState(config.SessionsDir),
 		responsesModelAliases: make(map[string]string),

@@ -6,7 +6,7 @@ import "lmtools/internal/providers"
 // This keeps inline system messages authoritative when callers intentionally bypass
 // the higher-level effective/defaulted system handling.
 func configuredSystemPrompt(cfg RequestOptions) string {
-	return cfg.GetSystem()
+	return cfg.System
 }
 
 // resolvedSystemPrompt returns an explicit override when one is provided, otherwise
@@ -22,7 +22,7 @@ func resolvedBuildSystemPrompt(cfg RequestOptions, override string, overrideSet 
 	if overrideSet || override != "" {
 		return override, true
 	}
-	return cfg.GetEffectiveSystem(), cfg.IsSystemExplicitlySet()
+	return cfg.GetEffectiveSystem(), cfg.SystemExplicitlySet
 }
 
 // providerUsesOutOfBandSystemPrompt reports whether a provider expects system

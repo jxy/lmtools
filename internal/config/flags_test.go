@@ -188,8 +188,8 @@ func TestParseFlagsOutputOptions(t *testing.T) {
 	}
 
 	opts := cfg.RequestOptions()
-	if opts.GetEffort() != "high" {
-		t.Fatalf("RequestOptions.GetEffort() = %q, want high", opts.GetEffort())
+	if opts.Effort != "high" {
+		t.Fatalf("RequestOptions.Effort = %q, want high", opts.Effort)
 	}
 	if string(opts.GetJSONSchema()) != string(cfg.JSONSchema) {
 		t.Fatalf("RequestOptions schema was not preserved")

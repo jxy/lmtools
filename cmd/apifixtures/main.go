@@ -1032,9 +1032,9 @@ func prepareCaptureRequestBody(meta apifixtures.CaseMeta, target targetConfig, b
 			decoded["stream"] = true
 		}
 	case "argo":
-		apiKey := strings.TrimSpace(os.Getenv("ARGO_API_KEY"))
-		if apiKey == "" {
-			return nil, fmt.Errorf("ARGO_API_KEY is required for target %s", target.ID)
+		apiKey, err := requiredFixtureEnv("ARGO_API_KEY", target.ID)
+		if err != nil {
+			return nil, err
 		}
 		decoded["user"] = apiKey
 	}
@@ -1043,25 +1043,20 @@ func prepareCaptureRequestBody(meta apifixtures.CaseMeta, target targetConfig, b
 }
 
 func tokenCountEndpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, map[string]string, error) {
-	headers := map[string]string{}
-
 	switch targetHost(target) {
 	case "anthropic":
-		apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("ANTHROPIC_API_KEY is required for target %s", target.ID)
+		headers, err := fixtureAuthHeaders("anthropic", target.ID, false)
+		if err != nil {
+			return "", nil, err
 		}
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
 		url, err := providers.ResolveCountTokensURL("anthropic", envOrDefault("ANTHROPIC_API_FIXTURE_URL", defaultAnthropicURL), "", strings.TrimSpace(meta.Models["anthropic"]))
 		return url, headers, err
 
 	case "google":
-		apiKey := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("GOOGLE_API_KEY is required for target %s", target.ID)
+		headers, err := fixtureAuthHeaders("google", target.ID, false)
+		if err != nil {
+			return "", nil, err
 		}
-		headers["x-goog-api-key"] = apiKey
 		model := strings.TrimSpace(meta.Models["google"])
 		if model == "" {
 			return "", nil, fmt.Errorf("case %s is missing models.google", meta.ID)
@@ -1076,17 +1071,11 @@ func tokenCountEndpointForTarget(target targetConfig, meta apifixtures.CaseMeta)
 }
 
 func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, map[string]string, error) {
-	headers := map[string]string{}
-
 	switch targetHost(target) {
 	case "openai":
-		apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("OPENAI_API_KEY is required for target %s", target.ID)
-		}
-		headers["Authorization"] = "Bearer " + apiKey
-		if target.Stream {
-			headers["Accept"] = "text/event-stream"
+		headers, err := fixtureAuthHeaders("openai", target.ID, target.Stream)
+		if err != nil {
+			return "", nil, err
 		}
 		if target.Provider == "openai-responses" {
 			return envOrDefault("OPENAI_RESPONSES_API_FIXTURE_URL", defaultOpenAIResponsesURL), headers, nil
@@ -1094,23 +1083,17 @@ func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, 
 		return envOrDefault("OPENAI_API_FIXTURE_URL", defaultOpenAIURL), headers, nil
 
 	case "anthropic":
-		apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("ANTHROPIC_API_KEY is required for target %s", target.ID)
-		}
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
-		if target.Stream {
-			headers["Accept"] = "text/event-stream"
+		headers, err := fixtureAuthHeaders("anthropic", target.ID, target.Stream)
+		if err != nil {
+			return "", nil, err
 		}
 		return envOrDefault("ANTHROPIC_API_FIXTURE_URL", defaultAnthropicURL), headers, nil
 
 	case "google":
-		apiKey := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("GOOGLE_API_KEY is required for target %s", target.ID)
+		headers, err := fixtureAuthHeaders("google", target.ID, false)
+		if err != nil {
+			return "", nil, err
 		}
-		headers["x-goog-api-key"] = apiKey
 		model := strings.TrimSpace(meta.Models["google"])
 		if model == "" {
 			return "", nil, fmt.Errorf("case %s is missing models.google", meta.ID)
@@ -1133,29 +1116,21 @@ func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, 
 		}
 		switch target.Provider {
 		case "argo":
+			headers := map[string]string{}
 			if target.Stream {
 				return endpoints.legacyStream, headers, nil
 			}
 			return endpoints.legacyChat, headers, nil
 		case "openai":
-			apiKey := strings.TrimSpace(os.Getenv("ARGO_API_KEY"))
-			if apiKey == "" {
-				return "", nil, fmt.Errorf("ARGO_API_KEY is required for target %s", target.ID)
-			}
-			headers["Authorization"] = "Bearer " + apiKey
-			if target.Stream {
-				headers["Accept"] = "text/event-stream"
+			headers, err := fixtureAuthHeaders("argo-openai", target.ID, target.Stream)
+			if err != nil {
+				return "", nil, err
 			}
 			return endpoints.openAI, headers, nil
 		case "anthropic":
-			apiKey := strings.TrimSpace(os.Getenv("ARGO_API_KEY"))
-			if apiKey == "" {
-				return "", nil, fmt.Errorf("ARGO_API_KEY is required for target %s", target.ID)
-			}
-			headers["x-api-key"] = apiKey
-			headers["anthropic-version"] = "2023-06-01"
-			if target.Stream {
-				headers["Accept"] = "text/event-stream"
+			headers, err := fixtureAuthHeaders("argo-anthropic", target.ID, target.Stream)
+			if err != nil {
+				return "", nil, err
 			}
 			return endpoints.anthropic, headers, nil
 		}
@@ -1165,40 +1140,89 @@ func endpointForTarget(target targetConfig, meta apifixtures.CaseMeta) (string, 
 }
 
 func modelsEndpointForTarget(target targetConfig) (string, map[string]string, error) {
-	headers := map[string]string{}
-
 	switch target.Provider {
 	case "openai":
-		apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("OPENAI_API_KEY is required for target %s", target.ID)
+		headers, err := fixtureAuthHeaders("openai", target.ID, false)
+		if err != nil {
+			return "", nil, err
 		}
-		headers["Authorization"] = "Bearer " + apiKey
 		url, err := providers.ResolveModelsURL("openai", envOrDefault("OPENAI_API_FIXTURE_URL", defaultOpenAIURL), "")
 		return url, headers, err
 	case "anthropic":
-		apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("ANTHROPIC_API_KEY is required for target %s", target.ID)
+		headers, err := fixtureAuthHeaders("anthropic", target.ID, false)
+		if err != nil {
+			return "", nil, err
 		}
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
 		url, err := providers.ResolveModelsURL("anthropic", envOrDefault("ANTHROPIC_API_FIXTURE_URL", defaultAnthropicURL), "")
 		return url, headers, err
 	case "google":
-		apiKey := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY"))
-		if apiKey == "" {
-			return "", nil, fmt.Errorf("GOOGLE_API_KEY is required for target %s", target.ID)
+		headers, err := fixtureAuthHeaders("google", target.ID, false)
+		if err != nil {
+			return "", nil, err
 		}
-		headers["x-goog-api-key"] = apiKey
 		url, err := providers.ResolveModelsURL("google", envOrDefault("GOOGLE_API_FIXTURE_URL", defaultGoogleBase), "")
 		return url, headers, err
 	case "argo":
+		headers := map[string]string{}
 		url, err := providers.ResolveModelsURL("argo", envOrDefault("ARGO_API_FIXTURE_BASE_URL", defaultArgoBase), "")
 		return url, headers, err
 	default:
 		return "", nil, fmt.Errorf("models capture is not supported for provider %q", target.Provider)
 	}
+}
+
+func requiredFixtureEnv(name, targetID string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return "", fmt.Errorf("%s is required for target %s", name, targetID)
+	}
+	return value, nil
+}
+
+func fixtureAuthHeaders(kind, targetID string, stream bool) (map[string]string, error) {
+	headers := map[string]string{}
+
+	switch kind {
+	case "openai":
+		apiKey, err := requiredFixtureEnv("OPENAI_API_KEY", targetID)
+		if err != nil {
+			return nil, err
+		}
+		headers["Authorization"] = "Bearer " + apiKey
+	case "anthropic":
+		apiKey, err := requiredFixtureEnv("ANTHROPIC_API_KEY", targetID)
+		if err != nil {
+			return nil, err
+		}
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
+	case "google":
+		apiKey, err := requiredFixtureEnv("GOOGLE_API_KEY", targetID)
+		if err != nil {
+			return nil, err
+		}
+		headers["x-goog-api-key"] = apiKey
+	case "argo-openai":
+		apiKey, err := requiredFixtureEnv("ARGO_API_KEY", targetID)
+		if err != nil {
+			return nil, err
+		}
+		headers["Authorization"] = "Bearer " + apiKey
+	case "argo-anthropic":
+		apiKey, err := requiredFixtureEnv("ARGO_API_KEY", targetID)
+		if err != nil {
+			return nil, err
+		}
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
+	default:
+		return nil, fmt.Errorf("unsupported fixture auth kind %q", kind)
+	}
+
+	if stream {
+		headers["Accept"] = "text/event-stream"
+	}
+	return headers, nil
 }
 
 type resolvedArgoFixtureEndpoints struct {

@@ -17,23 +17,43 @@ func TestMessage(role, content string) Message {
 	}
 }
 
+// NewTestManager returns a session manager rooted in a test-owned temp
+// directory. New tests should prefer this over mutating the package default
+// manager.
+func NewTestManager(t *testing.T) (*Manager, string) {
+	t.Helper()
+
+	testSessionsDir := filepath.Join(t.TempDir(), "sessions")
+	if err := os.MkdirAll(testSessionsDir, 0o750); err != nil {
+		t.Fatalf("Failed to create test sessions directory: %v", err)
+	}
+
+	manager := NewManager(testSessionsDir)
+	manager.SetSkipFlockCheck(true)
+	return manager, testSessionsDir
+}
+
+func WithTestManager(t *testing.T, fn func(manager *Manager, sessionsDir string)) {
+	t.Helper()
+
+	manager, sessionsDir := NewTestManager(t)
+	fn(manager, sessionsDir)
+}
+
 // WithTestSessionDir runs a test with a temporary session directory
 func WithTestSessionDir(t *testing.T, fn func(sessionsDir string)) {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	testSessionsDir := filepath.Join(tmpDir, "sessions")
+	_, testSessionsDir := NewTestManager(t)
 
 	// Override the sessions directory for testing
 	oldDir := GetSessionsDir()
 	SetSessionsDir(testSessionsDir)
+	SetSkipFlockCheck(true)
 	t.Cleanup(func() {
 		SetSessionsDir(oldDir)
+		SetSkipFlockCheck(false)
 	})
-
-	if err := os.MkdirAll(testSessionsDir, 0o750); err != nil {
-		t.Fatalf("Failed to create test sessions directory: %v", err)
-	}
 
 	fn(testSessionsDir)
 }

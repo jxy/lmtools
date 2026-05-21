@@ -48,8 +48,8 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 }
 
 func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg RequestOptions) {
-	payload.Effort = strings.ToLower(strings.TrimSpace(cfg.GetEffort()))
-	payload.JSONMode = cfg.IsJSONMode()
+	payload.Effort = strings.ToLower(strings.TrimSpace(cfg.Effort))
+	payload.JSONMode = cfg.JSONMode
 	if schema := cfg.GetJSONSchema(); len(schema) > 0 {
 		payload.JSONSchema = append(payload.JSONSchema[:0], schema...)
 	}
@@ -215,11 +215,11 @@ func googleAutoToolConfig() map[string]interface{} {
 }
 
 func openAIChatURL(cfg RequestOptions, _ string, _ bool) string {
-	chatURL, err := providers.ResolveChatURL(constants.ProviderOpenAI, cfg.GetProviderURL(), "", "", false)
+	chatURL, err := providers.ResolveChatURL(constants.ProviderOpenAI, cfg.ProviderURL, "", "", false)
 	if err == nil {
 		return chatURL
 	}
-	url := cfg.GetProviderURL()
+	url := cfg.ProviderURL
 	if url == "" {
 		url = "https://api.openai.com/v1"
 	}
@@ -227,16 +227,16 @@ func openAIChatURL(cfg RequestOptions, _ string, _ bool) string {
 }
 
 func anthropicChatURL(cfg RequestOptions, _ string, _ bool) string {
-	messagesURL, err := providers.ResolveChatURL(constants.ProviderAnthropic, cfg.GetProviderURL(), "", "", false)
+	messagesURL, err := providers.ResolveChatURL(constants.ProviderAnthropic, cfg.ProviderURL, "", "", false)
 	if err == nil {
 		return messagesURL
 	}
-	messagesURL, _ = providers.AnthropicURLs(cfg.GetProviderURL())
+	messagesURL, _ = providers.AnthropicURLs(cfg.ProviderURL)
 	return messagesURL
 }
 
 func googleChatURL(cfg RequestOptions, model string, stream bool) string {
-	url, err := providers.ResolveChatURL(constants.ProviderGoogle, cfg.GetProviderURL(), "", model, stream)
+	url, err := providers.ResolveChatURL(constants.ProviderGoogle, cfg.ProviderURL, "", model, stream)
 	if err == nil {
 		return url
 	}
@@ -245,7 +245,7 @@ func googleChatURL(cfg RequestOptions, model string, stream bool) string {
 	if stream {
 		action = "streamGenerateContent"
 	}
-	url = cfg.GetProviderURL()
+	url = cfg.ProviderURL
 	if url == "" {
 		url = "https://generativelanguage.googleapis.com/v1beta"
 	}

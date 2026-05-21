@@ -723,7 +723,7 @@ func (s *Server) streamResponsesFromArgo(ctx context.Context, anthReq *Anthropic
 			return s.convertAnthropicStreamToResponses(ctx, body, writer)
 		})
 	}
-	openAIReq, err := s.converter.ConvertAnthropicToOpenAI(ctx, anthReq)
+	openAIReq, err := ConvertAnthropicToOpenAI(ctx, anthReq)
 	if err != nil {
 		return "", fmt.Errorf("convert to Argo OpenAI format: %w", err)
 	}
@@ -759,7 +759,7 @@ func (s *Server) simulateLegacyArgoResponsesStream(ctx context.Context, anthReq 
 	if err != nil {
 		return "", err
 	}
-	anthResp := s.converter.ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
+	anthResp := ConvertLegacyArgoToAnthropicWithRequest(argoResp, anthReq.Model, anthReq)
 	if err := writer.start(); err != nil {
 		return "", err
 	}

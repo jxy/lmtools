@@ -12,9 +12,9 @@ import (
 )
 
 // ConvertAnthropicToArgo converts an Anthropic request to Argo format
-func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRequest, user string) (*ArgoChatRequest, error) {
+func ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRequest, user string) (*ArgoChatRequest, error) {
 	// Log omitted fields at DEBUG level
-	c.logOmittedFields(ctx, req)
+	logOmittedFields(ctx, req)
 
 	if req.System != nil {
 		if _, err := extractSystemContent(req.System); err != nil {
@@ -38,10 +38,10 @@ func (c *Converter) ConvertAnthropicToArgo(ctx context.Context, req *AnthropicRe
 	}
 
 	// Handle thinking field
-	c.applyThinkingConfig(ctx, req, argoReq)
+	applyThinkingConfig(ctx, req, argoReq)
 
 	// Handle max_tokens based on provider
-	c.setArgoMaxTokens(ctx, req, argoReq, provider)
+	setArgoMaxTokens(ctx, req, argoReq, provider)
 
 	return argoReq, nil
 }
@@ -91,7 +91,7 @@ func estimateTokenCount(content []AnthropicContentBlock) int {
 }
 
 // logOmittedFields logs fields that are omitted when converting from Anthropic to Argo
-func (c *Converter) logOmittedFields(ctx context.Context, req *AnthropicRequest) {
+func logOmittedFields(ctx context.Context, req *AnthropicRequest) {
 	if req.TopK != nil {
 		warnDroppedField(ctx, "Anthropic", "Argo", "top_k", "")
 	}
@@ -101,7 +101,7 @@ func (c *Converter) logOmittedFields(ctx context.Context, req *AnthropicRequest)
 }
 
 // applyThinkingConfig applies thinking configuration based on model type
-func (c *Converter) applyThinkingConfig(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest) {
+func applyThinkingConfig(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest) {
 	if req.Thinking != nil && req.Thinking.Type == "enabled" {
 		modelLower := strings.ToLower(req.Model)
 		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
@@ -119,7 +119,7 @@ func (c *Converter) applyThinkingConfig(ctx context.Context, req *AnthropicReque
 }
 
 // setArgoMaxTokens sets max_tokens for Argo request based on provider
-func (c *Converter) setArgoMaxTokens(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest, provider string) {
+func setArgoMaxTokens(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest, provider string) {
 	if provider == constants.ProviderOpenAI {
 		// For OpenAI models, use max_completion_tokens
 		argoReq.MaxCompletionTokens = req.MaxTokens
@@ -140,22 +140,22 @@ func (c *Converter) setArgoMaxTokens(ctx context.Context, req *AnthropicRequest,
 }
 
 // ConvertArgoToAnthropicWithRequest converts an Argo response to Anthropic format with request for token estimation.
-func (c *Converter) ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
-	return c.convertArgoToAnthropicWithRequest(resp, originalModel, req, false)
+func ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
+	return convertArgoToAnthropicWithRequest(resp, originalModel, req, false)
 }
 
-func (c *Converter) ConvertLegacyArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
-	return c.convertArgoToAnthropicWithRequest(resp, originalModel, req, true)
+func ConvertLegacyArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
+	return convertArgoToAnthropicWithRequest(resp, originalModel, req, true)
 }
 
-func (c *Converter) convertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest, allowEmbeddedExtraction bool) *AnthropicResponse {
+func convertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest, allowEmbeddedExtraction bool) *AnthropicResponse {
 	responseID := generateResponseID()
 
 	switch r := resp.Response.(type) {
 	case string:
 		return anthropicResponseFromText(responseID, originalModel, r, req)
 	case map[string]interface{}:
-		return c.convertArgoMapResponseToAnthropic(r, responseID, originalModel, req, allowEmbeddedExtraction)
+		return convertArgoMapResponseToAnthropic(r, responseID, originalModel, req, allowEmbeddedExtraction)
 	default:
 		return anthropicResponseFromText(responseID, originalModel, fmt.Sprintf("%v", resp.Response), req)
 	}
@@ -190,13 +190,13 @@ func anthropicResponseFromContent(responseID, originalModel string, content []An
 	}
 }
 
-func (c *Converter) convertArgoMapResponseToAnthropic(response map[string]interface{}, responseID, originalModel string, req *AnthropicRequest, allowEmbeddedExtraction bool) *AnthropicResponse {
-	content := c.extractArgoContentBlocks(response, req, allowEmbeddedExtraction)
+func convertArgoMapResponseToAnthropic(response map[string]interface{}, responseID, originalModel string, req *AnthropicRequest, allowEmbeddedExtraction bool) *AnthropicResponse {
+	content := extractArgoContentBlocks(response, req, allowEmbeddedExtraction)
 	content = append(content, extractArgoToolUseBlocks(response["tool_calls"])...)
 	return anthropicResponseFromContent(responseID, originalModel, content, req)
 }
 
-func (c *Converter) extractArgoContentBlocks(response map[string]interface{}, req *AnthropicRequest, allowEmbeddedExtraction bool) []AnthropicContentBlock {
+func extractArgoContentBlocks(response map[string]interface{}, req *AnthropicRequest, allowEmbeddedExtraction bool) []AnthropicContentBlock {
 	contentValue, ok := response["content"]
 	if !ok {
 		return nil

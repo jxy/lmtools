@@ -14,7 +14,7 @@ import (
 // ARCHITECTURAL NOTE: This conversion goes through TypedRequest as the
 // canonical intermediate representation to ensure consistency.
 // Flow: Anthropic -> TypedRequest -> OpenAI
-func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *AnthropicRequest) (*OpenAIRequest, error) {
+func ConvertAnthropicToOpenAI(ctx context.Context, req *AnthropicRequest) (*OpenAIRequest, error) {
 	warnAnthropicRequestDropsForOpenAI(ctx, req)
 
 	if req.System != nil {
@@ -42,11 +42,11 @@ func (c *Converter) ConvertAnthropicToOpenAI(ctx context.Context, req *Anthropic
 }
 
 // ConvertOpenAIToAnthropic converts an OpenAI response to Anthropic format
-func (c *Converter) ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel string) *AnthropicResponse {
-	return c.ConvertOpenAIToAnthropicWithToolNameRegistry(resp, originalModel, nil)
+func ConvertOpenAIToAnthropic(resp *OpenAIResponse, originalModel string) *AnthropicResponse {
+	return ConvertOpenAIToAnthropicWithToolNameRegistry(resp, originalModel, nil)
 }
 
-func (c *Converter) ConvertOpenAIToAnthropicWithToolNameRegistry(resp *OpenAIResponse, originalModel string, registry responseToolNameRegistry) *AnthropicResponse {
+func ConvertOpenAIToAnthropicWithToolNameRegistry(resp *OpenAIResponse, originalModel string, registry responseToolNameRegistry) *AnthropicResponse {
 	if len(resp.Choices) == 0 {
 		return &AnthropicResponse{
 			Type:  "message",
@@ -191,7 +191,7 @@ func (c *Converter) ConvertOpenAIToAnthropicWithToolNameRegistry(resp *OpenAIRes
 // canonical intermediate representation. This ensures consistency and maintains
 // a single source of truth for message handling logic.
 // Flow: OpenAI -> TypedRequest -> Anthropic
-func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *OpenAIRequest) (*AnthropicRequest, error) {
+func ConvertOpenAIRequestToAnthropic(ctx context.Context, req *OpenAIRequest) (*AnthropicRequest, error) {
 	warnOpenAIRequestDropsForAnthropic(ctx, req)
 
 	typed, err := OpenAIRequestToTypedStrict(req)
@@ -219,11 +219,11 @@ func (c *Converter) ConvertOpenAIRequestToAnthropic(ctx context.Context, req *Op
 }
 
 // ConvertAnthropicResponseToOpenAI converts an Anthropic response to OpenAI format
-func (c *Converter) ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, originalModel string) *OpenAIResponse {
-	return c.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp, originalModel, nil)
+func ConvertAnthropicResponseToOpenAI(resp *AnthropicResponse, originalModel string) *OpenAIResponse {
+	return ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp, originalModel, nil)
 }
 
-func (c *Converter) ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp *AnthropicResponse, originalModel string, registry responseToolNameRegistry) *OpenAIResponse {
+func ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp *AnthropicResponse, originalModel string, registry responseToolNameRegistry) *OpenAIResponse {
 	// Generate ID if missing
 	responseID := resp.ID
 	if responseID == "" {

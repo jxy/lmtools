@@ -57,7 +57,7 @@ func resolvePendingTools(ctx context.Context, sess *Session, cfg core.RequestOpt
 		return pendingToolResolution{}, nil
 	}
 
-	if !cfg.IsToolEnabled() {
+	if !cfg.ToolEnabled {
 		return pendingToolResolution{HasPending: true}, errors.WrapError("execute pending tools", fmt.Errorf("pending tool calls require -tool to continue"))
 	}
 

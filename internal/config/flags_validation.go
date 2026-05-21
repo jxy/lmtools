@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
-	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providers"
 	"os"
@@ -147,12 +146,6 @@ func validateProviderCredentials(cfg Config) error {
 }
 
 func validateToolFlags(cfg Config) error {
-	if cfg.EnableTool {
-		if err := core.ValidateToolSupport(cfg.Provider, cfg.Model); err != nil {
-			return err
-		}
-	}
-
 	if cfg.EnableTool && cfg.ToolNonInteractive && !cfg.ToolAutoApprove && cfg.ToolWhitelist == "" {
 		return fmt.Errorf("tool-non-interactive requires either -tool-auto-approve or a -tool-whitelist file")
 	}

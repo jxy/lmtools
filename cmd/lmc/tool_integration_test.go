@@ -609,15 +609,14 @@ func TestMultiRoundToolExecution(t *testing.T) {
 		Notifier: notifier,
 		Approver: &testApprover{autoApprove: true},
 		ExecCfg: core.ToolExecutionConfig{
-			Store:       &sessionStoreAdapter{sess: sess},
+			Store:       session.NewStore(sess, log),
 			RetryClient: retryClient,
 			ActualModel: cfg.Model,
 		},
-		Model:        cfg.Model,
-		ToolDefs:     []core.ToolDefinition{{Name: "universal_command", Description: "Execute commands"}},
-		MessagesFn:   msgBuilder,
-		InitialText:  response.Text,
-		InitialCalls: response.ToolCalls,
+		Model:           cfg.Model,
+		ToolDefs:        []core.ToolDefinition{{Name: "universal_command", Description: "Execute commands"}},
+		MessagesFn:      msgBuilder,
+		InitialResponse: response,
 	}
 
 	// Execute tool rounds
@@ -687,39 +686,6 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	if assistantCount != 4 {
 		t.Errorf("Expected 4 assistant messages, got %d", assistantCount)
 	}
-}
-
-// sessionStoreAdapter adapts a Session to the SessionStore interface
-type sessionStoreAdapter struct {
-	sess *session.Session
-}
-
-func (s *sessionStoreAdapter) GetPath() string {
-	return s.sess.Path
-}
-
-func (s *sessionStoreAdapter) SaveAssistant(ctx context.Context, text string, toolCalls []core.ToolCall, model string) (string, string, error) {
-	result, err := session.SaveAssistantResponseWithTools(ctx, s.sess, text, toolCalls, model)
-	if err != nil {
-		return "", "", err
-	}
-	// Update session path if it changed (sibling created)
-	if result.Path != s.sess.Path {
-		s.sess.Path = result.Path
-	}
-	return result.Path, result.MessageID, nil
-}
-
-func (s *sessionStoreAdapter) SaveToolResults(ctx context.Context, results []core.ToolResult, additionalText string) (string, string, error) {
-	result, err := session.SaveToolResults(ctx, s.sess, results, additionalText)
-	if err != nil {
-		return "", "", err
-	}
-	// Update session path if it changed
-	if result.Path != s.sess.Path {
-		s.sess.Path = result.Path
-	}
-	return result.Path, result.MessageID, nil
 }
 
 func truncateForLog(s string, maxLen int) string {

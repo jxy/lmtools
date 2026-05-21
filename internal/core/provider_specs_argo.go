@@ -66,7 +66,7 @@ func newArgoChatRequestPlan(cfg RequestOptions, messages []TypedMessage, model s
 		Payload:      payload,
 		Legacy:       isArgoLegacyMode(cfg),
 	}
-	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.GetProviderURL(), cfg.GetEnv(), model, stream, plan.Legacy)
+	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, model, stream, plan.Legacy)
 	if err != nil {
 		return argoChatRequestPlan{}, err
 	}
@@ -75,12 +75,12 @@ func newArgoChatRequestPlan(cfg RequestOptions, messages []TypedMessage, model s
 }
 
 func isArgoLegacyMode(cfg RequestOptions) bool {
-	return cfg.IsArgoLegacy()
+	return cfg.ArgoLegacy
 }
 
 func buildLegacyArgoChatRequest(cfg RequestOptions, model string, messages []TypedMessage, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	actualStream := stream && len(toolDefs) == 0
-	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.GetProviderURL(), cfg.GetEnv(), model, actualStream, true)
+	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, model, actualStream, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -90,7 +90,7 @@ func buildLegacyArgoChatRequest(cfg RequestOptions, model string, messages []Typ
 		requestMessages = AdaptCustomToolBlocksForFunctionCompatibility(requestMessages)
 	}
 	bodyMap := map[string]interface{}{
-		"user":     cfg.GetUser(),
+		"user":     cfg.User,
 		"model":    model,
 		"messages": marshalArgoTypedMessages(model, requestMessages),
 	}

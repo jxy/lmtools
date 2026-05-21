@@ -46,7 +46,7 @@ func marshalArgoTypedMessages(model string, messages []TypedMessage) []interface
 
 // handleAPIKeyAuth handles API key authentication for all providers
 func handleAPIKeyAuth(httpReq *http.Request, cfg RequestOptions, provider string) error {
-	if keyFile := cfg.GetAPIKeyFile(); keyFile != "" {
+	if keyFile := cfg.APIKeyFile; keyFile != "" {
 		providerKey, err := auth.LoadProviderKeyFile(provider, keyFile)
 		if err != nil {
 			return fmt.Errorf("failed to read API key file: %w", err)

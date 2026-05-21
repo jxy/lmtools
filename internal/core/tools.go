@@ -142,9 +142,6 @@ type ToolContext struct {
 	MessagesFn      func(string) ([]TypedMessage, error)
 	UI              ToolUI
 	InitialResponse Response
-	InitialText     string
-	InitialCalls    []ToolCall
-	InitialStreamed bool
 }
 
 // ToolExecutionResult holds the result of tool execution
@@ -175,11 +172,8 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 	}
 
 	rounds := 0
-	response := initialToolResponse(tc)
-	finalText := tc.InitialText
-	if response.Text != "" {
-		finalText = response.Text
-	}
+	response := tc.InitialResponse
+	finalText := response.Text
 	finalStreamed := response.Streamed
 
 	for rounds < maxRounds && len(response.ToolCalls) > 0 {
@@ -250,18 +244,6 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 	return finalText, finalStreamed, nil
 }
 
-func initialToolResponse(tc ToolContext) Response {
-	response := tc.InitialResponse
-	if response.Text != "" || len(response.ToolCalls) > 0 || len(response.Blocks) > 0 || response.ThoughtSignature != "" {
-		return response
-	}
-	return Response{
-		Text:      tc.InitialText,
-		ToolCalls: tc.InitialCalls,
-		Streamed:  tc.InitialStreamed,
-	}
-}
-
 // HandleToolExecution manages the tool execution loop for a conversation.
 // It handles multiple rounds of tool calls, respecting the maxRounds limit.
 //
@@ -302,7 +284,7 @@ func persistAssistantRound(ctx context.Context, store SessionStore, response Res
 		_, _, err = store.SaveAssistant(ctx, response.Text, response.ToolCalls, model)
 	}
 	if err != nil {
-		if logger.IsDebugEnabled() {
+		if logger != nil && logger.IsDebugEnabled() {
 			logger.Debugf("Failed to save assistant response: %v", err)
 		}
 		return fmt.Errorf("persist assistant response: %w", err)
@@ -377,18 +359,4 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 func extractSystemMessage(typedMessages []TypedMessage) string {
 	system, _ := splitSystem(typedMessages)
 	return system
-}
-
-// ValidateToolSupport validates if tools are supported for the given provider and model combination.
-// This centralizes the tool support policy to avoid duplication and drift.
-//
-// Current policy:
-// - Direct Google provider: SUPPORTS tools
-// - Google models via Argo: SUPPORT tools
-// - All other providers: SUPPORT tools
-func ValidateToolSupport(provider, model string) error {
-	// All current provider/model combinations support tools.
-	_ = provider
-	_ = model
-	return nil
 }

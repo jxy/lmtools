@@ -121,7 +121,6 @@ func TestDecodeStrictJSONAcceptsModernAnthropicFields(t *testing.T) {
 }
 
 func TestOpenAIToAnthropicConvertsDeveloperEffortAndStructuredOutput(t *testing.T) {
-	converter := &Converter{}
 	req := &OpenAIRequest{
 		Model: "claude-opus-4-7",
 		Messages: []OpenAIMessage{
@@ -144,7 +143,7 @@ func TestOpenAIToAnthropicConvertsDeveloperEffortAndStructuredOutput(t *testing.
 		},
 	}
 
-	got, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), req)
+	got, err := ConvertOpenAIRequestToAnthropic(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ConvertOpenAIRequestToAnthropic() error = %v", err)
 	}
@@ -174,7 +173,6 @@ func TestOpenAIToAnthropicConvertsDeveloperEffortAndStructuredOutput(t *testing.
 }
 
 func TestOpenAIToAnthropicPreservesMidConversationInstructionOrderByCoercingRole(t *testing.T) {
-	converter := &Converter{}
 	req := &OpenAIRequest{
 		Model: "claude-opus-4-7",
 		Messages: []OpenAIMessage{
@@ -184,7 +182,7 @@ func TestOpenAIToAnthropicPreservesMidConversationInstructionOrderByCoercingRole
 		},
 	}
 
-	got, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), req)
+	got, err := ConvertOpenAIRequestToAnthropic(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ConvertOpenAIRequestToAnthropic() error = %v", err)
 	}
@@ -207,7 +205,6 @@ func TestOpenAIToAnthropicPreservesMidConversationInstructionOrderByCoercingRole
 }
 
 func TestAnthropicToOpenAIConvertsEffortFormatMetadataAndServiceTier(t *testing.T) {
-	converter := &Converter{}
 	req := &AnthropicRequest{
 		Model:       "gpt-5",
 		MaxTokens:   128,
@@ -223,7 +220,7 @@ func TestAnthropicToOpenAIConvertsEffortFormatMetadataAndServiceTier(t *testing.
 		},
 	}
 
-	got, err := converter.ConvertAnthropicToOpenAI(context.Background(), req)
+	got, err := ConvertAnthropicToOpenAI(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}

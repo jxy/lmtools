@@ -84,7 +84,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 
 	// For other providers, convert OpenAI request to Anthropic format through TypedRequest
 	// ARCHITECTURAL NOTE: Always go through TypedRequest for conversions
-	anthReq, err := s.converter.ConvertOpenAIRequestToAnthropic(ctx, openAIReq)
+	anthReq, err := ConvertOpenAIRequestToAnthropic(ctx, openAIReq)
 	if err != nil {
 		log.Errorf("Failed to convert OpenAI to Anthropic format: %v", err)
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Failed to process request", "conversion_error", http.StatusBadRequest)
@@ -108,7 +108,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 
 	// Convert Anthropic response back to OpenAI format
 	registry := responseToolNameRegistryFromCoreTools(OpenAIRequestToTyped(openAIReq).Tools)
-	openAIResp := s.converter.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, route.OriginalModel, registry)
+	openAIResp := ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, route.OriginalModel, registry)
 
 	// Log the complete OpenAI response before sending (only if debug enabled)
 	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
@@ -251,8 +251,8 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 	}
 
 	registry := responseToolNameRegistryFromCoreTools(typed.Tools)
-	anthResp := s.converter.ConvertGoogleToAnthropicWithToolNameRegistry(&googleResp, originalModel, registry)
-	openAIResp := s.converter.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, originalModel, registry)
+	anthResp := ConvertGoogleToAnthropicWithToolNameRegistry(&googleResp, originalModel, registry)
+	openAIResp := ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, originalModel, registry)
 	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
 	_ = s.sendJSONResponse(ctx, w, openAIResp)
 }

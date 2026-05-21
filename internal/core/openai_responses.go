@@ -30,7 +30,7 @@ func buildOpenAIResponsesChatRequest(cfg RequestOptions, typedMessages []TypedMe
 		return nil, nil, fmt.Errorf("failed to marshal OpenAI responses request: %w", err)
 	}
 
-	url, err := providers.ResolveResponsesURL(constants.ProviderOpenAI, cfg.GetProviderURL(), cfg.GetEnv())
+	url, err := providers.ResolveResponsesURL(constants.ProviderOpenAI, cfg.ProviderURL, cfg.Env)
 	if err != nil {
 		return nil, nil, err
 	}

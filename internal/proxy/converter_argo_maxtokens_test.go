@@ -72,7 +72,6 @@ func TestConvertAnthropicToArgo_MaxTokensHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			converter := NewConverter()
 
 			// Create request
 			req := &AnthropicRequest{
@@ -106,7 +105,7 @@ func TestConvertAnthropicToArgo_MaxTokensHandling(t *testing.T) {
 			}
 
 			// Convert
-			argoReq, err := converter.ConvertAnthropicToArgo(ctx, req, "testuser")
+			argoReq, err := ConvertAnthropicToArgo(ctx, req, "testuser")
 			if err != nil {
 				t.Fatalf("Failed to convert: %v", err)
 			}
@@ -137,7 +136,6 @@ func TestConvertAnthropicToArgo_MaxTokensHandling(t *testing.T) {
 // omitted from JSON when set to 0
 func TestConvertAnthropicToArgo_MaxTokensJSON(t *testing.T) {
 	ctx := context.Background()
-	converter := NewConverter()
 
 	// Create request that should have max_tokens dropped
 	req := &AnthropicRequest{
@@ -162,7 +160,7 @@ func TestConvertAnthropicToArgo_MaxTokensJSON(t *testing.T) {
 	}
 
 	// Convert
-	argoReq, err := converter.ConvertAnthropicToArgo(ctx, req, "testuser")
+	argoReq, err := ConvertAnthropicToArgo(ctx, req, "testuser")
 	if err != nil {
 		t.Fatalf("Failed to convert: %v", err)
 	}

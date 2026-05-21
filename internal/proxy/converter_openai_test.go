@@ -9,7 +9,6 @@ import (
 )
 
 func TestConvertAnthropicToOpenAI_OmitsZeroMaxCompletionTokens(t *testing.T) {
-	converter := &Converter{}
 	req := &AnthropicRequest{
 		Model: "gpt-5.4-nano",
 		Messages: []AnthropicMessage{
@@ -20,7 +19,7 @@ func TestConvertAnthropicToOpenAI_OmitsZeroMaxCompletionTokens(t *testing.T) {
 		},
 	}
 
-	openAIReq, err := converter.ConvertAnthropicToOpenAI(context.Background(), req)
+	openAIReq, err := ConvertAnthropicToOpenAI(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -30,7 +29,6 @@ func TestConvertAnthropicToOpenAI_OmitsZeroMaxCompletionTokens(t *testing.T) {
 }
 
 func TestConvertAnthropicResponseToOpenAIUsesCustomToolRegistry(t *testing.T) {
-	converter := &Converter{}
 	registry := responseToolNameRegistryFromCoreTools([]core.ToolDefinition{{
 		Type: "custom",
 		Name: "apply_patch",
@@ -49,7 +47,7 @@ func TestConvertAnthropicResponseToOpenAIUsesCustomToolRegistry(t *testing.T) {
 		}},
 	}
 
-	got := converter.ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp, "gpt-public", registry)
+	got := ConvertAnthropicResponseToOpenAIWithToolNameRegistry(resp, "gpt-public", registry)
 	calls := got.Choices[0].Message.ToolCalls
 	if len(calls) != 1 || calls[0].Type != "custom" || calls[0].Custom == nil {
 		t.Fatalf("tool calls = %+v, want one custom call", calls)
@@ -114,14 +112,12 @@ func TestConvertAnthropicToOpenAI_LoggingRegression(t *testing.T) {
 			},
 		},
 	}
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Run the conversion
-			result, err := converter.ConvertAnthropicToOpenAI(ctx, tt.request)
+			result, err := ConvertAnthropicToOpenAI(ctx, tt.request)
 			// Verify no error
 			if err != nil {
 				t.Errorf("ConvertAnthropicToOpenAI() error = %v", err)
@@ -138,8 +134,6 @@ func TestConvertAnthropicToOpenAI_LoggingRegression(t *testing.T) {
 
 func TestConvertAnthropicToOpenAI_ReasoningBlock(t *testing.T) {
 	SetupTestLogger(t)
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	// Request with Anthropic reasoning content
@@ -157,7 +151,7 @@ func TestConvertAnthropicToOpenAI_ReasoningBlock(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+	result, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -176,8 +170,6 @@ func TestConvertAnthropicToOpenAI_ReasoningBlock(t *testing.T) {
 
 func TestConvertAnthropicToOpenAI_PreservesValidContent(t *testing.T) {
 	SetupTestLogger(t)
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	// Request with various content types
@@ -218,7 +210,7 @@ func TestConvertAnthropicToOpenAI_PreservesValidContent(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+	result, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -252,8 +244,6 @@ func TestConvertAnthropicToOpenAI_PreservesValidContent(t *testing.T) {
 func TestMetadataLoggingFormat(t *testing.T) {
 	// This test verifies that metadata is logged as JSON, not as Go map format
 	SetupTestLogger(t)
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	metadata := map[string]interface{}{
@@ -276,7 +266,7 @@ func TestMetadataLoggingFormat(t *testing.T) {
 		},
 	}
 
-	_, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+	_, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -290,8 +280,6 @@ func TestMetadataLoggingFormat(t *testing.T) {
 
 func TestThinkingConversion(t *testing.T) {
 	SetupTestLogger(t)
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	// Test thinking conversion for GPT models
@@ -310,7 +298,7 @@ func TestThinkingConversion(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+	result, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -323,8 +311,6 @@ func TestThinkingConversion(t *testing.T) {
 
 func TestToolConversion(t *testing.T) {
 	SetupTestLogger(t)
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	req := &AnthropicRequest{
@@ -357,7 +343,7 @@ func TestToolConversion(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+	result, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
@@ -397,8 +383,6 @@ func TestToolConversion(t *testing.T) {
 
 func TestToolCallConversion(t *testing.T) {
 	SetupTestLogger(t)
-
-	converter := &Converter{}
 	ctx := context.Background()
 
 	// Test converting assistant message with tool calls
@@ -422,7 +406,7 @@ func TestToolCallConversion(t *testing.T) {
 		},
 	}
 
-	result, err := converter.ConvertAnthropicToOpenAI(ctx, req)
+	result, err := ConvertAnthropicToOpenAI(ctx, req)
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}

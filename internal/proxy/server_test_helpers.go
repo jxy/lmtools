@@ -123,7 +123,6 @@ func newTestServerCore(t *testing.T, config *Config, client *retry.Client, calle
 		config:           config,
 		endpoints:        endpoints,
 		mapper:           mapper,
-		converter:        NewConverter(),
 		client:           client,
 		responsesState:   newResponsesState(config.SessionsDir),
 		backgroundCancel: make(map[string]context.CancelFunc),

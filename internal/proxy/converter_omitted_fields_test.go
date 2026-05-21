@@ -12,8 +12,6 @@ import (
 )
 
 func TestConversionWarningsForDroppedFields(t *testing.T) {
-	converter := &Converter{}
-
 	logs := captureWarnLogs(t, func() {
 		topK := 10
 		req := &AnthropicRequest{
@@ -32,7 +30,7 @@ func TestConversionWarningsForDroppedFields(t *testing.T) {
 				},
 			},
 		}
-		_, err := converter.ConvertAnthropicToOpenAI(context.Background(), req)
+		_, err := ConvertAnthropicToOpenAI(context.Background(), req)
 		if err != nil {
 			t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 		}
@@ -51,7 +49,6 @@ func TestConversionWarningsForDroppedFields(t *testing.T) {
 }
 
 func TestOpenAIConversionWarningsForDroppedFields(t *testing.T) {
-	converter := &Converter{}
 	trueValue := true
 
 	logs := captureWarnLogs(t, func() {
@@ -78,7 +75,7 @@ func TestOpenAIConversionWarningsForDroppedFields(t *testing.T) {
 				Function: OpenAIFunc{Name: "lookup", Parameters: map[string]interface{}{"type": "object"}, Strict: &trueValue},
 			}},
 		}
-		_, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), req)
+		_, err := ConvertOpenAIRequestToAnthropic(context.Background(), req)
 		if err != nil {
 			t.Fatalf("ConvertOpenAIRequestToAnthropic() error = %v", err)
 		}
@@ -157,7 +154,6 @@ func TestOpenAIToGoogleWarningsForDroppedModernFields(t *testing.T) {
 }
 
 func TestOpenAIInstructionRoleWarningsForAnthropic(t *testing.T) {
-	converter := &Converter{}
 	req := &OpenAIRequest{
 		Model: "claude-opus-4-7",
 		Messages: []OpenAIMessage{
@@ -168,7 +164,7 @@ func TestOpenAIInstructionRoleWarningsForAnthropic(t *testing.T) {
 	}
 
 	logs := captureWarnLogs(t, func() {
-		_, err := converter.ConvertOpenAIRequestToAnthropic(context.Background(), req)
+		_, err := ConvertOpenAIRequestToAnthropic(context.Background(), req)
 		if err != nil {
 			t.Fatalf("ConvertOpenAIRequestToAnthropic() error = %v", err)
 		}
@@ -209,8 +205,6 @@ func TestOpenAIInstructionRoleWarningsForGoogle(t *testing.T) {
 }
 
 func TestAnthropicToGoogleWarningsForDroppedModernFields(t *testing.T) {
-	converter := &Converter{}
-
 	logs := captureWarnLogs(t, func() {
 		req := &AnthropicRequest{
 			Model:             "gemini-2.5-pro",
@@ -239,7 +233,7 @@ func TestAnthropicToGoogleWarningsForDroppedModernFields(t *testing.T) {
 				},
 			},
 		}
-		_, err := converter.ConvertAnthropicToGoogle(context.Background(), req)
+		_, err := ConvertAnthropicToGoogle(context.Background(), req)
 		if err != nil {
 			t.Fatalf("ConvertAnthropicToGoogle() error = %v", err)
 		}
@@ -263,8 +257,6 @@ func TestAnthropicToGoogleWarningsForDroppedModernFields(t *testing.T) {
 }
 
 func TestArgoConversionWarningsUseWarnLevel(t *testing.T) {
-	converter := NewConverter()
-
 	logs := captureWarnLogs(t, func() {
 		topK := 5
 		req := &AnthropicRequest{
@@ -275,7 +267,7 @@ func TestArgoConversionWarningsUseWarnLevel(t *testing.T) {
 				{Role: core.RoleUser, Content: json.RawMessage(`"Hello Argo"`)},
 			},
 		}
-		_, err := converter.ConvertAnthropicToArgo(context.Background(), req, "testuser")
+		_, err := ConvertAnthropicToArgo(context.Background(), req, "testuser")
 		if err != nil {
 			t.Fatalf("ConvertAnthropicToArgo() error = %v", err)
 		}

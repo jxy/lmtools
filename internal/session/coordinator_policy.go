@@ -11,7 +11,7 @@ type ResumeForkDecision struct {
 }
 
 func DecideResumeFork(sessionSystem *string, cfg core.RequestOptions) ResumeForkDecision {
-	if cfg.IsSystemExplicitlySet() {
+	if cfg.SystemExplicitlySet {
 		specifiedPrompt := cfg.GetEffectiveSystem()
 		if sessionSystem == nil {
 			if specifiedPrompt != "" {
@@ -32,7 +32,7 @@ func DecideResumeFork(sessionSystem *string, cfg core.RequestOptions) ResumeFork
 	}
 
 	if sessionSystem != nil {
-		if *sessionSystem == prompts.DefaultSystemPrompt && cfg.IsToolEnabled() {
+		if *sessionSystem == prompts.DefaultSystemPrompt && cfg.ToolEnabled {
 			return ResumeForkDecision{
 				ShouldFork: true,
 				NewSystem:  prompts.ToolSystemPrompt,
@@ -41,7 +41,7 @@ func DecideResumeFork(sessionSystem *string, cfg core.RequestOptions) ResumeFork
 		return ResumeForkDecision{}
 	}
 
-	if cfg.IsToolEnabled() {
+	if cfg.ToolEnabled {
 		return ResumeForkDecision{
 			ShouldFork: true,
 			NewSystem:  prompts.ToolSystemPrompt,

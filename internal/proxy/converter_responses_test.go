@@ -719,10 +719,8 @@ func TestOpenAIChatNamespacedToolCallsRestoreResponsesNamespace(t *testing.T) {
 			FinishReason: "tool_calls",
 		}},
 	}
-
-	converter := NewConverter()
-	anth := converter.ConvertOpenAIToAnthropicWithToolNameRegistry(chatResp, "gpt-public", responseToolNameRegistryFromCoreTools(typed.Tools))
-	responses := converter.ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
+	anth := ConvertOpenAIToAnthropicWithToolNameRegistry(chatResp, "gpt-public", responseToolNameRegistryFromCoreTools(typed.Tools))
+	responses := ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
 	if len(responses.Output) != 2 {
 		t.Fatalf("responses output len = %d, want 2: %+v", len(responses.Output), responses.Output)
 	}
@@ -733,7 +731,7 @@ func TestOpenAIChatNamespacedToolCallsRestoreResponsesNamespace(t *testing.T) {
 		t.Fatalf("custom output = %+v", responses.Output[1])
 	}
 
-	chatRoundTrip := converter.ConvertOpenAIResponsesToOpenAI(responses, "gpt-public")
+	chatRoundTrip := ConvertOpenAIResponsesToOpenAI(responses, "gpt-public")
 	calls := chatRoundTrip.Choices[0].Message.ToolCalls
 	if calls[0].Function.Name != "mcp__computer_use__click" || calls[1].Custom.Name != "mcp__computer_use__apply_patch" {
 		t.Fatalf("roundtrip chat calls = %+v", calls)
@@ -741,7 +739,6 @@ func TestOpenAIChatNamespacedToolCallsRestoreResponsesNamespace(t *testing.T) {
 }
 
 func TestAnthropicCustomToolWrapperConvertsToOpenAIResponsesCustomCall(t *testing.T) {
-	converter := NewConverter()
 	registry := responseToolNameRegistryFromCoreTools([]core.ToolDefinition{{
 		Type: "custom",
 		Name: "apply_patch",
@@ -760,7 +757,7 @@ func TestAnthropicCustomToolWrapperConvertsToOpenAIResponsesCustomCall(t *testin
 		}},
 	}
 
-	resp := converter.ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(anth, "gpt-public", registry)
+	resp := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(anth, "gpt-public", registry)
 	if len(resp.Output) != 1 || resp.Output[0].Type != "custom_tool_call" {
 		t.Fatalf("responses output = %+v, want custom_tool_call", resp.Output)
 	}
@@ -776,7 +773,6 @@ func TestAnthropicCustomToolWrapperConvertsToOpenAIResponsesCustomCall(t *testin
 }
 
 func TestAnthropicNamespacedCustomToolWrapperRestoresResponsesNamespace(t *testing.T) {
-	converter := NewConverter()
 	registry := responseToolNameRegistryFromCoreTools([]core.ToolDefinition{{
 		Type:         "custom",
 		Namespace:    "mcp__computer_use__",
@@ -797,7 +793,7 @@ func TestAnthropicNamespacedCustomToolWrapperRestoresResponsesNamespace(t *testi
 		}},
 	}
 
-	resp := converter.ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(anth, "gpt-public", registry)
+	resp := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(anth, "gpt-public", registry)
 	if len(resp.Output) != 1 {
 		t.Fatalf("responses output = %+v", resp.Output)
 	}
@@ -839,8 +835,7 @@ func TestOpenAIResponsesPromptRejectedByConvertedProviderConversion(t *testing.T
 }
 
 func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t *testing.T) {
-	converter := NewConverter()
-	resp := converter.ConvertAnthropicResponseToOpenAIResponses(&AnthropicResponse{
+	resp := ConvertAnthropicResponseToOpenAIResponses(&AnthropicResponse{
 		ID:         "msg_backend",
 		Type:       "message",
 		Role:       core.RoleAssistant,
@@ -865,7 +860,6 @@ func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t 
 }
 
 func TestConvertOpenAIResponsesToOpenAIChat(t *testing.T) {
-	converter := NewConverter()
 	resp := &OpenAIResponsesResponse{
 		ID:     "resp_1",
 		Status: "completed",
@@ -888,7 +882,7 @@ func TestConvertOpenAIResponsesToOpenAIChat(t *testing.T) {
 		},
 	}
 
-	got := converter.ConvertOpenAIResponsesToOpenAI(resp, "gpt-public")
+	got := ConvertOpenAIResponsesToOpenAI(resp, "gpt-public")
 	if got.Model != "gpt-public" {
 		t.Fatalf("model = %q", got.Model)
 	}
@@ -904,7 +898,6 @@ func TestConvertOpenAIResponsesToOpenAIChat(t *testing.T) {
 }
 
 func TestOpenAIResponsesCustomToolCallsConvertToChat(t *testing.T) {
-	converter := NewConverter()
 	resp := &OpenAIResponsesResponse{
 		ID:     "resp_1",
 		Status: "completed",
@@ -918,7 +911,7 @@ func TestOpenAIResponsesCustomToolCallsConvertToChat(t *testing.T) {
 		}},
 	}
 
-	chat := converter.ConvertOpenAIResponsesToOpenAI(resp, "gpt-public")
+	chat := ConvertOpenAIResponsesToOpenAI(resp, "gpt-public")
 	calls := chat.Choices[0].Message.ToolCalls
 	if len(calls) != 1 || calls[0].Type != "custom" || calls[0].Custom == nil {
 		t.Fatalf("chat tool calls = %+v, want custom tool call", calls)
@@ -927,8 +920,8 @@ func TestOpenAIResponsesCustomToolCallsConvertToChat(t *testing.T) {
 		t.Fatalf("chat custom call = %+v", calls[0].Custom)
 	}
 
-	anth := converter.ConvertOpenAIToAnthropic(chat, "gpt-public")
-	roundTrip := converter.ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
+	anth := ConvertOpenAIToAnthropic(chat, "gpt-public")
+	roundTrip := ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
 	if len(roundTrip.Output) != 1 || roundTrip.Output[0].Type != "custom_tool_call" {
 		t.Fatalf("roundtrip responses output = %+v", roundTrip.Output)
 	}

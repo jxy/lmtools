@@ -41,7 +41,7 @@ func FormatToolCall(notifier core.Notifier, call core.ToolCall) {
 func FormatToolResult(notifier core.Notifier, cfg core.RequestOptions, result core.ToolResult) {
 	if result.Error != "" {
 		// Use centralized error explanation
-		explanation := errors.ExplainToolError(result.Code, result.Error, cfg.GetToolWhitelist())
+		explanation := errors.ExplainToolError(result.Code, result.Error, cfg.ToolWhitelist)
 
 		// Display primary error message
 		notifier.Errorf(">>> Error: %s", explanation.Message)

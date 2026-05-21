@@ -7,7 +7,7 @@ import (
 )
 
 // ConvertAnthropicToGoogle converts an Anthropic request to Google AI format
-func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
+func ConvertAnthropicToGoogle(ctx context.Context, req *AnthropicRequest) (*GoogleRequest, error) {
 	warnAnthropicRequestDropsForGoogle(ctx, req)
 
 	if req.System != nil {
@@ -27,13 +27,13 @@ func (c *Converter) ConvertAnthropicToGoogle(ctx context.Context, req *Anthropic
 }
 
 // ConvertGoogleToAnthropic converts a Google AI response to Anthropic format
-func (c *Converter) ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel string) *AnthropicResponse {
-	return c.ConvertGoogleToAnthropicWithToolNameRegistry(resp, originalModel, nil)
+func ConvertGoogleToAnthropic(resp *GoogleResponse, originalModel string) *AnthropicResponse {
+	return ConvertGoogleToAnthropicWithToolNameRegistry(resp, originalModel, nil)
 }
 
 // ConvertGoogleToAnthropicWithToolNameRegistry converts a Google AI response to
 // Anthropic format while restoring original custom-tool metadata when known.
-func (c *Converter) ConvertGoogleToAnthropicWithToolNameRegistry(resp *GoogleResponse, originalModel string, registry responseToolNameRegistry) *AnthropicResponse {
+func ConvertGoogleToAnthropicWithToolNameRegistry(resp *GoogleResponse, originalModel string, registry responseToolNameRegistry) *AnthropicResponse {
 	anthResp := &AnthropicResponse{
 		Type:  "message",
 		Model: originalModel,
