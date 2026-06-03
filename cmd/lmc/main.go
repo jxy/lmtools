@@ -214,38 +214,26 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
+	pendingToolMode := session.PendingToolExecute
 	if cfg.PrintCurl {
-		plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, notifier, inputStr, isRegeneration, session.PendingToolPreview)
-		if err != nil {
-			return err
-		}
-		hasPendingTools := plan != nil && plan.HasPendingTools
-		if !isRegeneration && inputStr == "" && !hasPendingTools {
-			return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
-		}
+		pendingToolMode = session.PendingToolPreview
+	}
+	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, notifier, inputStr, isRegeneration, pendingToolMode)
+	if err != nil {
+		return err
+	}
+	hasPendingTools := plan != nil && plan.HasPendingTools
+	if !isRegeneration && inputStr == "" && !hasPendingTools {
+		return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
+	}
+
+	if cfg.PrintCurl {
 		rb, err := buildHTTPRequest(ctx, &cfg, opts, plan, inputStr)
 		if err != nil {
 			return err
 		}
 		fmt.Println(renderCurlCommand(rb.Request, rb.Body))
 		return nil
-	}
-
-	// Prepare session using coordinator
-	var plan *session.RequestPlan
-	var hasPendingTools bool
-
-	plan, err = prepareSessionRequestPlan(ctx, &cfg, opts, notifier, inputStr, isRegeneration, session.PendingToolExecute)
-	if err != nil {
-		return err
-	}
-	if plan != nil {
-		hasPendingTools = plan.HasPendingTools
-	}
-
-	// Only require input if not regenerating and not continuing tool execution
-	if !isRegeneration && inputStr == "" && !hasPendingTools {
-		return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
 	}
 
 	return executeRequest(ctx, &cfg, opts, notifier, logDir, inputStr, plan)
@@ -255,11 +243,8 @@ func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts cor
 	if cfg.NoSession {
 		return nil, nil
 	}
-	coordinator := session.NewCoordinator(opts, notifier)
 	approver := NewCliApprover(notifier)
-	return coordinator.PrepareRequest(ctx, inputStr, isRegeneration, approver, session.PrepareRequestOptions{
-		PendingTools: pendingToolMode,
-	})
+	return session.PrepareRequest(ctx, opts, notifier, inputStr, isRegeneration, approver, pendingToolMode)
 }
 
 // handleSpecialFlags handles flags that don't require the full request processing

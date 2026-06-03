@@ -23,18 +23,6 @@ func NewTestRequestConfig() RequestOptions {
 	}
 }
 
-// TestSession is a mock that implements Session interface for testing
-type TestSession struct {
-	Path string
-}
-
-func (s *TestSession) GetPath() string { return s.Path }
-
-// NewTestSession creates a TestSession with a given path
-func NewTestSession(path string) *TestSession {
-	return &TestSession{Path: path}
-}
-
 // TestLogger is a mock that implements Logger interface for testing
 type TestLogger struct {
 	DebugMessages []string

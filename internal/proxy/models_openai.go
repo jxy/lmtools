@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"lmtools/internal/core"
 )
 
@@ -13,7 +15,7 @@ type OpenAIRequest struct {
 	TopP                 *float64               `json:"top_p,omitempty"`
 	N                    *int                   `json:"n,omitempty"`
 	Stream               bool                   `json:"stream,omitempty"`
-	Stop                 []string               `json:"stop,omitempty"`
+	Stop                 OpenAIStopSequences    `json:"stop,omitempty"`
 	MaxTokens            *int                   `json:"max_tokens,omitempty"`
 	MaxCompletionTokens  *int                   `json:"max_completion_tokens,omitempty"`
 	PresencePenalty      *float64               `json:"presence_penalty,omitempty"`
@@ -41,6 +43,28 @@ type OpenAIRequest struct {
 	Logprobs             *bool                  `json:"logprobs,omitempty"`
 	TopLogprobs          *int                   `json:"top_logprobs,omitempty"`
 	ExtraBody            map[string]interface{} `json:"extra_body,omitempty"`
+}
+
+// OpenAIStopSequences accepts OpenAI's `stop` field in either string or array form.
+type OpenAIStopSequences []string
+
+func (s *OpenAIStopSequences) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*s = nil
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(trimmed, &single); err == nil {
+		*s = []string{single}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(trimmed, &many); err == nil {
+		*s = many
+		return nil
+	}
+	return fmt.Errorf("stop must be a string or an array of strings")
 }
 
 // OpenAIStreamOptions represents streaming options for OpenAI requests.

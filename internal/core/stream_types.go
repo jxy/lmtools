@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+func streamFieldValue(line, field string) (string, bool) {
+	prefix := field + ":"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	value := strings.TrimPrefix(line, prefix)
+	value = strings.TrimPrefix(value, " ")
+	return value, true
+}
+
 // StreamState defines the interface for provider-specific stream parsers
 type StreamState interface {
 	// ParseLine processes a single line from the stream and returns:
@@ -33,15 +43,13 @@ type AnthropicStreamState struct {
 // ParseLine implements StreamState for Anthropic SSE format
 func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool, error) {
 	// Handle event lines
-	if strings.HasPrefix(line, "event: ") {
-		s.currentEvent = strings.TrimPrefix(line, "event: ")
+	if event, ok := streamFieldValue(line, "event"); ok {
+		s.currentEvent = event
 		return "", nil, false, nil
 	}
 
 	// Handle data lines
-	if strings.HasPrefix(line, "data: ") {
-		data := strings.TrimPrefix(line, "data: ")
-
+	if data, ok := streamFieldValue(line, "data"); ok {
 		switch s.currentEvent {
 		case "content_block_start":
 			var blockStart struct {
@@ -205,8 +213,7 @@ func NewOpenAIStreamState() *OpenAIStreamState {
 // ParseLine implements StreamState for OpenAI SSE format
 func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, error) {
 	// Handle data lines
-	if strings.HasPrefix(line, "data: ") {
-		data := strings.TrimPrefix(line, "data: ")
+	if data, ok := streamFieldValue(line, "data"); ok {
 		if data == "[DONE]" {
 			// Stream is complete - finalize any partial tool calls
 			var toolCalls []ToolCall
@@ -232,33 +239,48 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			return "", nil, false, err
 		}
 
-		for _, tc := range parsed.ToolCalls {
-			if _, exists := s.partialToolCalls[tc.Index]; !exists {
-				s.partialToolCalls[tc.Index] = &ToolCall{}
-			}
-			partial := s.partialToolCalls[tc.Index]
-			if tc.ID != "" {
-				partial.ID = tc.ID
-			}
-			if tc.Type != "" {
-				partial.Type = tc.Type
-			}
-			if tc.Name != "" {
-				partial.Name = tc.Name
-			}
-			if tc.Type == "custom" {
-				if tc.Input != "" {
-					partial.Input += tc.Input
+		textContent := ""
+		choices := parsed.Choices
+		if len(choices) == 0 {
+			choices = []ParsedOpenAIStreamChoice{{
+				Content:   parsed.Content,
+				ToolCalls: parsed.ToolCalls,
+			}}
+		}
+		for _, choice := range choices {
+			textContent += choice.Content
+			for _, tc := range choice.ToolCalls {
+				key := tc.Index
+				if tc.ChoiceIndex != 0 {
+					key = tc.ChoiceIndex*100000 + tc.Index
 				}
-				continue
-			}
-			if tc.Arguments != "" {
-				currentArgs := string(partial.Args)
-				partial.Args = json.RawMessage(currentArgs + tc.Arguments)
+				if _, exists := s.partialToolCalls[key]; !exists {
+					s.partialToolCalls[key] = &ToolCall{}
+				}
+				partial := s.partialToolCalls[key]
+				if tc.ID != "" {
+					partial.ID = tc.ID
+				}
+				if tc.Type != "" {
+					partial.Type = tc.Type
+				}
+				if tc.Name != "" {
+					partial.Name = tc.Name
+				}
+				if tc.Type == "custom" {
+					if tc.Input != "" {
+						partial.Input += tc.Input
+					}
+					continue
+				}
+				if tc.Arguments != "" {
+					currentArgs := string(partial.Args)
+					partial.Args = json.RawMessage(currentArgs + tc.Arguments)
+				}
 			}
 		}
 
-		return parsed.Content, nil, false, nil
+		return textContent, nil, false, nil
 	}
 
 	return "", nil, false, nil

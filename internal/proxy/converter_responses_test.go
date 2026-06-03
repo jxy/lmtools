@@ -465,16 +465,11 @@ func TestOpenAIResponsesCustomToolsConvertToChatShape(t *testing.T) {
 				"description": "Look up a value.",
 				"parameters":  map[string]interface{}{"type": "object"},
 			},
-			{"type": "file_search", "vector_store_ids": []interface{}{"vs_1"}},
 		},
 		ToolChoice: map[string]interface{}{"type": "custom", "name": "apply_patch"},
 	}
 
-	var typed TypedRequest
-	var err error
-	logs := captureWarnLogs(t, func() {
-		typed, err = OpenAIResponsesRequestToTyped(context.Background(), req)
-	})
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
 	if err != nil {
 		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
@@ -483,12 +478,6 @@ func TestOpenAIResponsesCustomToolsConvertToChatShape(t *testing.T) {
 	}
 	if typed.ToolChoice == nil || typed.ToolChoice.Type != "tool" || typed.ToolChoice.Name != "apply_patch" {
 		t.Fatalf("tool choice = %#v, want custom apply_patch choice", typed.ToolChoice)
-	}
-	if want := `Dropping unsupported Responses tool type "file_search" at index 2`; !strings.Contains(logs, want) {
-		t.Fatalf("warning %q not found in logs:\n%s", want, logs)
-	}
-	if strings.Contains(logs, `tool_choice type "custom"`) {
-		t.Fatalf("custom tool choice should not be dropped; logs:\n%s", logs)
 	}
 
 	chatReq, err := TypedToOpenAIRequest(typed, "gpt-public")
@@ -834,6 +823,47 @@ func TestOpenAIResponsesPromptRejectedByConvertedProviderConversion(t *testing.T
 	}
 }
 
+func TestOpenAIResponsesConvertedProviderRejectsUnsupportedFields(t *testing.T) {
+	tests := []struct {
+		name string
+		req  OpenAIResponsesRequest
+		want string
+	}{
+		{
+			name: "include",
+			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", Include: []string{"file_search_call.results"}},
+			want: "include is not supported for converted Responses providers",
+		},
+		{
+			name: "max_tool_calls",
+			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", MaxToolCalls: intPtr(1)},
+			want: "max_tool_calls is not supported for converted Responses providers",
+		},
+		{
+			name: "top_logprobs",
+			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", TopLogprobs: intPtr(2)},
+			want: "top_logprobs is not supported for converted Responses providers",
+		},
+		{
+			name: "text verbosity",
+			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", Text: &OpenAIResponsesText{Verbosity: "high"}},
+			want: "text.verbosity is not supported for converted Responses providers",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := OpenAIResponsesRequestToTyped(context.Background(), &tt.req)
+			if err == nil {
+				t.Fatal("expected conversion error")
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t *testing.T) {
 	resp := ConvertAnthropicResponseToOpenAIResponses(&AnthropicResponse{
 		ID:         "msg_backend",
@@ -930,13 +960,12 @@ func TestOpenAIResponsesCustomToolCallsConvertToChat(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesResponseMarshalOmitsOutputText(t *testing.T) {
+func TestOpenAIResponsesCoreResponseDerivesTextFromOutput(t *testing.T) {
 	resp := OpenAIResponsesResponse{
-		ID:         "resp_1",
-		Object:     "response",
-		Status:     "completed",
-		Model:      "gpt-test",
-		OutputText: "Checking.",
+		ID:     "resp_1",
+		Object: "response",
+		Status: "completed",
+		Model:  "gpt-test",
 		Output: []OpenAIResponsesOutputItem{{
 			Type: "message",
 			Role: core.RoleAssistant,
@@ -945,6 +974,9 @@ func TestOpenAIResponsesResponseMarshalOmitsOutputText(t *testing.T) {
 				Text: "Checking.",
 			}},
 		}},
+	}
+	if got := openAIResponsesCoreResponse(&resp).Text; got != "Checking." {
+		t.Fatalf("core response text = %q, want Checking.", got)
 	}
 	data, err := json.Marshal(resp)
 	if err != nil {

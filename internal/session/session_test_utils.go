@@ -40,8 +40,7 @@ func WithTestManager(t *testing.T, fn func(manager *Manager, sessionsDir string)
 	fn(manager, sessionsDir)
 }
 
-// WithTestSessionDir runs a test with a temporary session directory
-func WithTestSessionDir(t *testing.T, fn func(sessionsDir string)) {
+func UseTestSessionDir(t *testing.T) string {
 	t.Helper()
 
 	_, testSessionsDir := NewTestManager(t)
@@ -55,7 +54,13 @@ func WithTestSessionDir(t *testing.T, fn func(sessionsDir string)) {
 		SetSkipFlockCheck(false)
 	})
 
-	fn(testSessionsDir)
+	return testSessionsDir
+}
+
+// WithTestSessionDir runs a test with a temporary session directory
+func WithTestSessionDir(t *testing.T, fn func(sessionsDir string)) {
+	t.Helper()
+	fn(UseTestSessionDir(t))
 }
 
 // assertFileStructure verifies that the expected files exist in a session

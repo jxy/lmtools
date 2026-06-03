@@ -23,7 +23,6 @@ type responsesStreamWriter struct {
 	createdAt        int64
 	sequence         int
 	output           []OpenAIResponsesOutputItem
-	outputText       string
 	usage            *OpenAIResponsesUsage
 	serviceTier      string
 	incompleteReason string
@@ -124,7 +123,6 @@ func (w *responsesStreamWriter) currentResponse(status string) OpenAIResponsesRe
 		Model:             w.model,
 		Conversation:      openAIResponsesConversationRef(w.conversationID),
 		Output:            output,
-		OutputText:        w.outputText,
 		Usage:             w.usage,
 		Error:             w.responseError,
 		ServiceTier:       w.serviceTier,
@@ -187,7 +185,6 @@ func (w *responsesStreamWriter) WriteTextDelta(text string) error {
 		return err
 	}
 	w.messageText += text
-	w.outputText += text
 	return w.send("response.output_text.delta", map[string]interface{}{
 		"output_index":  *w.messageIndex,
 		"content_index": 0,
@@ -486,10 +483,14 @@ func (w *responsesStreamWriter) SetUsageCounts(inputTokens, outputTokens *int) {
 func (w *responsesStreamWriter) Finish(finishReason string) (*OpenAIResponsesResponse, error) {
 	status := "completed"
 	itemStatus := "completed"
-	if finishReason == "length" || finishReason == "max_tokens" {
+	if finishReason == "length" || finishReason == "max_tokens" || finishReason == "content_filter" {
 		status = "incomplete"
 		itemStatus = "incomplete"
-		w.incompleteReason = "max_output_tokens"
+		if finishReason == "content_filter" {
+			w.incompleteReason = "content_filter"
+		} else {
+			w.incompleteReason = "max_output_tokens"
+		}
 	}
 	if err := w.closeMessageItem(itemStatus); err != nil {
 		return nil, err
@@ -566,25 +567,8 @@ func (w *responsesStreamWriter) Blocks() []core.Block {
 					blocks = append(blocks, block)
 				}
 			}
-		case "function_call":
-			blocks = append(blocks, core.ToolUseBlock{
-				ID:           firstNonEmpty(item.CallID, item.ID),
-				Type:         "function",
-				Namespace:    item.Namespace,
-				OriginalName: item.Name,
-				Name:         responseOutputToolName(item),
-				Input:        core.NormalizeOpenAIResponsesArguments(item.Arguments),
-			})
-		case "custom_tool_call":
-			blocks = append(blocks, core.ToolUseBlock{
-				ID:           firstNonEmpty(item.CallID, item.ID),
-				Type:         "custom",
-				Namespace:    item.Namespace,
-				OriginalName: item.Name,
-				Name:         responseOutputToolName(item),
-				Input:        mustMarshalJSON(item.Input),
-				InputString:  item.Input,
-			})
+		case "function_call", "custom_tool_call":
+			blocks = append(blocks, openAIResponsesOutputToolUseBlock(item))
 		}
 	}
 	return blocks
@@ -857,7 +841,9 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 				delete(customToolBlocks, evt.Index)
 				return writer.WriteCustomToolCallDelta(evt.Index, state.callID, state.name, anthropicCustomToolInputFromJSON(state.input))
 			}
-			return writer.CloseReasoningBlock(evt.Index, "completed")
+			if _, ok := writer.reasoningItems[evt.Index]; ok {
+				return writer.CloseReasoningBlock(evt.Index, "completed")
+			}
 		case EventMessageDelta:
 			var evt anthropicStreamMessageDeltaEvent
 			if err := json.Unmarshal(data, &evt); err != nil {
@@ -885,15 +871,20 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 
 func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io.Reader, writer *responsesStreamWriter) (string, error) {
 	finishReason := "stop"
+	seenDone := false
 	toolDeltas := newOpenAIChatToolDeltaBuffer(writer)
 	scanner := NewSSEScanner(body)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "" || !strings.HasPrefix(line, "data: ") {
+		if line == "" {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
+		data, ok := sseFieldValue(line, "data")
+		if !ok {
+			continue
+		}
 		if data == OpenAIDoneMarker {
+			seenDone = true
 			break
 		}
 		if err := core.ParseOpenAIStreamErrorChunk([]byte(data)); err != nil {
@@ -905,20 +896,33 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 			return "", err
 		}
 		writer.SetUsageCounts(parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
-		if err := writer.WriteTextDelta(parsed.Content); err != nil {
-			return "", err
+		choices := parsed.Choices
+		if len(choices) == 0 {
+			choices = []core.ParsedOpenAIStreamChoice{{
+				FinishReason: parsed.FinishReason,
+				Content:      parsed.Content,
+				ToolCalls:    parsed.ToolCalls,
+			}}
 		}
-		for _, tc := range parsed.ToolCalls {
-			if err := toolDeltas.Apply(tc); err != nil {
+		for _, choice := range choices {
+			if err := writer.WriteTextDelta(choice.Content); err != nil {
 				return "", err
 			}
-		}
-		if parsed.FinishReason != "" {
-			finishReason = parsed.FinishReason
+			for _, tc := range choice.ToolCalls {
+				if err := toolDeltas.Apply(tc); err != nil {
+					return "", err
+				}
+			}
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", err
+	}
+	if !seenDone {
+		return "", fmt.Errorf("OpenAI chat stream ended before terminal %s marker", OpenAIDoneMarker)
 	}
 	if err := toolDeltas.Flush(); err != nil {
 		return "", err

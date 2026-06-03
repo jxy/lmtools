@@ -21,7 +21,7 @@ func BuildModelsRequest(opts ModelsRequestOptions) (*http.Request, error) {
 	}
 	provider := providerOpts.Provider
 
-	url, err := providers.ResolveModelsURLWithArgoOptions(provider, providerOpts.ProviderURL, providerOpts.ArgoEnv, providerOpts.ArgoLegacy)
+	url, err := providers.ResolveModelsURL(provider, providerOpts.ProviderURL, providerOpts.ArgoEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -39,9 +39,7 @@ func BuildModelsRequest(opts ModelsRequestOptions) (*http.Request, error) {
 		return nil, fmt.Errorf("-api-key-file is required for %s provider when listing models", provider)
 	}
 	if providerKey != nil {
-		if err := providerKey.Apply(req); err != nil {
-			return nil, err
-		}
+		auth.SetProviderHeaders(req, providerKey.Provider, providerKey.Value)
 	}
 
 	return req, nil

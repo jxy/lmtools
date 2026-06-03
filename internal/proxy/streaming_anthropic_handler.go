@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"lmtools/internal/logger"
 	"net/http"
 	"sync"
@@ -87,41 +86,6 @@ func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string
 // SendToolInputDelta sends tool input delta.
 func (h *AnthropicStreamHandler) SendToolInputDelta(index int, partialJSON string) error {
 	return h.SendEvent(EventContentBlockDelta, NewToolInputDelta(index, partialJSON))
-}
-
-// SendContentBlockDelta sends a content_block_delta event with any delta type.
-func (h *AnthropicStreamHandler) SendContentBlockDelta(index int, delta interface{}) error {
-	var deltaData ContentBlockDeltaEvent
-
-	if evt, ok := delta.(ContentBlockDeltaEvent); ok {
-		deltaData = evt
-	} else {
-		switch d := delta.(type) {
-		case DeltaContent:
-			switch d.Type {
-			case "text_delta":
-				deltaData = NewTextDelta(index, d.Text)
-			case "input_json_delta":
-				partialJSON := ""
-				if d.PartialJSON != nil {
-					partialJSON = *d.PartialJSON
-				}
-				deltaData = NewToolInputDelta(index, partialJSON)
-			default:
-				deltaData = ContentBlockDeltaEvent{
-					Type:  EventContentBlockDelta,
-					Index: index,
-					Delta: d,
-				}
-			}
-		case string:
-			deltaData = NewTextDelta(index, d)
-		default:
-			deltaData = NewTextDelta(index, fmt.Sprintf("%v", delta))
-		}
-	}
-
-	return h.SendEvent(EventContentBlockDelta, deltaData)
 }
 
 // SendContentBlockStop sends a content_block_stop event.

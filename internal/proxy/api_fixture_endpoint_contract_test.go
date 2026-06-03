@@ -509,6 +509,7 @@ func loadExpectedBackendBody(root string, meta apifixtures.CaseMeta, clientFamil
 			if err != nil {
 				return nil, err
 			}
+			stripOpenAICompatibleStop(rendered)
 			return json.Marshal(rendered)
 		case "google":
 			rendered, err := ConvertAnthropicToGoogle(context.Background(), &req)

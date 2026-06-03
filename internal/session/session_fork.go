@@ -116,24 +116,9 @@ func copyForkLineageWithManager(ctx context.Context, manager *Manager, originalP
 	if manager == nil {
 		manager = DefaultManager()
 	}
-	messages, err := GetLineageWithManager(manager, originalPath)
+	refs, err := lineageMessageRefsWithManager(manager, originalPath)
 	if err != nil {
 		return errors.WrapError("get lineage from original session", err)
-	}
-
-	msgIndex, err := indexMessagesAlongPathWithManager(manager, originalPath)
-	if err != nil {
-		return errors.WrapError("index lineage messages", err)
-	}
-
-	refs := make([]lineageMessageRef, 0, len(messages))
-	for _, msg := range messages {
-		originalMsgPath := msgIndex[msg.ID]
-		if originalMsgPath == "" {
-			originalMsgPath = originalPath
-		}
-		logger.From(ctx).Debugf("Processing message %s (role=%s) from path %s", msg.ID, msg.Role, originalMsgPath)
-		refs = append(refs, lineageMessageRef{path: originalMsgPath, message: msg})
 	}
 
 	return copyLineageMessageRefs(ctx, refs, newSession)

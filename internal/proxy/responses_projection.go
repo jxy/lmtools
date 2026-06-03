@@ -371,12 +371,8 @@ func appendUniqueString(items []string, value string) []string {
 }
 
 func openAIResponsesCoreResponse(resp *OpenAIResponsesResponse) core.Response {
-	text := resp.OutputText
-	if text == "" {
-		text = openAIResponsesOutputText(resp.Output)
-	}
 	return core.Response{
-		Text:      text,
+		Text:      openAIResponsesOutputText(resp.Output),
 		ToolCalls: openAIResponsesOutputToolCalls(resp.Output),
 		Blocks:    openAIResponsesOutputBlocks(resp.Output),
 	}
@@ -508,46 +504,54 @@ func openAIResponsesOutputToolCalls(output []OpenAIResponsesOutputItem) []core.T
 func openAIResponsesOutputBlocks(output []OpenAIResponsesOutputItem) []core.Block {
 	blocks := make([]core.Block, 0)
 	for _, item := range output {
-		switch item.Type {
-		case "reasoning":
-			raw := mustMarshalJSON(item)
-			blocks = append(blocks, core.ReasoningBlock{
-				Provider:         "openai",
-				Type:             "reasoning",
-				ID:               item.ID,
-				Status:           item.Status,
-				Summary:          mustMarshalJSON(item.Summary),
-				EncryptedContent: item.EncryptedContent,
-				Raw:              raw,
-			})
-		case "message":
-			for _, part := range item.Content {
-				if part.Text != "" {
-					blocks = append(blocks, core.TextBlock{Text: part.Text})
-				}
-			}
-		case "function_call":
-			blocks = append(blocks, core.ToolUseBlock{
-				ID:           firstNonEmpty(item.CallID, item.ID),
-				Type:         "function",
-				Namespace:    item.Namespace,
-				OriginalName: item.Name,
-				Name:         responseOutputToolName(item),
-				Input:        core.NormalizeOpenAIResponsesArguments(item.Arguments),
-			})
-		case "custom_tool_call":
-			blocks = append(blocks, core.ToolUseBlock{
-				ID:           firstNonEmpty(item.CallID, item.ID),
-				Type:         "custom",
-				Namespace:    item.Namespace,
-				OriginalName: item.Name,
-				Name:         responseOutputToolName(item),
-				Input:        mustMarshalJSON(item.Input),
-				InputString:  item.Input,
-			})
-		}
+		blocks = append(blocks, openAIResponsesOutputItemBlocks(item)...)
 	}
 	return blocks
+}
+
+func openAIResponsesOutputItemBlocks(item OpenAIResponsesOutputItem) []core.Block {
+	switch item.Type {
+	case "reasoning":
+		return []core.Block{core.ReasoningBlock{
+			Provider:         "openai",
+			Type:             "reasoning",
+			ID:               item.ID,
+			Status:           item.Status,
+			Summary:          mustMarshalJSON(item.Summary),
+			EncryptedContent: item.EncryptedContent,
+			Raw:              mustMarshalJSON(item),
+		}}
+	case "message":
+		blocks := make([]core.Block, 0, len(item.Content))
+		for _, part := range item.Content {
+			if part.Text != "" {
+				blocks = append(blocks, core.TextBlock{Text: part.Text})
+			}
+		}
+		return blocks
+	case "function_call", "custom_tool_call":
+		return []core.Block{openAIResponsesOutputToolUseBlock(item)}
+	default:
+		return nil
+	}
+}
+
+func openAIResponsesOutputToolUseBlock(item OpenAIResponsesOutputItem) core.ToolUseBlock {
+	block := core.ToolUseBlock{
+		ID:           firstNonEmpty(item.CallID, item.ID),
+		Namespace:    item.Namespace,
+		OriginalName: item.Name,
+		Name:         responseOutputToolName(item),
+	}
+	if item.Type == "custom_tool_call" {
+		block.Type = "custom"
+		block.Input = mustMarshalJSON(item.Input)
+		block.InputString = item.Input
+		return block
+	}
+	block.Type = "function"
+	block.Input = core.NormalizeOpenAIResponsesArguments(item.Arguments)
+	return block
 }
 
 func mustMarshalJSON(value interface{}) json.RawMessage {

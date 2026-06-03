@@ -116,20 +116,21 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	logger.DebugJSON(log, "Incoming Token Count Request", req)
 
 	// Map model to provider
-	mappedModel := s.mapper.MapModel(req.Model)
+	originalModel := req.Model
+	mappedModel := s.mapper.MapModel(originalModel)
 	if mappedModel == "" {
-		mappedModel = req.Model
+		mappedModel = originalModel
 	}
 	provider := s.config.Provider // Provider always comes from config
 	if provider == "" {
 		// For count_tokens, we can provide an estimate even for unknown providers
 		log.Warnf("No provider configured, using estimation")
 		provider = "estimation"
-	} else if req.Model != "" {
+	} else if originalModel != "" {
 		req.Model = mappedModel
 	}
 
-	log.Infof("Token counting: model=%s, provider=%s", req.Model, provider)
+	log.Infof("Token counting: model=%s->%s, provider=%s", originalModel, mappedModel, provider)
 
 	if resp, handled, err := s.countAnthropicTokensWithProvider(ctx, req, provider, mappedModel); handled {
 		if err != nil {
@@ -141,7 +142,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Infof("Input tokens: %d", resp.InputTokens)
-		RequestSummary(ctx, r.Method, r.URL.Path, req.Model, mappedModel, provider,
+		RequestSummary(ctx, r.Method, r.URL.Path, originalModel, mappedModel, provider,
 			len(req.Messages), len(req.Tools), http.StatusOK, false, time.Since(start))
 		return
 	}
@@ -173,7 +174,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	log.Infof("Input tokens: %d", inputTokens)
 
 	// Log request summary
-	RequestSummary(ctx, r.Method, r.URL.Path, req.Model, mappedModel, provider,
+	RequestSummary(ctx, r.Method, r.URL.Path, originalModel, mappedModel, provider,
 		len(req.Messages), len(req.Tools), http.StatusOK, false, time.Since(start))
 }
 
@@ -241,7 +242,7 @@ func (s *Server) forwardAnthropicRequest(ctx context.Context, anthReq *Anthropic
 
 func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
 	var resp AnthropicTokenCountResponse
-	err := s.doJSON(ctx, s.endpoints.ArgoAnthropicCountTokens, req, s.configureArgoAnthropicRequest, &resp, "Argo Anthropic count_tokens")
+	err := s.doJSON(ctx, s.endpoints.ArgoAnthropicCountTokens, req, s.configureArgoAnthropicRequest, &resp, constants.ProviderArgo, "Argo Anthropic count_tokens")
 	if err != nil {
 		return nil, err
 	}
@@ -250,13 +251,9 @@ func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicToken
 
 func (s *Server) forwardAnthropicCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
 	var resp AnthropicTokenCountResponse
-	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) error {
-		if err := auth.ApplyProviderCredentials(httpReq, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey); err != nil {
-			return err
-		}
-		httpReq.Header.Set("anthropic-version", "2023-06-01")
-		return nil
-	}, &resp, "Anthropic count_tokens")
+	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) {
+		auth.SetProviderHeaders(httpReq, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
+	}, &resp, constants.ProviderAnthropic, "Anthropic count_tokens")
 	if err != nil {
 		return nil, err
 	}

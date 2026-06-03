@@ -6,7 +6,6 @@ import (
 	"io"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	"strings"
 	"time"
 )
 
@@ -15,11 +14,17 @@ type OpenAIStreamParser struct {
 	handler           *AnthropicStreamHandler
 	pendingStopReason string
 	finished          bool
+	stopper           *stopTextEnforcer
 }
 
 // NewOpenAIStreamParser creates a new OpenAI stream parser.
 func NewOpenAIStreamParser(handler *AnthropicStreamHandler) *OpenAIStreamParser {
-	return &OpenAIStreamParser{handler: handler}
+	return NewOpenAIStreamParserWithStops(handler, nil)
+}
+
+// NewOpenAIStreamParserWithStops creates a new OpenAI stream parser with local stop enforcement.
+func NewOpenAIStreamParserWithStops(handler *AnthropicStreamHandler, stops []string) *OpenAIStreamParser {
+	return &OpenAIStreamParser{handler: handler, stopper: newStopTextEnforcer(stops)}
 }
 
 // Parse parses an OpenAI streaming response.
@@ -32,10 +37,11 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			continue
 		}
 
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-
+		if data, ok := sseFieldValue(line, "data"); ok {
 			if data == "[DONE]" {
+				if err := p.flushStopTail(); err != nil {
+					return err
+				}
 				return p.finishPending("end_turn")
 			}
 
@@ -71,15 +77,50 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 }
 
 func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) error {
-	p.handler.SetParsedUsage(chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
+	if p.finished {
+		return nil
+	}
 
-	if chunk.Content != "" {
-		if err := p.handler.SendTextDelta(chunk.Content); err != nil {
+	p.handler.SetParsedUsage(chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
+	choices := chunk.Choices
+	if len(choices) == 0 {
+		choices = []core.ParsedOpenAIStreamChoice{{
+			FinishReason: chunk.FinishReason,
+			Content:      chunk.Content,
+			ToolCalls:    chunk.ToolCalls,
+		}}
+	}
+	for _, choice := range choices {
+		if err := p.processChoice(choice); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	for _, tc := range chunk.ToolCalls {
+func (p *OpenAIStreamParser) processChoice(choice core.ParsedOpenAIStreamChoice) error {
+	if p.finished {
+		return nil
+	}
+
+	if choice.Content != "" {
+		content := choice.Content
+		matched := false
+		if p.stopper != nil {
+			content, matched = p.stopper.Push(choice.Content)
+		}
+		if content != "" {
+			if err := p.handler.SendTextDelta(content); err != nil {
+				return err
+			}
+		}
+		if matched {
+			p.pendingStopReason = "end_turn"
+			return p.finishPending("end_turn")
+		}
+	}
+
+	for _, tc := range choice.ToolCalls {
 		index := tc.Index
 		toolID := tc.ID
 		if toolID == "" {
@@ -98,10 +139,25 @@ func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) er
 		}
 	}
 
-	if chunk.FinishReason != "" {
-		p.pendingStopReason = MapOpenAIFinishReasonToStopReason(chunk.FinishReason)
+	if choice.FinishReason != "" {
+		p.pendingStopReason = MapOpenAIFinishReasonToStopReason(choice.FinishReason)
+		if p.stopper != nil && !p.stopper.Stopped() {
+			if err := p.flushStopTail(); err != nil {
+				return err
+			}
+		}
 	}
 
+	return nil
+}
+
+func (p *OpenAIStreamParser) flushStopTail() error {
+	if p.stopper == nil || p.stopper.Stopped() {
+		return nil
+	}
+	if tail := p.stopper.Flush(); tail != "" {
+		return p.handler.SendTextDelta(tail)
+	}
 	return nil
 }
 

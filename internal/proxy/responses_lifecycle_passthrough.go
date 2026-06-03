@@ -39,10 +39,7 @@ func (s *Server) forwardOpenAIRawLifecycleWithBody(w http.ResponseWriter, r *htt
 	} else if len(body) > 0 {
 		upstreamReq.Header.Set("Content-Type", "application/json")
 	}
-	if err := auth.ApplyProviderCredentials(upstreamReq, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey); err != nil {
-		s.sendOpenAIError(w, ErrTypeAuthentication, err.Error(), "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	auth.SetProviderHeaders(upstreamReq, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 	logWireHTTPRequest(ctx, "WIRE BACKEND REQUEST OpenAI lifecycle", upstreamReq, body)
 	resp, err := s.client.Do(ctx, upstreamReq, constants.ProviderOpenAI)
 	if err != nil {
@@ -52,6 +49,7 @@ func (s *Server) forwardOpenAIRawLifecycleWithBody(w http.ResponseWriter, r *htt
 	}
 	defer resp.Body.Close()
 	logWireHTTPResponseHeaders(ctx, "WIRE BACKEND RESPONSE HEADERS OpenAI lifecycle", resp)
+	wrapWireLoggedResponseBody(ctx, "WIRE BACKEND RESPONSE BODY OpenAI lifecycle", resp)
 	respBody, err := s.readResponseBody(resp)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to read upstream response", "read_error", http.StatusBadGateway)

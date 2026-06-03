@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -237,6 +240,124 @@ func TestPersistAssistantRoundPreservesResponseBlocks(t *testing.T) {
 	}
 	if reasoning.EncryptedContent != "enc_001" {
 		t.Fatalf("EncryptedContent = %q, want enc_001", reasoning.EncryptedContent)
+	}
+}
+
+func TestBuildAndSendFollowupRequestPreservesLeadingSessionSystem(t *testing.T) {
+	var requestBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		requestBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"done"}]}`))
+	}))
+	defer server.Close()
+
+	cfg := RequestOptions{
+		Provider:            "anthropic",
+		ProviderURL:         server.URL,
+		Model:               "claude-test",
+		System:              "config default system",
+		EffectiveSystem:     "config default system",
+		SystemExplicitlySet: true,
+		ToolEnabled:         true,
+	}
+	store := &mockSessionStore{path: "/test/session"}
+	_, err := BuildAndSendFollowupRequest(
+		context.Background(),
+		cfg,
+		ToolExecutionConfig{Store: store},
+		cfg.Model,
+		nil,
+		func(string) ([]TypedMessage, error) {
+			return []TypedMessage{
+				NewTextMessage("system", "session system"),
+				NewTextMessage("user", "hello"),
+				{
+					Role: string(RoleAssistant),
+					Blocks: []Block{ToolUseBlock{
+						ID:    "call_1",
+						Name:  "universal_command",
+						Input: json.RawMessage(`{"command":["echo","hi"]}`),
+					}},
+				},
+				{
+					Role: string(RoleUser),
+					Blocks: []Block{ToolResultBlock{
+						ToolUseID: "call_1",
+						Content:   "hi",
+					}},
+				},
+			}, nil
+		},
+		NewTestLogger(false),
+	)
+	if err != nil {
+		t.Fatalf("BuildAndSendFollowupRequest() error = %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		t.Fatalf("request JSON = %s, error = %v", string(requestBody), err)
+	}
+	if got := payload["system"]; got != "session system" {
+		t.Fatalf("system = %#v, want session system in %s", got, string(requestBody))
+	}
+	messages, ok := payload["messages"].([]interface{})
+	if !ok || len(messages) == 0 {
+		t.Fatalf("messages = %#v", payload["messages"])
+	}
+	first, ok := messages[0].(map[string]interface{})
+	if !ok || first["role"] == "system" {
+		t.Fatalf("first message = %#v, want non-system because Anthropic carries system out of band", first)
+	}
+}
+
+func TestBuildAndSendFollowupRequestUsesConfigSystemWhenSessionHasNoSystem(t *testing.T) {
+	var requestBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		requestBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"done"}]}`))
+	}))
+	defer server.Close()
+
+	cfg := RequestOptions{
+		Provider:            "anthropic",
+		ProviderURL:         server.URL,
+		Model:               "claude-test",
+		System:              "config system",
+		EffectiveSystem:     "config system",
+		SystemExplicitlySet: true,
+		ToolEnabled:         true,
+	}
+	_, err := BuildAndSendFollowupRequest(
+		context.Background(),
+		cfg,
+		ToolExecutionConfig{Store: &mockSessionStore{path: "/test/session"}},
+		cfg.Model,
+		nil,
+		func(string) ([]TypedMessage, error) {
+			return []TypedMessage{NewTextMessage("user", "hello")}, nil
+		},
+		NewTestLogger(false),
+	)
+	if err != nil {
+		t.Fatalf("BuildAndSendFollowupRequest() error = %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		t.Fatalf("request JSON = %s, error = %v", string(requestBody), err)
+	}
+	if got := payload["system"]; got != "config system" {
+		t.Fatalf("system = %#v, want config system in %s", got, string(requestBody))
 	}
 }
 

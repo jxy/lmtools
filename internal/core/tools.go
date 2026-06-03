@@ -330,11 +330,23 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 		return nil, fmt.Errorf("failed to get messages with tools: %w", err)
 	}
 
-	// Extract system message if present
-	system := extractSystemMessage(typedMessages)
+	if len(toolDefs) == 0 && cfg.ToolEnabled {
+		toolDefs = GetBuiltinUniversalCommandTool()
+	}
 
 	// Build request
-	req, body, err := BuildToolResultRequest(cfg, model, system, toolDefs, typedMessages)
+	buildMessages := typedMessages
+	buildOptions := ChatBuildOptions{
+		ModelOverride: model,
+		ToolDefs:      toolDefs,
+		Stream:        cfg.StreamChat,
+	}
+	if system, rest, found := splitSystemWithPresence(typedMessages); found {
+		buildMessages = rest
+		buildOptions.SystemOverride = system
+		buildOptions.SystemOverrideSet = true
+	}
+	req, body, err := BuildChatRequest(cfg, buildMessages, buildOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build tool result request: %w", err)
 	}
@@ -353,10 +365,4 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 	// Fallback to direct HTTP client if no retry client provided
 	client := &http.Client{}
 	return client.Do(req)
-}
-
-// extractSystemMessage extracts the system message from typed messages if present
-func extractSystemMessage(typedMessages []TypedMessage) string {
-	system, _ := splitSystem(typedMessages)
-	return system
 }

@@ -13,19 +13,22 @@ type argoChatRequestPlan struct {
 	WireProvider string
 	Payload      PreparedRequestPayload
 	Endpoint     string
-	Legacy       bool
 }
 
 func buildArgoChatRequest(cfg RequestOptions, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	if err := ValidateMessagesForProvider(constants.ProviderArgo, messages); err != nil {
 		return nil, nil, err
 	}
+	if model == "" {
+		model = GetDefaultChatModel(constants.ProviderArgo)
+	}
+	if isArgoLegacyMode(cfg) {
+		return buildLegacyArgoChatRequest(cfg, model, messages, system, systemExplicit, toolDefs, toolChoice, stream)
+	}
+
 	plan, err := newArgoChatRequestPlan(cfg, messages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {
 		return nil, nil, err
-	}
-	if plan.Legacy {
-		return buildLegacyArgoChatRequest(cfg, plan.Model, messages, system, systemExplicit, toolDefs, toolChoice, stream)
 	}
 	spec, err := requireProviderRequestSpec(plan.WireProvider)
 	if err != nil {
@@ -64,9 +67,8 @@ func newArgoChatRequestPlan(cfg RequestOptions, messages []TypedMessage, model s
 		Model:        model,
 		WireProvider: wireProvider,
 		Payload:      payload,
-		Legacy:       isArgoLegacyMode(cfg),
 	}
-	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, model, stream, plan.Legacy)
+	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, model, stream, false)
 	if err != nil {
 		return argoChatRequestPlan{}, err
 	}
@@ -108,7 +110,11 @@ func buildLegacyArgoChatRequest(cfg RequestOptions, model string, messages []Typ
 	}
 	payload := PreparedRequestPayload{Model: model}
 	applyOutputOptionsFromConfig(&payload, cfg)
-	addOpenAIOutputFields(bodyMap, payload)
+	if providers.DetermineArgoModelProvider(model) == constants.ProviderAnthropic {
+		addAnthropicOutputFields(bodyMap, payload)
+	} else {
+		addOpenAIOutputFields(bodyMap, payload)
+	}
 
 	body, err := json.Marshal(bodyMap)
 	if err != nil {

@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -337,6 +338,30 @@ func TestRetry(t *testing.T) {
 	})
 }
 
+type countingReadCloser struct {
+	remaining int64
+	read      int64
+	closed    bool
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n := len(p)
+	r.remaining -= int64(n)
+	r.read += int64(n)
+	return n, nil
+}
+
+func (r *countingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
 func TestDrainAndClose(t *testing.T) {
 	t.Run("handles nil response", func(t *testing.T) {
 		// Should not panic
@@ -363,5 +388,16 @@ func TestDrainAndClose(t *testing.T) {
 
 		// Should drain and close without error
 		DrainAndClose(resp)
+	})
+
+	t.Run("bounded drain", func(t *testing.T) {
+		body := &countingReadCloser{remaining: maxRetryDrainBytes * 2}
+		DrainAndClose(&http.Response{Body: body})
+		if !body.closed {
+			t.Fatal("body was not closed")
+		}
+		if body.read > maxRetryDrainBytes {
+			t.Fatalf("read %d bytes, want <= %d", body.read, maxRetryDrainBytes)
+		}
 	})
 }

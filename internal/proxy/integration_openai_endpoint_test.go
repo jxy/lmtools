@@ -388,6 +388,247 @@ func TestArgoOpenAIDirectOmitsZeroMaxCompletionTokens(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatCompletionsRetries400WithIncreasedMaxCompletionTokens(t *testing.T) {
+	var attempts []int
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
+			t.Fatalf("upstream path = %q, want /v1/chat/completions suffix", r.URL.Path)
+		}
+		var captured OpenAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		if captured.MaxCompletionTokens == nil {
+			t.Fatalf("upstream max_completion_tokens missing on attempt %d", len(attempts)+1)
+		}
+		attempts = append(attempts, *captured.MaxCompletionTokens)
+		if len(attempts) == 1 {
+			return jsonRoundTripResponse(http.StatusBadRequest, map[string]interface{}{
+				"error": map[string]interface{}{"message": "max_completion_tokens too small"},
+			}), nil
+		}
+		return jsonRoundTripResponse(http.StatusOK, OpenAIResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   captured.Model,
+			Choices: []OpenAIChoice{{
+				Index: 0,
+				Message: OpenAIMessage{
+					Role:    "assistant",
+					Content: "ok",
+				},
+				FinishReason: "stop",
+			}},
+		}), nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://openai.local/v1/chat/completions",
+		Provider:           constants.ProviderOpenAI,
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	logs := captureStderr(t, func() {
+		code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/chat/completions", map[string]interface{}{
+			"model":                 "gpt-5.4-nano",
+			"messages":              []interface{}{map[string]interface{}{"role": "user", "content": "Hello!"}},
+			"max_completion_tokens": 100,
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", code, string(body))
+		}
+	})
+
+	wantAttempts := []int{100, 356}
+	if !intSlicesEqual(attempts, wantAttempts) {
+		t.Fatalf("max_completion_tokens attempts = %v, want %v", attempts, wantAttempts)
+	}
+	for _, want := range []string{"[WARN]", "max_completion_tokens=100", "max_completion_tokens=356", "retry 1/3"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+}
+
+func TestOpenAIChatCompletionsRetries400ReturnsFirst400AfterExhaustion(t *testing.T) {
+	var attempts []int
+	errorBodies := []string{
+		`{"error":{"message":"first 400"}}`,
+		`{"error":{"message":"second 400"}}`,
+		`{"error":{"message":"third 400"}}`,
+		`{"error":{"message":"fourth 400"}}`,
+	}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var captured OpenAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		if captured.MaxCompletionTokens == nil {
+			t.Fatalf("upstream max_completion_tokens missing on attempt %d", len(attempts)+1)
+		}
+		attempts = append(attempts, *captured.MaxCompletionTokens)
+		body := errorBodies[len(attempts)-1]
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://openai.local/v1/chat/completions",
+		Provider:           constants.ProviderOpenAI,
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/chat/completions", map[string]interface{}{
+		"model":                 "gpt-5.4-nano",
+		"messages":              []interface{}{map[string]interface{}{"role": "user", "content": "Hello!"}},
+		"max_completion_tokens": 100,
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", code, string(body))
+	}
+	if string(body) != errorBodies[0] {
+		t.Fatalf("body = %s, want first 400 body %s", string(body), errorBodies[0])
+	}
+	wantAttempts := []int{100, 356, 612, 1124}
+	if !intSlicesEqual(attempts, wantAttempts) {
+		t.Fatalf("max_completion_tokens attempts = %v, want %v", attempts, wantAttempts)
+	}
+}
+
+func TestOpenAIChatCompletionsDoesNotRetry400WithoutMaxCompletionTokens(t *testing.T) {
+	attempts := 0
+	firstBody := `{"error":{"message":"bad request"}}`
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(firstBody)),
+		}, nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://openai.local/v1/chat/completions",
+		Provider:           constants.ProviderOpenAI,
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/chat/completions", map[string]interface{}{
+		"model":    "gpt-5.4-nano",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "Hello!"}},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", code, string(body))
+	}
+	if string(body) != firstBody {
+		t.Fatalf("body = %s, want %s", string(body), firstBody)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestOpenAIChatCompletionsDoesNotRetry400WithOnlyMaxTokens(t *testing.T) {
+	attempts := 0
+	firstBody := `{"error":{"message":"bad request"}}`
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(firstBody)),
+		}, nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://openai.local/v1/chat/completions",
+		Provider:           constants.ProviderOpenAI,
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/chat/completions", map[string]interface{}{
+		"model":      "gpt-5.4-nano",
+		"messages":   []interface{}{map[string]interface{}{"role": "user", "content": "Hello!"}},
+		"max_tokens": 100,
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", code, string(body))
+	}
+	if string(body) != firstBody {
+		t.Fatalf("body = %s, want %s", string(body), firstBody)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestOpenAIChatCompletionsStreamingRetries400BeforeStreaming(t *testing.T) {
+	var attempts []int
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("Accept"); got != "text/event-stream" {
+			t.Fatalf("Accept = %q, want text/event-stream", got)
+		}
+		var captured OpenAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		if captured.MaxCompletionTokens == nil {
+			t.Fatalf("upstream max_completion_tokens missing on attempt %d", len(attempts)+1)
+		}
+		attempts = append(attempts, *captured.MaxCompletionTokens)
+		if len(attempts) == 1 {
+			return jsonRoundTripResponse(http.StatusBadRequest, map[string]interface{}{
+				"error": map[string]interface{}{"message": "max_completion_tokens too small"},
+			}), nil
+		}
+		streamBody := `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","model":"gpt-5.4-nano","choices":[{"index":0,"delta":{"content":"ok"}}]}` + "\n\n" + "data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(streamBody)),
+		}, nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://openai.local/v1/chat/completions",
+		Provider:           constants.ProviderOpenAI,
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/chat/completions", map[string]interface{}{
+		"model":                 "gpt-5.4-nano",
+		"stream":                true,
+		"messages":              []interface{}{map[string]interface{}{"role": "user", "content": "Hello!"}},
+		"max_completion_tokens": 100,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", code, string(body))
+	}
+	if !strings.Contains(string(body), "data:") || !strings.Contains(string(body), "[DONE]") {
+		t.Fatalf("stream body = %s, want SSE data", string(body))
+	}
+	wantAttempts := []int{100, 356}
+	if !intSlicesEqual(attempts, wantAttempts) {
+		t.Fatalf("max_completion_tokens attempts = %v, want %v", attempts, wantAttempts)
+	}
+}
+
+func intSlicesEqual(got, want []int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestArgoModelMapRoutesOpenAIAliasToAnthropicEndpoint(t *testing.T) {
 	var captured AnthropicRequest
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -496,6 +737,77 @@ func TestArgoModelMapRoutesClaudeAliasToOpenAIEndpoint(t *testing.T) {
 	}
 	if captured.Model != "gpt-5.4-nano" {
 		t.Fatalf("upstream model = %q, want gpt-5.4-nano", captured.Model)
+	}
+}
+
+func TestAnthropicMessagesArgoOpenAIMappedChatCompletionsRetries400WithIncreasedMaxTokens(t *testing.T) {
+	var attempts []int
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
+			t.Fatalf("upstream path = %q, want /v1/chat/completions suffix", r.URL.Path)
+		}
+		var captured OpenAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		if captured.Model != "gpt55" {
+			t.Fatalf("upstream model = %q, want gpt55", captured.Model)
+		}
+		if captured.MaxTokens == nil {
+			t.Fatalf("upstream max_tokens missing on attempt %d; request = %+v", len(attempts)+1, captured)
+		}
+		attempts = append(attempts, *captured.MaxTokens)
+		if len(attempts) == 1 {
+			return jsonRoundTripResponse(http.StatusBadRequest, map[string]interface{}{
+				"error": map[string]interface{}{"message": "Could not finish the message because max_tokens or model output limit was reached. Please try again with higher max_tokens."},
+			}), nil
+		}
+		return jsonRoundTripResponse(http.StatusOK, OpenAIResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   captured.Model,
+			Choices: []OpenAIChoice{{
+				Index: 0,
+				Message: OpenAIMessage{
+					Role:    "assistant",
+					Content: "ok",
+				},
+				FinishReason: "stop",
+			}},
+			Usage: &OpenAIUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
+		}), nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{
+		ProviderURL:        "http://argo.local/v1",
+		Provider:           constants.ProviderArgo,
+		ArgoUser:           "testuser",
+		ModelMapRules:      []ModelMapRule{{Pattern: `^claude-opus-4-8\[1m\]$`, Model: "gpt55"}},
+		MaxRequestBodySize: 100 * 1024 * 1024,
+	}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	logs := captureStderr(t, func() {
+		code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/messages", map[string]interface{}{
+			"model":      "claude-opus-4-8[1m]",
+			"max_tokens": 100,
+			"messages":   []interface{}{map[string]interface{}{"role": "user", "content": "Hello!"}},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", code, string(body))
+		}
+		if !strings.Contains(string(body), `"model":"claude-opus-4-8[1m]"`) {
+			t.Fatalf("response body = %s, want original model", string(body))
+		}
+	})
+
+	wantAttempts := []int{100, 356}
+	if !intSlicesEqual(attempts, wantAttempts) {
+		t.Fatalf("max_tokens attempts = %v, want %v", attempts, wantAttempts)
+	}
+	for _, want := range []string{"[WARN]", "Argo OpenAI chat/completions returned 400", "max_tokens=100", "max_tokens=356", "retry 1/3"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
 	}
 }
 

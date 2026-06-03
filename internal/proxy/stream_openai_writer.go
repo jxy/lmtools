@@ -12,13 +12,17 @@ import (
 
 // OpenAIStreamWriter handles Server-Sent Events writing for OpenAI format.
 type OpenAIStreamWriter struct {
-	mu           sync.Mutex
-	sse          *SSEWriter
-	ctx          context.Context
-	streamID     string
-	model        string
-	created      int64
-	includeUsage bool
+	mu                sync.Mutex
+	sse               *SSEWriter
+	ctx               context.Context
+	streamID          string
+	model             string
+	created           int64
+	includeUsage      bool
+	stopper           *stopTextEnforcer
+	finished          bool
+	localStopFinished bool
+	doneWritten       bool
 }
 
 // OpenAIStreamOption is a functional option for configuring OpenAIStreamWriter.
@@ -28,6 +32,13 @@ type OpenAIStreamOption func(*OpenAIStreamWriter)
 func WithIncludeUsage(include bool) OpenAIStreamOption {
 	return func(w *OpenAIStreamWriter) {
 		w.includeUsage = include
+	}
+}
+
+// WithStopSequences sets stop sequences enforced locally on text deltas.
+func WithStopSequences(stops []string) OpenAIStreamOption {
+	return func(w *OpenAIStreamWriter) {
+		w.stopper = newStopTextEnforcer(stops)
 	}
 }
 
@@ -55,8 +66,16 @@ func NewOpenAIStreamWriter(w http.ResponseWriter, model string, ctx context.Cont
 
 // WriteChunk writes a complete OpenAI streaming chunk.
 func (w *OpenAIStreamWriter) WriteChunk(chunk *OpenAIStreamChunk) error {
+	return w.writeChunk(chunk, false)
+}
+
+func (w *OpenAIStreamWriter) writeChunk(chunk *OpenAIStreamChunk, allowFinished bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	if w.finished && !allowFinished {
+		return nil
+	}
 
 	if chunk.ID == "" {
 		chunk.ID = w.streamID
@@ -131,6 +150,10 @@ func (w *OpenAIStreamWriter) WriteInitialAssistantToolCallDelta(index int, id, n
 
 // WriteDelta writes a delta update.
 func (w *OpenAIStreamWriter) WriteDelta(content string, role *string, finishReason *string) error {
+	return w.writeDelta(content, role, finishReason, false)
+}
+
+func (w *OpenAIStreamWriter) writeDelta(content string, role *string, finishReason *string, allowFinished bool) error {
 	delta := OpenAIDelta{}
 
 	if role != nil {
@@ -154,41 +177,46 @@ func (w *OpenAIStreamWriter) WriteDelta(content string, role *string, finishReas
 		},
 	}
 
-	return w.WriteChunk(chunk)
+	return w.writeChunk(chunk, allowFinished)
 }
 
 // WriteContent writes a content chunk.
 func (w *OpenAIStreamWriter) WriteContent(text string) error {
-	return w.WriteDelta(text, nil, nil)
+	if w.finished {
+		return nil
+	}
+	if w.stopper == nil {
+		return w.WriteDelta(text, nil, nil)
+	}
+	filtered, matched := w.stopper.Push(text)
+	if filtered != "" {
+		if err := w.WriteDelta(filtered, nil, nil); err != nil {
+			return err
+		}
+	}
+	if matched {
+		if err := w.writeLocalStopFinish(); err != nil {
+			return err
+		}
+		if !w.includeUsage {
+			return w.writeDone(true)
+		}
+	}
+	return nil
 }
 
-// WriteToolCallIntro writes the initial tool call with ID, name, and empty arguments.
-func (w *OpenAIStreamWriter) WriteToolCallIntro(index int, id, name string) error {
-	toolCall := &ToolCallDelta{
-		Index: index,
-		ID:    id,
-		Type:  "function",
-		Function: &FunctionCallDelta{
-			Name:      name,
-			Arguments: "",
-		},
-	}
-	return w.WriteToolCallDelta(index, toolCall, nil, nil)
-}
-
-// WriteToolArguments writes tool argument chunks.
-func (w *OpenAIStreamWriter) WriteToolArguments(index int, argsChunk string) error {
-	toolCall := &ToolCallDelta{
-		Index: index,
-		Function: &FunctionCallDelta{
-			Arguments: argsChunk,
-		},
-	}
-	return w.WriteToolCallDelta(index, toolCall, nil, nil)
+func (w *OpenAIStreamWriter) writeLocalStopFinish() error {
+	w.finished = true
+	w.localStopFinished = true
+	finishReason := "stop"
+	return w.writeDelta("", nil, &finishReason, true)
 }
 
 // WriteToolCallDelta writes a tool call delta.
 func (w *OpenAIStreamWriter) WriteToolCallDelta(index int, toolCall *ToolCallDelta, role *string, finishReason *string) error {
+	if w.finished {
+		return nil
+	}
 	var delta OpenAIDelta
 	if role != nil {
 		r := core.Role(*role)
@@ -210,34 +238,70 @@ func (w *OpenAIStreamWriter) WriteToolCallDelta(index int, toolCall *ToolCallDel
 
 // WriteUsage writes usage information.
 func (w *OpenAIStreamWriter) WriteUsage(usage *OpenAIUsage) error {
+	return w.writeUsage(usage, false)
+}
+
+func (w *OpenAIStreamWriter) writeUsage(usage *OpenAIUsage, allowFinished bool) error {
 	chunk := &OpenAIStreamChunk{
 		Usage:   usage,
 		Choices: []OpenAIStreamDelta{},
 	}
 
-	return w.WriteChunk(chunk)
+	return w.writeChunk(chunk, allowFinished)
 }
 
 // WriteFinish writes the final chunk with finish_reason and optionally usage, then [DONE].
 func (w *OpenAIStreamWriter) WriteFinish(finishReason string, usage *OpenAIUsage) error {
-	if err := w.WriteDelta("", nil, &finishReason); err != nil {
+	if w.doneWritten {
+		return nil
+	}
+	if w.finished && !w.localStopFinished {
+		return nil
+	}
+	if w.localStopFinished {
+		if w.includeUsage && usage != nil {
+			if err := w.writeUsage(usage, true); err != nil {
+				return err
+			}
+		}
+		return w.writeDone(true)
+	}
+	if w.stopper != nil {
+		if w.stopper.Stopped() {
+			finishReason = "stop"
+		} else if tail := w.stopper.Flush(); tail != "" {
+			if err := w.WriteDelta(tail, nil, nil); err != nil {
+				return err
+			}
+		}
+	}
+	w.finished = true
+	if err := w.writeDelta("", nil, &finishReason, true); err != nil {
 		return err
 	}
 
 	if w.includeUsage && usage != nil {
-		if err := w.WriteUsage(usage); err != nil {
+		if err := w.writeUsage(usage, true); err != nil {
 			return err
 		}
 	}
 
-	return w.WriteDone()
+	return w.writeDone(true)
 }
 
 // WriteDone writes the OpenAI stream termination marker "[DONE]".
 func (w *OpenAIStreamWriter) WriteDone() error {
+	return w.writeDone(false)
+}
+
+func (w *OpenAIStreamWriter) writeDone(allowFinished bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.doneWritten || (w.finished && !allowFinished) {
+		return nil
+	}
+	w.doneWritten = true
 	return w.sse.WriteEvent("", OpenAIDoneMarker)
 }
 

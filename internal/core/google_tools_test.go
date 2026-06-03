@@ -73,9 +73,9 @@ func TestBuildGoogleToolAwareRequest(t *testing.T) {
 	}
 
 	toolConfigMap := toolConfig.(map[string]interface{})
-	funcCallConfig, ok := toolConfigMap["functionCallConfig"]
+	funcCallConfig, ok := toolConfigMap["functionCallingConfig"]
 	if !ok {
-		t.Fatal("Expected 'functionCallConfig' in toolConfig")
+		t.Fatal("Expected 'functionCallingConfig' in toolConfig")
 	}
 
 	funcCallConfigMap := funcCallConfig.(map[string]interface{})

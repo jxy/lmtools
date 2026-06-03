@@ -1,15 +1,16 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/providers"
 	"net/http"
-	"strings"
 )
 
 // parseOpenAIRequest reads and validates an OpenAI API request.
@@ -67,14 +68,15 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	}
 
 	openAIReq.Model = route.MappedModel
+	clientStops := nonEmptyStopSequences([]string(openAIReq.Stop))
 
 	// If provider is OpenAI, do a direct pass-through
 	if route.Provider == constants.ProviderOpenAI {
-		s.forwardOpenAIDirectly(w, r, openAIReq, route.OriginalModel)
+		s.forwardOpenAIDirectly(w, r, openAIReq, route.OriginalModel, clientStops)
 		return
 	}
 	if route.Provider == constants.ProviderArgo && !s.useLegacyArgo() && providers.DetermineArgoModelProvider(route.MappedModel) == constants.ProviderOpenAI {
-		s.forwardArgoOpenAIDirectly(w, r, openAIReq, route.OriginalModel)
+		s.forwardArgoOpenAIDirectly(w, r, openAIReq, route.OriginalModel, clientStops)
 		return
 	}
 	if route.Provider == constants.ProviderGoogle && !info.Stream {
@@ -95,7 +97,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	// Handle streaming vs non-streaming
 	if info.Stream {
 		// Handle streaming for OpenAI format
-		s.handleOpenAIStreamingRequest(w, r, openAIReq, anthReq, route.Provider, route.OriginalModel)
+		s.handleOpenAIStreamingRequest(w, r, openAIReq, anthReq, route.Provider, route.OriginalModel, clientStops)
 		return
 	}
 
@@ -109,6 +111,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	// Convert Anthropic response back to OpenAI format
 	registry := responseToolNameRegistryFromCoreTools(OpenAIRequestToTyped(openAIReq).Tools)
 	openAIResp := ConvertAnthropicResponseToOpenAIWithToolNameRegistry(anthResp, route.OriginalModel, registry)
+	enforceOpenAIResponseStops(openAIResp, clientStops)
 
 	// Log the complete OpenAI response before sending (only if debug enabled)
 	logger.DebugJSON(log, "Sending OpenAI response", openAIResp)
@@ -119,6 +122,8 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) sendOpenAICompatibleRequest(ctx context.Context, url, apiKey, requestName, provider string, openAIReq *OpenAIRequest, stream bool) (*http.Response, error) {
 	omitNonPositiveOpenAITokenLimits(openAIReq)
+	strippedStops := stripOpenAICompatibleStop(openAIReq)
+	warnOpenAICompatibleStopSpecialProcessing(ctx, requestName, strippedStops)
 	if constants.NormalizeProvider(provider) == constants.ProviderArgo {
 		normalizeArgoOpenAIChatRequest(openAIReq)
 	}
@@ -127,24 +132,85 @@ func (s *Server) sendOpenAICompatibleRequest(ctx context.Context, url, apiKey, r
 	if stream {
 		extraHeaders["Accept"] = "text/event-stream"
 	}
+	if openAIReq.MaxCompletionTokens == nil {
+		return s.sendOpenAICompatibleRequestOnce(ctx, url, apiKey, requestName, provider, openAIReq, extraHeaders)
+	}
+	return s.sendOpenAICompatibleRequestWithMaxCompletionTokenRetries(ctx, url, apiKey, requestName, provider, openAIReq, extraHeaders)
+}
 
+func (s *Server) sendOpenAICompatibleRequestOnce(ctx context.Context, url, apiKey, requestName, provider string, openAIReq *OpenAIRequest, extraHeaders map[string]string) (*http.Response, error) {
 	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
 		URL:          url,
 		Provider:     provider,
 		RequestName:  requestName,
 		Payload:      openAIReq,
 		ExtraHeaders: extraHeaders,
-		Configure: func(req *http.Request) error {
+		Configure: func(req *http.Request) {
 			if apiKey != "" {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 			}
-			return nil
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (s *Server) sendOpenAICompatibleRequestWithMaxCompletionTokenRetries(ctx context.Context, url, apiKey, requestName, provider string, openAIReq *OpenAIRequest, extraHeaders map[string]string) (*http.Response, error) {
+	baseMaxCompletionTokens := *openAIReq.MaxCompletionTokens
+	attemptValues := []int{baseMaxCompletionTokens, baseMaxCompletionTokens + 256, baseMaxCompletionTokens + 512, baseMaxCompletionTokens + 1024}
+	var firstBadRequest *http.Response
+	var firstBadRequestBody []byte
+
+	for attempt, maxCompletionTokens := range attemptValues {
+		attemptReq := *openAIReq
+		attemptReq.MaxCompletionTokens = &maxCompletionTokens
+
+		resp, err := s.sendOpenAICompatibleRequestOnce(ctx, url, apiKey, requestName, provider, &attemptReq, extraHeaders)
+		if err != nil {
+			if firstBadRequest != nil {
+				logger.From(ctx).Warnf("%s chat/completions retry with max_completion_tokens=%d failed: %v; returning first 400 response", requestName, maxCompletionTokens, err)
+				return restoreResponseBody(firstBadRequest, firstBadRequestBody), nil
+			}
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			return resp, nil
+		}
+
+		body, err := s.readResponseBody(resp)
+		if err != nil {
+			resp.Body.Close()
+			if firstBadRequest != nil {
+				logger.From(ctx).Warnf("Failed to read %s chat/completions retry 400 response body: %v; returning first 400 response", requestName, err)
+				return restoreResponseBody(firstBadRequest, firstBadRequestBody), nil
+			}
+			return nil, err
+		}
+		resp.Body.Close()
+		if firstBadRequest == nil {
+			firstBadRequest = resp
+			firstBadRequestBody = append([]byte(nil), body...)
+		}
+		if attempt == len(attemptValues)-1 {
+			return restoreResponseBody(firstBadRequest, firstBadRequestBody), nil
+		}
+
+		nextMaxCompletionTokens := attemptValues[attempt+1]
+		logger.From(ctx).Warnf("%s chat/completions returned 400 with max_completion_tokens=%d; retrying with max_completion_tokens=%d (retry %d/3)", requestName, maxCompletionTokens, nextMaxCompletionTokens, attempt+1)
+	}
+
+	return restoreResponseBody(firstBadRequest, firstBadRequestBody), nil
+}
+
+func restoreResponseBody(resp *http.Response, body []byte) *http.Response {
+	if resp == nil {
+		return nil
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	return resp
 }
 
 func rewriteOpenAIResponseModel(ctx context.Context, body []byte, originalModel, source string) (*OpenAIResponse, error) {
@@ -158,7 +224,7 @@ func rewriteOpenAIResponseModel(ctx context.Context, body []byte, originalModel,
 }
 
 // forwardOpenAIDirectly forwards an OpenAI request directly to OpenAI
-func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string) {
+func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string, stops []string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
@@ -169,7 +235,7 @@ func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.
 	}
 
 	if openAIReq.Stream {
-		s.forwardOpenAICompatibleStreamDirectly(w, r, openAIReq, originalModel, url, apiKey, requestName, provider)
+		s.forwardOpenAICompatibleStreamDirectly(w, r, openAIReq, originalModel, url, apiKey, requestName, provider, stops)
 		return
 	}
 
@@ -181,17 +247,8 @@ func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.
 	}
 	defer resp.Body.Close()
 
-	// Read response
-	respBody, err := s.readResponseBody(resp)
-	if err != nil {
-		log.Errorf("Failed to read OpenAI response: %v", err)
-		s.sendOpenAIError(w, ErrTypeServer, "Failed to read response", "read_error", http.StatusBadGateway)
-		return
-	}
-
-	// If error response, pass it through with consistent logging
-	if resp.StatusCode >= 400 {
-		passthroughErrorResponse(ctx, w, provider, resp.StatusCode, respBody)
+	respBody, ok := s.readDirectProviderResponse(ctx, w, resp, provider, "OpenAI")
+	if !ok {
 		return
 	}
 
@@ -203,17 +260,18 @@ func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.
 		_, _ = w.Write(respBody)
 		return
 	}
+	enforceOpenAIResponseStops(openAIResp, stops)
 
 	// Send response using centralized helper
 	_ = s.sendJSONResponse(ctx, w, openAIResp)
 }
 
-func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
-	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.OpenAI, s.config.ProviderKeySet.OpenAIAPIKey, "OpenAI", constants.ProviderOpenAI)
+func (s *Server) forwardOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string, stops []string) {
+	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.OpenAI, s.config.ProviderKeySet.OpenAIAPIKey, "OpenAI", constants.ProviderOpenAI, stops)
 }
 
-func (s *Server) forwardArgoOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string) {
-	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.ArgoOpenAI, s.argoAPIKey(), "Argo OpenAI", constants.ProviderArgo)
+func (s *Server) forwardArgoOpenAIDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel string, stops []string) {
+	s.forwardOpenAICompatibleDirectly(w, r, openAIReq, originalModel, s.endpoints.ArgoOpenAI, s.argoAPIKey(), "Argo OpenAI", constants.ProviderArgo, stops)
 }
 
 func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, mappedModel, originalModel string) {
@@ -242,9 +300,9 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 	}
 
 	var googleResp GoogleResponse
-	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) error {
-		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
-	}, &googleResp, "Google")
+	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
+		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+	}, &googleResp, constants.ProviderGoogle, "Google")
 	if err != nil {
 		s.sendProviderErrorAsOpenAI(ctx, w, constants.ProviderGoogle, err)
 		return
@@ -258,12 +316,12 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 }
 
 // handleOpenAIStreamingRequest handles streaming requests for the OpenAI chat completions endpoint
-func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, anthReq *AnthropicRequest, provider, originalModel string) {
+func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, anthReq *AnthropicRequest, provider, originalModel string, stops []string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
 	// Create OpenAI stream writer with include_usage option
-	writer, err := NewOpenAIStreamWriter(w, originalModel, ctx, WithIncludeUsage(includeUsageFromMetadata(anthReq)))
+	writer, err := NewOpenAIStreamWriter(w, originalModel, ctx, WithIncludeUsage(includeUsageFromMetadata(anthReq)), WithStopSequences(stops))
 	if err != nil {
 		log.Errorf("Failed to create OpenAI stream writer: %v", err)
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to initialize streaming", "stream_init_error", http.StatusInternalServerError)
@@ -288,7 +346,7 @@ func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Req
 }
 
 // forwardOpenAICompatibleStreamDirectly forwards an OpenAI-compatible streaming request directly upstream.
-func (s *Server) forwardOpenAICompatibleStreamDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string) {
+func (s *Server) forwardOpenAICompatibleStreamDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string, stops []string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
 
@@ -301,71 +359,15 @@ func (s *Server) forwardOpenAICompatibleStreamDirectly(w http.ResponseWriter, r 
 	defer resp.Body.Close()
 
 	// Check status
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := s.readErrorBody(resp) // Use readErrorBody for error responses
 		passthroughErrorResponse(ctx, w, provider, resp.StatusCode, body)
 		return
 	}
 
-	// Set SSE headers
+	// Stream the response directly with model name replacement and local stop enforcement.
 	setSSEHeaders(w)
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		log.Errorf("ResponseWriter does not support flushing")
-		return
-	}
-
-	// Stream the response directly with model name replacement
-	scanner := NewSSEScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Check if this is a data line
-		if strings.HasPrefix(line, "data: ") {
-			// Check for the DONE sentinel explicitly
-			if strings.TrimSpace(line) == "data: "+OpenAIDoneMarker {
-				// Write as-is and continue
-				payload := fmt.Sprintf("%s\n\n", line)
-				logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
-				fmt.Fprint(w, payload)
-				flusher.Flush()
-				continue
-			}
-
-			// Extract the data portion
-			data := strings.TrimPrefix(line, "data: ")
-			warnUnknownFields(ctx, []byte(data), OpenAIStreamChunk{}, requestName+" stream chunk")
-
-			// Try to parse and update model name
-			var chunk map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &chunk); err == nil {
-				// Update model name
-				chunk["model"] = originalModel
-
-				// Re-marshal
-				if updated, err := json.Marshal(chunk); err == nil {
-					line = "data: " + string(updated)
-				}
-			}
-
-			// Write the line with empty line after
-			payload := fmt.Sprintf("%s\n\n", line)
-			logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
-			fmt.Fprint(w, payload)
-		} else {
-			// Non-data lines (like comments or events)
-			payload := fmt.Sprintf("%s\n", line)
-			logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
-			fmt.Fprint(w, payload)
-		}
-
-		flusher.Flush()
-	}
-
-	if err := scanner.Err(); err != nil {
-		// Note: we can't send error to client as stream is already in progress
-		// handleStreamError handles all logging internally
-		_ = handleStreamError(ctx, nil, "OpenAIDirectSSEScanner", err)
+	if err := forwardOpenAICompatibleSSEWithStops(ctx, w, resp.Body, originalModel, requestName, stops); err != nil {
+		_ = handleStreamError(ctx, nil, "OpenAIDirectSSE", err)
 	}
 }

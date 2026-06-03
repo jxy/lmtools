@@ -21,15 +21,14 @@ type (
 )
 
 type providerSpec struct {
-	Provider       string
-	BuildChat      providerChatBuilder
-	BuildEmbed     providerEmbedBuilder
-	HandleStream   providerStreamHandler
-	ParseResponse  providerResponseParser
-	ConvertTools   providerToolConverter
-	RequestMap     providerRequestMapper
-	ResolveChatURL providerChatURLResolver
-	Marshal        providerMessageMarshaller
+	Provider      string
+	BuildChat     providerChatBuilder
+	BuildEmbed    providerEmbedBuilder
+	HandleStream  providerStreamHandler
+	ParseResponse providerResponseParser
+	ConvertTools  providerToolConverter
+	RequestMap    providerRequestMapper
+	Marshal       providerMessageMarshaller
 }
 
 var (
@@ -47,37 +46,34 @@ func initProviderSpecs() {
 				}
 				return buildToolAwareRequest(cfg, constants.ProviderOpenAI, typedMessages, model, "", false, toolDefs, toolChoice, stream)
 			},
-			BuildEmbed:     buildOpenAIEmbedRequest,
-			HandleStream:   handleOpenAIStreamWithTools,
-			ParseResponse:  parseOpenAIResponse,
-			ConvertTools:   convertOpenAITools,
-			RequestMap:     openAIRequestMap,
-			ResolveChatURL: openAIChatURL,
-			Marshal:        marshalOpenAITypedMessages,
+			BuildEmbed:    buildOpenAIEmbedRequest,
+			HandleStream:  handleOpenAIStreamWithTools,
+			ParseResponse: parseOpenAIResponse,
+			ConvertTools:  convertOpenAITools,
+			RequestMap:    openAIRequestMap,
+			Marshal:       marshalOpenAITypedMessages,
 		},
 		constants.ProviderAnthropic: {
 			Provider: constants.ProviderAnthropic,
 			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 				return buildToolAwareRequest(cfg, constants.ProviderAnthropic, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 			},
-			HandleStream:   handleAnthropicStreamWithTools,
-			ParseResponse:  parseAnthropicResponse,
-			ConvertTools:   convertAnthropicTools,
-			RequestMap:     anthropicRequestMap,
-			ResolveChatURL: anthropicChatURL,
-			Marshal:        marshalAnthropicTypedMessages,
+			HandleStream:  handleAnthropicStreamWithTools,
+			ParseResponse: parseAnthropicResponse,
+			ConvertTools:  convertAnthropicTools,
+			RequestMap:    anthropicRequestMap,
+			Marshal:       marshalAnthropicTypedMessages,
 		},
 		constants.ProviderGoogle: {
 			Provider: constants.ProviderGoogle,
 			BuildChat: func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 				return buildToolAwareRequest(cfg, constants.ProviderGoogle, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 			},
-			HandleStream:   handleGoogleStreamWithTools,
-			ParseResponse:  parseGoogleResponseDetailed,
-			ConvertTools:   convertGoogleTools,
-			RequestMap:     googleRequestMap,
-			ResolveChatURL: googleChatURL,
-			Marshal:        marshalGoogleTypedMessages,
+			HandleStream:  handleGoogleStreamWithTools,
+			ParseResponse: parseGoogleResponseDetailed,
+			ConvertTools:  convertGoogleTools,
+			RequestMap:    googleRequestMap,
+			Marshal:       marshalGoogleTypedMessages,
 		},
 		constants.ProviderArgo: {
 			Provider: constants.ProviderArgo,
@@ -129,7 +125,7 @@ func (spec providerSpec) displayName() string {
 }
 
 func (spec providerSpec) supportsGenericRequest() bool {
-	return spec.RequestMap != nil && spec.ResolveChatURL != nil && spec.Marshal != nil
+	return spec.RequestMap != nil && spec.Marshal != nil
 }
 
 func (spec providerSpec) usesOutOfBandSystemPrompt() bool {

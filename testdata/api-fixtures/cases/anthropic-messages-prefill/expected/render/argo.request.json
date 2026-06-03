@@ -1,9 +1,6 @@
 {
   "user": "fixture-user",
   "model": "gpt5nano",
-  "stop": [
-    ")"
-  ],
   "messages": [
     {
       "role": "user",
@@ -13,5 +10,8 @@
       "role": "assistant",
       "content": "The answer is ("
     }
+  ],
+  "stop": [
+    ")"
   ]
 }

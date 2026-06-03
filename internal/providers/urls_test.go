@@ -2,6 +2,29 @@ package providers
 
 import "testing"
 
+func TestBuildProviderURLPreservesQueryAndFragment(t *testing.T) {
+	got, err := BuildProviderURL("https://example.test/base?api-version=2024-01-01#frag", "v1/models")
+	if err != nil {
+		t.Fatalf("BuildProviderURL() error = %v", err)
+	}
+	want := "https://example.test/base/v1/models?api-version=2024-01-01#frag"
+	if got != want {
+		t.Fatalf("BuildProviderURL() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildProviderURLRejectsHTTPSWithoutHost(t *testing.T) {
+	if _, err := BuildProviderURL("https:///v1", "models"); err == nil {
+		t.Fatal("BuildProviderURL() error = nil, want empty host error")
+	}
+}
+
+func TestValidateProviderURLRejectsEmptyHost(t *testing.T) {
+	if err := ValidateProviderURL("https:///v1", "openai"); err == nil {
+		t.Fatal("ValidateProviderURL() error = nil, want empty host error")
+	}
+}
+
 func TestOpenAIURLsAcceptsBaseAndChatEndpoint(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -85,7 +108,10 @@ func TestAnthropicURLsAcceptsBaseAndMessagesEndpoint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotMessages, gotModels := AnthropicURLs(tt.base)
+			gotMessages, gotModels, err := AnthropicURLs(tt.base)
+			if err != nil {
+				t.Fatalf("AnthropicURLs() error = %v", err)
+			}
 			if gotMessages != tt.wantMessages {
 				t.Fatalf("messages URL = %q, want %q", gotMessages, tt.wantMessages)
 			}

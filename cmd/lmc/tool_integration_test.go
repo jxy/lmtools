@@ -22,30 +22,42 @@ import (
 	"time"
 )
 
-func TestToolIntegrationFlow(t *testing.T) {
-	// Create temp directories
+func toolTestDirs(t *testing.T) (string, string, string) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	sessionDir := filepath.Join(tmpDir, "sessions")
 	logDir := filepath.Join(tmpDir, "logs")
-
-	// Create directories
 	if err := os.MkdirAll(sessionDir, constants.DirPerm); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(logDir, constants.DirPerm); err != nil {
 		t.Fatal(err)
 	}
+	return tmpDir, sessionDir, logDir
+}
 
-	// Tool definitions are now built-in via EnableTool flag
-	// No need to create external tools.json file
-
-	// Create whitelist file
-	whitelistFile := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistFile, []byte(`["echo"]
-["date"]
-["pwd"]`), constants.FilePerm); err != nil {
+func writeToolListFile(t *testing.T, dir, name string, commands ...string) string {
+	t.Helper()
+	if len(commands) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		lines = append(lines, fmt.Sprintf(`[%q]`, cmd))
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), constants.FilePerm); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
+
+func TestToolIntegrationFlow(t *testing.T) {
+	// Create temp directories
+	tmpDir, sessionDir, logDir := toolTestDirs(t)
+
+	// Create whitelist file
+	whitelistFile := writeToolListFile(t, tmpDir, "whitelist.txt", "echo", "date", "pwd")
 
 	// Start mock server with tool support
 	ms := mockserver.NewMockServer()
@@ -147,29 +159,22 @@ func TestToolIntegrationFlow(t *testing.T) {
 	// Create retry client
 	retryClient := retry.NewClientWithRetries(5*time.Second, 3, log)
 
-	// Build initial request
-	getMessagesWithTools := func(ctx context.Context, path string) ([]core.TypedMessage, error) {
-		msgs, err := session.GetLineage(path)
-		if err != nil {
-			return nil, err
-		}
-		// Convert session.Message to core.TypedMessage
-		typedMessages := make([]core.TypedMessage, len(msgs))
-		for i, msg := range msgs {
-			typedMessages[i] = core.NewTextMessage(string(msg.Role), msg.Content)
-		}
-		return typedMessages, nil
+	msgs, err := session.GetLineage(sess.Path)
+	if err != nil {
+		t.Fatalf("Failed to load messages: %v", err)
 	}
-
-	rb, err := core.BuildRequestWithToolInteractions(context.Background(), cfg.RequestOptions(), sess, getMessagesWithTools)
+	typedMessages := make([]core.TypedMessage, len(msgs))
+	for i, msg := range msgs {
+		typedMessages[i] = core.NewTextMessage(string(msg.Role), msg.Content)
+	}
+	rbReq, rbBody, err := core.BuildChatRequest(cfg.RequestOptions(), typedMessages, core.ChatBuildOptions{ToolDefs: core.GetBuiltinUniversalCommandTool()})
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
 	}
-
 	// Execute request with retry
 	ctx := context.Background()
-	rb.Request.Body = io.NopCloser(bytes.NewReader(rb.Body))
-	resp, err := retryClient.Do(ctx, rb.Request, cfg.Provider)
+	rbReq.Body = io.NopCloser(bytes.NewReader(rbBody))
+	resp, err := retryClient.Do(ctx, rbReq, cfg.Provider)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -249,7 +254,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 	// Build follow-up request with tool results
 	// Create typed messages that include the full conversation context
-	typedMessages := []core.TypedMessage{
+	followUpMessages := []core.TypedMessage{
 		// System message
 		core.NewTextMessage("system", "You are a helpful assistant."),
 		// Initial user message
@@ -280,11 +285,14 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 	// Add additional text block if present
 	if additionalText != "" {
-		lastMsg := &typedMessages[len(typedMessages)-1]
+		lastMsg := &followUpMessages[len(followUpMessages)-1]
 		lastMsg.Blocks = append(lastMsg.Blocks, core.TextBlock{Text: additionalText})
 	}
 
-	req2, reqBody2, err := core.BuildToolResultRequest(cfg.RequestOptions(), cfg.Model, "You are a helpful assistant.", nil, typedMessages)
+	req2, reqBody2, err := core.BuildChatRequest(cfg.RequestOptions(), followUpMessages, core.ChatBuildOptions{
+		ModelOverride: cfg.Model,
+		ToolDefs:      core.GetBuiltinUniversalCommandTool(),
+	})
 	if err != nil {
 		t.Fatalf("Failed to build tool result request: %v", err)
 	}
@@ -326,18 +334,11 @@ func TestToolIntegrationFlow(t *testing.T) {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}
 
-	// Should have: user msg, assistant with tools, tool results, final assistant
-	// But with current implementation we have: user msg, assistant with tools, final assistant (3)
-	// Tool results are saved but not as separate message in lineage
-	expectedMessages := 3
-	if len(lineage) != expectedMessages {
-		t.Logf("Lineage has %d messages", len(lineage))
-		for i, msg := range lineage {
-			t.Logf("Message %d: Role=%s, Content=%s", i, msg.Role, msg.Content)
-		}
-		if len(lineage) < 2 {
-			t.Errorf("Expected at least 2 messages in lineage, got %d", len(lineage))
-		}
+	if len(lineage) != 4 {
+		t.Fatalf("lineage length = %d, want 4 messages", len(lineage))
+	}
+	if lineage[0].Role != core.RoleUser || lineage[1].Role != core.RoleAssistant || lineage[2].Role != core.RoleUser || lineage[3].Role != core.RoleAssistant {
+		t.Fatalf("lineage roles = [%s %s %s %s], want [user assistant user assistant]", lineage[0].Role, lineage[1].Role, lineage[2].Role, lineage[3].Role)
 	}
 
 	// Load and verify tool interactions
@@ -372,25 +373,10 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 func TestMultiRoundToolExecution(t *testing.T) {
 	// Create temp directories
-	tmpDir := t.TempDir()
-	sessionDir := filepath.Join(tmpDir, "sessions")
-	logDir := filepath.Join(tmpDir, "logs")
-
-	// Create directories
-	if err := os.MkdirAll(sessionDir, constants.DirPerm); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(logDir, constants.DirPerm); err != nil {
-		t.Fatal(err)
-	}
+	tmpDir, sessionDir, logDir := toolTestDirs(t)
 
 	// Create whitelist file
-	whitelistFile := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistFile, []byte(`["echo"]
-["date"]
-["pwd"]`), constants.FilePerm); err != nil {
-		t.Fatal(err)
-	}
+	whitelistFile := writeToolListFile(t, tmpDir, "whitelist.txt", "echo", "date", "pwd")
 
 	// Start mock server with multi-round tool support
 	ms := mockserver.NewMockServer()
@@ -436,6 +422,35 @@ func TestMultiRoundToolExecution(t *testing.T) {
 		}
 
 		// Return different responses based on request count
+		toolResultID := func() string {
+			if strings.Contains(bodyStr, "call-003") {
+				return "call-003"
+			}
+			if strings.Contains(bodyStr, "call-002") {
+				return "call-002"
+			}
+			if strings.Contains(bodyStr, "call-001") {
+				return "call-001"
+			}
+			var requestData map[string]interface{}
+			if err := json.Unmarshal(bodyBytes, &requestData); err != nil {
+				return ""
+			}
+			messages, _ := requestData["messages"].([]interface{})
+			for _, msg := range messages {
+				msgMap, _ := msg.(map[string]interface{})
+				content, _ := msgMap["content"].([]interface{})
+				for _, block := range content {
+					blockMap, _ := block.(map[string]interface{})
+					if blockMap["type"] == "tool_result" {
+						if id, _ := blockMap["tool_use_id"].(string); id != "" {
+							return id
+						}
+					}
+				}
+			}
+			return ""
+		}()
 		switch requestCount {
 		case 1:
 			// Initial request - return first tool call
@@ -456,45 +471,41 @@ func TestMultiRoundToolExecution(t *testing.T) {
 
 		case 2:
 			// First follow-up with tool results - return second tool call
-			if strings.Contains(bodyStr, "call-001") && strings.Contains(bodyStr, "tool_result") {
-				return map[string]interface{}{
-					"content": []map[string]interface{}{
-						{
-							"type": "text",
-							"text": "First command executed. Now let me run the second command.",
-						},
-						{
-							"type":  "tool_use",
-							"id":    "call-002",
-							"name":  "universal_command",
-							"input": map[string]interface{}{"command": []string{"echo", "Second command"}},
-						},
+			return map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "First command executed. Now let me run the second command.",
 					},
-				}, 200, nil
-			}
+					{
+						"type":  "tool_use",
+						"id":    "call-002",
+						"name":  "universal_command",
+						"input": map[string]interface{}{"command": []string{"echo", "Second command"}},
+					},
+				},
+			}, 200, nil
 
 		case 3:
 			// Second follow-up with tool results - return third tool call
-			if strings.Contains(bodyStr, "call-002") && strings.Contains(bodyStr, "tool_result") {
-				return map[string]interface{}{
-					"content": []map[string]interface{}{
-						{
-							"type": "text",
-							"text": "Second command done. One more command to run.",
-						},
-						{
-							"type":  "tool_use",
-							"id":    "call-003",
-							"name":  "universal_command",
-							"input": map[string]interface{}{"command": []string{"echo", "Third command"}},
-						},
+			return map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "Second command done. One more command to run.",
 					},
-				}, 200, nil
-			}
+					{
+						"type":  "tool_use",
+						"id":    "call-003",
+						"name":  "universal_command",
+						"input": map[string]interface{}{"command": []string{"echo", "Third command"}},
+					},
+				},
+			}, 200, nil
 
 		case 4:
 			// Third follow-up with tool results - return final response without tools
-			if strings.Contains(bodyStr, "call-003") && strings.Contains(bodyStr, "tool_result") {
+			if toolResultID == "call-003" {
 				return map[string]interface{}{
 					"content": []map[string]interface{}{
 						{
@@ -607,7 +618,7 @@ func TestMultiRoundToolExecution(t *testing.T) {
 		Cfg:      cfg.RequestOptions(),
 		Logger:   log,
 		Notifier: notifier,
-		Approver: &testApprover{autoApprove: true},
+		Approver: core.NewTestApprover(true),
 		ExecCfg: core.ToolExecutionConfig{
 			Store:       session.NewStore(sess, log),
 			RetryClient: retryClient,
@@ -695,87 +706,12 @@ func truncateForLog(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-type testApprover struct {
-	autoApprove bool
-}
-
-func (t *testApprover) Approve(ctx context.Context, args []string) (bool, error) {
-	return t.autoApprove, nil
-}
-
-func (t *testApprover) RequestApproval(ctx context.Context, tool string, args []string) (bool, error) {
-	return t.autoApprove, nil
-}
-
-func TestToolExecutionWithStreamingDowngrade(t *testing.T) {
-	// Create temp directories
-	tmpDir := t.TempDir()
-	logDir := filepath.Join(tmpDir, "logs")
-
-	if err := os.MkdirAll(logDir, constants.DirPerm); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create tool definitions file
-	toolsFile := filepath.Join(tmpDir, "tools.json")
-	tools := []core.ToolDefinition{
-		{
-			Name:        "universal_command",
-			Description: "Execute shell commands",
-		},
-	}
-	toolsJSON, _ := json.Marshal(tools)
-	if err := os.WriteFile(toolsFile, toolsJSON, constants.FilePerm); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create config with streaming enabled
-	cfg := config.Config{
-		Options: providerconfig.Options{
-			ArgoUser: "testuser",
-			Provider: "anthropic",
-		},
-		Model:      "claude-3-opus",
-		StreamChat: true, // Enable streaming
-		EnableTool: true,
-		LogDir:     logDir,
-	}
-
-	// Initialize logger with log directory
-	if err := logger.InitializeWithOptions(
-		logger.WithLogDir(logDir),
-		logger.WithLevel("info"),
-		logger.WithFile(true),
-	); err != nil {
-		t.Fatalf("Failed to initialize logger: %v", err)
-	}
-	_ = logger.GetLogger()
-
-	// Read log file to check for warning
-	_, err := filepath.Glob(filepath.Join(logDir, "*.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// When tools are present, streaming should be disabled with a warning
-	// This is handled in the main.go handleToolExecution function
-	// Let's verify the config would trigger the warning
-	if cfg.StreamChat && cfg.EnableTool {
-		// This condition would trigger the warning in production
-		t.Log("Streaming would be disabled due to tools being present")
-	}
-}
-
 func TestParallelToolExecution(t *testing.T) {
 	// Create temp directory
 	tmpDir := t.TempDir()
 
 	// Create whitelist
-	whitelistFile := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistFile, []byte(`["echo"]
-["sleep"]`), constants.FilePerm); err != nil {
-		t.Fatal(err)
-	}
+	whitelistFile := writeToolListFile(t, tmpDir, "whitelist.txt", "echo", "sleep")
 
 	cfg := config.Config{
 		ToolTimeout:     5 * time.Second,
@@ -846,10 +782,7 @@ func TestToolOutputTruncation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create whitelist
-	whitelistFile := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistFile, []byte(`["sh"]`), constants.FilePerm); err != nil {
-		t.Fatal(err)
-	}
+	whitelistFile := writeToolListFile(t, tmpDir, "whitelist.txt", "sh")
 
 	cfg := config.Config{
 		ToolTimeout:     5 * time.Second,
@@ -945,33 +878,8 @@ func TestToolApprovalMechanisms(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create whitelist file
-			whitelistFile := ""
-			if len(tt.whitelist) > 0 {
-				whitelistFile = filepath.Join(tmpDir, "whitelist.txt")
-				var lines []string
-				for _, cmd := range tt.whitelist {
-					lines = append(lines, fmt.Sprintf(`["%s"]`, cmd))
-				}
-				content := strings.Join(lines, "\n")
-				if err := os.WriteFile(whitelistFile, []byte(content), constants.FilePerm); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			// Create blacklist file
-			blacklistFile := ""
-			if len(tt.blacklist) > 0 {
-				blacklistFile = filepath.Join(tmpDir, "blacklist.txt")
-				var lines []string
-				for _, cmd := range tt.blacklist {
-					lines = append(lines, fmt.Sprintf(`["%s"]`, cmd))
-				}
-				content := strings.Join(lines, "\n")
-				if err := os.WriteFile(blacklistFile, []byte(content), constants.FilePerm); err != nil {
-					t.Fatal(err)
-				}
-			}
+			whitelistFile := writeToolListFile(t, tmpDir, "whitelist.txt", tt.whitelist...)
+			blacklistFile := writeToolListFile(t, tmpDir, "blacklist.txt", tt.blacklist...)
 
 			cfg := config.Config{
 				ToolTimeout:        5 * time.Second,

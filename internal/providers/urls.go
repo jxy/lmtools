@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"net/url"
+	"strings"
 )
 
 type EndpointSet struct {
@@ -21,10 +22,45 @@ type EndpointSet struct {
 
 type endpointResolver func(providerURL, argoEnv string) (EndpointSet, error)
 
+func ValidateProviderURL(providerURL, provider string) error {
+	u, err := url.Parse(providerURL)
+	if err != nil {
+		return fmt.Errorf("invalid %s ProviderURL: %w", provider, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%s ProviderURL must use http or https scheme", provider)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%s ProviderURL must include a host", provider)
+	}
+	return nil
+}
+
+func providerURLFromParsed(base url.URL, pathToAppend string) (string, error) {
+	var err error
+	base.Path, err = url.JoinPath(base.Path, pathToAppend)
+	if err != nil {
+		return "", fmt.Errorf("invalid path join: %w", err)
+	}
+	return base.String(), nil
+}
+
+func endpointBaseURL(endpoint, suffix string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return strings.TrimSuffix(endpoint, suffix)
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), suffix)
+	return u.String()
+}
+
 func BuildProviderURL(baseURL, pathToAppend string) (string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base URL: %w", err)
+	}
+	if (u.Scheme == "http" || u.Scheme == "https") && u.Host == "" {
+		return "", fmt.Errorf("invalid base URL: http(s) URL must include a host")
 	}
 
 	u.Path, err = url.JoinPath(u.Path, pathToAppend)

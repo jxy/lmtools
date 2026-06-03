@@ -41,13 +41,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
-			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Should fork
-			newSessionID := GetSessionID(result.Session.Path)
+			newSessionID := GetSessionID(sess.Path)
 			if newSessionID == sessionID {
 				t.Error("Expected fork but session was not forked")
 			}
@@ -56,7 +56,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Verify new session has the specified prompt
-			newSystemMsg, err := GetSystemMessage(result.Session.Path)
+			newSystemMsg, err := GetSystemMessage(sess.Path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,13 +93,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
-			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Should NOT fork
-			newSessionID := GetSessionID(result.Session.Path)
+			newSessionID := GetSessionID(sess.Path)
 			if newSessionID != sessionID {
 				t.Errorf("Should not fork when prompts match. Original: %s, New: %s", sessionID, newSessionID)
 			}
@@ -139,13 +139,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
-			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Should fork to use tool prompt
-			newSessionID := GetSessionID(result.Session.Path)
+			newSessionID := GetSessionID(sess.Path)
 			if newSessionID == sessionID {
 				t.Error("Expected fork when upgrading from default non-tool to tool prompt")
 			}
@@ -154,7 +154,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Verify new session has tool prompt
-			newSystemMsg, err := GetSystemMessage(result.Session.Path)
+			newSystemMsg, err := GetSystemMessage(sess.Path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -189,13 +189,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
-			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Should NOT fork
-			newSessionID := GetSessionID(result.Session.Path)
+			newSessionID := GetSessionID(sess.Path)
 			if newSessionID != sessionID {
 				t.Errorf("Should not fork. Original: %s, New: %s", sessionID, newSessionID)
 			}
@@ -241,13 +241,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					notifier := core.NewTestNotifier()
 
 					coordinator := NewCoordinator(cfg, notifier)
-					result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+					sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
 
 					// Should NOT fork
-					newSessionID := GetSessionID(result.Session.Path)
+					newSessionID := GetSessionID(sess.Path)
 					if newSessionID != sessionID {
 						t.Errorf("Should not fork with tool prompt. Original: %s, New: %s", sessionID, newSessionID)
 					}
@@ -296,13 +296,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					notifier := core.NewTestNotifier()
 
 					coordinator := NewCoordinator(cfg, notifier)
-					result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+					sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
 
 					// Should NOT fork (preserve custom prompt)
-					newSessionID := GetSessionID(result.Session.Path)
+					newSessionID := GetSessionID(sess.Path)
 					if newSessionID != sessionID {
 						t.Errorf("Should not fork with custom prompt. Original: %s, New: %s", sessionID, newSessionID)
 					}
@@ -311,7 +311,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					}
 
 					// Verify custom prompt is preserved
-					systemMsg, err := GetSystemMessage(result.Session.Path)
+					systemMsg, err := GetSystemMessage(sess.Path)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -350,13 +350,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
-			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Should fork to add tool prompt
-			newSessionID := GetSessionID(result.Session.Path)
+			newSessionID := GetSessionID(sess.Path)
 			if newSessionID == sessionID {
 				t.Error("Expected fork when adding tool prompt to session without prompt")
 			}
@@ -365,7 +365,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			}
 
 			// Verify new session has tool prompt
-			newSystemMsg, err := GetSystemMessage(result.Session.Path)
+			newSystemMsg, err := GetSystemMessage(sess.Path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -400,13 +400,13 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			notifier := core.NewTestNotifier()
 
 			coordinator := NewCoordinator(cfg, notifier)
-			result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Should NOT fork (keeping no prompt is valid)
-			newSessionID := GetSessionID(result.Session.Path)
+			newSessionID := GetSessionID(sess.Path)
 			if newSessionID != sessionID {
 				t.Errorf("Should not fork. Original: %s, New: %s", sessionID, newSessionID)
 			}
@@ -430,7 +430,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
-		result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, coordinator, "test", false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -441,7 +441,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		}
 
 		// Verify session was created with the prompt
-		systemMsg, err := GetSystemMessage(result.Session.Path)
+		systemMsg, err := GetSystemMessage(sess.Path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,13 +467,13 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
-		result, err := coordinator.PrepareSession(ctx, "test", false, nil)
+		sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Should fork to remove prompt
-		newSessionID := GetSessionID(result.Session.Path)
+		newSessionID := GetSessionID(sess.Path)
 		if newSessionID == sessionID {
 			t.Error("Expected fork when explicitly setting empty prompt")
 		}
@@ -482,7 +482,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		}
 
 		// Verify new session has no prompt
-		newSystemMsg, err := GetSystemMessage(result.Session.Path)
+		newSystemMsg, err := GetSystemMessage(sess.Path)
 		if err != nil {
 			t.Fatal(err)
 		}

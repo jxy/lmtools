@@ -154,14 +154,27 @@ func (e *openAISimulatedContentEmitter) EndTextBlock(_ int, _ string) error {
 
 func (e *openAISimulatedContentEmitter) StartToolBlock(index int, block AnthropicContentBlock) error {
 	if e.started {
-		return e.writer.WriteToolCallIntro(index, block.ID, block.Name)
+		return e.writer.WriteToolCallDelta(index, &ToolCallDelta{
+			Index: index,
+			ID:    block.ID,
+			Type:  "function",
+			Function: &FunctionCallDelta{
+				Name:      block.Name,
+				Arguments: "",
+			},
+		}, nil, nil)
 	}
 	e.started = true
 	return e.writer.WriteInitialAssistantToolCallDelta(index, block.ID, block.Name)
 }
 
 func (e *openAISimulatedContentEmitter) WriteToolInputChunk(index int, chunk string) error {
-	return e.writer.WriteToolArguments(index, chunk)
+	return e.writer.WriteToolCallDelta(index, &ToolCallDelta{
+		Index: index,
+		Function: &FunctionCallDelta{
+			Arguments: chunk,
+		},
+	}, nil, nil)
 }
 
 func (e *openAISimulatedContentEmitter) EndToolBlock(_ int, _ AnthropicContentBlock) error {

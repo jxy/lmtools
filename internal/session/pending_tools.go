@@ -20,6 +20,7 @@ type pendingToolResolution struct {
 	HasPending     bool
 	PreviewCalls   []core.ToolCall
 	PreviewResults []core.ToolResult
+	AdditionalText string
 }
 
 // ExecutePendingTools checks for and executes any pending tool calls from a previous session
@@ -33,7 +34,13 @@ type pendingToolResolution struct {
 // This is used by callers to determine if empty input is acceptable (when continuing tool execution).
 func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, notifier core.Notifier, approver core.Approver) (hasPendingTools bool, err error) {
 	resolution, err := resolvePendingTools(ctx, sess, cfg, log, notifier, approver, PendingToolExecute)
-	return resolution.HasPending, err
+	if err != nil || !resolution.HasPending || len(resolution.PreviewResults) == 0 {
+		return resolution.HasPending, err
+	}
+	if err := commitPendingToolResults(ctx, sess, resolution, log); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func resolvePendingTools(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, notifier core.Notifier, approver core.Approver, mode PendingToolMode) (pendingToolResolution, error) {
@@ -98,24 +105,34 @@ func resolvePendingTools(ctx context.Context, sess *Session, cfg core.RequestOpt
 	// Check for truncation and prepare additional text
 	additionalText := core.BuildTruncationNotes(results, pendingTools)
 
-	// Save tool results to session
-	result, err := SaveToolResults(ctx, sess, results, additionalText)
-	if err != nil {
-		return pendingToolResolution{HasPending: true}, errors.WrapError("save pending tool results", err)
-	}
-	path := result.Path
-	msgID := result.MessageID
+	// Stage tool results for the provider request. They are committed only after
+	// the provider response succeeds so failed follow-up requests do not make the
+	// session look as if the pending tools were consumed.
+	return pendingToolResolution{
+		HasPending:     true,
+		PreviewCalls:   pendingTools,
+		PreviewResults: results,
+		AdditionalText: additionalText,
+	}, nil
+}
 
-	// Update session path if sibling was created
-	if path != sess.Path {
-		sess.Path = path
+func commitPendingToolResults(ctx context.Context, sess *Session, resolution pendingToolResolution, log core.Logger) error {
+	if sess == nil || len(resolution.PreviewResults) == 0 {
+		return nil
+	}
+
+	result, err := SaveToolResults(ctx, sess, resolution.PreviewResults, resolution.AdditionalText)
+	if err != nil {
+		return errors.WrapError("save pending tool results", err)
+	}
+	if result.Path != sess.Path {
+		sess.Path = result.Path
 		if log != nil {
 			log.Debugf("Tool results saved to sibling branch %s as message %s",
-				GetSessionID(path), msgID)
+				GetSessionID(result.Path), result.MessageID)
 		}
 	}
-
-	return pendingToolResolution{HasPending: true}, nil
+	return nil
 }
 
 func placeholderPendingToolResults(calls []core.ToolCall) []core.ToolResult {

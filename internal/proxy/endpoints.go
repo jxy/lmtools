@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/providers"
-	"net/url"
 )
 
 // Endpoints holds all computed API endpoint URLs for a provider.
@@ -93,14 +92,7 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 
 // validateProviderURL validates a ProviderURL.
 func validateProviderURL(providerURL, provider string) error {
-	u, err := url.Parse(providerURL)
-	if err != nil {
-		return fmt.Errorf("invalid %s ProviderURL: %w", provider, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("%s ProviderURL must use http or https scheme", provider)
-	}
-	return nil
+	return providers.ValidateProviderURL(providerURL, provider)
 }
 
 // GetArgoURL returns the appropriate Argo URL for the given endpoint type.

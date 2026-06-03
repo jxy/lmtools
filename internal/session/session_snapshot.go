@@ -272,6 +272,73 @@ func buildTypedMessagesFromLineageRefs(ctx context.Context, refs []lineageMessag
 	return result, nil
 }
 
+func pendingToolCallsFromLineageRefs(ctx context.Context, refs []lineageMessageRef) ([]core.ToolCall, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	resolved := make(map[string]bool)
+	for i := len(refs) - 1; i >= 0; i-- {
+		ref := refs[i]
+		toolInteraction, err := LoadToolInteraction(ref.path, ref.message.ID)
+		if err != nil {
+			return nil, errors.WrapError("load tool interaction for message "+ref.message.ID, err)
+		}
+
+		if ref.message.Role == core.RoleAssistant && toolInteraction != nil && len(toolInteraction.Calls) > 0 {
+			pending := unresolvedToolCalls(toolInteraction, resolved)
+			if len(pending) == 0 {
+				return nil, nil
+			}
+			return pending, nil
+		}
+
+		for _, res := range toolInteractionResults(toolInteraction) {
+			if res.ID != "" {
+				resolved[res.ID] = true
+			}
+		}
+
+		if ref.message.Role == core.RoleUser && (toolInteraction == nil || len(toolInteraction.Results) == 0) {
+			return nil, nil
+		}
+	}
+	return nil, nil
+}
+
+func unresolvedToolCalls(toolInteraction *core.ToolInteraction, resolved map[string]bool) []core.ToolCall {
+	if toolInteraction == nil || len(toolInteraction.Calls) == 0 {
+		return nil
+	}
+
+	localResolved := make(map[string]bool, len(resolved)+len(toolInteraction.Results))
+	for id, ok := range resolved {
+		if ok {
+			localResolved[id] = true
+		}
+	}
+	for _, res := range toolInteraction.Results {
+		if res.ID != "" {
+			localResolved[res.ID] = true
+		}
+	}
+
+	pending := make([]core.ToolCall, 0, len(toolInteraction.Calls))
+	for _, call := range toolInteraction.Calls {
+		if call.ID == "" || !localResolved[call.ID] {
+			pending = append(pending, call)
+		}
+	}
+	return pending
+}
+
+func toolInteractionResults(toolInteraction *core.ToolInteraction) []core.ToolResult {
+	if toolInteraction == nil {
+		return nil
+	}
+	return toolInteraction.Results
+}
+
 func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, newSession *Session) error {
 	mc := newMessageCommitter(newSession.Path)
 	for _, ref := range refs {

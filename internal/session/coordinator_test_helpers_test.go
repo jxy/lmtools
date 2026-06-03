@@ -15,16 +15,9 @@ func newTestCoordinatorConfig() core.RequestOptions {
 func setupCoordinatorTestEnv(t *testing.T) context.Context {
 	t.Helper()
 
-	tempDir := t.TempDir()
-	SetSessionsDir(tempDir)
-	SetSkipFlockCheck(true)
-	t.Cleanup(func() {
-		SetSessionsDir("")
-		SetSkipFlockCheck(false)
-	})
-
+	sessionsDir := UseTestSessionDir(t)
 	if err := logger.InitializeWithOptions(
-		logger.WithLogDir(tempDir),
+		logger.WithLogDir(sessionsDir),
 		logger.WithLevel("debug"),
 		logger.WithStderr(false),
 		logger.WithFile(true),
@@ -33,6 +26,18 @@ func setupCoordinatorTestEnv(t *testing.T) context.Context {
 	}
 
 	return context.Background()
+}
+
+func prepareSessionForTest(ctx context.Context, coordinator *Coordinator, inputStr string, isRegeneration bool, approver core.Approver) (*Session, bool, error) {
+	plan, err := coordinator.PrepareRequest(ctx, inputStr, isRegeneration, approver, PendingToolExecute)
+	if err != nil {
+		return nil, false, err
+	}
+	sess, err := plan.Commit(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	return sess, plan.HasPendingTools, nil
 }
 
 func stringPtr(s string) *string {

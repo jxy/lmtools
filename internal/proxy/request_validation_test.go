@@ -17,6 +17,51 @@ func TestDecodeStrictJSONRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestOpenAIStopSequencesDecodeStringAndArray(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{name: "string", body: `{"model":"gpt-test","messages":[],"stop":"END"}`, want: []string{"END"}},
+		{name: "array", body: `{"model":"gpt-test","messages":[],"stop":["A","B"]}`, want: []string{"A", "B"}},
+		{name: "null", body: `{"model":"gpt-test","messages":[],"stop":null}`, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req OpenAIRequest
+			if err := decodeLenientJSON([]byte(tt.body), &req); err != nil {
+				t.Fatalf("decodeLenientJSON() error = %v", err)
+			}
+			if got := []string(req.Stop); !stringSlicesEqual(got, tt.want) {
+				t.Fatalf("Stop = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIStopSequencesRejectInvalidShape(t *testing.T) {
+	var req OpenAIRequest
+	if err := decodeLenientJSON([]byte(`{"model":"gpt-test","messages":[],"stop":123}`), &req); err == nil {
+		t.Fatal("expected decode error for numeric stop")
+	}
+	if err := decodeLenientJSON([]byte(`{"model":"gpt-test","messages":[],"stop":["ok",123]}`), &req); err == nil {
+		t.Fatal("expected decode error for mixed stop array")
+	}
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestValidateAnthropicAllowsWarnOnlyFieldsForConvertedProviders(t *testing.T) {
 	req := &AnthropicRequest{
 		Model:     "gpt-4o-mini",

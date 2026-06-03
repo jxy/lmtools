@@ -20,7 +20,7 @@ func TestCoordinatorPrepareRequestNewSessionDefersWritesUntilCommit(t *testing.T
 	cfg.System = "plan system"
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "hello", false, nil, PrepareRequestOptions{})
+	plan, err := coordinator.PrepareRequest(ctx, "hello", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCoordinatorPrepareRequestResumeAppendsInputWithoutWritingUntilCommit(t 
 	cfg.System = "session system"
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "preview question", false, nil, PrepareRequestOptions{})
+	plan, err := coordinator.PrepareRequest(ctx, "preview question", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -108,7 +108,7 @@ func TestCoordinatorPrepareRequestPreviewPendingToolsUsesPlaceholderWithoutWriti
 	cfg.ToolEnabled = true
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "", false, nil, PrepareRequestOptions{PendingTools: PendingToolPreview})
+	plan, err := coordinator.PrepareRequest(ctx, "", false, nil, PendingToolPreview)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -152,7 +152,7 @@ func TestCoordinatorPrepareRequestBranchAssistantDefersSiblingUntilCommit(t *tes
 	cfg.System = "system prompt"
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "", true, nil, PrepareRequestOptions{})
+	plan, err := coordinator.PrepareRequest(ctx, "", true, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -187,7 +187,7 @@ func TestCoordinatorPrepareRequestBranchUserUsesPreviousAssistant(t *testing.T) 
 	cfg.System = "system prompt"
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "alternate second user", false, nil, PrepareRequestOptions{})
+	plan, err := coordinator.PrepareRequest(ctx, "alternate second user", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -224,7 +224,7 @@ func TestCoordinatorPrepareRequestNestedBranchBubblesToOriginalAnchor(t *testing
 	cfg.System = "system prompt"
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "", true, nil, PrepareRequestOptions{})
+	plan, err := coordinator.PrepareRequest(ctx, "", true, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRequestPlanCommitRejectsSecondCommit(t *testing.T) {
 
 	cfg := newTestCoordinatorConfig()
 	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
-	plan, err := coordinator.PrepareRequest(ctx, "hello", false, nil, PrepareRequestOptions{})
+	plan, err := coordinator.PrepareRequest(ctx, "hello", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}

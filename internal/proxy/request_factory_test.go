@@ -2,9 +2,12 @@ package proxy
 
 import (
 	"context"
-	"errors"
+	"io"
+	"lmtools/internal/retry"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildProviderJSONRequest(t *testing.T) {
@@ -18,9 +21,8 @@ func TestBuildProviderJSONRequest(t *testing.T) {
 		ExtraHeaders: map[string]string{
 			"Accept": "text/event-stream",
 		},
-		Configure: func(req *http.Request) error {
+		Configure: func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer test")
-			return nil
 		},
 	})
 	if err != nil {
@@ -42,39 +44,94 @@ func TestBuildProviderJSONRequest(t *testing.T) {
 	if got := req.Header.Get("Authorization"); got != "Bearer test" {
 		t.Fatalf("authorization = %q, want Bearer test", got)
 	}
-	if string(body) != `{"hello":"world"}` {
+	if string(body) != "{\"hello\":\"world\"}" {
 		t.Fatalf("body = %s", string(body))
 	}
 }
 
-func TestBuildProviderJSONRequestConfigureError(t *testing.T) {
-	wantErr := errors.New("boom")
+func TestBuildProviderJSONRequestConfigureWithError(t *testing.T) {
 	_, _, err := buildProviderJSONRequest(context.Background(), providerJSONRequest{
 		URL:         "https://example.com/v1/test",
 		Provider:    "openai",
 		RequestName: "OpenAI",
 		Payload:     map[string]string{"hello": "world"},
-		Configure: func(*http.Request) error {
-			return wantErr
+		ConfigureWithError: func(req *http.Request) error {
+			return context.Canceled
 		},
 	})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("buildProviderJSONRequest() error = %v, want %v", err, wantErr)
+	if err == nil {
+		t.Fatal("buildProviderJSONRequest() error = nil, want configure error")
 	}
 }
 
-func TestDoJSONReturnsConfigureError(t *testing.T) {
-	server := NewMinimalTestServer(t, &Config{})
-	wantErr := errors.New("missing provider configuration")
-	var out map[string]interface{}
+func TestSendProviderJSONRequestLogsBackendNonStreamLifecycle(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			Request:    r,
+		}, nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{Provider: "argo", MaxRequestBodySize: 1024}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
 
-	err := server.doJSON(context.Background(), "https://example.com/v1/test", map[string]string{
-		"hello": "world",
-	}, func(*http.Request) error {
-		return wantErr
-	}, &out, "OpenAI")
+	logs := captureStderrWithLevel(t, "info", func() {
+		resp, _, err := server.sendProviderJSONRequest(context.Background(), providerJSONRequest{
+			URL:         "http://backend.local/v1/chat/completions",
+			Provider:    "argo",
+			RequestName: "Argo OpenAI",
+			Payload:     map[string]string{"hello": "world"},
+		})
+		if err != nil {
+			t.Fatalf("sendProviderJSONRequest() error = %v", err)
+		}
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	})
 
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("doJSON() error = %v, want %v", err, wantErr)
+	for _, want := range []string{
+		"Backend request started: Argo OpenAI POST http://backend.local/v1/chat/completions",
+		"Backend response completed: Argo OpenAI POST http://backend.local/v1/chat/completions | Status: 200",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+}
+
+func TestSendProviderJSONRequestLogsBackendStreamLifecycle(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: ok\n\ndata: [DONE]\n\n")),
+			Request:    r,
+		}, nil
+	})
+	server := NewTestServerDirectWithClient(t, &Config{Provider: "argo", MaxRequestBodySize: 1024}, retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport))
+
+	logs := captureStderrWithLevel(t, "info", func() {
+		resp, _, err := server.sendProviderJSONRequest(context.Background(), providerJSONRequest{
+			URL:          "http://backend.local/v1/chat/completions",
+			Provider:     "argo",
+			RequestName:  "Argo OpenAI",
+			Payload:      map[string]string{"hello": "world"},
+			ExtraHeaders: map[string]string{"Accept": "text/event-stream"},
+		})
+		if err != nil {
+			t.Fatalf("sendProviderJSONRequest() error = %v", err)
+		}
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	})
+
+	for _, want := range []string{
+		"Backend request started: Argo OpenAI POST http://backend.local/v1/chat/completions",
+		"Backend stream received first bytes: Argo OpenAI POST http://backend.local/v1/chat/completions | Status: 200",
+		"Backend stream completed: Argo OpenAI POST http://backend.local/v1/chat/completions | Status: 200",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
 	}
 }

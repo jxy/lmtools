@@ -45,9 +45,7 @@ func TestLoadProviderKeyFileAppliesProviderCredentials(t *testing.T) {
 			if err != nil {
 				t.Fatalf("http.NewRequest() error = %v", err)
 			}
-			if err := providerKey.Apply(req); err != nil {
-				t.Fatalf("ProviderKey.Apply() error = %v", err)
-			}
+			SetProviderHeaders(req, providerKey.Provider, providerKey.Value)
 			if got := req.Header.Get(tt.wantHeader); got != tt.wantValue {
 				t.Fatalf("%s = %q, want %q", tt.wantHeader, got, tt.wantValue)
 			}
@@ -106,15 +104,13 @@ func TestLoadProviderKeyFileRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestApplyProviderCredentialsGoogleUsesHeader(t *testing.T) {
+func TestSetProviderHeadersGoogleUsesHeader(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 
-	if err := ApplyProviderCredentials(req, constants.ProviderGoogle, "test-google-key"); err != nil {
-		t.Fatalf("ApplyProviderCredentials() error = %v", err)
-	}
+	SetProviderHeaders(req, constants.ProviderGoogle, "test-google-key")
 
 	if got := req.Header.Get("x-goog-api-key"); got != "test-google-key" {
 		t.Fatalf("x-goog-api-key = %q, want test-google-key", got)

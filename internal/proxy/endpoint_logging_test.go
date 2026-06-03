@@ -19,6 +19,11 @@ import (
 // captureStderr captures stderr output during test execution
 func captureStderr(t *testing.T, f func()) string {
 	t.Helper()
+	return captureStderrWithLevel(t, "debug", f)
+}
+
+func captureStderrWithLevel(t *testing.T, level string, f func()) string {
+	t.Helper()
 	// Save original stderr
 	oldStderr := os.Stderr
 
@@ -34,7 +39,7 @@ func captureStderr(t *testing.T, f func()) string {
 	// Reinitialize logger to use the new stderr
 	logger.ResetForTesting()
 	_ = logger.InitializeWithOptions(
-		logger.WithLevel("debug"),
+		logger.WithLevel(level),
 		logger.WithFormat("text"),
 		logger.WithStderr(true),
 		logger.WithFile(false),
@@ -177,6 +182,51 @@ func TestCountTokensEndpointLogging(t *testing.T) {
 	// Verify request ID is present (format: [#N])
 	if !strings.Contains(logs, "[#") {
 		t.Error("Expected request ID in logs")
+	}
+}
+
+func TestCountTokensEndpointLoggingPreservesOriginalModelAfterMapping(t *testing.T) {
+	SetupTestLogger(t)
+
+	config := &Config{
+		Provider:           constants.ProviderArgo,
+		ProviderURL:        "http://argo.local",
+		ArgoUser:           "testuser",
+		ModelMapRules:      []ModelMapRule{{Pattern: `^claude-opus-4-8\[1m\]$`, Model: "gpt55"}},
+		MaxRequestBodySize: 10 * 1024 * 1024,
+	}
+	server, cleanup := NewTestServer(t, config)
+	t.Cleanup(cleanup)
+
+	body := []byte(`{"model":"claude-opus-4-8[1m]","messages":[{"role":"user","content":"count me"}]}`)
+	logs := captureStderr(t, func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	for _, want := range []string{
+		"Token counting: model=claude-opus-4-8[1m]->gpt55, provider=argo",
+		"POST /v1/messages/count_tokens",
+		"Model: claude-opus-4-8[1m]->gpt55",
+		"Provider: argo",
+		"Status: 200",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+	for _, unwanted := range []string{
+		"Token counting: model=gpt55, provider=argo",
+		"Model: gpt55->gpt55",
+	} {
+		if strings.Contains(logs, unwanted) {
+			t.Fatalf("logs contain %q\nlogs:\n%s", unwanted, logs)
+		}
 	}
 }
 

@@ -1,31 +1,44 @@
 package providers
 
-import "strings"
+import (
+	"fmt"
+	"net/url"
+	"strings"
+)
 
 func OpenAIURLs(base string) (string, string, string, error) {
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
 
-	trimmed := strings.TrimRight(base, "/")
-	if strings.HasSuffix(trimmed, "/chat/completions") {
-		base = strings.TrimSuffix(trimmed, "/chat/completions")
-		return trimmed, base + "/responses", base + "/models", nil
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", "", "", err
 	}
-	if strings.HasSuffix(trimmed, "/responses") {
-		base = strings.TrimSuffix(trimmed, "/responses")
-		return base + "/chat/completions", trimmed, base + "/models", nil
+	if (u.Scheme == "http" || u.Scheme == "https") && u.Host == "" {
+		return "", "", "", fmt.Errorf("invalid base URL: http(s) URL must include a host")
 	}
 
-	chatURL, err := BuildProviderURL(base, "chat/completions")
+	endpointPath := strings.TrimRight(u.Path, "/")
+	apiBase := *u
+	switch {
+	case strings.HasSuffix(endpointPath, "/chat/completions"):
+		apiBase.Path = strings.TrimSuffix(endpointPath, "/chat/completions")
+	case strings.HasSuffix(endpointPath, "/responses"):
+		apiBase.Path = strings.TrimSuffix(endpointPath, "/responses")
+	default:
+		apiBase.Path = u.Path
+	}
+
+	chatURL, err := providerURLFromParsed(apiBase, "chat/completions")
 	if err != nil {
 		return "", "", "", err
 	}
-	responsesURL, err := BuildProviderURL(base, "responses")
+	responsesURL, err := providerURLFromParsed(apiBase, "responses")
 	if err != nil {
 		return "", "", "", err
 	}
-	modelsURL, err := BuildProviderURL(base, "models")
+	modelsURL, err := providerURLFromParsed(apiBase, "models")
 	if err != nil {
 		return "", "", "", err
 	}
@@ -33,19 +46,24 @@ func OpenAIURLs(base string) (string, string, string, error) {
 }
 
 func resolveOpenAIEndpoints(providerURL, _ string) (EndpointSet, error) {
-	trimmed := strings.TrimRight(providerURL, "/")
-	if strings.HasSuffix(trimmed, "/embeddings") {
-		base := strings.TrimSuffix(trimmed, "/embeddings")
-		chatURL, responsesURL, modelsURL, err := OpenAIURLs(base)
+	u, err := url.Parse(providerURL)
+	if err != nil {
+		return EndpointSet{}, err
+	}
+	if strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/embeddings") {
+		base := *u
+		base.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/embeddings")
+		chatURL, responsesURL, modelsURL, err := OpenAIURLs(base.String())
 		if err != nil {
 			return EndpointSet{}, err
 		}
+		apiBase := endpointBaseURL(chatURL, "/chat/completions")
 		return EndpointSet{
-			Base:      strings.TrimSuffix(chatURL, "/chat/completions"),
-			APIBase:   strings.TrimSuffix(chatURL, "/chat/completions"),
+			Base:      apiBase,
+			APIBase:   apiBase,
 			Chat:      chatURL,
 			Responses: responsesURL,
-			Embed:     trimmed,
+			Embed:     u.String(),
 			Models:    modelsURL,
 		}, nil
 	}
@@ -54,7 +72,7 @@ func resolveOpenAIEndpoints(providerURL, _ string) (EndpointSet, error) {
 	if err != nil {
 		return EndpointSet{}, err
 	}
-	base := strings.TrimSuffix(chatURL, "/chat/completions")
+	base := endpointBaseURL(chatURL, "/chat/completions")
 	embedURL, err := BuildProviderURL(base, "embeddings")
 	if err != nil {
 		return EndpointSet{}, err

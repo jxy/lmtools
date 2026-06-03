@@ -51,7 +51,7 @@ func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error)
 		MaxTokens:       maxTokens,
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
-		Stop:            req.Stop,
+		Stop:            []string(req.Stop),
 		Stream:          req.Stream,
 		ReasoningEffort: req.ReasoningEffort,
 		ResponseFormat:  req.ResponseFormat,

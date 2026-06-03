@@ -25,6 +25,7 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 		MaxTokens:       req.MaxOutputTokens,
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
+		Stop:            []string(req.Stop),
 		Stream:          req.Stream,
 		Metadata:        cloneStringInterfaceMap(req.Metadata),
 		ServiceTier:     req.ServiceTier,
@@ -59,6 +60,9 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 	if req.Prompt != nil {
 		return TypedRequest{}, fmt.Errorf("prompt is only supported for direct OpenAI Responses passthrough")
 	}
+	if err := validateConvertedResponsesUnsupportedFields(req); err != nil {
+		return TypedRequest{}, err
+	}
 
 	messages, err := responsesInputToTypedMessages(ctx, req.Input)
 	if err != nil {
@@ -72,6 +76,43 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 	typed.Tools = tools
 	typed.ToolChoice = responsesToolChoiceToCore(ctx, req.ToolChoice)
 	return typed, nil
+}
+
+func validateConvertedResponsesUnsupportedFields(req *OpenAIResponsesRequest) error {
+	if req == nil {
+		return nil
+	}
+	if req.MaxToolCalls != nil {
+		return fmt.Errorf("max_tool_calls is not supported for converted Responses providers")
+	}
+	if req.TopLogprobs != nil {
+		return fmt.Errorf("top_logprobs is not supported for converted Responses providers")
+	}
+	if req.Text != nil && strings.TrimSpace(req.Text.Verbosity) != "" {
+		return fmt.Errorf("text.verbosity is not supported for converted Responses providers")
+	}
+	for _, include := range req.Include {
+		if strings.TrimSpace(include) != "" {
+			return fmt.Errorf("include is not supported for converted Responses providers")
+		}
+	}
+	for i, tool := range req.Tools {
+		if isOpenAIHostedResponsesTool(tool) {
+			toolType, _ := tool["type"].(string)
+			return fmt.Errorf("responses hosted tool %q at index %d is not supported for converted providers", toolType, i)
+		}
+	}
+	return nil
+}
+
+func isOpenAIHostedResponsesTool(tool map[string]interface{}) bool {
+	toolType, _ := tool["type"].(string)
+	switch toolType {
+	case "function", "custom", "namespace":
+		return false
+	default:
+		return strings.TrimSpace(toolType) != ""
+	}
 }
 
 func ensureResponsesAnthropicMaxTokens(typed TypedRequest, model string) TypedRequest {
@@ -160,58 +201,9 @@ func responsesInputItemToTypedMessages(ctx context.Context, rawItem interface{},
 		blocks := responsesContentToBlocks(ctx, role, item["content"])
 		return []core.TypedMessage{{Role: role, Blocks: blocks}}, nil
 	case "function_call":
-		callID, _ := item["call_id"].(string)
-		if callID == "" {
-			callID, _ = item["id"].(string)
-		}
-		name, _ := item["name"].(string)
-		namespace, _ := item["namespace"].(string)
-		originalName := name
-		if namespace != "" {
-			name = flattenNamespaceToolName(namespace, name)
-		}
-		if callID != "" && name != "" {
-			toolNamesByCallID[callID] = name
-		}
-		arguments, _ := item["arguments"].(string)
-		return []core.TypedMessage{{
-			Role: string(core.RoleAssistant),
-			Blocks: []core.Block{core.ToolUseBlock{
-				ID:           callID,
-				Type:         "function",
-				Namespace:    namespace,
-				OriginalName: originalName,
-				Name:         name,
-				Input:        core.NormalizeOpenAIResponsesArguments(arguments),
-			}},
-		}}, nil
+		return []core.TypedMessage{responsesInputToolCallMessage(item, "function", toolNamesByCallID)}, nil
 	case "custom_tool_call":
-		callID, _ := item["call_id"].(string)
-		if callID == "" {
-			callID, _ = item["id"].(string)
-		}
-		name, _ := item["name"].(string)
-		namespace, _ := item["namespace"].(string)
-		originalName := name
-		if namespace != "" {
-			name = flattenNamespaceToolName(namespace, name)
-		}
-		if callID != "" && name != "" {
-			toolNamesByCallID[callID] = name
-		}
-		input, _ := item["input"].(string)
-		return []core.TypedMessage{{
-			Role: string(core.RoleAssistant),
-			Blocks: []core.Block{core.ToolUseBlock{
-				ID:           callID,
-				Type:         "custom",
-				Namespace:    namespace,
-				OriginalName: originalName,
-				Name:         name,
-				Input:        mustMarshalJSON(input),
-				InputString:  input,
-			}},
-		}}, nil
+		return []core.TypedMessage{responsesInputToolCallMessage(item, "custom", toolNamesByCallID)}, nil
 	case "function_call_output":
 		callID, _ := item["call_id"].(string)
 		status, _ := item["status"].(string)
@@ -303,6 +295,39 @@ func responsesFunctionCallOutputText(output interface{}) string {
 	return string(encoded)
 }
 
+func responsesInputToolCallMessage(item map[string]interface{}, toolType string, toolNamesByCallID map[string]string) core.TypedMessage {
+	callID, _ := item["call_id"].(string)
+	if callID == "" {
+		callID, _ = item["id"].(string)
+	}
+	name, _ := item["name"].(string)
+	namespace, _ := item["namespace"].(string)
+	originalName := name
+	if namespace != "" {
+		name = flattenNamespaceToolName(namespace, name)
+	}
+	if callID != "" && name != "" {
+		toolNamesByCallID[callID] = name
+	}
+
+	block := core.ToolUseBlock{
+		ID:           callID,
+		Type:         toolType,
+		Namespace:    namespace,
+		OriginalName: originalName,
+		Name:         name,
+	}
+	if toolType == "custom" {
+		input, _ := item["input"].(string)
+		block.Input = mustMarshalJSON(input)
+		block.InputString = input
+	} else {
+		arguments, _ := item["arguments"].(string)
+		block.Input = core.NormalizeOpenAIResponsesArguments(arguments)
+	}
+	return core.TypedMessage{Role: string(core.RoleAssistant), Blocks: []core.Block{block}}
+}
+
 func responsesContentToBlocks(ctx context.Context, role string, content interface{}) []core.Block {
 	switch value := content.(type) {
 	case string:
@@ -388,21 +413,19 @@ func responsesToolsToCore(ctx context.Context, tools []map[string]interface{}) (
 			if err != nil {
 				return nil, err
 			}
-			if _, exists := usedNames[def.Name]; exists {
-				return nil, duplicateFlattenedToolNameError(def.Name)
+			result, err = appendResponsesToolDefinition(result, usedNames, def)
+			if err != nil {
+				return nil, err
 			}
-			usedNames[def.Name] = struct{}{}
-			result = append(result, def)
 		case "custom":
 			def, err := responsesCustomToolToCore(tool, i)
 			if err != nil {
 				return nil, err
 			}
-			if _, exists := usedNames[def.Name]; exists {
-				return nil, duplicateFlattenedToolNameError(def.Name)
+			result, err = appendResponsesToolDefinition(result, usedNames, def)
+			if err != nil {
+				return nil, err
 			}
-			usedNames[def.Name] = struct{}{}
-			result = append(result, def)
 		case "namespace":
 			namespaceTools, err := responsesNamespaceToolsToCore(tool, i, usedNames)
 			if err != nil {
@@ -414,6 +437,14 @@ func responsesToolsToCore(ctx context.Context, tools []map[string]interface{}) (
 		}
 	}
 	return result, nil
+}
+
+func appendResponsesToolDefinition(result []core.ToolDefinition, usedNames map[string]struct{}, def core.ToolDefinition) ([]core.ToolDefinition, error) {
+	if _, exists := usedNames[def.Name]; exists {
+		return nil, duplicateFlattenedToolNameError(def.Name)
+	}
+	usedNames[def.Name] = struct{}{}
+	return append(result, def), nil
 }
 
 func responsesFunctionToolToCore(tool map[string]interface{}, index int) (core.ToolDefinition, error) {
@@ -482,11 +513,10 @@ func responsesNamespaceToolsToCore(namespaceTool map[string]interface{}, index i
 		def.OriginalName = originalName
 		def.OriginalDescription = def.Description
 		def.Description = namespaceToolDescription(namespace, namespaceDescription, originalName, def.Description)
-		if _, exists := usedNames[def.Name]; exists {
-			return nil, duplicateFlattenedToolNameError(def.Name)
+		result, err = appendResponsesToolDefinition(result, usedNames, def)
+		if err != nil {
+			return nil, err
 		}
-		usedNames[def.Name] = struct{}{}
-		result = append(result, def)
 	}
 	return result, nil
 }
@@ -865,7 +895,6 @@ func ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *Anthrop
 		incompleteDetails = map[string]interface{}{"reason": "max_output_tokens"}
 	}
 	output := make([]OpenAIResponsesOutputItem, 0, len(resp.Content))
-	var outputText []string
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "thinking", "redacted_thinking":
@@ -879,7 +908,6 @@ func ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *Anthrop
 			if block.Text == "" {
 				continue
 			}
-			outputText = append(outputText, block.Text)
 			output = append(output, OpenAIResponsesOutputItem{
 				ID:     generateUUID("msg_"),
 				Type:   "message",
@@ -936,7 +964,6 @@ func ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *Anthrop
 		Status:            status,
 		Model:             originalModel,
 		Output:            output,
-		OutputText:        strings.Join(outputText, ""),
 		Usage:             openAIUsageToResponsesUsage(AnthropicUsageToOpenAI(resp.Usage)),
 		ServiceTier:       resp.ServiceTier,
 		IncompleteDetails: incompleteDetails,

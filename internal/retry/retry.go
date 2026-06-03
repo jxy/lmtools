@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -172,8 +173,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			if stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
-			// Only retry on network timeout errors
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			if isRetryableTransportError(err) {
 				lastErr = errors.WrapError("execute request", fmt.Errorf("attempt %d: %s %s -> %v", attempt+1, req.Method, req.URL, err))
 				continue
 			}
@@ -210,15 +210,24 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 
 // DoWithFunc executes a function with retry logic
 func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, error)) (*http.Response, error) {
+	if r.config.MaxRetries < 0 {
+		return nil, errors.WrapError("validate retry config", stdErrors.New("max retries must be >= 0"))
+	}
+
 	// Resolve logger once for this operation
 	logger := r.getLogger(ctx)
 
 	var lastErr error
+	var overrideBackoff time.Duration
 
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
 		// Wait before retry (except first attempt)
 		if attempt > 0 {
 			backoff := r.calculateBackoff(attempt - 1)
+			if overrideBackoff > 0 {
+				backoff = overrideBackoff
+				overrideBackoff = 0
+			}
 
 			// Try to get request logger from context first
 			if logger != nil {
@@ -249,7 +258,25 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 				}
 			}
 			lastErr = errors.WrapError("HTTP response", fmt.Errorf("HTTP %d response", resp.StatusCode))
+			if retryAfter := ExtractRetryAfter(resp); retryAfter > 0 {
+				nextBackoff := r.calculateBackoff(attempt)
+				if retryAfter > nextBackoff {
+					overrideBackoff = retryAfter
+					if logger != nil {
+						logger.Infof("Retry-After header suggests waiting %v (vs calculated %v)", retryAfter, nextBackoff)
+					}
+				}
+			}
+			DrainAndClose(resp)
 		} else {
+			if err != nil {
+				if stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
+					return nil, err
+				}
+				if !isRetryableTransportError(err) {
+					return nil, errors.WrapError("execute request", err)
+				}
+			}
 			lastErr = err
 		}
 
@@ -260,6 +287,31 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 	}
 
 	return nil, errors.WrapError("max retries exceeded", lastErr)
+}
+
+func isRetryableTransportError(err error) bool {
+	if err == nil || stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var netErr net.Error
+	if stdErrors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return true
+		}
+		type temporary interface{ Temporary() bool }
+		if temp, ok := netErr.(temporary); ok && temp.Temporary() {
+			return true
+		}
+	}
+	if stdErrors.Is(err, io.ErrUnexpectedEOF) || stdErrors.Is(err, io.EOF) {
+		return true
+	}
+	for _, code := range []syscall.Errno{syscall.ECONNRESET, syscall.ECONNREFUSED, syscall.EPIPE} {
+		if stdErrors.Is(err, code) {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldRetryResponse determines if a response warrants a retry
@@ -303,13 +355,14 @@ func (r *Retryer) calculateBackoff(attempt int) time.Duration {
 	return time.Duration(backoff)
 }
 
-// DrainAndClose fully drains the response body to enable connection reuse
+const maxRetryDrainBytes int64 = 64 * 1024
+
+// DrainAndClose drains a bounded response body prefix to enable connection reuse without blocking retries indefinitely.
 func DrainAndClose(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
 	}
-	// Drain the entire body for better connection reuse
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRetryDrainBytes))
 	resp.Body.Close()
 }
 

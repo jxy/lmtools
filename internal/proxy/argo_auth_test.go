@@ -10,9 +10,7 @@ func TestConfigureArgoAnthropicRequestUsesArgoUserAsAPIKey(t *testing.T) {
 	server := &Server{config: &Config{ArgoUser: "argo-user-key"}}
 	req := httptest.NewRequest(http.MethodPost, "http://argo.test/v1/messages", nil)
 
-	if err := server.configureArgoAnthropicRequest(req); err != nil {
-		t.Fatalf("configureArgoAnthropicRequest() error = %v", err)
-	}
+	server.configureArgoAnthropicRequest(req)
 
 	if got := req.Header.Get("x-api-key"); got != "argo-user-key" {
 		t.Fatalf("x-api-key = %q, want %q", got, "argo-user-key")
@@ -26,9 +24,7 @@ func TestConfigureArgoOpenAIRequestUsesArgoUserAsBearerToken(t *testing.T) {
 	server := &Server{config: &Config{ArgoUser: "argo-user-key"}}
 	req := httptest.NewRequest(http.MethodPost, "http://argo.test/v1/chat/completions", nil)
 
-	if err := server.configureArgoOpenAIRequest(req); err != nil {
-		t.Fatalf("configureArgoOpenAIRequest() error = %v", err)
-	}
+	server.configureArgoOpenAIRequest(req)
 
 	if got := req.Header.Get("Authorization"); got != "Bearer argo-user-key" {
 		t.Fatalf("Authorization = %q, want %q", got, "Bearer argo-user-key")
@@ -42,9 +38,7 @@ func TestConfigureArgoRequestPrefersExplicitAPIKey(t *testing.T) {
 	}}
 	req := httptest.NewRequest(http.MethodPost, "http://argo.test/v1/messages", nil)
 
-	if err := server.configureArgoAnthropicRequest(req); err != nil {
-		t.Fatalf("configureArgoAnthropicRequest() error = %v", err)
-	}
+	server.configureArgoAnthropicRequest(req)
 
 	if got := req.Header.Get("x-api-key"); got != "file-key" {
 		t.Fatalf("x-api-key = %q, want %q", got, "file-key")

@@ -60,7 +60,7 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*Op
 		Temperature:     typed.Temperature,
 		TopP:            typed.TopP,
 		Stream:          typed.Stream,
-		Stop:            typed.Stop,
+		Stop:            OpenAIStopSequences(typed.Stop),
 		ReasoningEffort: typed.ReasoningEffort,
 		ResponseFormat:  typed.ResponseFormat,
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
@@ -222,7 +222,6 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:     typed.ServiceTier,
 	}
-
 	var typedMessages []core.TypedMessage
 	if providers.DetermineArgoModelProvider(ctx.Model) == constants.ProviderOpenAI {
 		typedMessages = prependOpenAIInstructionMessages(typed.Messages, typed.System, typed.Developer, ctx.Model)

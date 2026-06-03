@@ -105,38 +105,6 @@ func HashAPIKey(apiKey string) string {
 	return "apikey_" + hex.EncodeToString(hash[:8])
 }
 
-// ValidateAPIKey performs basic validation on an API key
-func ValidateAPIKey(key string, provider string) error {
-	if key == "" {
-		return errors.WrapError("validate API key", stdErrors.New("API key is empty"))
-	}
-
-	// Provider-specific validation
-	switch provider {
-	case constants.ProviderOpenAI:
-		// OpenAI keys typically start with "sk-"
-		if !strings.HasPrefix(key, "sk-") && !strings.Contains(key, "-") {
-			// Allow Azure OpenAI keys which have different format
-			// Just check it's not obviously invalid
-			if len(key) < 20 {
-				return errors.WrapError("validate API key", stdErrors.New("OpenAI API key appears to be invalid (too short)"))
-			}
-		}
-	case constants.ProviderAnthropic:
-		// Anthropic keys typically start with "sk-ant-"
-		if !strings.HasPrefix(key, "sk-ant-") && len(key) < 20 {
-			return errors.WrapError("validate API key", stdErrors.New("anthropic API key appears to be invalid"))
-		}
-	case constants.ProviderGoogle:
-		// Google API keys typically start with "AIza"
-		if !strings.HasPrefix(key, "AIza") && len(key) < 20 {
-			return errors.WrapError("validate API key", stdErrors.New("google API key appears to be invalid"))
-		}
-	}
-
-	return nil
-}
-
 // SetProviderHeaders sets authentication and required headers for a provider
 func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 	switch provider {
@@ -155,7 +123,10 @@ func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 			req.Header.Set("x-goog-api-key", apiKey)
 		}
 	case constants.ProviderArgo:
-		// Argo doesn't use API key headers
+		if apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+			req.Header.Set("x-api-key", apiKey)
+		}
 	}
 }
 

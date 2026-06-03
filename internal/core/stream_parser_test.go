@@ -82,6 +82,37 @@ func TestParseOpenAIStreamChunkTopLevelErrorIsFatal(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIStreamChunkParsesAllChoices(t *testing.T) {
+	parsed, err := ParseOpenAIStreamChunk([]byte(`{"choices":[{"index":0,"delta":{"content":"first"},"finish_reason":""},{"index":1,"delta":{"content":"second"},"finish_reason":"stop"}]}`))
+	if err != nil {
+		t.Fatalf("ParseOpenAIStreamChunk() error = %v", err)
+	}
+	if len(parsed.Choices) != 2 {
+		t.Fatalf("len(Choices) = %d, want 2", len(parsed.Choices))
+	}
+	if parsed.Content != "first" || parsed.Choices[1].Content != "second" || parsed.Choices[1].FinishReason != "stop" {
+		t.Fatalf("unexpected parsed choices: %#v", parsed)
+	}
+}
+
+func TestOpenAIStreamStateAcceptsNoSpaceDataAndAllChoices(t *testing.T) {
+	state := NewOpenAIStreamState()
+	content, calls, done, err := state.ParseLine(`data:{"choices":[{"index":0,"delta":{"content":"first"}},{"index":1,"delta":{"content":"second"}}]}`)
+	if err != nil {
+		t.Fatalf("ParseLine() error = %v", err)
+	}
+	if done || len(calls) != 0 || content != "firstsecond" {
+		t.Fatalf("ParseLine() = content %q, calls %v, done %v", content, calls, done)
+	}
+	_, _, done, err = state.ParseLine(`data:[DONE]`)
+	if err != nil {
+		t.Fatalf("ParseLine([DONE]) error = %v", err)
+	}
+	if !done {
+		t.Fatal("ParseLine([DONE]) done = false")
+	}
+}
+
 // TestStreamingParseErrorThreshold tests the parse error threshold behavior
 // for streaming responses across different providers
 func TestStreamingParseErrorThreshold(t *testing.T) {

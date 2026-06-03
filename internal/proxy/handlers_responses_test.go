@@ -240,6 +240,38 @@ func TestOpenAIResponsesDirectStreamPassThroughPreservesUnmodeledFields(t *testi
 	assertCapturedResponsesPassthroughFields(t, captured)
 }
 
+func TestOpenAIResponsesDirectPassThroughForwards3xxAsNonSuccess(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTemporaryRedirect,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"error":{"message":"redirect"}}`)),
+		}, nil
+	})
+	config := &Config{
+		Provider:           constants.ProviderOpenAI,
+		ProviderURL:        "http://openai.local/v1",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "test-key"},
+		MaxRequestBodySize: fixtureMaxBodySize,
+		SessionsDir:        t.TempDir(),
+	}
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	server := NewTestServerDirectWithClient(t, config, client)
+
+	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
+		"model": "gpt-test",
+		"input": "say hi",
+	})
+	if code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want %d; body = %s", code, http.StatusTemporaryRedirect, string(body))
+	}
+	if !strings.Contains(string(body), "redirect") {
+		t.Fatalf("body = %s, want upstream redirect body", string(body))
+	}
+}
+
 func TestOpenAIResponsesDirectPassThroughRewritesOnlyMappedModel(t *testing.T) {
 	var captured map[string]interface{}
 	var lifecyclePath string
@@ -721,31 +753,7 @@ func assertCapturedResponsesPassthroughFields(t *testing.T, captured map[string]
 	}
 }
 
-func TestOpenAIResponsesConvertedProviderDropsUnsupportedTools(t *testing.T) {
-	upstreamCalls := 0
-	var upstreamBody map[string]interface{}
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		upstreamCalls++
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(body, &upstreamBody); err != nil {
-			t.Fatalf("json.Unmarshal(upstream request) error = %v, body = %s", err, string(body))
-		}
-		return jsonRoundTripResponse(http.StatusOK, AnthropicResponse{
-			ID:         "msg_1",
-			Type:       "message",
-			Role:       core.RoleAssistant,
-			Model:      "claude-test",
-			StopReason: "end_turn",
-			Content: []AnthropicContentBlock{{
-				Type: "text",
-				Text: "search skipped",
-			}},
-			Usage: &AnthropicUsage{InputTokens: 1, OutputTokens: 2},
-		}), nil
-	})
+func TestOpenAIResponsesConvertedProviderRejectsUnsupportedTools(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
@@ -753,7 +761,10 @@ func TestOpenAIResponsesConvertedProviderDropsUnsupportedTools(t *testing.T) {
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
 	}
-	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatal("unexpected upstream call for unsupported Responses hosted tool")
+		return nil, nil
+	}))
 	server := NewTestServerDirectWithClient(t, config, client)
 
 	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
@@ -763,21 +774,11 @@ func TestOpenAIResponsesConvertedProviderDropsUnsupportedTools(t *testing.T) {
 			map[string]interface{}{"type": "web_search_preview"},
 		},
 	})
-	if code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", code, string(body))
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", code, string(body))
 	}
-	if upstreamCalls != 1 {
-		t.Fatalf("upstream calls = %d, want 1", upstreamCalls)
-	}
-	if _, ok := upstreamBody["tools"]; ok {
-		t.Fatalf("upstream tools = %#v, want unsupported Responses tool dropped", upstreamBody["tools"])
-	}
-	var resp OpenAIResponsesResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("json.Unmarshal(response) error = %v, body = %s", err, string(body))
-	}
-	if resp.Status != "completed" || len(resp.Output) != 1 {
-		t.Fatalf("response = %+v, want completed response with one message", resp)
+	if !strings.Contains(string(body), "web_search_preview") {
+		t.Fatalf("body = %s, want unsupported tool error", string(body))
 	}
 }
 

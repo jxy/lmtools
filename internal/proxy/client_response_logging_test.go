@@ -3,13 +3,109 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"io"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestInfoLogsConnectionClosedForNonStreamResponse(t *testing.T) {
+	logs := captureStderrWithLevel(t, "info", func() {
+		handler := NewProxyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}), &Config{MaxRequestBodySize: 1024})
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/nonstream", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	})
+
+	for _, want := range []string{"Client response completed", "GET /nonstream", "Mode: non-stream", "Status: 200"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "WIRE CLIENT") {
+		t.Fatalf("INFO logs should not include DEBUG wire dumps\nlogs:\n%s", logs)
+	}
+}
+
+func TestInfoLogsFirstSSEAndStreamConnectionClosed(t *testing.T) {
+	logs := captureStderrWithLevel(t, "info", func() {
+		handler := NewProxyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writer, err := NewSSEWriter(w, r.Context())
+			if err != nil {
+				t.Fatalf("NewSSEWriter() error = %v", err)
+			}
+			if err := writer.WriteEvent("message", `{"text":"hello"}`); err != nil {
+				t.Fatalf("WriteEvent() error = %v", err)
+			}
+		}), &Config{MaxRequestBodySize: 1024})
+
+		rr := newFlushableRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	})
+
+	for _, want := range []string{"Client stream started", "GET /stream", "Client response completed", "Mode: stream", "Status: 200"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+	if strings.Count(logs, "Client stream started") != 1 {
+		t.Fatalf("client stream started log count = %d, want 1\nlogs:\n%s", strings.Count(logs, "Client stream started"), logs)
+	}
+}
+
+func TestOpenAIRawLifecycleLogsRawBackendResponseBeforeClientRewrite(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_123","model":"gpt-upstream","status":"completed"}`)),
+			Request:    r,
+		}, nil
+	})
+	config := &Config{
+		Provider:           constants.ProviderOpenAI,
+		ProviderURL:        "http://openai.local/v1",
+		ProviderKeySet:     ProviderKeySet{OpenAIAPIKey: "openai-key"},
+		MaxRequestBodySize: fixtureMaxBodySize,
+	}
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	server := NewTestServerDirectWithClient(t, config, client)
+	server.registerResponsesModelAlias("resp_123", "gpt-upstream", "gpt-visible")
+
+	logs := captureStderr(t, func() {
+		req := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123", nil)
+		w := httptest.NewRecorder()
+		server.forwardOpenAIRawLifecycle(w, req, "responses")
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "gpt-visible") {
+			t.Fatalf("client body was not rewritten: %s", w.Body.String())
+		}
+	})
+
+	for _, want := range []string{"WIRE BACKEND RESPONSE HEADERS OpenAI lifecycle", "WIRE BACKEND RESPONSE BODY OpenAI lifecycle", `"model":"gpt-upstream"`, "WIRE CLIENT RESPONSE BODY", `"model":"gpt-visible"`} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
+		}
+	}
+}
 
 func TestClientResponseHeadersLoggedForExplicitStatus(t *testing.T) {
 	logs := captureStderr(t, func() {

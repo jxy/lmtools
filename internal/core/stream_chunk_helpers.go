@@ -16,12 +16,20 @@ type ParsedStreamUsage struct {
 
 // ParsedOpenAIStreamToolCall captures a single streamed OpenAI tool-call delta.
 type ParsedOpenAIStreamToolCall struct {
-	Index     int
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
-	Input     string
+	ChoiceIndex int
+	Index       int
+	ID          string
+	Type        string
+	Name        string
+	Arguments   string
+	Input       string
+}
+
+type ParsedOpenAIStreamChoice struct {
+	Index        int
+	FinishReason string
+	Content      string
+	ToolCalls    []ParsedOpenAIStreamToolCall
 }
 
 // ParsedOpenAIStreamChunk is the normalized shape of an OpenAI stream chunk.
@@ -30,6 +38,7 @@ type ParsedOpenAIStreamChunk struct {
 	FinishReason string
 	Content      string
 	ToolCalls    []ParsedOpenAIStreamToolCall
+	Choices      []ParsedOpenAIStreamChoice
 }
 
 // ParseOpenAIStreamErrorChunk detects OpenAI-compatible SSE error payloads.
@@ -95,6 +104,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 			TotalTokens      *int `json:"total_tokens"`
 		} `json:"usage"`
 		Choices []struct {
+			Index        int    `json:"index"`
 			FinishReason string `json:"finish_reason"`
 			Delta        struct {
 				Content   string `json:"content"`
@@ -129,47 +139,54 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 		return parsed, nil
 	}
 
-	choice := raw.Choices[0]
+	parsed.Choices = make([]ParsedOpenAIStreamChoice, 0, len(raw.Choices))
+	for _, rawChoice := range raw.Choices {
+		choice := ParsedOpenAIStreamChoice{
+			Index:        rawChoice.Index,
+			FinishReason: rawChoice.FinishReason,
+			Content:      rawChoice.Delta.Content,
+		}
+		if len(rawChoice.Delta.ToolCalls) > 0 {
+			choice.ToolCalls = make([]ParsedOpenAIStreamToolCall, 0, len(rawChoice.Delta.ToolCalls))
+			for _, toolCall := range rawChoice.Delta.ToolCalls {
+				toolType := toolCall.Type
+				if toolType == "" {
+					switch {
+					case toolCall.Custom != nil:
+						toolType = "custom"
+					case toolCall.Function != nil:
+						toolType = "function"
+					}
+				}
+				name := ""
+				arguments := ""
+				if toolCall.Function != nil {
+					name = toolCall.Function.Name
+					arguments = toolCall.Function.Arguments
+				}
+				input := ""
+				if toolType == "custom" && toolCall.Custom != nil {
+					name = toolCall.Custom.Name
+					input = toolCall.Custom.Input
+				}
+				choice.ToolCalls = append(choice.ToolCalls, ParsedOpenAIStreamToolCall{
+					ChoiceIndex: rawChoice.Index,
+					Index:       toolCall.Index,
+					ID:          toolCall.ID,
+					Type:        toolType,
+					Name:        name,
+					Arguments:   arguments,
+					Input:       input,
+				})
+			}
+		}
+		parsed.Choices = append(parsed.Choices, choice)
+	}
+
+	choice := parsed.Choices[0]
 	parsed.FinishReason = choice.FinishReason
-	parsed.Content = choice.Delta.Content
-	if len(choice.Delta.ToolCalls) == 0 {
-		return parsed, nil
-	}
-
-	parsed.ToolCalls = make([]ParsedOpenAIStreamToolCall, 0, len(choice.Delta.ToolCalls))
-	for _, toolCall := range choice.Delta.ToolCalls {
-		toolType := toolCall.Type
-		if toolType == "" {
-			switch {
-			case toolCall.Custom != nil:
-				toolType = "custom"
-			case toolCall.Function != nil:
-				toolType = "function"
-			}
-		}
-		name := ""
-		arguments := ""
-		if toolCall.Function != nil {
-			name = toolCall.Function.Name
-			arguments = toolCall.Function.Arguments
-		}
-		input := ""
-		if toolType == "custom" {
-			if toolCall.Custom != nil {
-				name = toolCall.Custom.Name
-				input = toolCall.Custom.Input
-			}
-		}
-		parsed.ToolCalls = append(parsed.ToolCalls, ParsedOpenAIStreamToolCall{
-			Index:     toolCall.Index,
-			ID:        toolCall.ID,
-			Type:      toolType,
-			Name:      name,
-			Arguments: arguments,
-			Input:     input,
-		})
-	}
-
+	parsed.Content = choice.Content
+	parsed.ToolCalls = choice.ToolCalls
 	return parsed, nil
 }
 

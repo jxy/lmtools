@@ -17,6 +17,94 @@ import (
 	"time"
 )
 
+func newTestResponsesStreamWriter(t *testing.T) (*responsesStreamWriter, *httptest.ResponseRecorder) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	writer, err := newResponsesStreamWriter(recorder, context.Background(), "gpt-test")
+	if err != nil {
+		t.Fatalf("newResponsesStreamWriter() error = %v", err)
+	}
+	return writer, recorder
+}
+
+func TestOpenAIResponsesConvertedOpenAIStreamRequiresDoneMarker(t *testing.T) {
+	SetupTestLogger(t)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"))
+	}))
+	defer backend.Close()
+
+	handler, cleanup := NewTestServer(t, &Config{
+		Provider:           constants.ProviderArgo,
+		ProviderURL:        backend.URL,
+		ArgoUser:           "test-key",
+		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
+	})
+	defer cleanup()
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	resp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"say hi"}`))
+	if err != nil {
+		t.Fatalf("POST /v1/responses: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d; body=%s", resp.StatusCode, string(body))
+	}
+	if !strings.Contains(string(body), "response.failed") {
+		t.Fatalf("stream did not contain response.failed: %s", string(body))
+	}
+	if !strings.Contains(string(body), "ended before terminal") {
+		t.Fatalf("stream did not include terminal marker error: %s", string(body))
+	}
+}
+
+func TestOpenAIResponsesConvertedStreamContentFilterIsIncomplete(t *testing.T) {
+	writer, recorder := newTestResponsesStreamWriter(t)
+	if err := writer.start(); err != nil {
+		t.Fatalf("start() error = %v", err)
+	}
+	if err := writer.WriteTextDelta("blocked"); err != nil {
+		t.Fatalf("WriteTextDelta() error = %v", err)
+	}
+	resp, err := writer.Finish("content_filter")
+	if err != nil {
+		t.Fatalf("Finish() error = %v", err)
+	}
+	if resp.Status != "incomplete" {
+		t.Fatalf("status = %q, want incomplete", resp.Status)
+	}
+	details, _ := resp.IncompleteDetails.(map[string]interface{})
+	if details["reason"] != "content_filter" {
+		t.Fatalf("incomplete reason = %#v, want content_filter", resp.IncompleteDetails)
+	}
+	if !strings.Contains(recorder.Body.String(), "response.incomplete") {
+		t.Fatalf("stream missing response.incomplete: %s", recorder.Body.String())
+	}
+}
+
+func TestOpenAIResponsesConvertedOpenAIStreamAcceptsNoSpaceDataFields(t *testing.T) {
+	writer, _ := newTestResponsesStreamWriter(t)
+	input := strings.Join([]string{
+		`data:{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`,
+		"",
+		"data:[DONE]",
+		"",
+	}, "\n")
+
+	finishReason, err := (&Server{}).convertOpenAIChatStreamToResponses(context.Background(), strings.NewReader(input), writer)
+	if err != nil {
+		t.Fatalf("convertOpenAIChatStreamToResponses() error = %v", err)
+	}
+	if finishReason != "stop" {
+		t.Fatalf("finishReason = %q, want stop", finishReason)
+	}
+}
+
 func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 	SetupTestLogger(t)
 

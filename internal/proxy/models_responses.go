@@ -17,6 +17,7 @@ type OpenAIResponsesRequest struct {
 	MaxToolCalls       *int                      `json:"max_tool_calls,omitempty"`
 	Temperature        *float64                  `json:"temperature,omitempty"`
 	TopP               *float64                  `json:"top_p,omitempty"`
+	Stop               OpenAIStopSequences       `json:"stop,omitempty"`
 	Stream             bool                      `json:"stream,omitempty"`
 	StreamOptions      *OpenAIStreamOptions      `json:"stream_options,omitempty"`
 	Store              *bool                     `json:"store,omitempty"`
@@ -56,7 +57,6 @@ type OpenAIResponsesResponse struct {
 	Model             string                       `json:"model"`
 	Conversation      *OpenAIResponsesConversation `json:"conversation,omitempty"`
 	Output            []OpenAIResponsesOutputItem  `json:"output"`
-	OutputText        string                       `json:"-"`
 	Usage             *OpenAIResponsesUsage        `json:"usage,omitempty"`
 	Error             interface{}                  `json:"error,omitempty"`
 	IncompleteDetails interface{}                  `json:"incomplete_details,omitempty"`

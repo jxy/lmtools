@@ -9,9 +9,9 @@ import (
 // conversationSnapshot caches message directory lookups along the active session
 // lineage so repeated conversation reconstruction does not rebuild indexes.
 type conversationSnapshot struct {
-	sessionPath  string
-	manager      *Manager
-	messageIndex map[string]string
+	sessionPath string
+	manager     *Manager
+	refs        []lineageMessageRef
 }
 
 func newConversationSnapshot(sessionPath string) (*conversationSnapshot, error) {
@@ -22,15 +22,15 @@ func newConversationSnapshotWithManager(manager *Manager, sessionPath string) (*
 	if manager == nil {
 		manager = DefaultManager()
 	}
-	messageIndex, err := indexMessagesAlongPathWithManager(manager, sessionPath)
+	refs, err := lineageMessageRefsWithManager(manager, sessionPath)
 	if err != nil {
-		return nil, errors.WrapError("index message directories", err)
+		return nil, errors.WrapError("build message lineage refs", err)
 	}
 
 	return &conversationSnapshot{
-		sessionPath:  sessionPath,
-		manager:      manager,
-		messageIndex: messageIndex,
+		sessionPath: sessionPath,
+		manager:     manager,
+		refs:        refs,
 	}, nil
 }
 
@@ -39,13 +39,11 @@ func (s *conversationSnapshot) ensureIndexed(path string) error {
 		return nil
 	}
 
-	newIndex, err := indexMessagesAlongPathWithManager(s.manager, path)
+	refs, err := lineageMessageRefsWithManager(s.manager, path)
 	if err != nil {
-		return errors.WrapError("index new message directories", err)
+		return errors.WrapError("build new message lineage refs", err)
 	}
-	for msgID, dir := range newIndex {
-		s.messageIndex[msgID] = dir
-	}
+	s.refs = refs
 	s.sessionPath = path
 	return nil
 }
@@ -55,12 +53,7 @@ func (s *conversationSnapshot) buildTypedMessages(ctx context.Context, path stri
 		return nil, err
 	}
 
-	messages, err := GetLineageWithManager(s.manager, path)
-	if err != nil {
-		return nil, errors.WrapError("get lineage", err)
-	}
-
-	return BuildMessagesWithIndex(ctx, messages, s.messageIndex, path)
+	return buildTypedMessagesFromLineageRefs(ctx, s.refs)
 }
 
 func (s *conversationSnapshot) pendingToolCalls(ctx context.Context, path string) ([]core.ToolCall, error) {
@@ -68,27 +61,5 @@ func (s *conversationSnapshot) pendingToolCalls(ctx context.Context, path string
 		return nil, err
 	}
 
-	messages, err := GetLineageWithManager(s.manager, path)
-	if err != nil {
-		return nil, errors.WrapError("get lineage", err)
-	}
-	if len(messages) == 0 {
-		return nil, nil
-	}
-
-	lastMsg := messages[len(messages)-1]
-	if lastMsg.Role != core.RoleAssistant {
-		return nil, nil
-	}
-
-	msgDir := resolveIndexedMessageDir(ctx, s.messageIndex, lastMsg.ID, path)
-	toolInteraction, err := LoadToolInteraction(msgDir, lastMsg.ID)
-	if err != nil {
-		return nil, errors.WrapError("load tool interaction", err)
-	}
-	if toolInteraction == nil || len(toolInteraction.Calls) == 0 {
-		return nil, nil
-	}
-
-	return toolInteraction.Calls, nil
+	return pendingToolCallsFromLineageRefs(ctx, s.refs)
 }

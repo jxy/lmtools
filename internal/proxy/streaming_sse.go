@@ -31,20 +31,25 @@ func NewSSEWriter(w http.ResponseWriter, ctx context.Context) (*SSEWriter, error
 
 // WriteEvent writes an SSE event.
 func (s *SSEWriter) WriteEvent(eventType, data string) error {
+	var payload strings.Builder
+	if eventType != "" {
+		fmt.Fprintf(&payload, "event: %s\n", eventType)
+	}
+	writeSSEDataLines(&payload, data)
+	payload.WriteString("\n")
+	return s.WriteRaw(payload.String())
+}
+
+// WriteRaw writes already-framed SSE bytes without changing them.
+func (s *SSEWriter) WriteRaw(payload string) error {
 	select {
 	case <-s.ctx.Done():
 		return s.ctx.Err()
 	default:
 	}
 
-	var payload strings.Builder
-	if eventType != "" {
-		fmt.Fprintf(&payload, "event: %s\n", eventType)
-	}
-	fmt.Fprintf(&payload, "data: %s\n\n", data)
-	raw := payload.String()
-	logWireBytes(s.ctx, "WIRE CLIENT STREAM", []byte(raw))
-	if _, err := io.WriteString(s.w, raw); err != nil {
+	logWireBytes(s.ctx, "WIRE CLIENT STREAM", []byte(payload))
+	if _, err := io.WriteString(s.w, payload); err != nil {
 		return err
 	}
 	s.flusher.Flush()
@@ -53,12 +58,6 @@ func (s *SSEWriter) WriteEvent(eventType, data string) error {
 
 // WriteJSON writes a JSON object as an SSE event.
 func (s *SSEWriter) WriteJSON(eventType string, data interface{}) error {
-	select {
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	default:
-	}
-
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err

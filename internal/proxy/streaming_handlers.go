@@ -24,7 +24,7 @@ func (s *Server) sendStreamingJSONRequest(
 	url string,
 	payload interface{},
 	extraHeaders map[string]string,
-	configure func(*http.Request) error,
+	configure func(*http.Request),
 ) (*http.Response, error) {
 	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
 		URL:          url,
@@ -58,14 +58,25 @@ func consumeSSEStream(reader io.Reader, onData func(event string, data json.RawM
 	scanner := NewSSEScanner(reader)
 	var currentEvent string
 	var dataLines []string
+	var recordHasEvent bool
+	var recordHasComment bool
 
 	flush := func() error {
+		defer func() {
+			recordHasEvent = false
+			recordHasComment = false
+		}()
 		if len(dataLines) == 0 {
+			if recordHasEvent && !recordHasComment {
+				currentEvent = ""
+			}
 			return nil
 		}
 		data := strings.Join(dataLines, "\n")
 		dataLines = dataLines[:0]
-		return onData(currentEvent, json.RawMessage(data))
+		event := currentEvent
+		currentEvent = ""
+		return onData(event, json.RawMessage(data))
 	}
 
 	for scanner.Scan() {
@@ -76,13 +87,17 @@ func consumeSSEStream(reader io.Reader, onData func(event string, data json.RawM
 			if err := flush(); err != nil {
 				return err
 			}
-		case strings.HasPrefix(line, "event: "):
-			if err := flush(); err != nil {
-				return err
+		case strings.HasPrefix(line, ":"):
+			recordHasComment = true
+		case true:
+			if event, ok := sseFieldValue(line, "event"); ok {
+				currentEvent = event
+				recordHasEvent = true
+				continue
 			}
-			currentEvent = strings.TrimPrefix(line, "event: ")
-		case strings.HasPrefix(line, "data: "):
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
+			if data, ok := sseFieldValue(line, "data"); ok {
+				dataLines = append(dataLines, data)
+			}
 		}
 	}
 
@@ -107,8 +122,8 @@ func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicR
 		return nil, fmt.Errorf("build Google streaming URL: %w", err)
 	}
 
-	return s.sendStreamingJSONRequest(ctx, constants.ProviderGoogle, "Google", url, googleReq, nil, func(req *http.Request) error {
-		return auth.ApplyProviderCredentials(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+	return s.sendStreamingJSONRequest(ctx, constants.ProviderGoogle, "Google", url, googleReq, nil, func(req *http.Request) {
+		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
 	})
 }
 
@@ -118,8 +133,7 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 	// Enable streaming
 	anthReq.Stream = true
 	extraHeaders := map[string]string{
-		"Accept":            "text/event-stream",
-		"anthropic-version": "2023-06-01",
+		"Accept": "text/event-stream",
 	}
 	if anthReq.Betas != "" {
 		extraHeaders["anthropic-beta"] = anthReq.Betas
@@ -132,8 +146,8 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 		s.endpoints.Anthropic,
 		anthReq,
 		extraHeaders,
-		func(req *http.Request) error {
-			return auth.ApplyProviderCredentials(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
+		func(req *http.Request) {
+			auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
 		},
 	)
 }
@@ -146,10 +160,12 @@ func (s *Server) openAIStreamingRequest(ctx context.Context, anthReq *AnthropicR
 	if err != nil {
 		return nil, fmt.Errorf("convert to OpenAI format: %w", err)
 	}
+	strippedStops := stripOpenAICompatibleStop(openAIReq)
+	warnOpenAICompatibleStopSpecialProcessing(ctx, "OpenAI", strippedStops)
 	openAIReq.Stream = true
 
-	return s.sendStreamingJSONRequest(ctx, constants.ProviderOpenAI, "OpenAI", s.endpoints.OpenAI, openAIReq, nil, func(req *http.Request) error {
-		return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
+	return s.sendStreamingJSONRequest(ctx, constants.ProviderOpenAI, "OpenAI", s.endpoints.OpenAI, openAIReq, nil, func(req *http.Request) {
+		auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 	})
 }
 
@@ -170,7 +186,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	}
 
 	// Parse OpenAI SSE stream
-	parser := NewOpenAIStreamParser(handler)
+	parser := NewOpenAIStreamParserWithStops(handler, anthReq.StopSequences)
 	return parser.Parse(resp.Body)
 }
 
@@ -264,7 +280,7 @@ func (s *Server) streamNativeArgoOpenAI(ctx context.Context, anthReq *AnthropicR
 		return err
 	}
 
-	parser := NewOpenAIStreamParser(handler)
+	parser := NewOpenAIStreamParserWithStops(handler, anthReq.StopSequences)
 	return parser.Parse(resp.Body)
 }
 

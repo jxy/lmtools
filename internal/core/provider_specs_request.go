@@ -1,9 +1,6 @@
 package core
 
 import (
-	"fmt"
-	"lmtools/internal/constants"
-	"lmtools/internal/providers"
 	"strings"
 )
 
@@ -41,7 +38,7 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 	}
 	if tools, ok := payload.Tools.([]GoogleTool); ok && len(tools) > 0 {
 		reqMap["tools"] = tools
-		reqMap["toolConfig"] = googleAutoToolConfig()
+		reqMap["toolConfig"] = googleToolConfigMap(payload.ToolChoice)
 	}
 	addGoogleOutputFields(reqMap, payload)
 	return reqMap
@@ -112,8 +109,10 @@ func anthropicOutputEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
 	case "minimal", "low":
 		return "low"
-	case "medium", "high", "xhigh", "max":
+	case "medium", "high", "xhigh":
 		return strings.ToLower(strings.TrimSpace(effort))
+	case "max":
+		return "xhigh"
 	default:
 		return ""
 	}
@@ -206,50 +205,26 @@ func googleSystemInstruction(system string) map[string]interface{} {
 	}
 }
 
-func googleAutoToolConfig() map[string]interface{} {
-	return map[string]interface{}{
-		"functionCallConfig": map[string]interface{}{
-			"mode": "AUTO",
-		},
+func googleToolConfigMap(toolChoice interface{}) map[string]interface{} {
+	config := map[string]interface{}{
+		"mode": "AUTO",
 	}
-}
-
-func openAIChatURL(cfg RequestOptions, _ string, _ bool) string {
-	chatURL, err := providers.ResolveChatURL(constants.ProviderOpenAI, cfg.ProviderURL, "", "", false)
-	if err == nil {
-		return chatURL
+	choice, ok := toolChoice.(*ToolChoice)
+	if !ok || choice == nil {
+		return map[string]interface{}{"functionCallingConfig": config}
 	}
-	url := cfg.ProviderURL
-	if url == "" {
-		url = "https://api.openai.com/v1"
+	switch choice.Type {
+	case "none":
+		config["mode"] = "NONE"
+	case "required":
+		config["mode"] = "ANY"
+	case "tool":
+		config["mode"] = "ANY"
+		if choice.Name != "" {
+			config["allowedFunctionNames"] = []string{choice.Name}
+		}
 	}
-	return strings.TrimRight(url, "/") + "/chat/completions"
-}
-
-func anthropicChatURL(cfg RequestOptions, _ string, _ bool) string {
-	messagesURL, err := providers.ResolveChatURL(constants.ProviderAnthropic, cfg.ProviderURL, "", "", false)
-	if err == nil {
-		return messagesURL
-	}
-	messagesURL, _ = providers.AnthropicURLs(cfg.ProviderURL)
-	return messagesURL
-}
-
-func googleChatURL(cfg RequestOptions, model string, stream bool) string {
-	url, err := providers.ResolveChatURL(constants.ProviderGoogle, cfg.ProviderURL, "", model, stream)
-	if err == nil {
-		return url
-	}
-
-	action := "generateContent"
-	if stream {
-		action = "streamGenerateContent"
-	}
-	url = cfg.ProviderURL
-	if url == "" {
-		url = "https://generativelanguage.googleapis.com/v1beta"
-	}
-	return fmt.Sprintf("%s/models/%s:%s", strings.TrimRight(url, "/"), model, action)
+	return map[string]interface{}{"functionCallingConfig": config}
 }
 
 func marshalOpenAITypedMessages(messages []TypedMessage, _ bool) []interface{} {
@@ -269,36 +244,7 @@ func marshalGoogleTypedMessages(messages []TypedMessage, keepGoogleSystem bool) 
 
 func convertOpenAITools(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
 	openAITools := ConvertToolsToOpenAITyped(tools)
-	if toolChoice != nil {
-		if toolChoice.Type == "tool" && toolChoice.Name != "" {
-			if toolDefinitionType(tools, toolChoice.Name) == "custom" {
-				return ConvertedTools{
-					Tools: openAITools,
-					ToolChoice: OpenAIToolChoice{
-						Type: "custom",
-						Custom: &OpenAIToolChoiceCustom{
-							Name: toolChoice.Name,
-						},
-					},
-				}
-			}
-			return ConvertedTools{
-				Tools: openAITools,
-				ToolChoice: OpenAIToolChoice{
-					Type: "function",
-					Function: &OpenAIToolChoiceFunction{
-						Name: toolChoice.Name,
-					},
-				},
-			}
-		}
-		return ConvertedTools{
-			Tools:      openAITools,
-			ToolChoice: toolChoice.Type,
-		}
-	}
-
-	return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+	return ConvertedTools{Tools: openAITools, ToolChoice: openAIToolChoiceForDefinitions(tools, toolChoice, false)}
 }
 
 // ConvertToolsForOpenAIChatCompatibility adapts native/custom tool definitions
@@ -308,25 +254,30 @@ func ConvertToolsForOpenAIChatCompatibility(tools []ToolDefinition, toolChoice *
 	if len(openAITools) == 0 {
 		return ConvertedTools{}
 	}
-	if toolChoice != nil {
-		if toolChoice.Type == "tool" && toolChoice.Name != "" {
-			return ConvertedTools{
-				Tools: openAITools,
-				ToolChoice: OpenAIToolChoice{
-					Type: "function",
-					Function: &OpenAIToolChoiceFunction{
-						Name: toolChoice.Name,
-					},
-				},
-			}
-		}
-		return ConvertedTools{
-			Tools:      openAITools,
-			ToolChoice: toolChoice.Type,
+	return ConvertedTools{Tools: openAITools, ToolChoice: openAIToolChoiceForDefinitions(tools, toolChoice, true)}
+}
+
+func openAIToolChoiceForDefinitions(tools []ToolDefinition, toolChoice *ToolChoice, forceFunction bool) interface{} {
+	if toolChoice == nil {
+		return "auto"
+	}
+	if toolChoice.Type != "tool" || toolChoice.Name == "" {
+		return toolChoice.Type
+	}
+	if !forceFunction && toolDefinitionType(tools, toolChoice.Name) == "custom" {
+		return OpenAIToolChoice{
+			Type: "custom",
+			Custom: &OpenAIToolChoiceCustom{
+				Name: toolChoice.Name,
+			},
 		}
 	}
-
-	return ConvertedTools{Tools: openAITools, ToolChoice: "auto"}
+	return OpenAIToolChoice{
+		Type: "function",
+		Function: &OpenAIToolChoiceFunction{
+			Name: toolChoice.Name,
+		},
+	}
 }
 
 func toolDefinitionType(tools []ToolDefinition, name string) string {
@@ -380,7 +331,13 @@ func anthropicToolExists(tools []AnthropicTool, name string) bool {
 	return false
 }
 
-func convertGoogleTools(tools []ToolDefinition, _ *ToolChoice) ConvertedTools {
+func convertGoogleTools(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools {
+	if toolChoice != nil {
+		return ConvertedTools{
+			Tools:      ConvertToolsToGoogleTyped(tools),
+			ToolChoice: toolChoice,
+		}
+	}
 	return ConvertedTools{
 		Tools: ConvertToolsToGoogleTyped(tools),
 	}

@@ -135,7 +135,7 @@ func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []b
 		return nil, nil, fmt.Errorf("failed to marshal embed request: %w", err)
 	}
 
-	endpoint, err := providers.ResolveEmbedURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, isArgoLegacyMode(cfg))
+	endpoint, err := providers.ResolveEmbedURL(constants.ProviderArgo, cfg.ProviderURL, cfg.Env)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,53 +394,6 @@ func BuildToolResultRequest(cfg RequestOptions, model string, system string, too
 		Stream:            cfg.StreamChat,
 	}
 	return BuildChatRequest(cfg, typedMessages, opts)
-}
-
-// ============================================================================
-// Session-related Request Building
-// ============================================================================
-
-// BuildRequestWithToolInteractions builds a request using messages that include tool interactions
-func BuildRequestWithToolInteractions(ctx context.Context, cfg RequestOptions, sess Session, getMessagesWithTools func(context.Context, string) ([]TypedMessage, error)) (RequestBuild, error) {
-	if cfg.Embed {
-		return RequestBuild{}, fmt.Errorf("embed mode does not support sessions")
-	}
-
-	// Get messages with tool interactions
-	typedMessages, err := getMessagesWithTools(ctx, sess.GetPath())
-	if err != nil {
-		return RequestBuild{}, fmt.Errorf("failed to get messages with tools: %w", err)
-	}
-
-	// Prepare options
-	opts := ChatBuildOptions{
-		Stream: cfg.StreamChat,
-	}
-
-	// Load tool if configured
-	if cfg.ToolEnabled {
-		opts.ToolDefs = GetBuiltinUniversalCommandTool()
-	}
-
-	// Use the unified BuildChatRequest
-	req, body, err := BuildChatRequest(cfg, typedMessages, opts)
-	if err != nil {
-		return RequestBuild{}, err
-	}
-
-	// Get the actual model used
-	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
-	model := cfg.Model
-	if model == "" {
-		model = GetDefaultChatModel(provider)
-	}
-
-	return RequestBuild{
-		Request:  req,
-		Body:     body,
-		Model:    model,
-		ToolDefs: opts.ToolDefs,
-	}, nil
 }
 
 // ============================================================================

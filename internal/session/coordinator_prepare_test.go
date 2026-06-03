@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// TestCoordinatorPrepareSessionNewSession tests creating a new session
-func TestCoordinatorPrepareSessionNewSession(t *testing.T) {
+// TestCoordinatorPrepareRequestNewSession tests creating a new session
+func TestCoordinatorPrepareRequestNewSession(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	cfg := newTestCoordinatorConfig()
@@ -22,22 +22,22 @@ func TestCoordinatorPrepareSessionNewSession(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test creating new session
-	result, err := coordinator.PrepareSession(ctx, "Hello, world!", false, approver)
+	sess, executedPending, err := prepareSessionForTest(ctx, coordinator, "Hello, world!", false, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
-	if result.ExecutedPending {
+	if executedPending {
 		t.Error("Expected ExecutedPending=false for new session")
 	}
 
 	// Verify session was created with system prompt
 	// Verify system prompt was set correctly by checking the first message
-	messages, err := GetLineage(result.Session.Path)
+	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to load messages: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestCoordinatorPrepareSessionNewSession(t *testing.T) {
 	}
 
 	// Verify user message was saved
-	messages, err = GetLineage(result.Session.Path)
+	messages, err = GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}
@@ -63,8 +63,8 @@ func TestCoordinatorPrepareSessionNewSession(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPrepareSessionResume tests resuming an existing session
-func TestCoordinatorPrepareSessionResume(t *testing.T) {
+// TestCoordinatorPrepareRequestResume tests resuming an existing session
+func TestCoordinatorPrepareRequestResume(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	// Create an existing session
@@ -92,26 +92,26 @@ func TestCoordinatorPrepareSessionResume(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test resuming session
-	result, err := coordinator.PrepareSession(ctx, "Second message", false, approver)
+	sess, executedPending, err := prepareSessionForTest(ctx, coordinator, "Second message", false, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
-	if result.ExecutedPending {
+	if executedPending {
 		t.Error("Expected ExecutedPending=false (no pending tools)")
 	}
 
 	// Verify same session path (no fork)
-	if result.Session.Path != existingSession.Path {
-		t.Errorf("Expected same session path, got %s", result.Session.Path)
+	if sess.Path != existingSession.Path {
+		t.Errorf("Expected same session path, got %s", sess.Path)
 	}
 
 	// Verify messages
-	messages, err := GetLineage(result.Session.Path)
+	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}
@@ -123,8 +123,8 @@ func TestCoordinatorPrepareSessionResume(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPrepareSessionForkOnSystemChange tests forking when system prompt changes
-func TestCoordinatorPrepareSessionForkOnSystemChange(t *testing.T) {
+// TestCoordinatorPrepareRequestForkOnSystemChange tests forking when system prompt changes
+func TestCoordinatorPrepareRequestForkOnSystemChange(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	// Create an existing session
@@ -153,18 +153,18 @@ func TestCoordinatorPrepareSessionForkOnSystemChange(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test resuming with different system prompt
-	result, err := coordinator.PrepareSession(ctx, "Second message", false, approver)
+	sess, _, err := prepareSessionForTest(ctx, coordinator, "Second message", false, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
 
 	// Verify forked to new session
-	if result.Session.Path == existingSession.Path {
+	if sess.Path == existingSession.Path {
 		t.Error("Expected different session path after fork")
 	}
 
@@ -176,7 +176,7 @@ func TestCoordinatorPrepareSessionForkOnSystemChange(t *testing.T) {
 
 	// Verify new session has new system prompt
 	// Verify system prompt was set correctly by checking the first message
-	messages, err := GetLineage(result.Session.Path)
+	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to load messages: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestCoordinatorPrepareSessionForkOnSystemChange(t *testing.T) {
 	}
 
 	// Verify messages were copied
-	messages, err = GetLineage(result.Session.Path)
+	messages, err = GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}
@@ -196,8 +196,8 @@ func TestCoordinatorPrepareSessionForkOnSystemChange(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPrepareSessionBranch tests explicit branching
-func TestCoordinatorPrepareSessionBranch(t *testing.T) {
+// TestCoordinatorPrepareRequestBranch tests explicit branching
+func TestCoordinatorPrepareRequestBranch(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	// Create an existing session
@@ -227,29 +227,29 @@ func TestCoordinatorPrepareSessionBranch(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test branching from first message
-	result, err := coordinator.PrepareSession(ctx, "Alternative message 2", false, approver)
+	sess, _, err := prepareSessionForTest(ctx, coordinator, "Alternative message 2", false, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
 
 	// Verify branched to sibling
-	if result.Session.Path == existingSession.Path {
+	if sess.Path == existingSession.Path {
 		t.Error("Expected different session path after branch")
 	}
 
 	// Verify sibling path format
 	expectedPrefix := existingSession.Path + "/" + res1.MessageID + ".s."
-	if !strings.HasPrefix(result.Session.Path, expectedPrefix) {
-		t.Errorf("Expected sibling path to start with %s, got %s", expectedPrefix, result.Session.Path)
+	if !strings.HasPrefix(sess.Path, expectedPrefix) {
+		t.Errorf("Expected sibling path to start with %s, got %s", expectedPrefix, sess.Path)
 	}
 
 	// Verify only first message was copied
-	messages, err := GetLineage(result.Session.Path)
+	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}
@@ -267,8 +267,8 @@ func TestCoordinatorPrepareSessionBranch(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPrepareSessionPendingTools tests executing pending tools on resume
-func TestCoordinatorPrepareSessionPendingTools(t *testing.T) {
+// TestCoordinatorPrepareRequestPendingTools tests executing pending tools on resume
+func TestCoordinatorPrepareRequestPendingTools(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	// Create an existing session
@@ -307,16 +307,16 @@ func TestCoordinatorPrepareSessionPendingTools(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test resuming with pending tools
-	result, err := coordinator.PrepareSession(ctx, "", false, approver)
+	sess, executedPending, err := prepareSessionForTest(ctx, coordinator, "", false, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
-	if !result.ExecutedPending {
+	if !executedPending {
 		t.Error("Expected ExecutedPending=true when pending tools found")
 	}
 
@@ -324,8 +324,8 @@ func TestCoordinatorPrepareSessionPendingTools(t *testing.T) {
 	// This test verifies that pending tools are detected and the flag is set
 }
 
-// TestCoordinatorPrepareSessionRegeneration tests regeneration (no user message saved)
-func TestCoordinatorPrepareSessionRegeneration(t *testing.T) {
+// TestCoordinatorPrepareRequestRegeneration tests regeneration (no user message saved)
+func TestCoordinatorPrepareRequestRegeneration(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	// Create an existing session
@@ -353,18 +353,18 @@ func TestCoordinatorPrepareSessionRegeneration(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test regeneration (isRegeneration=true)
-	result, err := coordinator.PrepareSession(ctx, "This should not be saved", true, approver)
+	sess, _, err := prepareSessionForTest(ctx, coordinator, "This should not be saved", true, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
 
 	// Verify no new message was saved
-	messages, err := GetLineage(result.Session.Path)
+	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}
@@ -373,8 +373,8 @@ func TestCoordinatorPrepareSessionRegeneration(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPrepareSessionEmptyInput tests handling empty input
-func TestCoordinatorPrepareSessionEmptyInput(t *testing.T) {
+// TestCoordinatorPrepareRequestEmptyInput tests handling empty input
+func TestCoordinatorPrepareRequestEmptyInput(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	cfg := newTestCoordinatorConfig()
@@ -385,18 +385,18 @@ func TestCoordinatorPrepareSessionEmptyInput(t *testing.T) {
 	coordinator := NewCoordinator(cfg, notifier)
 
 	// Test with empty input
-	result, err := coordinator.PrepareSession(ctx, "", false, approver)
+	sess, _, err := prepareSessionForTest(ctx, coordinator, "", false, approver)
 	if err != nil {
-		t.Fatalf("PrepareSession failed: %v", err)
+		t.Fatalf("PrepareRequest failed: %v", err)
 	}
 
 	// Verify result
-	if result.Session == nil {
+	if sess == nil {
 		t.Fatal("Expected non-nil session")
 	}
 
 	// Verify no message was saved
-	messages, err := GetLineage(result.Session.Path)
+	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
 	}

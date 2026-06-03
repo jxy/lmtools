@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
@@ -121,16 +120,20 @@ func (s *Server) forwardTypedAsAnthropic(ctx context.Context, typed TypedRequest
 		return nil, err
 	}
 	if s.useNativeArgoOpenAIChatRoute(provider, mappedModel) {
+		stops := nonEmptyStopSequences(typed.Stop)
 		openAIReq, err := renderTypedToOpenAIRequest(typed, typedRenderContext{Model: mappedModel, OpenAIChatCompatibilityTools: true})
 		if err != nil {
 			return nil, err
 		}
 		openAIReq.Model = mappedModel
+		strippedStops := stripOpenAICompatibleStop(openAIReq)
+		warnOpenAICompatibleStopSpecialProcessing(ctx, "Argo OpenAI", strippedStops)
 		normalizeArgoOpenAIChatRequest(openAIReq)
 		var openAIResp OpenAIResponse
-		if err := s.doJSON(ctx, s.endpoints.ArgoOpenAI, openAIReq, s.configureArgoOpenAIRequest, &openAIResp, "Argo OpenAI"); err != nil {
+		if err := s.doJSON(ctx, s.endpoints.ArgoOpenAI, openAIReq, s.configureArgoOpenAIRequest, &openAIResp, constants.ProviderArgo, "Argo OpenAI"); err != nil {
 			return nil, err
 		}
+		enforceOpenAIResponseStops(&openAIResp, stops)
 		return ConvertOpenAIToAnthropicWithToolNameRegistry(&openAIResp, originalModel, responseToolNameRegistryFromCoreTools(typed.Tools)), nil
 	}
 	typed = ensureResponsesAnthropicWireMaxTokens(typed, provider, mappedModel)
@@ -154,8 +157,8 @@ func (s *Server) sendOpenAIResponsesRequest(ctx context.Context, reqBody *OpenAI
 		Payload:      reqBody,
 		RawBody:      rawBody,
 		ExtraHeaders: extraHeaders,
-		Configure: func(req *http.Request) error {
-			return auth.ApplyProviderCredentials(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
+		Configure: func(req *http.Request) {
+			auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 		},
 	})
 	return resp, err
@@ -182,14 +185,8 @@ func (s *Server) forwardOpenAIResponsesDirectly(w http.ResponseWriter, r *http.R
 	}
 	defer resp.Body.Close()
 
-	respBody, err := s.readResponseBody(resp)
-	if err != nil {
-		log.Errorf("Failed to read OpenAI responses response: %v", err)
-		s.sendOpenAIError(w, ErrTypeServer, "Failed to read response", "read_error", http.StatusBadGateway)
-		return
-	}
-	if resp.StatusCode >= 400 {
-		passthroughErrorResponse(ctx, w, constants.ProviderOpenAI, resp.StatusCode, respBody)
+	respBody, ok := s.readDirectProviderResponse(ctx, w, resp, constants.ProviderOpenAI, "OpenAI responses")
+	if !ok {
 		return
 	}
 
@@ -214,7 +211,7 @@ func (s *Server) forwardOpenAIResponsesStreamDirectly(w http.ResponseWriter, r *
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := s.readErrorBody(resp)
 		passthroughErrorResponse(ctx, w, constants.ProviderOpenAI, resp.StatusCode, body)
 		return
@@ -222,22 +219,46 @@ func (s *Server) forwardOpenAIResponsesStreamDirectly(w http.ResponseWriter, r *
 	visibleModel := clientVisibleCreatedResponsesModel(responsesReq.Model, originalModel)
 
 	setSSEHeaders(w)
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		log.Errorf("ResponseWriter does not support flushing")
-		return
+	if err := forwardSSERecords(ctx, w, resp.Body, func(data string) string {
+		return s.rewriteResponsesStreamData(data, responsesReq.Model, visibleModel)
+	}); err != nil {
+		_ = handleStreamError(ctx, nil, "OpenAIResponsesDirectSSE", err)
 	}
-	scanner := NewSSEScanner(resp.Body)
-	for scanner.Scan() {
-		line := s.rewriteResponsesStreamModel(scanner.Text(), responsesReq.Model, visibleModel)
-		payload := line + "\n"
-		logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
-		fmt.Fprint(w, payload)
-		flusher.Flush()
+}
+
+func (s *Server) rewriteResponsesStreamData(data, mappedModel, visibleModel string) string {
+	if strings.TrimSpace(data) == OpenAIDoneMarker {
+		return data
 	}
-	if err := scanner.Err(); err != nil {
-		_ = handleStreamError(ctx, nil, "OpenAIResponsesDirectSSEScanner", err)
+	var decoded map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
+		return data
 	}
+	changed := false
+	if _, ok := decoded["model"]; ok {
+		decoded["model"] = visibleModel
+		changed = true
+	}
+	if id, ok := decoded["id"].(string); ok {
+		s.registerResponsesModelAlias(id, mappedModel, visibleModel)
+	}
+	if response, ok := decoded["response"].(map[string]interface{}); ok {
+		if _, ok := response["model"]; ok {
+			response["model"] = visibleModel
+			changed = true
+		}
+		if id, ok := response["id"].(string); ok {
+			s.registerResponsesModelAlias(id, mappedModel, visibleModel)
+		}
+	}
+	if !changed {
+		return data
+	}
+	updated, err := json.Marshal(decoded)
+	if err != nil {
+		return data
+	}
+	return string(updated)
 }
 
 func (s *Server) rewriteResponsesStreamModel(line, mappedModel, visibleModel string) string {
@@ -280,30 +301,25 @@ func rewriteResponsesBodyModel(body []byte, originalModel string) []byte {
 	if originalModel == "" {
 		return body
 	}
-	var decoded map[string]interface{}
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return body
-	}
-	if _, ok := decoded["model"]; !ok {
-		return body
-	}
-	decoded["model"] = originalModel
-	updated, err := json.Marshal(decoded)
-	if err != nil {
-		return body
-	}
-	return updated
+	return rewriteResponsesTopLevelModel(body, originalModel, false)
 }
 
 func rewriteResponsesRequestModel(body []byte, mappedModel string) []byte {
 	if mappedModel == "" {
 		return body
 	}
+	return rewriteResponsesTopLevelModel(body, mappedModel, true)
+}
+
+func rewriteResponsesTopLevelModel(body []byte, model string, addIfMissing bool) []byte {
 	var decoded map[string]interface{}
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return body
 	}
-	decoded["model"] = mappedModel
+	if _, ok := decoded["model"]; !ok && !addIfMissing {
+		return body
+	}
+	decoded["model"] = model
 	updated, err := json.Marshal(decoded)
 	if err != nil {
 		return body
@@ -410,7 +426,7 @@ func (s *Server) runAndCommitConvertedOpenAIResponsesStream(ctx context.Context,
 		s.failAndCommitOpenAIResponsesStream(ctx, stateCtx, responsesReq, typedCurrent, writer, err, originalModel)
 		return
 	}
-	if err := s.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, responsesReq, typedCurrent, resp, originalModel, blocks); err != nil {
+	if err := s.commitOpenAIResponsesStateWithBlocks(context.WithoutCancel(ctx), stateCtx, responsesReq, typedCurrent, resp, originalModel, blocks); err != nil {
 		logger.From(ctx).Errorf("Failed to save OpenAI responses stream state: %v", err)
 	}
 }

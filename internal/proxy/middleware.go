@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"lmtools/internal/logger"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,8 @@ func NewProxyMiddleware(next http.Handler, config *Config) http.Handler {
 
 // ServeHTTP implements http.Handler with all middleware functionality
 func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	// 1. Generate counter-based request ID for logging
 	ctx := logger.WithNewRequestCounter(r.Context())
 
@@ -66,6 +69,7 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+		rw.logConnectionClosed(time.Since(start))
 	}()
 
 	// Process the request
@@ -77,7 +81,10 @@ type proxyResponseWriter struct {
 	http.ResponseWriter
 	written        bool
 	request        *http.Request
+	statusCode     int
+	bytesWritten   int64
 	streamDetected bool
+	streamLogged   bool
 }
 
 func (rw *proxyResponseWriter) WriteHeader(code int) {
@@ -86,6 +93,7 @@ func (rw *proxyResponseWriter) WriteHeader(code int) {
 			logWireHTTPClientResponseHeaders(rw.request.Context(), "WIRE CLIENT RESPONSE HEADERS", code, rw.Header())
 		}
 		rw.ResponseWriter.WriteHeader(code)
+		rw.statusCode = code
 		rw.written = true
 	}
 }
@@ -96,8 +104,9 @@ func (rw *proxyResponseWriter) Write(b []byte) (int, error) {
 	}
 
 	if !rw.streamDetected {
-		if rw.Header().Get("Content-Type") == "text/event-stream" {
+		if strings.HasPrefix(rw.Header().Get("Content-Type"), "text/event-stream") {
 			rw.streamDetected = true
+			rw.logFirstSSEStream()
 			// Disable write timeout for streaming
 			if rc := http.NewResponseController(rw.ResponseWriter); rc != nil {
 				_ = rc.SetWriteDeadline(time.Time{})
@@ -105,7 +114,9 @@ func (rw *proxyResponseWriter) Write(b []byte) (int, error) {
 		}
 	}
 
-	return rw.ResponseWriter.Write(b)
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytesWritten += int64(n)
+	return n, err
 }
 
 // Flush implements http.Flusher
@@ -116,4 +127,27 @@ func (rw *proxyResponseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (rw *proxyResponseWriter) logFirstSSEStream() {
+	if rw.streamLogged || rw.request == nil {
+		return
+	}
+	rw.streamLogged = true
+	logger.From(rw.request.Context()).Infof("Client stream started: %s %s", rw.request.Method, rw.request.URL.Path)
+}
+
+func (rw *proxyResponseWriter) logConnectionClosed(duration time.Duration) {
+	if rw.request == nil {
+		return
+	}
+	status := rw.statusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+	kind := "non-stream"
+	if rw.streamDetected {
+		kind = "stream"
+	}
+	logger.From(rw.request.Context()).Infof("Client response completed: %s %s | Mode: %s | Status: %d | Bytes: %d | Duration: %s", rw.request.Method, rw.request.URL.Path, kind, status, rw.bytesWritten, duration.Round(time.Millisecond))
 }

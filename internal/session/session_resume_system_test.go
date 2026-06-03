@@ -53,13 +53,13 @@ func TestResumeSessionWithCustomSystemNoFork(t *testing.T) {
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
-		prepResult, err := coordinator.PrepareSession(ctx, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
 
 		// Verify no fork occurred
-		newSessionID := GetSessionID(prepResult.Session.Path)
+		newSessionID := GetSessionID(sess.Path)
 		if newSessionID != sessionID {
 			t.Errorf("Session was forked unexpectedly. Original: %s, New: %s", sessionID, newSessionID)
 		}
@@ -79,13 +79,13 @@ func TestResumeSessionWithCustomSystemNoFork(t *testing.T) {
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
-		prepResult, err := coordinator.PrepareSession(ctx, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
 
 		// Verify no fork occurred
-		newSessionID := GetSessionID(prepResult.Session.Path)
+		newSessionID := GetSessionID(sess.Path)
 		if newSessionID != sessionID {
 			t.Errorf("Session was forked unexpectedly. Original: %s, New: %s", sessionID, newSessionID)
 		}
@@ -106,13 +106,13 @@ func TestResumeSessionWithCustomSystemNoFork(t *testing.T) {
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
-		prepResult, err := coordinator.PrepareSession(ctx, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
 
 		// Verify fork occurred
-		newSessionID := GetSessionID(prepResult.Session.Path)
+		newSessionID := GetSessionID(sess.Path)
 		if newSessionID == sessionID {
 			t.Errorf("Session was not forked when it should have been. SessionID: %s", sessionID)
 		}
@@ -157,13 +157,13 @@ func TestResumeSessionWithDefaultSystem(t *testing.T) {
 		notifier := core.NewTestNotifier()
 
 		coordinator := NewCoordinator(cfg, notifier)
-		prepResult, err := coordinator.PrepareSession(ctx, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
 
 		// Verify no fork occurred
-		newSessionID := GetSessionID(prepResult.Session.Path)
+		newSessionID := GetSessionID(sess.Path)
 		if newSessionID != sessionID {
 			t.Errorf("Session was forked unexpectedly. Original: %s, New: %s", sessionID, newSessionID)
 		}

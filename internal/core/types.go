@@ -110,21 +110,6 @@ type Logger interface {
 	IsDebugEnabled() bool
 }
 
-// Session interface represents a conversation session
-type Session interface {
-	GetPath() string
-}
-
-// Message represents a message in a session
-type Message struct {
-	ID      string
-	Role    string
-	Content string
-}
-
-// GetLineageFunc is a function type for retrieving message history
-type GetLineageFunc func(path string) ([]Message, error)
-
 // SessionStore provides an abstraction for session storage operations
 // This interface replaces the multiple callback functions in ToolExecutionConfig
 type SessionStore interface {

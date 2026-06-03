@@ -12,7 +12,6 @@ import (
 
 type (
 	providerRequestMapper     func(PreparedRequestPayload) map[string]interface{}
-	providerChatURLResolver   func(cfg RequestOptions, model string, stream bool) string
 	providerMessageMarshaller func(messages []TypedMessage, keepGoogleSystem bool) []interface{}
 )
 
@@ -84,6 +83,10 @@ func buildProviderRequest(cfg RequestOptions, url string, body []byte, provider 
 	return httpReq, body, nil
 }
 
+func resolveCoreChatURL(cfg RequestOptions, provider, model string, stream bool) (string, error) {
+	return providers.ResolveChatURL(provider, cfg.ProviderURL, cfg.Env, model, stream)
+}
+
 func buildToolAwareRequest(cfg RequestOptions, provider string, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	spec, err := requireProviderRequestSpec(provider)
 	if err != nil {
@@ -101,7 +104,11 @@ func buildToolAwareRequest(cfg RequestOptions, provider string, typedMessages []
 		return nil, nil, fmt.Errorf("failed to marshal %s request: %w", provider, err)
 	}
 
-	return buildProviderRequest(cfg, spec.ResolveChatURL(cfg, model, stream), body, provider, stream)
+	endpoint, err := resolveCoreChatURL(cfg, provider, model, stream)
+	if err != nil {
+		return nil, nil, err
+	}
+	return buildProviderRequest(cfg, endpoint, body, provider, stream)
 }
 
 // buildChatRequestFromTyped builds a unified chat request from typed messages
