@@ -4,12 +4,73 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"os"
 	"strings"
 	"testing"
 )
+
+func TestWarnOpenAIResponsesRequestDropsForTarget(t *testing.T) {
+	req := &OpenAIResponsesRequest{Text: &OpenAIResponsesText{Verbosity: "high"}}
+
+	tests := []struct {
+		name          string
+		provider      string
+		model         string
+		useLegacyArgo bool
+		want          string
+	}{
+		{
+			name:     "anthropic",
+			provider: constants.ProviderAnthropic,
+			model:    "claude-sonnet-4-5",
+			want:     `Dropping OpenAI Responses field "text.verbosity" while converting to Anthropic`,
+		},
+		{
+			name:     "google",
+			provider: constants.ProviderGoogle,
+			model:    "gemini-2.5-pro",
+			want:     `Dropping OpenAI Responses field "text.verbosity" while converting to Google`,
+		},
+		{
+			name:          "legacy argo openai model",
+			provider:      constants.ProviderArgo,
+			model:         "gpt-5",
+			useLegacyArgo: true,
+			want:          `Dropping OpenAI Responses field "text.verbosity" while converting to Argo`,
+		},
+		{
+			name:     "argo claude model",
+			provider: constants.ProviderArgo,
+			model:    "claude-sonnet-4-5",
+			want:     `Dropping OpenAI Responses field "text.verbosity" while converting to Argo`,
+		},
+		{
+			name:     "native argo openai model",
+			provider: constants.ProviderArgo,
+			model:    "gpt-5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureWarnLogs(t, func() {
+				warnOpenAIResponsesRequestDropsForTarget(context.Background(), req, tt.provider, tt.model, tt.useLegacyArgo)
+			})
+			if tt.want == "" {
+				if strings.Contains(logs, "text.verbosity") {
+					t.Fatalf("unexpected text.verbosity warning:\n%s", logs)
+				}
+				return
+			}
+			if !strings.Contains(logs, tt.want) {
+				t.Fatalf("warning %q not found in logs:\n%s", tt.want, logs)
+			}
+		})
+	}
+}
 
 func TestConversionWarningsForDroppedFields(t *testing.T) {
 	logs := captureWarnLogs(t, func() {

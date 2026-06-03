@@ -56,6 +56,7 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 	}
 	if req.Text != nil {
 		typed.ResponseFormat = responsesTextToResponseFormat(req.Text)
+		typed.Verbosity = req.Text.Verbosity
 	}
 	if req.Prompt != nil {
 		return TypedRequest{}, fmt.Errorf("prompt is only supported for direct OpenAI Responses passthrough")
@@ -87,9 +88,6 @@ func validateConvertedResponsesUnsupportedFields(req *OpenAIResponsesRequest) er
 	}
 	if req.TopLogprobs != nil {
 		return fmt.Errorf("top_logprobs is not supported for converted Responses providers")
-	}
-	if req.Text != nil && strings.TrimSpace(req.Text.Verbosity) != "" {
-		return fmt.Errorf("text.verbosity is not supported for converted Responses providers")
 	}
 	for _, include := range req.Include {
 		if strings.TrimSpace(include) != "" {
@@ -582,7 +580,7 @@ func TypedToOpenAIResponsesRequest(typed TypedRequest, model string) (*OpenAIRes
 		Instructions:    combineInstructionText(typed.System, typed.Developer),
 		Tools:           proxyOpenAIResponsesToolsFromDefinitions(typed.Tools),
 		ToolChoice:      proxyOpenAIResponsesToolChoiceFromDefinition(typed.ToolChoice, typed.Tools, prepared.ToolChoice),
-		Text:            responseFormatToResponsesText(typed.ResponseFormat),
+		Text:            responseTextForResponses(typed.ResponseFormat, typed.Verbosity),
 		Temperature:     typed.Temperature,
 		TopP:            typed.TopP,
 		MaxOutputTokens: typed.MaxTokens,
@@ -728,6 +726,18 @@ func proxyOpenAIResponsesToolChoiceFromDefinition(choice *core.ToolChoice, tools
 		}
 	}
 	return proxyOpenAIResponsesToolChoiceFromCore(converted)
+}
+
+func responseTextForResponses(format *ResponseFormat, verbosity string) *OpenAIResponsesText {
+	text := responseFormatToResponsesText(format)
+	if verbosity == "" {
+		return text
+	}
+	if text == nil {
+		text = &OpenAIResponsesText{}
+	}
+	text.Verbosity = verbosity
+	return text
 }
 
 func responseFormatToResponsesText(format *ResponseFormat) *OpenAIResponsesText {

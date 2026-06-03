@@ -1,0 +1,18 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Say hello briefly.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "model": "gpt-5.4-nano",
+  "text": {
+    "verbosity": "high"
+  }
+}

@@ -34,6 +34,10 @@ func TestOpenAIResponsesRequestToTyped(t *testing.T) {
 				"output":  "ok",
 			},
 		},
+		Text: &OpenAIResponsesText{
+			Format:    map[string]interface{}{"type": "json_object"},
+			Verbosity: "high",
+		},
 		Reasoning:       &OpenAIResponsesReasoning{Effort: "low"},
 		MaxOutputTokens: intPtr(64),
 	}
@@ -47,6 +51,12 @@ func TestOpenAIResponsesRequestToTyped(t *testing.T) {
 	}
 	if typed.ReasoningEffort != "low" {
 		t.Fatalf("reasoning effort = %q", typed.ReasoningEffort)
+	}
+	if typed.Verbosity != "high" {
+		t.Fatalf("verbosity = %q, want high", typed.Verbosity)
+	}
+	if typed.ResponseFormat == nil || typed.ResponseFormat.Type != "json_object" {
+		t.Fatalf("response format = %+v, want json_object", typed.ResponseFormat)
 	}
 	if typed.MaxTokens == nil || *typed.MaxTokens != 64 {
 		t.Fatalf("max tokens = %v", typed.MaxTokens)
@@ -823,6 +833,34 @@ func TestOpenAIResponsesPromptRejectedByConvertedProviderConversion(t *testing.T
 	}
 }
 
+func TestTypedToOpenAIResponsesRequestPreservesTextVerbosity(t *testing.T) {
+	req, err := TypedToOpenAIResponsesRequest(TypedRequest{
+		Verbosity: "high",
+		Messages:  []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hi")},
+	}, "gpt-public")
+	if err != nil {
+		t.Fatalf("TypedToOpenAIResponsesRequest() error = %v", err)
+	}
+	if req.Text == nil || req.Text.Verbosity != "high" {
+		t.Fatalf("text = %+v, want verbosity high", req.Text)
+	}
+	if len(req.Text.Format) != 0 {
+		t.Fatalf("text.format = %#v, want nil", req.Text.Format)
+	}
+
+	req, err = TypedToOpenAIResponsesRequest(TypedRequest{
+		Verbosity:      "low",
+		ResponseFormat: &ResponseFormat{Type: "json_object"},
+		Messages:       []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hi")},
+	}, "gpt-public")
+	if err != nil {
+		t.Fatalf("TypedToOpenAIResponsesRequest() error = %v", err)
+	}
+	if req.Text == nil || req.Text.Verbosity != "low" || req.Text.Format["type"] != "json_object" {
+		t.Fatalf("text = %+v, want verbosity low and json_object format", req.Text)
+	}
+}
+
 func TestOpenAIResponsesConvertedProviderRejectsUnsupportedFields(t *testing.T) {
 	tests := []struct {
 		name string
@@ -843,11 +881,6 @@ func TestOpenAIResponsesConvertedProviderRejectsUnsupportedFields(t *testing.T) 
 			name: "top_logprobs",
 			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", TopLogprobs: intPtr(2)},
 			want: "top_logprobs is not supported for converted Responses providers",
-		},
-		{
-			name: "text verbosity",
-			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", Text: &OpenAIResponsesText{Verbosity: "high"}},
-			want: "text.verbosity is not supported for converted Responses providers",
 		},
 	}
 

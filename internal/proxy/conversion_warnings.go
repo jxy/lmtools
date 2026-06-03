@@ -3,8 +3,10 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"strings"
 )
 
@@ -31,6 +33,23 @@ func warnDroppedResponsesToolChoice(ctx context.Context, choiceType string) {
 		return
 	}
 	logger.From(ctx).Warnf("Dropping unsupported Responses tool_choice type %q; only function and custom tool choices are converted by compatibility provider paths", choiceType)
+}
+
+func warnOpenAIResponsesRequestDropsForTarget(ctx context.Context, req *OpenAIResponsesRequest, provider, model string, useLegacyArgo bool) {
+	if req == nil || req.Text == nil || strings.TrimSpace(req.Text.Verbosity) == "" {
+		return
+	}
+	normalizedProvider := constants.NormalizeProvider(provider)
+	switch normalizedProvider {
+	case constants.ProviderAnthropic, constants.ProviderGoogle:
+	case constants.ProviderArgo:
+		if !useLegacyArgo && isArgoOpenAIChatRoute(provider, model) {
+			return
+		}
+	default:
+		return
+	}
+	warnDroppedField(ctx, "OpenAI Responses", providers.DisplayName(normalizedProvider), "text.verbosity", "")
 }
 
 func warnOpenAIRequestDropsForAnthropic(ctx context.Context, req *OpenAIRequest) {

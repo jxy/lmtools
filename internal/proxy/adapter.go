@@ -24,6 +24,7 @@ type TypedRequest struct {
 	Stop            []string
 	Stream          bool
 	ReasoningEffort string // for OpenAI o1 models
+	Verbosity       string
 	Thinking        *AnthropicThinking
 	OutputConfig    *AnthropicOutputConfig
 	ResponseFormat  *ResponseFormat
@@ -54,6 +55,7 @@ func openAIRequestToTyped(req *OpenAIRequest, strict bool) (TypedRequest, error)
 		Stop:            []string(req.Stop),
 		Stream:          req.Stream,
 		ReasoningEffort: req.ReasoningEffort,
+		Verbosity:       req.Verbosity,
 		ResponseFormat:  req.ResponseFormat,
 		Metadata:        cloneStringInterfaceMap(req.Metadata),
 		ServiceTier:     req.ServiceTier,

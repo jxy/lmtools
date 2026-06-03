@@ -105,6 +105,13 @@
       ]
     },
     {
+      "id": "openai-responses-verbosity",
+      "description": "OpenAI Responses API request with text verbosity",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
       "id": "openai-responses-incomplete-stream",
       "description": "OpenAI Responses API stream ending with response.incomplete after max output tokens",
       "kinds": [

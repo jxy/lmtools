@@ -2,6 +2,16 @@ package proxy
 
 import "testing"
 
+func TestTypedToOpenAIRequest_PreservesVerbosity(t *testing.T) {
+	req, err := TypedToOpenAIRequest(TypedRequest{Verbosity: "high"}, "gpt-5.4-nano")
+	if err != nil {
+		t.Fatalf("TypedToOpenAIRequest() error = %v", err)
+	}
+	if req.Verbosity != "high" {
+		t.Fatalf("Verbosity = %q, want high", req.Verbosity)
+	}
+}
+
 func TestTypedToOpenAIRequest_UsesMaxCompletionTokensForGPT5Family(t *testing.T) {
 	maxTokens := 128
 	req, err := TypedToOpenAIRequest(TypedRequest{MaxTokens: &maxTokens}, "gpt-5.4-nano")

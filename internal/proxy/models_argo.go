@@ -13,6 +13,7 @@ type ArgoChatRequest struct {
 	Tools               interface{}            `json:"tools,omitempty"`
 	ToolChoice          interface{}            `json:"tool_choice,omitempty"`
 	ReasoningEffort     string                 `json:"reasoning_effort,omitempty"`
+	Verbosity           string                 `json:"verbosity,omitempty"`
 	ResponseFormat      *ResponseFormat        `json:"response_format,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	ServiceTier         string                 `json:"service_tier,omitempty"`

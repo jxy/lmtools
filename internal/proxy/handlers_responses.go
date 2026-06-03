@@ -68,6 +68,7 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	warnOpenAIResponsesRequestDropsForTarget(ctx, responsesReq, route.Provider, route.MappedModel, s.useLegacyArgo())
 	typed, err := OpenAIResponsesRequestToTyped(ctx, responsesReq)
 	if err != nil {
 		logger.From(ctx).Errorf("Failed to convert OpenAI responses request: %v", err)

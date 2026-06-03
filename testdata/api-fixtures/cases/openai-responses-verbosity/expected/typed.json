@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Say hello briefly.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false,
+  "verbosity": "high"
+}

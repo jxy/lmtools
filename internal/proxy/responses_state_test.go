@@ -1627,6 +1627,56 @@ func TestOpenAIResponsesInputTokensReadOnlyAndPagination(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesUtilityEndpointsWarnDroppedTextVerbosity(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/v1/messages/count_tokens":
+			return jsonRoundTripResponse(http.StatusOK, AnthropicTokenCountResponse{InputTokens: 77}), nil
+		case "/v1/messages":
+			return jsonRoundTripResponse(http.StatusOK, AnthropicResponse{
+				ID:         "msg_compact",
+				Type:       "message",
+				Role:       core.RoleAssistant,
+				Model:      "claude-test",
+				StopReason: "end_turn",
+				Content:    []AnthropicContentBlock{{Type: "text", Text: "compact summary"}},
+				Usage:      &AnthropicUsage{InputTokens: 1, OutputTokens: 1},
+			}), nil
+		default:
+			return jsonRoundTripResponse(http.StatusBadRequest, map[string]interface{}{"error": "bad path"}), nil
+		}
+	})
+	config := &Config{
+		Provider:           constants.ProviderAnthropic,
+		ProviderURL:        "http://anthropic.local/v1",
+		ProviderKeySet:     ProviderKeySet{AnthropicAPIKey: "test-key"},
+		MaxRequestBodySize: fixtureMaxBodySize,
+		SessionsDir:        t.TempDir(),
+	}
+	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+	server := NewTestServerDirectWithClient(t, config, client)
+
+	payload := map[string]interface{}{
+		"model": "claude-test",
+		"input": "utility request",
+		"text":  map[string]interface{}{"verbosity": "high"},
+	}
+	logs := captureWarnLogs(t, func() {
+		countResp := requestJSON(t, server, http.MethodPost, "/v1/responses/input_tokens", payload)
+		if countResp["object"] != "response.input_tokens" {
+			t.Fatalf("input_tokens object = %#v, want response.input_tokens", countResp["object"])
+		}
+		compactResp := requestJSON(t, server, http.MethodPost, "/v1/responses/compact", payload)
+		if compactResp["object"] != "response.compaction" {
+			t.Fatalf("compact object = %#v, want response.compaction", compactResp["object"])
+		}
+	})
+	want := `Dropping OpenAI Responses field "text.verbosity" while converting to Anthropic`
+	if got := strings.Count(logs, want); got != 2 {
+		t.Fatalf("warning count = %d, want 2; logs:\n%s", got, logs)
+	}
+}
+
 func TestOpenAIResponsesInputTokensUsesAnthropicNativeCount(t *testing.T) {
 	var mu sync.Mutex
 	var backendPaths []string

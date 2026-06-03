@@ -433,8 +433,9 @@ Known limitations when `-provider` is not `openai`:
 - Custom tools are represented, but target providers may not enforce OpenAI custom-tool grammar or validation semantics.
 - Some OpenAI-only controls have no portable effect, including
   `max_tool_calls`, `parallel_tool_calls`, `include`, `truncation`,
-  `top_logprobs`, `prompt_cache_key`, `text.verbosity`, and
-  `reasoning.summary`.
+  `top_logprobs`, `prompt_cache_key`, and `reasoning.summary`.
+  `text.verbosity` is forwarded on OpenAI-compatible converted routes but is
+  warned and dropped for providers without an equivalent verbosity field.
 - Output images, files, audio, annotations, and logprobs are not synthesized by the converted response path.
 - Local response and conversation state lives under `~/.apiproxy/sessions` or `-sessions-dir`; it is not OpenAI-hosted state.
 - `store:false` disables local persistence for foreground converted requests, so

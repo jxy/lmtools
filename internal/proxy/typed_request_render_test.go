@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func TestTypedToArgoRequestPreservesVerbosityForOpenAIModels(t *testing.T) {
+	req, err := TypedToArgoRequest(TypedRequest{
+		Verbosity: "high",
+		Messages:  []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hi")},
+	}, "gpt55", "tester")
+	if err != nil {
+		t.Fatalf("TypedToArgoRequest() error = %v", err)
+	}
+	if req.Verbosity != "high" {
+		t.Fatalf("Verbosity = %q, want high", req.Verbosity)
+	}
+
+	req, err = TypedToArgoRequest(TypedRequest{
+		Verbosity: "high",
+		Messages:  []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "hi")},
+	}, "claude-sonnet-4-5", "tester")
+	if err != nil {
+		t.Fatalf("TypedToArgoRequest() error = %v", err)
+	}
+	if req.Verbosity != "" {
+		t.Fatalf("Verbosity = %q, want omitted for Claude-routed Argo", req.Verbosity)
+	}
+}
+
 func TestTypedToAnthropicRequestOmitsTopPWhenTemperaturePresent(t *testing.T) {
 	req, err := TypedToAnthropicRequest(TypedRequest{
 		MaxTokens:   intPtr(32),

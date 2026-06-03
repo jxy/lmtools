@@ -50,6 +50,7 @@ func (s *Server) handleOpenAIResponsesInputTokens(w http.ResponseWriter, r *http
 		return
 	}
 	req.Model = route.MappedModel
+	warnOpenAIResponsesRequestDropsForTarget(ctx, req, route.Provider, route.MappedModel, s.useLegacyArgo())
 	typed, err := OpenAIResponsesRequestToTyped(ctx, req)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "conversion_error", http.StatusBadRequest)
@@ -146,6 +147,7 @@ func (s *Server) handleOpenAIResponsesCompact(w http.ResponseWriter, r *http.Req
 		return
 	}
 	req.Model = route.MappedModel
+	warnOpenAIResponsesRequestDropsForTarget(ctx, req, route.Provider, route.MappedModel, s.useLegacyArgo())
 	typed, err := OpenAIResponsesRequestToTyped(ctx, req)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "conversion_error", http.StatusBadRequest)

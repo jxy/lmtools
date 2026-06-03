@@ -1,0 +1,7 @@
+{
+  "model": "gpt-5.4-nano",
+  "input": "Say hello briefly.",
+  "text": {
+    "verbosity": "high"
+  }
+}

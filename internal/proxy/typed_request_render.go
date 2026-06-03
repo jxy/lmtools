@@ -62,6 +62,7 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*Op
 		Stream:          typed.Stream,
 		Stop:            OpenAIStopSequences(typed.Stop),
 		ReasoningEffort: typed.ReasoningEffort,
+		Verbosity:       typed.Verbosity,
 		ResponseFormat:  typed.ResponseFormat,
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:     serviceTierForOpenAI(typed.ServiceTier),
@@ -210,6 +211,7 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 	if err := core.ValidateMessagesForProvider(constants.ProviderArgo, typed.Messages); err != nil {
 		return nil, err
 	}
+	argoProvider := providers.DetermineArgoModelProvider(ctx.Model)
 
 	argoReq := &ArgoChatRequest{
 		User:            ctx.User,
@@ -222,8 +224,11 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:     typed.ServiceTier,
 	}
+	if argoProvider == constants.ProviderOpenAI {
+		argoReq.Verbosity = typed.Verbosity
+	}
 	var typedMessages []core.TypedMessage
-	if providers.DetermineArgoModelProvider(ctx.Model) == constants.ProviderOpenAI {
+	if argoProvider == constants.ProviderOpenAI {
 		typedMessages = prependOpenAIInstructionMessages(typed.Messages, typed.System, typed.Developer, ctx.Model)
 		typedMessages = core.AdaptCustomToolBlocksForFunctionCompatibility(typedMessages)
 		typedMessages = normalizeTypedMessagesForOpenAIChat(typedMessages)
@@ -231,18 +236,16 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 		system, messages := prepareOutOfBandInstructionMessages(typed.Messages, typed.System, typed.Developer)
 		typedMessages = core.PrependSystemMessage(messages, system)
 	}
-	messages := make([]ArgoMessage, 0, len(typedMessages))
 	renderMessages := argoMessageRendererForModel(ctx.Model)
-	renderedMessages, err := renderMessages(typedMessages)
+	messages, err := renderMessages(typedMessages)
 	if err != nil {
 		return nil, err
 	}
-	messages = append(messages, renderedMessages...)
 	argoReq.Messages = messages
 
 	if len(typed.Tools) > 0 {
 		converted := core.ConvertToolsForProvider(ctx.Model, typed.Tools, typed.ToolChoice)
-		if providers.DetermineArgoModelProvider(ctx.Model) == constants.ProviderOpenAI {
+		if argoProvider == constants.ProviderOpenAI {
 			converted = core.ConvertToolsForOpenAIChatCompatibility(typed.Tools, typed.ToolChoice)
 		}
 		argoReq.Tools = converted.Tools
