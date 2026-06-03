@@ -32,7 +32,7 @@ func AnthropicURLs(base string) (string, string, error) {
 
 	modelsBase := messagesBase
 	modelsBase.Path = strings.TrimSuffix(strings.TrimRight(modelsBase.Path, "/"), "/messages")
-	modelsURL, err := providerURLFromParsed(modelsBase, "models")
+	modelsURL, err := BuildProviderURL(modelsBase.String(), "models")
 	if err != nil {
 		return "", "", err
 	}

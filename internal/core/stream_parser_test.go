@@ -90,7 +90,7 @@ func TestParseOpenAIStreamChunkParsesAllChoices(t *testing.T) {
 	if len(parsed.Choices) != 2 {
 		t.Fatalf("len(Choices) = %d, want 2", len(parsed.Choices))
 	}
-	if parsed.Content != "first" || parsed.Choices[1].Content != "second" || parsed.Choices[1].FinishReason != "stop" {
+	if parsed.Choices[0].Content != "first" || parsed.Choices[1].Content != "second" || parsed.Choices[1].FinishReason != "stop" {
 		t.Fatalf("unexpected parsed choices: %#v", parsed)
 	}
 }
@@ -622,6 +622,51 @@ func TestOpenAIStreamStatePreservesCustomToolInputDeltasWithoutRepeatedType(t *t
 	}
 	if len(call.Args) != 0 {
 		t.Fatalf("custom args = %s, want empty args", string(call.Args))
+	}
+}
+
+func TestParseOpenAIStreamChunkParsesCustomToolInput(t *testing.T) {
+	parsed, err := ParseOpenAIStreamChunk([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_custom","type":"custom","custom":{"name":"apply_patch","input":"raw patch"}}]}}]}`))
+	if err != nil {
+		t.Fatalf("ParseOpenAIStreamChunk() error = %v", err)
+	}
+	if len(parsed.Choices) != 1 || len(parsed.Choices[0].ToolCalls) != 1 {
+		t.Fatalf("parsed choices/tool calls = %#v", parsed)
+	}
+	call := parsed.Choices[0].ToolCalls[0]
+	if call.Type != "custom" || call.Name != "apply_patch" || call.Input != "raw patch" || call.Arguments != "" {
+		t.Fatalf("custom tool call = %#v", call)
+	}
+}
+
+func TestOpenAIStreamStateToolCallKeysDoNotCollideAcrossChoices(t *testing.T) {
+	state := NewOpenAIStreamState()
+	lines := []string{
+		`data: {"choices":[{"index":1,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"tool_a","arguments":"{\"a\":"}}]}},{"index":0,"delta":{"tool_calls":[{"index":100000,"id":"call_b","type":"function","function":{"name":"tool_b","arguments":"{\"b\":"}}]}}]}`,
+		`data: {"choices":[{"index":1,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}},{"index":0,"delta":{"tool_calls":[{"index":100000,"function":{"arguments":"2}"}}]}}]}`,
+		`data: [DONE]`,
+	}
+
+	var finalCalls []ToolCall
+	for _, line := range lines {
+		_, calls, done, err := state.ParseLine(line)
+		if err != nil {
+			t.Fatalf("ParseLine(%q) error = %v", line, err)
+		}
+		if done {
+			finalCalls = calls
+		}
+	}
+
+	if len(finalCalls) != 2 {
+		t.Fatalf("len(finalCalls) = %d, want 2: %#v", len(finalCalls), finalCalls)
+	}
+	first, second := finalCalls[0], finalCalls[1]
+	if first.ID != "call_b" || first.Name != "tool_b" || string(first.Args) != `{"b":2}` {
+		t.Fatalf("first call = %#v, want choice 0/tool 100000", first)
+	}
+	if second.ID != "call_a" || second.Name != "tool_a" || string(second.Args) != `{"a":1}` {
+		t.Fatalf("second call = %#v, want choice 1/tool 0", second)
 	}
 }
 

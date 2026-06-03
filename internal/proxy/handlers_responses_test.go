@@ -410,6 +410,46 @@ func TestOpenAIResponsesDirectStreamRegistersModelAliasByResponseID(t *testing.T
 	}
 }
 
+func TestOpenAIResponsesDirectStreamRewritesNoSpaceDataModelAlias(t *testing.T) {
+	server := &Server{}
+	line := server.rewriteResponsesStreamModel(
+		`data:{"type":"response.created","model":"gpt-upstream","response":{"id":"resp_stream","model":"gpt-upstream"},"extra":true}`,
+		"gpt-upstream",
+		"claude-3-sonnet",
+	)
+	data, ok := sseFieldValue(line, "data")
+	if !ok {
+		t.Fatalf("stream line = %q, want data line", line)
+	}
+
+	var event map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		t.Fatalf("stream line is invalid JSON: %v; line = %s", err, line)
+	}
+	if event["model"] != "claude-3-sonnet" {
+		t.Fatalf("top-level model = %#v, want claude-3-sonnet", event["model"])
+	}
+	if event["extra"] != true {
+		t.Fatalf("event extra field = %#v, want true", event["extra"])
+	}
+	response, ok := event["response"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event response = %#v", event["response"])
+	}
+	if response["model"] != "claude-3-sonnet" {
+		t.Fatalf("stream response model = %#v, want claude-3-sonnet", response["model"])
+	}
+
+	retrieved := server.rewriteResponsesLifecycleBodyModel([]byte(`{"id":"resp_stream","model":"gpt-upstream"}`), "")
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(retrieved, &decoded); err != nil {
+		t.Fatalf("retrieved response is invalid JSON: %v; body = %s", err, string(retrieved))
+	}
+	if decoded["model"] != "claude-3-sonnet" {
+		t.Fatalf("retrieved model = %#v, want claude-3-sonnet", decoded["model"])
+	}
+}
+
 func TestOpenAIResponsesDirectStreamPassThroughPreservesNonDataLines(t *testing.T) {
 	upstreamBody := strings.Join([]string{
 		"event: response.created",

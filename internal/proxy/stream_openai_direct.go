@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -11,14 +10,13 @@ import (
 )
 
 func forwardOpenAICompatibleSSEWithStops(ctx context.Context, w http.ResponseWriter, reader io.Reader, originalModel, requestName string, stops []string) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return fmt.Errorf("ResponseWriter does not support flushing")
+	writer, err := NewSSEWriter(w, ctx)
+	if err != nil {
+		return err
 	}
 	forwarder := &openAICompatibleStreamStopForwarder{
 		ctx:             ctx,
-		w:               w,
-		flusher:         flusher,
+		writer:          writer,
 		originalModel:   originalModel,
 		requestName:     requestName,
 		stops:           nonEmptyStopSequences(stops),
@@ -34,8 +32,7 @@ func forwardOpenAICompatibleSSEWithStops(ctx context.Context, w http.ResponseWri
 
 type openAICompatibleStreamStopForwarder struct {
 	ctx             context.Context
-	w               http.ResponseWriter
-	flusher         http.Flusher
+	writer          *SSEWriter
 	originalModel   string
 	requestName     string
 	stops           []string
@@ -124,15 +121,7 @@ func (f *openAICompatibleStreamStopForwarder) finish() error {
 }
 
 func (f *openAICompatibleStreamStopForwarder) writePendingStopTail(index int) error {
-	stopper := f.stoppers[index]
-	if stopper == nil || stopper.Stopped() || f.stoppedChoices[index] || f.finishedChoices[index] {
-		return nil
-	}
-	if tail := stopper.Flush(); tail != "" {
-		chunk := OpenAIStreamChunk{Object: "chat.completion.chunk", Model: f.originalModel, Choices: []OpenAIStreamDelta{{Index: index, Delta: OpenAIDelta{Content: &tail}}}}
-		return f.writeMarshaledChunk(chunk)
-	}
-	return nil
+	return f.flushStopTail(index)
 }
 
 func (f *openAICompatibleStreamStopForwarder) writePendingStopTails() error {
@@ -145,23 +134,21 @@ func (f *openAICompatibleStreamStopForwarder) writePendingStopTails() error {
 	}
 	sort.Ints(indexes)
 	for _, index := range indexes {
-		stopper := f.stoppers[index]
-		if stopper == nil || stopper.Stopped() || f.stoppedChoices[index] || f.finishedChoices[index] {
-			continue
+		if err := f.flushStopTail(index); err != nil {
+			return err
 		}
-		if tail := stopper.Flush(); tail != "" {
-			chunk := OpenAIStreamChunk{
-				Object: "chat.completion.chunk",
-				Model:  f.originalModel,
-				Choices: []OpenAIStreamDelta{{
-					Index: index,
-					Delta: OpenAIDelta{Content: &tail},
-				}},
-			}
-			if err := f.writeMarshaledChunk(chunk); err != nil {
-				return err
-			}
-		}
+	}
+	return nil
+}
+
+func (f *openAICompatibleStreamStopForwarder) flushStopTail(index int) error {
+	stopper := f.stoppers[index]
+	if stopper == nil || stopper.Stopped() || f.stoppedChoices[index] || f.finishedChoices[index] {
+		return nil
+	}
+	if tail := stopper.Flush(); tail != "" {
+		chunk := OpenAIStreamChunk{Object: "chat.completion.chunk", Model: f.originalModel, Choices: []OpenAIStreamDelta{{Index: index, Delta: OpenAIDelta{Content: &tail}}}}
+		return f.writeMarshaledChunk(chunk)
 	}
 	return nil
 }
@@ -239,26 +226,7 @@ func patchOpenAIStreamChunkData(originalData, model string, chunk OpenAIStreamCh
 			} else {
 				rawDelta = map[string]interface{}{}
 			}
-			if choice.Delta.Content != nil {
-				rawDelta["content"] = *choice.Delta.Content
-			} else {
-				delete(rawDelta, "content")
-			}
-			if choice.Delta.Role != nil {
-				rawDelta["role"] = choice.Delta.Role
-			}
-			if len(choice.Delta.ToolCalls) > 0 {
-				rawDelta["tool_calls"] = choice.Delta.ToolCalls
-			}
-			if choice.Delta.FunctionCall != nil {
-				rawDelta["function_call"] = choice.Delta.FunctionCall
-			}
-			if choice.Delta.Refusal != nil {
-				rawDelta["refusal"] = *choice.Delta.Refusal
-			}
-			if choice.Delta.Audio != nil {
-				rawDelta["audio"] = choice.Delta.Audio
-			}
+			patchOpenAIStreamDeltaData(rawDelta, choice.Delta)
 			rawChoice["delta"] = rawDelta
 			patched[i] = rawChoice
 		}
@@ -269,6 +237,78 @@ func patchOpenAIStreamChunkData(originalData, model string, chunk OpenAIStreamCh
 		return "", err
 	}
 	return string(updated), nil
+}
+
+func patchOpenAIStreamDeltaData(rawDelta map[string]interface{}, delta OpenAIDelta) {
+	if delta.Role != nil {
+		rawDelta["role"] = delta.Role
+	} else {
+		delete(rawDelta, "role")
+	}
+	if delta.ContentNull {
+		rawDelta["content"] = nil
+	} else if delta.Content != nil {
+		rawDelta["content"] = *delta.Content
+	} else {
+		delete(rawDelta, "content")
+	}
+	if len(delta.ToolCalls) > 0 {
+		patchOpenAIStreamToolCallData(rawDelta, delta.ToolCalls)
+	} else {
+		delete(rawDelta, "tool_calls")
+	}
+	if delta.FunctionCall != nil {
+		rawDelta["function_call"] = delta.FunctionCall
+	} else {
+		delete(rawDelta, "function_call")
+	}
+	if delta.Refusal != nil {
+		rawDelta["refusal"] = *delta.Refusal
+	} else {
+		delete(rawDelta, "refusal")
+	}
+	if delta.Audio != nil {
+		rawDelta["audio"] = delta.Audio
+	} else {
+		delete(rawDelta, "audio")
+	}
+}
+
+func patchOpenAIStreamToolCallData(rawDelta map[string]interface{}, toolCalls []ToolCallDelta) {
+	rawToolCalls, _ := rawDelta["tool_calls"].([]interface{})
+	patched := make([]interface{}, len(toolCalls))
+	for i, toolCall := range toolCalls {
+		var rawToolCall map[string]interface{}
+		if i < len(rawToolCalls) {
+			rawToolCall, _ = rawToolCalls[i].(map[string]interface{})
+		}
+		if rawToolCall == nil {
+			rawToolCall = map[string]interface{}{}
+		}
+		rawToolCall["index"] = toolCall.Index
+		if toolCall.ID != "" {
+			rawToolCall["id"] = toolCall.ID
+		} else {
+			delete(rawToolCall, "id")
+		}
+		if toolCall.Type != "" {
+			rawToolCall["type"] = toolCall.Type
+		} else {
+			delete(rawToolCall, "type")
+		}
+		if toolCall.Function != nil {
+			rawToolCall["function"] = toolCall.Function
+		} else {
+			delete(rawToolCall, "function")
+		}
+		if toolCall.Custom != nil {
+			rawToolCall["custom"] = toolCall.Custom
+		} else {
+			delete(rawToolCall, "custom")
+		}
+		patched[i] = rawToolCall
+	}
+	rawDelta["tool_calls"] = patched
 }
 
 func (f *openAICompatibleStreamStopForwarder) writeMarshaledChunk(chunk OpenAIStreamChunk) error {
@@ -312,15 +352,5 @@ func (f *openAICompatibleStreamStopForwarder) writeData(data string) error {
 }
 
 func (f *openAICompatibleStreamStopForwarder) writePayload(payload string) error {
-	select {
-	case <-f.ctx.Done():
-		return f.ctx.Err()
-	default:
-	}
-	logWireBytes(f.ctx, "WIRE CLIENT STREAM", []byte(payload))
-	if _, err := io.WriteString(f.w, payload); err != nil {
-		return err
-	}
-	f.flusher.Flush()
-	return nil
+	return f.writer.WriteRaw(payload)
 }

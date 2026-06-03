@@ -8,6 +8,28 @@ import (
 	"testing"
 )
 
+func TestSSEFieldValue(t *testing.T) {
+	tests := []struct {
+		line      string
+		field     string
+		want      string
+		wantFound bool
+	}{
+		{line: "data:x", field: "data", want: "x", wantFound: true},
+		{line: "data: x", field: "data", want: "x", wantFound: true},
+		{line: "data:  x", field: "data", want: " x", wantFound: true},
+		{line: "event: message", field: "data", wantFound: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.line, func(t *testing.T) {
+			got, found := sseFieldValue(tt.line, tt.field)
+			if found != tt.wantFound || got != tt.want {
+				t.Fatalf("sseFieldValue(%q, %q) = %q, %v; want %q, %v", tt.line, tt.field, got, found, tt.want, tt.wantFound)
+			}
+		})
+	}
+}
+
 func TestConsumeSSEStreamAcceptsNoSpaceFieldsAndResetsEvent(t *testing.T) {
 	input := strings.Join([]string{
 		"event:message_start",

@@ -34,11 +34,8 @@ type ParsedOpenAIStreamChoice struct {
 
 // ParsedOpenAIStreamChunk is the normalized shape of an OpenAI stream chunk.
 type ParsedOpenAIStreamChunk struct {
-	Usage        ParsedStreamUsage
-	FinishReason string
-	Content      string
-	ToolCalls    []ParsedOpenAIStreamToolCall
-	Choices      []ParsedOpenAIStreamChoice
+	Usage   ParsedStreamUsage
+	Choices []ParsedOpenAIStreamChoice
 }
 
 // ParseOpenAIStreamErrorChunk detects OpenAI-compatible SSE error payloads.
@@ -183,10 +180,6 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 		parsed.Choices = append(parsed.Choices, choice)
 	}
 
-	choice := parsed.Choices[0]
-	parsed.FinishReason = choice.FinishReason
-	parsed.Content = choice.Content
-	parsed.ToolCalls = choice.ToolCalls
 	return parsed, nil
 }
 

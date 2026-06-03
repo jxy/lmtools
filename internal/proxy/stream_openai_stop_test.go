@@ -379,6 +379,59 @@ func TestForwardOpenAICompatibleSSEWithStopsPerChoice(t *testing.T) {
 	}
 }
 
+func TestForwardOpenAICompatibleSSEWithStopsPreservesCustomToolCallDelta(t *testing.T) {
+	upstream := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"upstream","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_custom","type":"custom","custom":{"name":"apply_patch","input":""},"extension":"keep"}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"upstream","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"type":"custom","custom":{"input":"*** Begin Patch"}}]},"finish_reason":null}]}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	recorder := httptest.NewRecorder()
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{`"type":"custom"`, `"custom"`, `"name":"apply_patch"`, `"input":""`, `*** Begin Patch`, `"extension":"keep"`, "client-model"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream missing %q for custom tool delta: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "upstream") {
+		t.Fatalf("model rewrite failed: %s", body)
+	}
+}
+
+func TestForwardOpenAICompatibleSSEWithStopsDeletesStoppedChoiceTypedDeltaFields(t *testing.T) {
+	upstream := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"upstream","choices":[{"index":1,"delta":{"content":"<STOP> hidden"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"upstream","choices":[{"index":0,"delta":{"content":"still visible"},"finish_reason":null},{"index":1,"delta":{"tool_calls":[{"index":0,"id":"call_late","type":"function","function":{"name":"late_tool","arguments":"{}"}}],"function_call":{"name":"legacy_late","arguments":"{}"},"refusal":"late refusal","audio":{"id":"late_audio"},"delta_extension":"keep-delta"},"finish_reason":null}]}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	recorder := httptest.NewRecorder()
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
+	}
+	body := recorder.Body.String()
+	for _, leaked := range []string{"late_tool", "legacy_late", "call_late", "late refusal", "late_audio", "hidden", "<STOP>"} {
+		if strings.Contains(body, leaked) {
+			t.Fatalf("stream leaked stopped choice field %q: %s", leaked, body)
+		}
+	}
+	for _, want := range []string{"still vi", "sible", "delta_extension", "keep-delta", "client-model", `"index":1`, `"finish_reason":"stop"`, "data: [DONE]"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream missing %q after stopped choice patch: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "upstream") {
+		t.Fatalf("model rewrite failed: %s", body)
+	}
+}
+
 func TestMessagesOpenAIStopSequencesEnforcedNonStream(t *testing.T) {
 	var upstreamBody []byte
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

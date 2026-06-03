@@ -9,21 +9,23 @@ import (
 
 // StreamingState tracks the state of a streaming response.
 type StreamingState struct {
-	MessageID       string
-	TextSent        bool
-	TextBlockClosed bool
-	ToolIndex       *int
-	LastToolIndex   int
-	AccumulatedText string
-	InputTokens     int
-	OutputTokens    int
-	ClosedBlocks    map[int]bool
+	MessageID        string
+	TextSent         bool
+	TextBlockClosed  bool
+	ToolIndex        *int
+	LastToolIndex    int
+	AccumulatedText  string
+	InputTokens      int
+	OutputTokens     int
+	ClosedBlocks     map[int]bool
+	ParsedToolBlocks map[openAIStreamToolKey]int
 }
 
 func newStreamingState(messageID string) *StreamingState {
 	return &StreamingState{
-		MessageID:    messageID,
-		ClosedBlocks: make(map[int]bool),
+		MessageID:        messageID,
+		ClosedBlocks:     make(map[int]bool),
+		ParsedToolBlocks: make(map[openAIStreamToolKey]int),
 	}
 }
 
@@ -151,6 +153,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	textSent := h.state.TextSent
 	toolIndex := h.state.ToolIndex
 	lastToolIndex := h.state.LastToolIndex
+	hasParsedToolBlocks := len(h.state.ParsedToolBlocks) > 0
 	h.mu.Unlock()
 
 	if needToCloseText {
@@ -167,7 +170,7 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 		h.mu.Unlock()
 	}
 
-	if toolIndex != nil {
+	if toolIndex != nil || hasParsedToolBlocks {
 		for i := 1; i <= lastToolIndex; i++ {
 			if err := h.SendContentBlockStop(i); err != nil {
 				return handleStreamError(h.ctx, h, "AnthropicComplete", err)
@@ -235,11 +238,24 @@ func (h *AnthropicStreamHandler) CloseParsedTextBlockIfNeeded() error {
 }
 
 func (h *AnthropicStreamHandler) BeginParsedToolUseBlock(streamIndex *int, toolID, name string) (int, error) {
+	if streamIndex == nil {
+		return h.beginParsedToolUseBlock(nil, toolID, name)
+	}
+	key := openAIStreamToolKey{ToolIndex: *streamIndex}
+	return h.BeginParsedToolUseBlockForOpenAIKey(key, toolID, name)
+}
+
+func (h *AnthropicStreamHandler) BeginParsedToolUseBlockForOpenAIKey(key openAIStreamToolKey, toolID, name string) (int, error) {
+	return h.beginParsedToolUseBlock(&key, toolID, name)
+}
+
+func (h *AnthropicStreamHandler) beginParsedToolUseBlock(key *openAIStreamToolKey, toolID, name string) (int, error) {
 	h.mu.Lock()
-	if streamIndex != nil && h.state.ToolIndex != nil && *streamIndex == *h.state.ToolIndex {
-		blockIndex := h.state.LastToolIndex
-		h.mu.Unlock()
-		return blockIndex, nil
+	if key != nil {
+		if blockIndex, ok := h.state.ParsedToolBlocks[*key]; ok {
+			h.mu.Unlock()
+			return blockIndex, nil
+		}
 	}
 	h.mu.Unlock()
 
@@ -248,12 +264,15 @@ func (h *AnthropicStreamHandler) BeginParsedToolUseBlock(streamIndex *int, toolI
 	}
 
 	h.mu.Lock()
-	if streamIndex != nil {
-		index := *streamIndex
+	if key != nil {
+		index := key.ToolIndex
 		h.state.ToolIndex = &index
 	}
 	h.state.LastToolIndex++
 	blockIndex := h.state.LastToolIndex
+	if key != nil {
+		h.state.ParsedToolBlocks[*key] = blockIndex
+	}
 	h.mu.Unlock()
 
 	if err := h.SendToolUseStart(blockIndex, toolID, name); err != nil {

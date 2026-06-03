@@ -90,6 +90,44 @@ func TestAnthropicStreamHandler_ParsedStateHelpersCloseTextAndReuseToolBlock(t *
 	}
 }
 
+func TestOpenAIFinishReasonAggregation(t *testing.T) {
+	tests := []struct {
+		current string
+		next    string
+		want    string
+	}{
+		{current: "", next: "stop", want: "stop"},
+		{current: "length", next: "stop", want: "length"},
+		{current: "stop", next: "content_filter", want: "content_filter"},
+		{current: "tool_calls", next: "stop", want: "tool_calls"},
+		{current: "unknown", next: "stop", want: "unknown"},
+	}
+	for _, tt := range tests {
+		if got := combineOpenAIFinishReason(tt.current, tt.next); got != tt.want {
+			t.Fatalf("combineOpenAIFinishReason(%q, %q) = %q, want %q", tt.current, tt.next, got, tt.want)
+		}
+	}
+}
+
+func TestAnthropicStopReasonAggregation(t *testing.T) {
+	tests := []struct {
+		current string
+		next    string
+		want    string
+	}{
+		{current: "", next: "end_turn", want: "end_turn"},
+		{current: "max_tokens", next: "end_turn", want: "max_tokens"},
+		{current: "end_turn", next: "content_filter", want: "content_filter"},
+		{current: "tool_use", next: "end_turn", want: "tool_use"},
+		{current: "unknown", next: "end_turn", want: "unknown"},
+	}
+	for _, tt := range tests {
+		if got := combineAnthropicStopReason(tt.current, tt.next); got != tt.want {
+			t.Fatalf("combineAnthropicStopReason(%q, %q) = %q, want %q", tt.current, tt.next, got, tt.want)
+		}
+	}
+}
+
 func TestOpenAIStreamParser_UsageAfterFinishReasonCompletesOnce(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
@@ -122,6 +160,228 @@ func TestOpenAIStreamParser_UsageAfterFinishReasonCompletesOnce(t *testing.T) {
 	}
 	if !strings.Contains(body, `"usage":{"input_tokens":10,"output_tokens":5}`) {
 		t.Fatalf("expected final usage in message_delta, body=%s", body)
+	}
+}
+
+func TestOpenAIStreamParserStopSequencesArePerChoice(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hello <ST"}}]}`,
+		"",
+		`data: {"choices":[{"index":1,"delta":{"content":"OP> visible"}}]}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	parser := NewOpenAIStreamParserWithStops(handler, []string{"<STOP>"})
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{"hell", "o <ST", "OP> vi", "sible"} {
+		if !strings.Contains(handler.state.AccumulatedText, want) {
+			t.Fatalf("accumulated text missing %q with per-choice stops: %q\nbody=%s", want, handler.state.AccumulatedText, body)
+		}
+	}
+	if !strings.Contains(body, `"type":"message_stop"`) {
+		t.Fatalf("stream missing message_stop with per-choice stops: %s", body)
+	}
+}
+
+func TestOpenAIStreamParserUsesChoiceIndexForToolBlocks(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"tool_a","arguments":"{\"a\":1}"}}]}},{"index":1,"delta":{"tool_calls":[{"index":0,"id":"call_b","function":{"name":"tool_b","arguments":"{\"b\":2}"}}]}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"",
+	}, "\n")
+
+	parser := NewOpenAIStreamParser(handler)
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	body := recorder.Body.String()
+	if count := strings.Count(body, `"type":"tool_use"`); count != 2 {
+		t.Fatalf("tool_use starts = %d, want 2\nbody=%s", count, body)
+	}
+	for _, want := range []string{`"name":"tool_a"`, `"name":"tool_b"`, `\"a\":1`, `\"b\":2`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream missing %q for multi-choice tool calls: %s", want, body)
+		}
+	}
+}
+
+func TestAnthropicStreamHandler_ParsedToolBlocksUseCompositeKeys(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	first, err := handler.BeginParsedToolUseBlockForOpenAIKey(openAIStreamToolKey{ChoiceIndex: 0, ToolIndex: 0}, "toolu_a", "tool_a")
+	if err != nil {
+		t.Fatalf("BeginParsedToolUseBlockForOpenAIKey(first) error = %v", err)
+	}
+	second, err := handler.BeginParsedToolUseBlockForOpenAIKey(openAIStreamToolKey{ChoiceIndex: 1, ToolIndex: 0}, "toolu_b", "tool_b")
+	if err != nil {
+		t.Fatalf("BeginParsedToolUseBlockForOpenAIKey(second) error = %v", err)
+	}
+	reused, err := handler.BeginParsedToolUseBlockForOpenAIKey(openAIStreamToolKey{ChoiceIndex: 0, ToolIndex: 0}, "toolu_ignored", "ignored")
+	if err != nil {
+		t.Fatalf("BeginParsedToolUseBlockForOpenAIKey(reuse) error = %v", err)
+	}
+	if first != 1 || second != 2 || reused != first {
+		t.Fatalf("block indexes first/second/reused = %d/%d/%d, want 1/2/1", first, second, reused)
+	}
+	if count := strings.Count(recorder.Body.String(), `"type":"tool_use"`); count != 2 {
+		t.Fatalf("tool_use starts = %d, want 2\nbody=%s", count, recorder.Body.String())
+	}
+}
+
+func TestOpenAIStreamParserAggregatesMultiChoiceFinishReasons(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"},{"index":1,"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	parser := NewOpenAIStreamParser(handler)
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"stop_reason":"max_tokens"`) {
+		t.Fatalf("stream did not preserve max_tokens finish reason: %s", body)
+	}
+}
+
+func TestOpenAIStreamParserFlushesAllStopTailsOnEOFAfterFinishReason(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"abcde"}}]}`,
+		"",
+		`data: {"choices":[{"index":1,"delta":{},"finish_reason":"stop"}]}`,
+		"",
+	}, "\n")
+	parser := NewOpenAIStreamParserWithStops(handler, []string{"XYZ"})
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if handler.state.AccumulatedText != "abcde" {
+		t.Fatalf("AccumulatedText = %q, want abcde\nbody=%s", handler.state.AccumulatedText, recorder.Body.String())
+	}
+	if count := strings.Count(recorder.Body.String(), "event: message_stop"); count != 1 {
+		t.Fatalf("message_stop count = %d, want 1\nbody=%s", count, recorder.Body.String())
+	}
+}
+
+func TestOpenAIStreamParserBuffersFunctionToolUntilName(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"arguments":"{\"city\":\"Chi"}}]}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"lookup_city","arguments":"cago\"}"}}]}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"",
+	}, "\n")
+	parser := NewOpenAIStreamParser(handler)
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, `"name":""`) {
+		t.Fatalf("stream emitted empty tool name: %s", body)
+	}
+	if count := strings.Count(body, `"type":"tool_use"`); count != 1 {
+		t.Fatalf("tool_use starts = %d, want 1\nbody=%s", count, body)
+	}
+	for _, want := range []string{`"name":"lookup_city"`, `Chi`, `cago`, `"stop_reason":"tool_use"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream missing %q for buffered function tool: %s", want, body)
+		}
+	}
+}
+
+func TestOpenAIStreamParserBuffersCustomToolUntilName(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_custom","type":"custom","custom":{"input":"*** Begin"}}]}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"custom":{"name":"apply_patch","input":" Patch\n*** End Patch\n"}}]}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"",
+	}, "\n")
+	parser := NewOpenAIStreamParser(handler)
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, `"name":""`) {
+		t.Fatalf("stream emitted empty custom tool name: %s", body)
+	}
+	if count := strings.Count(body, `"type":"tool_use"`); count != 1 {
+		t.Fatalf("tool_use starts = %d, want 1\nbody=%s", count, body)
+	}
+	for _, want := range []string{`"name":"apply_patch"`, `*** Begin Patch`, `*** End Patch`, `\"input\"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream missing %q for buffered custom tool: %s", want, body)
+		}
 	}
 }
 

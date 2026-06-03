@@ -36,15 +36,6 @@ func ValidateProviderURL(providerURL, provider string) error {
 	return nil
 }
 
-func providerURLFromParsed(base url.URL, pathToAppend string) (string, error) {
-	var err error
-	base.Path, err = url.JoinPath(base.Path, pathToAppend)
-	if err != nil {
-		return "", fmt.Errorf("invalid path join: %w", err)
-	}
-	return base.String(), nil
-}
-
 func endpointBaseURL(endpoint, suffix string) string {
 	u, err := url.Parse(endpoint)
 	if err != nil {

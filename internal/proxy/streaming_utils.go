@@ -30,6 +30,56 @@ func MapOpenAIFinishReasonToStopReason(finishReason string) string {
 	}
 }
 
+// combineOpenAIFinishReason keeps the most severe finish reason seen across choices.
+func combineOpenAIFinishReason(current, next string) string {
+	if openAIFinishReasonPriority(next) > openAIFinishReasonPriority(current) {
+		return next
+	}
+	return current
+}
+
+func openAIFinishReasonPriority(reason string) int {
+	switch reason {
+	case "":
+		return 0
+	case "stop":
+		return 1
+	case "tool_calls", "function_call":
+		return 2
+	case "length", "max_tokens":
+		return 3
+	case "content_filter":
+		return 4
+	default:
+		return 2
+	}
+}
+
+// combineAnthropicStopReason keeps the most severe stop reason seen across choices.
+func combineAnthropicStopReason(current, next string) string {
+	if anthropicStopReasonPriority(next) > anthropicStopReasonPriority(current) {
+		return next
+	}
+	return current
+}
+
+func anthropicStopReasonPriority(reason string) int {
+	switch reason {
+	case "":
+		return 0
+	case "end_turn":
+		return 1
+	case "tool_use":
+		return 2
+	case "max_tokens":
+		return 3
+	case "content_filter":
+		return 4
+	default:
+		return 2
+	}
+}
+
 // AnthropicUsageToOpenAI converts Anthropic usage to OpenAI format
 func AnthropicUsageToOpenAI(usage *AnthropicUsage) *OpenAIUsage {
 	if usage == nil {

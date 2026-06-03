@@ -262,39 +262,15 @@ func (s *Server) rewriteResponsesStreamData(data, mappedModel, visibleModel stri
 }
 
 func (s *Server) rewriteResponsesStreamModel(line, mappedModel, visibleModel string) string {
-	if !strings.HasPrefix(line, "data: ") || strings.TrimSpace(line) == "data: [DONE]" {
+	data, ok := sseFieldValue(line, "data")
+	if !ok {
 		return line
 	}
-	data := strings.TrimPrefix(line, "data: ")
-	var decoded map[string]interface{}
-	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
+	rewritten := s.rewriteResponsesStreamData(data, mappedModel, visibleModel)
+	if rewritten == data {
 		return line
 	}
-	changed := false
-	if _, ok := decoded["model"]; ok {
-		decoded["model"] = visibleModel
-		changed = true
-	}
-	if id, ok := decoded["id"].(string); ok {
-		s.registerResponsesModelAlias(id, mappedModel, visibleModel)
-	}
-	if response, ok := decoded["response"].(map[string]interface{}); ok {
-		if _, ok := response["model"]; ok {
-			response["model"] = visibleModel
-			changed = true
-		}
-		if id, ok := response["id"].(string); ok {
-			s.registerResponsesModelAlias(id, mappedModel, visibleModel)
-		}
-	}
-	if !changed {
-		return line
-	}
-	updated, err := json.Marshal(decoded)
-	if err != nil {
-		return line
-	}
-	return "data: " + string(updated)
+	return "data: " + rewritten
 }
 
 func rewriteResponsesBodyModel(body []byte, originalModel string) []byte {

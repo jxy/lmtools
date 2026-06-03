@@ -30,15 +30,15 @@ func OpenAIURLs(base string) (string, string, string, error) {
 		apiBase.Path = u.Path
 	}
 
-	chatURL, err := providerURLFromParsed(apiBase, "chat/completions")
+	chatURL, err := BuildProviderURL(apiBase.String(), "chat/completions")
 	if err != nil {
 		return "", "", "", err
 	}
-	responsesURL, err := providerURLFromParsed(apiBase, "responses")
+	responsesURL, err := BuildProviderURL(apiBase.String(), "responses")
 	if err != nil {
 		return "", "", "", err
 	}
-	modelsURL, err := providerURLFromParsed(apiBase, "models")
+	modelsURL, err := BuildProviderURL(apiBase.String(), "models")
 	if err != nil {
 		return "", "", "", err
 	}

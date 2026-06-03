@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -198,15 +199,20 @@ func (s *AnthropicStreamState) Blocks() []Block {
 	return append([]Block(nil), s.blocks...)
 }
 
+type openAIStreamToolCallKey struct {
+	choiceIndex int
+	toolIndex   int
+}
+
 // OpenAIStreamState tracks streaming state with tool support for OpenAI
 type OpenAIStreamState struct {
-	partialToolCalls map[int]*ToolCall
+	partialToolCalls map[openAIStreamToolCallKey]*ToolCall
 }
 
 // NewOpenAIStreamState creates a new OpenAI stream state
 func NewOpenAIStreamState() *OpenAIStreamState {
 	return &OpenAIStreamState{
-		partialToolCalls: make(map[int]*ToolCall),
+		partialToolCalls: make(map[openAIStreamToolCallKey]*ToolCall),
 	}
 }
 
@@ -217,12 +223,23 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 		if data == "[DONE]" {
 			// Stream is complete - finalize any partial tool calls
 			var toolCalls []ToolCall
-			for idx, tc := range s.partialToolCalls {
+			keys := make([]openAIStreamToolCallKey, 0, len(s.partialToolCalls))
+			for key := range s.partialToolCalls {
+				keys = append(keys, key)
+			}
+			sort.Slice(keys, func(i, j int) bool {
+				if keys[i].choiceIndex != keys[j].choiceIndex {
+					return keys[i].choiceIndex < keys[j].choiceIndex
+				}
+				return keys[i].toolIndex < keys[j].toolIndex
+			})
+			for _, key := range keys {
+				tc := s.partialToolCalls[key]
 				// Validate JSON arguments before adding to final tool calls
 				if tc.Type != "custom" && len(tc.Args) > 0 {
 					var v interface{}
 					if err := json.Unmarshal(tc.Args, &v); err != nil {
-						return "", nil, false, fmt.Errorf("invalid JSON in tool call %d arguments: %w", idx, err)
+						return "", nil, false, fmt.Errorf("invalid JSON in tool call choice %d index %d arguments: %w", key.choiceIndex, key.toolIndex, err)
 					}
 					// Re-marshal to ensure clean JSON
 					normalized, _ := json.Marshal(v)
@@ -240,20 +257,10 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 		}
 
 		textContent := ""
-		choices := parsed.Choices
-		if len(choices) == 0 {
-			choices = []ParsedOpenAIStreamChoice{{
-				Content:   parsed.Content,
-				ToolCalls: parsed.ToolCalls,
-			}}
-		}
-		for _, choice := range choices {
+		for _, choice := range parsed.Choices {
 			textContent += choice.Content
 			for _, tc := range choice.ToolCalls {
-				key := tc.Index
-				if tc.ChoiceIndex != 0 {
-					key = tc.ChoiceIndex*100000 + tc.Index
-				}
+				key := openAIStreamToolCallKey{choiceIndex: tc.ChoiceIndex, toolIndex: tc.Index}
 				if _, exists := s.partialToolCalls[key]; !exists {
 					s.partialToolCalls[key] = &ToolCall{}
 				}

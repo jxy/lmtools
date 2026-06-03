@@ -304,10 +304,17 @@ func (d OpenAIDelta) MarshalJSON() ([]byte, error) {
 
 // ToolCallDelta represents a tool call delta in streaming.
 type ToolCallDelta struct {
-	Index    int                `json:"index"`
-	ID       string             `json:"id,omitempty"`
-	Type     string             `json:"type,omitempty"`
-	Function *FunctionCallDelta `json:"function,omitempty"`
+	Index    int                  `json:"index"`
+	ID       string               `json:"id,omitempty"`
+	Type     string               `json:"type,omitempty"`
+	Function *FunctionCallDelta   `json:"function,omitempty"`
+	Custom   *CustomToolCallDelta `json:"custom,omitempty"`
+}
+
+// CustomToolCallDelta represents a custom tool call delta in streaming.
+type CustomToolCallDelta struct {
+	Name  string `json:"name,omitempty"`
+	Input string `json:"input"`
 }
 
 // FunctionCallDelta represents a function call delta.

@@ -881,6 +881,52 @@ func TestOpenAIResponsesStreamBuffersInterleavedToolCallIndexes(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesStreamKeepsMultiChoiceToolCallsSeparate(t *testing.T) {
+	SetupTestLogger(t)
+
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{})
+	recorder := httptest.NewRecorder()
+	writer, err := newResponsesStreamWriter(recorder, ctx, "gpt-5")
+	if err != nil {
+		t.Fatalf("newResponsesStreamWriter() error = %v", err)
+	}
+	if err := writer.start(); err != nil {
+		t.Fatalf("writer.start() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"tool_a","arguments":"{\"a\":1}"}}],"content":""},"finish_reason":null},{"index":1,"delta":{"tool_calls":[{"index":0,"id":"call_b","type":"function","function":{"name":"tool_b","arguments":"{\"b\":2}"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"},{"index":1,"delta":{},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	finishReason, err := server.convertOpenAIChatStreamToResponses(ctx, strings.NewReader(stream), writer)
+	if err != nil {
+		t.Fatalf("convertOpenAIChatStreamToResponses() error = %v", err)
+	}
+	resp, err := writer.Finish(finishReason)
+	if err != nil {
+		t.Fatalf("writer.Finish() error = %v", err)
+	}
+
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len=%d, want 2: %#v", len(resp.Output), resp.Output)
+	}
+	if got := resp.Output[0]; got.Type != "function_call" || got.Name != "tool_a" || got.CallID != "call_a" || got.Arguments != `{"a":1}` {
+		t.Fatalf("first tool item = %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "function_call" || got.Name != "tool_b" || got.CallID != "call_b" || got.Arguments != `{"b":2}` {
+		t.Fatalf("second tool item = %#v", got)
+	}
+	body := recorder.Body.String()
+	if strings.Count(body, "event: response.output_item.added") != 2 || strings.Count(body, "event: response.output_item.done") != 2 {
+		t.Fatalf("expected two tool item added/done events: %s", body)
+	}
+}
+
 func TestOpenAIResponsesStreamBuffersNamelessCustomToolCallDeltas(t *testing.T) {
 	SetupTestLogger(t)
 
@@ -936,6 +982,92 @@ func TestOpenAIResponsesStreamBuffersNamelessCustomToolCallDeltas(t *testing.T) 
 	}
 	if !strings.Contains(body, "response.custom_tool_call_input.delta") || !strings.Contains(body, "response.custom_tool_call_input.done") {
 		t.Fatalf("missing custom tool stream events: %s", body)
+	}
+}
+
+func TestOpenAIResponsesStreamAggregatesMultiChoiceFinishReasons(t *testing.T) {
+	SetupTestLogger(t)
+
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{})
+	writer, recorder := newTestResponsesStreamWriter(t)
+	if err := writer.start(); err != nil {
+		t.Fatalf("writer.start() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"},{"index":1,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	finishReason, err := server.convertOpenAIChatStreamToResponses(ctx, strings.NewReader(stream), writer)
+	if err != nil {
+		t.Fatalf("convertOpenAIChatStreamToResponses() error = %v", err)
+	}
+	if finishReason != "length" {
+		t.Fatalf("finishReason = %q, want length", finishReason)
+	}
+	resp, err := writer.Finish(finishReason)
+	if err != nil {
+		t.Fatalf("writer.Finish() error = %v", err)
+	}
+	if resp.Status != "incomplete" {
+		t.Fatalf("response status = %q, want incomplete", resp.Status)
+	}
+	details, _ := resp.IncompleteDetails.(map[string]interface{})
+	if details["reason"] != "max_output_tokens" {
+		t.Fatalf("incomplete details = %#v, want max_output_tokens", resp.IncompleteDetails)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "response.incomplete") || strings.Contains(body, "response.completed") {
+		t.Fatalf("stream terminal event = %s, want incomplete only", body)
+	}
+}
+
+func TestOpenAIResponsesStreamBuffersExplicitCustomToolUntilName(t *testing.T) {
+	SetupTestLogger(t)
+
+	ctx := context.Background()
+	server := NewMinimalTestServer(t, &Config{})
+	recorder := httptest.NewRecorder()
+	writer, err := newResponsesStreamWriter(recorder, ctx, "gpt-5")
+	if err != nil {
+		t.Fatalf("newResponsesStreamWriter() error = %v", err)
+	}
+	if err := writer.start(); err != nil {
+		t.Fatalf("writer.start() error = %v", err)
+	}
+
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_custom","type":"custom","custom":{"input":"*** Begin"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"type":"custom","custom":{"name":"apply_patch","input":" Patch\n*** End Patch\n"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	finishReason, err := server.convertOpenAIChatStreamToResponses(ctx, strings.NewReader(stream), writer)
+	if err != nil {
+		t.Fatalf("convertOpenAIChatStreamToResponses() error = %v", err)
+	}
+	resp, err := writer.Finish(finishReason)
+	if err != nil {
+		t.Fatalf("writer.Finish() error = %v", err)
+	}
+
+	if len(resp.Output) != 1 {
+		t.Fatalf("output len=%d, want 1: %#v", len(resp.Output), resp.Output)
+	}
+	item := resp.Output[0]
+	if item.Type != "custom_tool_call" || item.Name != "apply_patch" || item.Input != "*** Begin Patch\n*** End Patch\n" || item.CallID != "call_custom" {
+		t.Fatalf("custom tool item = %#v", item)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, `"name":""`) {
+		t.Fatalf("stream emitted empty custom name: %s", body)
 	}
 }
 
