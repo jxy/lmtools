@@ -49,7 +49,7 @@ func NewAnthropicStreamHandler(w http.ResponseWriter, originalModel string, ctx 
 		sse:           sse,
 		originalModel: originalModel,
 		ctx:           ctx,
-		state:         newStreamingState(newAnthropicStreamID()),
+		state:         newStreamingState(generateUUID("msg_")),
 	}, nil
 }
 

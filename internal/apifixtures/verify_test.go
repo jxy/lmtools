@@ -831,6 +831,31 @@ func TestReadCaseFileExpandsFixtureFileDataURL(t *testing.T) {
 	}
 }
 
+func TestIsCaptureCapable(t *testing.T) {
+	tests := []struct {
+		name string
+		meta CaseMeta
+		want bool
+	}{
+		{name: "request", meta: CaseMeta{Kinds: []string{"request"}}, want: true},
+		{name: "models", meta: CaseMeta{Kinds: []string{"models"}}, want: true},
+		{name: "token count", meta: CaseMeta{Kinds: []string{"token-count"}}, want: true},
+		{name: "stateful", meta: CaseMeta{Kinds: []string{"stateful"}}, want: true},
+		{name: "response", meta: CaseMeta{Kinds: []string{"response"}}},
+		{name: "stream", meta: CaseMeta{Kinds: []string{"stream"}}},
+		{name: "negative only", meta: CaseMeta{Kinds: []string{"negative"}}},
+		{name: "empty"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsCaptureCapable(tt.meta); got != tt.want {
+				t.Fatalf("IsCaptureCapable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func writeTestFile(t *testing.T, path, contents string) {
 	t.Helper()
 

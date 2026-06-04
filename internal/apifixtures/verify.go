@@ -121,7 +121,7 @@ func verifyLoadedCase(root string, entry ManifestCase, meta CaseMeta, opts Verif
 			problems = append(problems, fmt.Sprintf("case %q has invalid capture target %q: %v", caseID, targetID, err))
 			continue
 		}
-		if !isCaptureCapableMeta(meta) {
+		if !IsCaptureCapable(meta) {
 			problems = append(problems, fmt.Sprintf("case %q declares capture target %q but is not capture-capable", caseID, target.ID))
 			continue
 		}
@@ -140,7 +140,7 @@ func verifyLoadedCase(root string, entry ManifestCase, meta CaseMeta, opts Verif
 func verifyNegativeCase(meta CaseMeta) []string {
 	caseID := meta.ID
 	problems := make([]string, 0)
-	if !isCaptureCapableMeta(meta) {
+	if !IsCaptureCapable(meta) {
 		problems = append(problems, fmt.Sprintf("case %q negative fixture must also declare a capture-capable kind", caseID))
 	}
 	if len(meta.CaptureTargets) == 0 {
@@ -165,13 +165,6 @@ func verifyNegativeCase(meta CaseMeta) []string {
 		}
 	}
 	return problems
-}
-
-func isCaptureCapableMeta(meta CaseMeta) bool {
-	return StringSliceContains(meta.Kinds, "request") ||
-		StringSliceContains(meta.Kinds, "models") ||
-		StringSliceContains(meta.Kinds, "token-count") ||
-		StringSliceContains(meta.Kinds, "stateful")
 }
 
 func verifyStatefulCase(root string, meta CaseMeta) []string {

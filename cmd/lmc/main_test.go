@@ -8,6 +8,7 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/providerconfig"
+	"lmtools/internal/providerrequest"
 	"lmtools/internal/session"
 	"net/http"
 	"os"
@@ -98,11 +99,6 @@ func TestGetExitCode(t *testing.T) {
 	}
 }
 
-func TestGetOperationName(t *testing.T) {
-	// This is a compilation test to ensure the function exists
-	// We can't test it directly without creating a config
-}
-
 func assertContainsAll(t *testing.T, got string, wants []string) {
 	t.Helper()
 	for _, want := range wants {
@@ -167,100 +163,18 @@ func TestRenderCurlCommandAvoidsHeredocDelimiterCollision(t *testing.T) {
 	}
 }
 
-func TestBuildListModelsRequestProviderURLAppliesAPIKeyFile(t *testing.T) {
-	tests := []struct {
-		name        string
-		provider    string
-		wantHeader  string
-		wantValue   string
-		wantVersion bool
-	}{
-		{
-			name:       "openai",
-			provider:   constants.ProviderOpenAI,
-			wantHeader: "Authorization",
-			wantValue:  "Bearer test_key",
-		},
-		{
-			name:        "anthropic",
-			provider:    constants.ProviderAnthropic,
-			wantHeader:  "x-api-key",
-			wantValue:   "test_key",
-			wantVersion: true,
-		},
-		{
-			name:       "google",
-			provider:   constants.ProviderGoogle,
-			wantHeader: "x-goog-api-key",
-			wantValue:  "test_key",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			apiKeyFile := writeTestAPIKeyFile(t, "test_key")
-			req, err := buildListModelsRequest(config.Config{
-				Options: providerconfig.Options{
-					Provider:    tt.provider,
-					ProviderURL: "http://localhost:8080/v1",
-					APIKeyFile:  apiKeyFile,
-				},
-			})
-			if err != nil {
-				t.Fatalf("buildListModelsRequest() error = %v", err)
-			}
-			if got := req.Header.Get(tt.wantHeader); got != tt.wantValue {
-				t.Fatalf("%s = %q, want %q", tt.wantHeader, got, tt.wantValue)
-			}
-			if tt.wantVersion {
-				if got := req.Header.Get("anthropic-version"); got != "2023-06-01" {
-					t.Fatalf("anthropic-version = %q, want 2023-06-01", got)
-				}
-			}
-		})
-	}
-}
-
-func TestBuildListModelsRequestProviderURLWithoutAPIKeyAllowed(t *testing.T) {
-	req, err := buildListModelsRequest(config.Config{
-		Options: providerconfig.Options{
-			Provider:    constants.ProviderOpenAI,
-			ProviderURL: "http://localhost:8080/v1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("buildListModelsRequest() error = %v", err)
-	}
-	if got := req.Header.Get("Authorization"); got != "" {
-		t.Fatalf("Authorization = %q, want empty", got)
-	}
-}
-
-func TestBuildListModelsRequestRequiresAPIKeyWithoutProviderURL(t *testing.T) {
-	_, err := buildListModelsRequest(config.Config{
-		Options: providerconfig.Options{
-			Provider: constants.ProviderOpenAI,
-		},
-	})
-	if err == nil {
-		t.Fatal("buildListModelsRequest() succeeded without API key or provider URL")
-	}
-	if !strings.Contains(err.Error(), "-api-key-file is required for openai provider when listing models") {
-		t.Fatalf("buildListModelsRequest() error = %q, want missing key error", err)
-	}
-}
-
 func TestListModelsPrintCurlProviderURLIncludesAPIKeyHeader(t *testing.T) {
 	apiKeyFile := writeTestAPIKeyFile(t, "test_key")
-	req, err := buildListModelsRequest(config.Config{
-		Options: providerconfig.Options{
+	req, err := providerrequest.BuildModelsRequest(providerrequest.ModelsRequestOptions{
+		ProviderOptions: providerconfig.Options{
 			Provider:    constants.ProviderOpenAI,
 			ProviderURL: "http://localhost:8080/v1",
 			APIKeyFile:  apiKeyFile,
 		},
+		RequireAPIKeyWithoutProviderURL: true,
 	})
 	if err != nil {
-		t.Fatalf("buildListModelsRequest() error = %v", err)
+		t.Fatalf("BuildModelsRequest() error = %v", err)
 	}
 
 	got := renderCurlCommand(req, nil)
@@ -522,21 +436,9 @@ func TestGetActualModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Compute actual model using the same logic as in main.go
-			actual := tt.cfg.Model
-			if actual == "" {
-				if tt.cfg.Embed {
-					actual = core.DefaultEmbedModel
-				} else {
-					provider := tt.cfg.Provider
-					if provider == "" {
-						provider = constants.ProviderArgo
-					}
-					actual = core.GetDefaultChatModel(provider)
-				}
-			}
+			actual := actualModelForConfig(&tt.cfg, tt.cfg.RequestOptions())
 			if actual != tt.expected {
-				t.Errorf("computed model = %q, want %q", actual, tt.expected)
+				t.Errorf("actualModelForConfig() = %q, want %q", actual, tt.expected)
 			}
 		})
 	}

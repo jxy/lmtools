@@ -135,7 +135,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to load API key file: %v\n", err)
 		os.Exit(1)
 	}
-	if err := providerOpts.ValidateCredentials(providers.ValidationSurfaceProxy, providerKeys, false); err != nil {
+	if err := providerOpts.ValidateCredentials(providers.ValidationSurfaceProxy, providerKeys); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
 		os.Exit(1)
 	}

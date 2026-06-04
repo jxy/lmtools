@@ -259,6 +259,13 @@ func MatchesFilters(meta CaseMeta, caseID, provider string) bool {
 	return true
 }
 
+func IsCaptureCapable(meta CaseMeta) bool {
+	return StringSliceContains(meta.Kinds, "request") ||
+		StringSliceContains(meta.Kinds, "models") ||
+		StringSliceContains(meta.Kinds, "token-count") ||
+		StringSliceContains(meta.Kinds, "stateful")
+}
+
 func ExpectedCaptureStatus(meta CaseMeta, target CaptureTarget) (int, bool) {
 	if len(meta.ExpectedStatus) == 0 {
 		return 0, false

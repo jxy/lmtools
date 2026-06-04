@@ -52,7 +52,7 @@ func NewOpenAIStreamWriter(w http.ResponseWriter, model string, ctx context.Cont
 	writer := &OpenAIStreamWriter{
 		sse:      sse,
 		ctx:      ctx,
-		streamID: newOpenAIStreamID(),
+		streamID: generateUUID("chatcmpl-"),
 		model:    model,
 		created:  time.Now().Unix(),
 	}

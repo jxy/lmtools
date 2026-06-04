@@ -3,9 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"lmtools/internal/core"
-	"time"
 )
 
 // OpenAIStreamConverter converts from various provider formats to OpenAI streaming format.
@@ -175,7 +173,7 @@ func (c *OpenAIStreamConverter) HandleGoogleChunk(chunk core.ParsedGoogleStreamC
 	for _, functionCall := range chunk.FunctionCalls {
 		toolID := functionCall.ID
 		if toolID == "" {
-			toolID = fmt.Sprintf("call_%x", time.Now().UnixNano())
+			toolID = generateUUID("call_")
 		}
 		args := string(functionCall.Args)
 

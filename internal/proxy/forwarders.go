@@ -196,15 +196,14 @@ func (s *Server) argoOpenAIStreamingRequest(ctx context.Context, openAIReq *Open
 	normalizeArgoOpenAIChatRequest(openAIReq)
 	openAIReq.Stream = true
 	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", openAIReq)
-	return s.sendStreamingJSONRequest(
-		ctx,
-		constants.ProviderArgo,
-		"Argo OpenAI",
-		s.endpoints.ArgoOpenAI,
-		openAIReq,
-		map[string]string{"Accept": "text/event-stream"},
-		s.configureArgoOpenAIRequest,
-	)
+	return s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
+		URL:          s.endpoints.ArgoOpenAI,
+		Provider:     constants.ProviderArgo,
+		RequestName:  "Argo OpenAI",
+		Payload:      openAIReq,
+		ExtraHeaders: map[string]string{"Accept": "text/event-stream"},
+		Configure:    s.configureArgoOpenAIRequest,
+	})
 }
 
 func (s *Server) argoOpenAIStreamingRequestFromAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
@@ -224,15 +223,14 @@ func (s *Server) argoAnthropicStreamingRequest(ctx context.Context, anthReq *Ant
 	if anthReq.Betas != "" {
 		extraHeaders["anthropic-beta"] = anthReq.Betas
 	}
-	return s.sendStreamingJSONRequest(
-		ctx,
-		constants.ProviderArgo,
-		"Argo Anthropic",
-		s.endpoints.ArgoAnthropic,
-		anthReq,
-		extraHeaders,
-		s.configureArgoAnthropicRequest,
-	)
+	return s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
+		URL:          s.endpoints.ArgoAnthropic,
+		Provider:     constants.ProviderArgo,
+		RequestName:  "Argo Anthropic",
+		Payload:      anthReq,
+		ExtraHeaders: extraHeaders,
+		Configure:    s.configureArgoAnthropicRequest,
+	})
 }
 
 // forwardToGoogle forwards a request to the Google Gemini API
@@ -295,7 +293,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 	}
 
 	var argoResp ArgoChatResponse
-	err = s.doJSON(ctx, s.endpoints.GetArgoURL("chat"), argoReq, nil, &argoResp, constants.ProviderArgo, "Argo")
+	err = s.doJSON(ctx, s.endpoints.ArgoChat, argoReq, nil, &argoResp, constants.ProviderArgo, "Argo")
 	if err != nil {
 		return nil, err
 	}
@@ -331,15 +329,12 @@ func (s *Server) forwardToArgoStream(ctx context.Context, anthReq *AnthropicRequ
 	// Log request if debug enabled
 	logger.DebugJSON(log, "Outgoing Argo Streaming Request", argoReq)
 
-	resp, err := s.sendStreamingJSONRequest(
-		ctx,
-		constants.ProviderArgo,
-		"Argo stream",
-		s.endpoints.GetArgoURL("streamchat"),
-		argoReq,
-		nil,
-		nil,
-	)
+	resp, err := s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
+		URL:         s.endpoints.ArgoStreamChat,
+		Provider:    constants.ProviderArgo,
+		RequestName: "Argo stream",
+		Payload:     argoReq,
+	})
 	if err != nil {
 		return nil, err
 	}

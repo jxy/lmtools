@@ -623,14 +623,8 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 		logger.From(ctx).Warnf("Failed to log models response: %v", err)
 	}
 
-	items, err := parseModelsForDisplay(provider, data)
+	items, err := modelcatalog.Parse(provider, data)
 	if err != nil {
-		if cfg.ProviderURL != "" {
-			if _, ok := providers.InfoFor(provider); !ok {
-				fmt.Println(string(data))
-				return nil
-			}
-		}
 		return errors.WrapError("parse models response", err)
 	}
 
@@ -643,26 +637,6 @@ func buildListModelsRequest(cfg config.Config) (*http.Request, error) {
 		ProviderOptions:                 cfg.Options,
 		RequireAPIKeyWithoutProviderURL: true,
 	})
-}
-
-func parseModelsForDisplay(provider string, data []byte) ([]modelcatalog.Item, error) {
-	if _, ok := providers.InfoFor(provider); ok {
-		return modelcatalog.Parse(provider, data)
-	}
-
-	parsers := []func([]byte) ([]modelcatalog.Item, error){
-		modelcatalog.ParseOpenAI,
-		modelcatalog.ParseAnthropic,
-		modelcatalog.ParseGoogle,
-		modelcatalog.ParseArgo,
-	}
-	for _, parse := range parsers {
-		if items, err := parse(data); err == nil {
-			return items, nil
-		}
-	}
-
-	return nil, fmt.Errorf("unable to parse models response for provider %s", provider)
 }
 
 func displayModels(provider string, items []modelcatalog.Item) {

@@ -142,7 +142,7 @@ func validateProviderCredentials(cfg Config) error {
 		return nil
 	}
 
-	return cfg.ValidateCredentials(providers.ValidationSurfaceCLI, auth.ProviderKeySet{}, false)
+	return cfg.ValidateCredentials(providers.ValidationSurfaceCLI, auth.ProviderKeySet{})
 }
 
 func validateToolFlags(cfg Config) error {

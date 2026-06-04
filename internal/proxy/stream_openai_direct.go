@@ -87,7 +87,7 @@ func (f *openAICompatibleStreamStopForwarder) handleRecord(record sseRecord) err
 			}
 		}
 		if chunk.Choices[i].FinishReason != nil {
-			if err := f.writePendingStopTail(index); err != nil {
+			if err := f.flushStopTail(index); err != nil {
 				return err
 			}
 			f.finishedChoices[index] = true
@@ -118,10 +118,6 @@ func (f *openAICompatibleStreamStopForwarder) finish() error {
 		return f.writeData(OpenAIDoneMarker)
 	}
 	return nil
-}
-
-func (f *openAICompatibleStreamStopForwarder) writePendingStopTail(index int) error {
-	return f.flushStopTail(index)
 }
 
 func (f *openAICompatibleStreamStopForwarder) writePendingStopTails() error {

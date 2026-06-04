@@ -223,7 +223,7 @@ func rewriteOpenAIResponseModel(ctx context.Context, body []byte, originalModel,
 	return &openAIResp, nil
 }
 
-// forwardOpenAIDirectly forwards an OpenAI request directly to OpenAI
+// forwardOpenAICompatibleDirectly forwards an OpenAI-compatible request directly upstream.
 func (s *Server) forwardOpenAICompatibleDirectly(w http.ResponseWriter, r *http.Request, openAIReq *OpenAIRequest, originalModel, url, apiKey, requestName, provider string, stops []string) {
 	ctx := r.Context()
 	log := logger.From(ctx)

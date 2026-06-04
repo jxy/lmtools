@@ -81,10 +81,7 @@ func (o Options) CredentialState(keys auth.ProviderKeySet) providers.CredentialS
 	}
 }
 
-func (o Options) ValidateCredentials(surface providers.ValidationSurface, keys auth.ProviderKeySet, allowSkip bool) error {
-	if allowSkip {
-		return nil
-	}
+func (o Options) ValidateCredentials(surface providers.ValidationSurface, keys auth.ProviderKeySet) error {
 	normalized := o
 	if err := normalized.Normalize(); err != nil {
 		return err

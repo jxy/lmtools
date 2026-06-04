@@ -97,7 +97,7 @@ func TestValidateCredentials(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.opts.ValidateCredentials(tt.surface, tt.keys, false)
+			err := tt.opts.ValidateCredentials(tt.surface, tt.keys)
 			if tt.wantErr && err == nil {
 				t.Fatal("ValidateCredentials() succeeded, want error")
 			}

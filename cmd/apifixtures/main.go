@@ -208,7 +208,7 @@ func runCaptureAll(args []string) error {
 
 		targets := meta.CaptureTargets
 		if *targetID != "" {
-			if !isCaptureCapableCase(meta) {
+			if !apifixtures.IsCaptureCapable(meta) {
 				continue
 			}
 			if !apifixtures.StringSliceContains(meta.CaptureTargets, *targetID) {
@@ -265,13 +265,6 @@ func captureCase(root, caseID, targetID string) error {
 	}
 
 	return captureRequestCase(root, meta, target)
-}
-
-func isCaptureCapableCase(meta apifixtures.CaseMeta) bool {
-	return apifixtures.StringSliceContains(meta.Kinds, "request") ||
-		apifixtures.StringSliceContains(meta.Kinds, "models") ||
-		apifixtures.StringSliceContains(meta.Kinds, "token-count") ||
-		apifixtures.StringSliceContains(meta.Kinds, "stateful")
 }
 
 func captureTokenCountCase(root string, meta apifixtures.CaseMeta, target targetConfig) error {

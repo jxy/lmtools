@@ -46,9 +46,6 @@ func TestProviderSpecsCompleteness(t *testing.T) {
 			if spec.Provider != provider {
 				t.Fatalf("spec.Provider = %q, want %q", spec.Provider, provider)
 			}
-			if spec.displayName() == "" {
-				t.Fatal("displayName() must not be empty")
-			}
 			if spec.BuildChat == nil {
 				t.Fatal("BuildChat must be set")
 			}
@@ -58,11 +55,8 @@ func TestProviderSpecsCompleteness(t *testing.T) {
 			if spec.ParseResponse == nil {
 				t.Fatal("ParseResponse must be set")
 			}
-			if got := spec.supportsEmbeddings(); got != providers.SupportsEmbeddings(provider) {
-				t.Fatalf("supportsEmbeddings() = %v, want %v", got, providers.SupportsEmbeddings(provider))
-			}
-			if got := spec.BuildEmbed != nil; got != spec.supportsEmbeddings() {
-				t.Fatalf("BuildEmbed set = %v, want supportsEmbeddings()=%v", got, spec.supportsEmbeddings())
+			if got := spec.BuildEmbed != nil; got != providers.SupportsEmbeddings(provider) {
+				t.Fatalf("BuildEmbed set = %v, want SupportsEmbeddings(%q)=%v", got, provider, providers.SupportsEmbeddings(provider))
 			}
 			if got := spec.ConvertTools != nil; got != tt.expectConvertTools {
 				t.Fatalf("ConvertTools set = %v, want %v", got, tt.expectConvertTools)

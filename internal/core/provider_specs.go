@@ -114,26 +114,12 @@ func unknownProviderSpec(provider string) providerSpec {
 	return providerSpec{Provider: constants.NormalizeProvider(provider)}
 }
 
-func (spec providerSpec) displayName() string {
-	if info, ok := providers.InfoFor(spec.Provider); ok {
-		return info.DisplayName
-	}
-	if spec.Provider != "" {
-		return spec.Provider
-	}
-	return "unknown"
-}
-
 func (spec providerSpec) supportsGenericRequest() bool {
 	return spec.RequestMap != nil && spec.Marshal != nil
 }
 
 func (spec providerSpec) usesOutOfBandSystemPrompt() bool {
 	return providers.UsesOutOfBandSystemPrompt(spec.Provider)
-}
-
-func (spec providerSpec) supportsEmbeddings() bool {
-	return providers.SupportsEmbeddings(spec.Provider)
 }
 
 func (spec providerSpec) requireChatBuilder() (providerChatBuilder, error) {
@@ -145,7 +131,7 @@ func (spec providerSpec) requireChatBuilder() (providerChatBuilder, error) {
 
 func (spec providerSpec) requireEmbedBuilder() (providerEmbedBuilder, error) {
 	if spec.BuildEmbed == nil {
-		return nil, fmt.Errorf("%s provider does not support embedding mode", spec.displayName())
+		return nil, fmt.Errorf("%s provider does not support embedding mode", providers.DisplayName(spec.Provider))
 	}
 	return spec.BuildEmbed, nil
 }

@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-func getDefaultUser() string {
-	return "" // No default, always require -u flag
-}
-
 type Config struct {
 	// Tool execution settings
 	MaxToolRounds   int    `json:"max_tool_rounds,omitempty"`
@@ -133,7 +129,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	// Configuration
 	providerconfig.RegisterFlags(fs, &cfg.Options, providerconfig.Defaults{
 		Provider: constants.ProviderArgo,
-		ArgoUser: getDefaultUser(),
+		ArgoUser: "",
 	})
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
 

@@ -94,18 +94,3 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 func validateProviderURL(providerURL, provider string) error {
 	return providers.ValidateProviderURL(providerURL, provider)
 }
-
-// GetArgoURL returns the appropriate Argo URL for the given endpoint type.
-// Valid endpoints: "chat", "streamchat", "embed"
-func (e *Endpoints) GetArgoURL(endpoint string) string {
-	switch endpoint {
-	case "chat":
-		return e.ArgoChat
-	case "streamchat":
-		return e.ArgoStreamChat
-	case "embed":
-		return e.ArgoEmbed
-	default:
-		return e.ArgoBase
-	}
-}

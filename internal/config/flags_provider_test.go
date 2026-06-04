@@ -81,6 +81,12 @@ func TestProviderValidation(t *testing.T) {
 			errMsg:  `invalid provider: "invalid-provider", must be one of: argo, openai, google, anthropic`,
 		},
 		{
+			name:    "custom provider url still requires known provider shape",
+			args:    []string{"-provider", "custom", "-provider-url", "http://localhost:8080/v1", "-list-models"},
+			wantErr: true,
+			errMsg:  `invalid provider: "custom", must be one of: argo, openai, google, anthropic`,
+		},
+		{
 			name:    "valid provider argo",
 			args:    []string{"-provider", "argo", "-argo-user", "test"},
 			wantErr: false,

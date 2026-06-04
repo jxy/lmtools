@@ -9,7 +9,6 @@ import (
 // PreparedRequestPayload captures the provider-normalized inputs required to
 // render a provider-specific request.
 type PreparedRequestPayload struct {
-	Provider   string
 	Model      string
 	Messages   []TypedMessage
 	System     string
@@ -41,7 +40,6 @@ func PrepareRequestPayloadWithSystemExplicit(provider, model string, typedMessag
 	}
 
 	payload := PreparedRequestPayload{
-		Provider: provider,
 		Model:    model,
 		Messages: typedMessages,
 		System:   system,

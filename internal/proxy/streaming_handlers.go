@@ -15,29 +15,9 @@ import (
 	"time"
 )
 
-// Helper functions to reduce duplication in stream handlers
-
-func (s *Server) sendStreamingJSONRequest(
-	ctx context.Context,
-	provider string,
-	requestName string,
-	url string,
-	payload interface{},
-	extraHeaders map[string]string,
-	configure func(*http.Request),
-) (*http.Response, error) {
-	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
-		URL:          url,
-		Provider:     provider,
-		RequestName:  requestName,
-		Payload:      payload,
-		ExtraHeaders: extraHeaders,
-		Configure:    configure,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
+func (s *Server) sendProviderStreamingJSONRequest(ctx context.Context, request providerJSONRequest) (*http.Response, error) {
+	resp, _, err := s.sendProviderJSONRequest(ctx, request)
+	return resp, err
 }
 
 func (s *Server) ensureStreamingResponseOK(ctx context.Context, provider string, resp *http.Response) error {
@@ -122,8 +102,14 @@ func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicR
 		return nil, fmt.Errorf("build Google streaming URL: %w", err)
 	}
 
-	return s.sendStreamingJSONRequest(ctx, constants.ProviderGoogle, "Google", url, googleReq, nil, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+	return s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
+		URL:         url,
+		Provider:    constants.ProviderGoogle,
+		RequestName: "Google",
+		Payload:     googleReq,
+		Configure: func(req *http.Request) {
+			auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+		},
 	})
 }
 
@@ -139,17 +125,16 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 		extraHeaders["anthropic-beta"] = anthReq.Betas
 	}
 
-	return s.sendStreamingJSONRequest(
-		ctx,
-		constants.ProviderAnthropic,
-		"Anthropic",
-		s.endpoints.Anthropic,
-		anthReq,
-		extraHeaders,
-		func(req *http.Request) {
+	return s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
+		URL:          s.endpoints.Anthropic,
+		Provider:     constants.ProviderAnthropic,
+		RequestName:  "Anthropic",
+		Payload:      anthReq,
+		ExtraHeaders: extraHeaders,
+		Configure: func(req *http.Request) {
 			auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
 		},
-	)
+	})
 }
 
 // openAIStreamingRequest builds and sends an HTTP request for OpenAI streaming.
@@ -164,8 +149,14 @@ func (s *Server) openAIStreamingRequest(ctx context.Context, anthReq *AnthropicR
 	warnOpenAICompatibleStopSpecialProcessing(ctx, "OpenAI", strippedStops)
 	openAIReq.Stream = true
 
-	return s.sendStreamingJSONRequest(ctx, constants.ProviderOpenAI, "OpenAI", s.endpoints.OpenAI, openAIReq, nil, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
+	return s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
+		URL:         s.endpoints.OpenAI,
+		Provider:    constants.ProviderOpenAI,
+		RequestName: "OpenAI",
+		Payload:     openAIReq,
+		Configure: func(req *http.Request) {
+			auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
+		},
 	})
 }
 
