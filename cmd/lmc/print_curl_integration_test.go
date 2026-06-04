@@ -31,6 +31,9 @@ func TestPrintCurlFreshDoesNotSendOrCreateSession(t *testing.T) {
 	if !strings.Contains(stdout, "curl -X POST") || !strings.Contains(stdout, "fresh preview") {
 		t.Fatalf("stdout = %q, want curl command containing request body", stdout)
 	}
+	if !strings.Contains(stdout, "-H 'Authorization: Bearer testuser'") {
+		t.Fatalf("stdout = %q, want Argo user Authorization header", stdout)
+	}
 	if got := len(server.GetRequests()); got != 0 {
 		t.Fatalf("mock server received %d requests, want 0", got)
 	}

@@ -57,8 +57,24 @@ func handleAPIKeyAuth(httpReq *http.Request, cfg RequestOptions, provider string
 	return nil
 }
 
+func isArgoNativeWireProvider(cfg RequestOptions, provider string) bool {
+	if getProviderWithDefault(cfg, constants.ProviderArgo) != constants.ProviderArgo {
+		return false
+	}
+	return provider == constants.ProviderOpenAI || provider == constants.ProviderAnthropic
+}
+
 // applyProviderAuth applies authentication based on the provider type
 func applyProviderAuth(req *http.Request, cfg RequestOptions, provider string) error {
+	if isArgoNativeWireProvider(cfg, provider) {
+		if cfg.APIKeyFile != "" {
+			return handleAPIKeyAuth(req, cfg, provider)
+		}
+		if cfg.User != "" {
+			auth.SetProviderHeaders(req, provider, cfg.User)
+		}
+		return nil
+	}
 	switch providers.CredentialKindFor(provider) {
 	case providers.CredentialKindAPIKey:
 		return handleAPIKeyAuth(req, cfg, provider)

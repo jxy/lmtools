@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,15 @@ func decodeRequestBody(t *testing.T, body []byte) map[string]interface{} {
 		t.Fatalf("failed to decode request body: %v", err)
 	}
 	return req
+}
+
+func writeProviderSpecTestAPIKeyFile(t *testing.T, key string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return path
 }
 
 func TestProviderSpecChatRequestBehavior(t *testing.T) {
@@ -282,6 +292,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 	t.Run("gpt model uses native openai endpoint", func(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "gpt5", "")
 		cfg.Env = "http://argo.example.test"
+		cfg.User = "argo-user-key"
 
 		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "gpt5", "Be concise.", true, nil, nil, true)
 		if err != nil {
@@ -290,6 +301,15 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 
 		if got := req.URL.String(); got != "http://argo.example.test/v1/chat/completions" {
 			t.Fatalf("URL = %q", got)
+		}
+		if got := req.Header.Get("Authorization"); got != "Bearer argo-user-key" {
+			t.Fatalf("Authorization = %q, want %q", got, "Bearer argo-user-key")
+		}
+		if got := req.Header.Get("x-api-key"); got != "" {
+			t.Fatalf("x-api-key = %q, want empty", got)
+		}
+		if got := req.Header.Get("anthropic-version"); got != "" {
+			t.Fatalf("anthropic-version = %q, want empty", got)
 		}
 
 		payload := decodeRequestBody(t, body)
@@ -337,6 +357,7 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 	t.Run("claude model uses native anthropic endpoint", func(t *testing.T) {
 		cfg := newProviderSpecTestConfig("argo", "claude-opus-4-1", "")
 		cfg.Env = "http://argo.example.test"
+		cfg.User = "argo-user-key"
 
 		req, body, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, "claude-opus-4-1", "Be concise.", true, nil, nil, true)
 		if err != nil {
@@ -345,6 +366,15 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 
 		if got := req.URL.String(); got != "http://argo.example.test/v1/messages" {
 			t.Fatalf("URL = %q", got)
+		}
+		if got := req.Header.Get("x-api-key"); got != "argo-user-key" {
+			t.Fatalf("x-api-key = %q, want %q", got, "argo-user-key")
+		}
+		if got := req.Header.Get("anthropic-version"); got != "2023-06-01" {
+			t.Fatalf("anthropic-version = %q, want %q", got, "2023-06-01")
+		}
+		if got := req.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
 		}
 
 		payload := decodeRequestBody(t, body)
@@ -361,6 +391,59 @@ func TestArgoProviderSpecChatRequestBehavior(t *testing.T) {
 		first, _ := messages[0].(map[string]interface{})
 		if first["role"] != "user" {
 			t.Fatalf("first role = %v, want user", first["role"])
+		}
+	})
+
+	t.Run("api key file wins over argo user for native wire endpoints", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			model       string
+			wantHeader  string
+			wantValue   string
+			emptyHeader string
+			wantVersion bool
+		}{
+			{
+				name:        "openai",
+				model:       "gpt5",
+				wantHeader:  "Authorization",
+				wantValue:   "Bearer file-key",
+				emptyHeader: "x-api-key",
+			},
+			{
+				name:        "anthropic",
+				model:       "claude-opus-4-1",
+				wantHeader:  "x-api-key",
+				wantValue:   "file-key",
+				emptyHeader: "Authorization",
+				wantVersion: true,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg := newProviderSpecTestConfig("argo", tt.model, "")
+				cfg.Env = "http://argo.example.test"
+				cfg.User = "argo-user-key"
+				cfg.APIKeyFile = writeProviderSpecTestAPIKeyFile(t, "file-key\n")
+
+				req, _, err := buildChat(cfg, []TypedMessage{NewTextMessage("user", "Hello")}, tt.model, "", false, nil, nil, false)
+				if err != nil {
+					t.Fatalf("buildChat() error = %v", err)
+				}
+
+				if got := req.Header.Get(tt.wantHeader); got != tt.wantValue {
+					t.Fatalf("%s = %q, want %q", tt.wantHeader, got, tt.wantValue)
+				}
+				if got := req.Header.Get(tt.emptyHeader); got != "" {
+					t.Fatalf("%s = %q, want empty", tt.emptyHeader, got)
+				}
+				if tt.wantVersion {
+					if got := req.Header.Get("anthropic-version"); got != "2023-06-01" {
+						t.Fatalf("anthropic-version = %q, want %q", got, "2023-06-01")
+					}
+				}
+			})
 		}
 	})
 }

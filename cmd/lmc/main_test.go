@@ -103,6 +103,15 @@ func TestGetOperationName(t *testing.T) {
 	// We can't test it directly without creating a config
 }
 
+func assertContainsAll(t *testing.T, got string, wants []string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Fatalf("got %q, want substring %q", got, want)
+		}
+	}
+}
+
 func TestRenderCurlCommand(t *testing.T) {
 	req, err := http.NewRequest("POST", "https://api.example.com/v1/chat/completions?debug=true", nil)
 	if err != nil {
@@ -113,19 +122,14 @@ func TestRenderCurlCommand(t *testing.T) {
 	body := []byte(`{"message":"Bob's answer"}`)
 
 	got := renderCurlCommand(req, body)
-	wants := []string{
+	assertContainsAll(t, got, []string{
 		"curl -X POST",
 		"-H 'Authorization: Bearer sk-test'",
 		"-H 'Content-Type: application/json'",
 		"--data-binary @-",
 		"'https://api.example.com/v1/chat/completions?debug=true'",
 		"<<'EOJ'\n{\"message\":\"Bob's answer\"}\nEOJ",
-	}
-	for _, want := range wants {
-		if !strings.Contains(got, want) {
-			t.Fatalf("renderCurlCommand() = %q, want substring %q", got, want)
-		}
-	}
+	})
 }
 
 func TestRenderCurlCommandPreservesHeaderValueOrder(t *testing.T) {
@@ -260,16 +264,37 @@ func TestListModelsPrintCurlProviderURLIncludesAPIKeyHeader(t *testing.T) {
 	}
 
 	got := renderCurlCommand(req, nil)
-	wants := []string{
+	assertContainsAll(t, got, []string{
 		"curl -X GET",
 		"-H 'Authorization: Bearer test_key'",
 		"http://localhost:8080/v1/models",
+	})
+}
+
+func TestBuildPrintCurlRequestArgoUserAddsAuthorizationHeader(t *testing.T) {
+	ctx := context.Background()
+	cfg, err := config.ParseFlags([]string{
+		"-argo-user", "testuser",
+		"-model", "gpt4o",
+		"-provider-url", "http://argo.example.test",
+		"-print-curl",
+	})
+	if err != nil {
+		t.Fatalf("ParseFlags() error = %v", err)
 	}
-	for _, want := range wants {
-		if !strings.Contains(got, want) {
-			t.Fatalf("renderCurlCommand() = %q, want substring %q", got, want)
-		}
+
+	opts := cfg.RequestOptions()
+	rb, err := buildHTTPRequest(ctx, &cfg, opts, nil, "fresh preview")
+	if err != nil {
+		t.Fatalf("buildHTTPRequest() error = %v", err)
 	}
+
+	got := renderCurlCommand(rb.Request, rb.Body)
+	assertContainsAll(t, got, []string{
+		"-H 'Authorization: Bearer testuser'",
+		"http://argo.example.test/v1/chat/completions",
+		"fresh preview",
+	})
 }
 
 func writeTestAPIKeyFile(t *testing.T, key string) string {
