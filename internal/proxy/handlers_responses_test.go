@@ -793,7 +793,8 @@ func assertCapturedResponsesPassthroughFields(t *testing.T, captured map[string]
 	}
 }
 
-func TestOpenAIResponsesConvertedProviderRejectsUnsupportedTools(t *testing.T) {
+func TestOpenAIResponsesConvertedProviderDropsUnsupportedTools(t *testing.T) {
+	var captured AnthropicRequest
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
@@ -802,23 +803,51 @@ func TestOpenAIResponsesConvertedProviderRejectsUnsupportedTools(t *testing.T) {
 		SessionsDir:        t.TempDir(),
 	}
 	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		t.Fatal("unexpected upstream call for unsupported Responses hosted tool")
-		return nil, nil
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("json.Unmarshal(upstream request) error = %v, body = %s", err, string(body))
+		}
+		return jsonRoundTripResponse(http.StatusOK, AnthropicResponse{
+			ID:         "msg_1",
+			Type:       "message",
+			Role:       core.RoleAssistant,
+			Model:      "claude-test",
+			StopReason: "end_turn",
+			Content: []AnthropicContentBlock{{
+				Type: "text",
+				Text: "ok",
+			}},
+			Usage: &AnthropicUsage{InputTokens: 1, OutputTokens: 2},
+		}), nil
 	}))
 	server := NewTestServerDirectWithClient(t, config, client)
 
-	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
-		"model": "claude-test",
-		"input": "search",
-		"tools": []interface{}{
-			map[string]interface{}{"type": "web_search_preview"},
-		},
+	logs := captureWarnLogs(t, func() {
+		code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
+			"model": "claude-test",
+			"input": "search",
+			"tools": []interface{}{
+				map[string]interface{}{"type": "tool_search"},
+				map[string]interface{}{
+					"type":        "function",
+					"name":        "lookup",
+					"description": "lookup data",
+					"parameters":  map[string]interface{}{"type": "object"},
+				},
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", code, string(body))
+		}
 	})
-	if code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body = %s", code, string(body))
+	if !strings.Contains(logs, `Dropping unsupported Responses tool type "tool_search" at index 0`) {
+		t.Fatalf("tool_search warning not found in logs:\n%s", logs)
 	}
-	if !strings.Contains(string(body), "web_search_preview") {
-		t.Fatalf("body = %s, want unsupported tool error", string(body))
+	if len(captured.Tools) != 1 || captured.Tools[0].Name != "lookup" {
+		t.Fatalf("captured tools = %+v, want only lookup", captured.Tools)
 	}
 }
 

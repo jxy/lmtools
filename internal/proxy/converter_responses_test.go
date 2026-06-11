@@ -902,6 +902,61 @@ func TestTypedToOpenAIResponsesRequestPreservesTextVerbosity(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesRequestToTypedDropsHostedToolsForConvertedProviders(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model: "gpt-5.4-nano",
+		Input: "hi",
+		Tools: []map[string]interface{}{
+			{"type": "tool_search"},
+			{"type": "function", "name": "lookup", "parameters": map[string]interface{}{"type": "object"}},
+		},
+	}
+
+	logs := captureWarnLogs(t, func() {
+		typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
+		if err != nil {
+			t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+		}
+		if len(typed.Tools) != 1 || typed.Tools[0].Name != "lookup" {
+			t.Fatalf("tools = %+v, want only lookup function tool", typed.Tools)
+		}
+	})
+	if !strings.Contains(logs, `Dropping unsupported Responses tool type "tool_search" at index 0`) {
+		t.Fatalf("tool_search warning not found in logs:\n%s", logs)
+	}
+}
+
+func TestOpenAIResponsesRequestToTypedDropsRequiredToolChoiceAfterHostedTools(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model:      "gpt-5.4-nano",
+		Input:      "hi",
+		ToolChoice: "required",
+		Tools: []map[string]interface{}{
+			{"type": "tool_search"},
+			{"type": "function", "name": "lookup", "parameters": map[string]interface{}{"type": "object"}},
+		},
+	}
+
+	logs := captureWarnLogs(t, func() {
+		typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
+		if err != nil {
+			t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+		}
+		if len(typed.Tools) != 1 || typed.Tools[0].Name != "lookup" {
+			t.Fatalf("tools = %+v, want only lookup function tool", typed.Tools)
+		}
+		if typed.ToolChoice != nil {
+			t.Fatalf("tool choice = %#v, want nil after dropping unsupported tool from required set", typed.ToolChoice)
+		}
+	})
+	if !strings.Contains(logs, `Dropping unsupported Responses tool type "tool_search" at index 0`) {
+		t.Fatalf("tool_search warning not found in logs:\n%s", logs)
+	}
+	if !strings.Contains(logs, `Dropping unsupported Responses tool_choice type "required"`) {
+		t.Fatalf("required tool_choice warning not found in logs:\n%s", logs)
+	}
+}
+
 func TestOpenAIResponsesConvertedProviderRejectsUnsupportedFields(t *testing.T) {
 	tests := []struct {
 		name string

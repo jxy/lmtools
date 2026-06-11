@@ -70,12 +70,12 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 		return TypedRequest{}, err
 	}
 	typed.Messages = messages
-	tools, err := responsesToolsToCore(ctx, req.Tools)
+	tools, droppedUnsupportedTools, err := responsesToolsToCore(ctx, req.Tools)
 	if err != nil {
 		return TypedRequest{}, err
 	}
 	typed.Tools = tools
-	typed.ToolChoice = responsesToolChoiceToCore(ctx, req.ToolChoice)
+	typed.ToolChoice = responsesToolChoiceToCore(ctx, req.ToolChoice, droppedUnsupportedTools)
 	return typed, nil
 }
 
@@ -89,23 +89,7 @@ func validateConvertedResponsesUnsupportedFields(req *OpenAIResponsesRequest) er
 	if req.TopLogprobs != nil {
 		return fmt.Errorf("top_logprobs is not supported for converted Responses providers")
 	}
-	for i, tool := range req.Tools {
-		if isOpenAIHostedResponsesTool(tool) {
-			toolType, _ := tool["type"].(string)
-			return fmt.Errorf("responses hosted tool %q at index %d is not supported for converted providers", toolType, i)
-		}
-	}
 	return nil
-}
-
-func isOpenAIHostedResponsesTool(tool map[string]interface{}) bool {
-	toolType, _ := tool["type"].(string)
-	switch toolType {
-	case "function", "custom", "namespace":
-		return false
-	default:
-		return strings.TrimSpace(toolType) != ""
-	}
 }
 
 func ensureResponsesAnthropicMaxTokens(typed TypedRequest, model string) TypedRequest {
@@ -392,44 +376,46 @@ func responsesInstructionText(ctx context.Context, value interface{}) string {
 	}
 }
 
-func responsesToolsToCore(ctx context.Context, tools []map[string]interface{}) ([]core.ToolDefinition, error) {
+func responsesToolsToCore(ctx context.Context, tools []map[string]interface{}) ([]core.ToolDefinition, bool, error) {
 	if len(tools) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	result := make([]core.ToolDefinition, 0, len(tools))
 	usedNames := make(map[string]struct{})
+	droppedUnsupported := false
 	for i, tool := range tools {
 		toolType, _ := tool["type"].(string)
 		switch toolType {
 		case "function":
 			def, err := responsesFunctionToolToCore(tool, i)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			result, err = appendResponsesToolDefinition(result, usedNames, def)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		case "custom":
 			def, err := responsesCustomToolToCore(tool, i)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			result, err = appendResponsesToolDefinition(result, usedNames, def)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		case "namespace":
 			namespaceTools, err := responsesNamespaceToolsToCore(tool, i, usedNames)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			result = append(result, namespaceTools...)
 		default:
+			droppedUnsupported = true
 			warnDroppedResponsesTool(ctx, i, toolType)
 		}
 	}
-	return result, nil
+	return result, droppedUnsupported, nil
 }
 
 func appendResponsesToolDefinition(result []core.ToolDefinition, usedNames map[string]struct{}, def core.ToolDefinition) ([]core.ToolDefinition, error) {
@@ -514,12 +500,19 @@ func responsesNamespaceToolsToCore(namespaceTool map[string]interface{}, index i
 	return result, nil
 }
 
-func responsesToolChoiceToCore(ctx context.Context, toolChoice interface{}) *core.ToolChoice {
+func responsesToolChoiceToCore(ctx context.Context, toolChoice interface{}, droppedUnsupportedTools bool) *core.ToolChoice {
 	switch value := toolChoice.(type) {
 	case nil:
 		return nil
 	case string:
-		if value == "auto" || value == "none" || value == "required" {
+		if value == "auto" || value == "none" {
+			return &core.ToolChoice{Type: value}
+		}
+		if value == "required" {
+			if droppedUnsupportedTools {
+				warnDroppedResponsesToolChoice(ctx, value)
+				return nil
+			}
 			return &core.ToolChoice{Type: value}
 		}
 		warnDroppedResponsesToolChoice(ctx, value)
