@@ -72,6 +72,37 @@ func TestWarnOpenAIResponsesRequestDropsForTarget(t *testing.T) {
 	}
 }
 
+func TestWarnOpenAIResponsesRequestDropsForTargetWarnsDroppedResponsesOnlyFields(t *testing.T) {
+	parallelToolCalls := true
+	req := &OpenAIResponsesRequest{
+		Include:           []string{"reasoning.encrypted_content", "file_search_call.results", " "},
+		Reasoning:         &OpenAIResponsesReasoning{Effort: "xhigh", Summary: "detailed"},
+		PromptCacheKey:    "cache-key",
+		ParallelToolCalls: &parallelToolCalls,
+		Truncation:        "auto",
+	}
+
+	logs := captureWarnLogs(t, func() {
+		warnOpenAIResponsesRequestDropsForTarget(context.Background(), req, constants.ProviderArgo, "gpt-5", false)
+	})
+
+	for _, want := range []string{
+		`Dropping OpenAI Responses field "include.reasoning.encrypted_content" while converting to Argo OpenAI`,
+		`Dropping OpenAI Responses field "include.file_search_call.results" while converting to Argo OpenAI`,
+		`Dropping OpenAI Responses field "reasoning.summary" while converting to Argo OpenAI`,
+		`Dropping OpenAI Responses field "prompt_cache_key" while converting to Argo OpenAI`,
+		`Dropping OpenAI Responses field "parallel_tool_calls" while converting to Argo OpenAI`,
+		`Dropping OpenAI Responses field "truncation" while converting to Argo OpenAI`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("warning %q not found in logs:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "reasoning.effort") {
+		t.Fatalf("unexpected reasoning.effort warning:\n%s", logs)
+	}
+}
+
 func TestConversionWarningsForDroppedFields(t *testing.T) {
 	logs := captureWarnLogs(t, func() {
 		topK := 10

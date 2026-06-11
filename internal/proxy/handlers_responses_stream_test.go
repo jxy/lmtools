@@ -112,17 +112,27 @@ func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 	releaseFinalChunk := make(chan struct{})
 	var sawStream bool
 	var sawPath string
+	var capturedReq OpenAIRequest
+	var capturedRaw []byte
+	var capturedMap map[string]interface{}
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawPath = r.URL.Path
 		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		var req OpenAIRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read backend request: %v", err)
+		}
+		capturedRaw = body
+		if err := json.Unmarshal(body, &capturedMap); err != nil {
+			t.Fatalf("unmarshal backend request map: %v", err)
+		}
+		if err := json.Unmarshal(body, &capturedReq); err != nil {
 			t.Fatalf("decode backend request: %v", err)
 		}
-		sawStream = req.Stream
+		sawStream = capturedReq.Stream
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n"))
@@ -145,7 +155,21 @@ func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
-	reqBody := []byte(`{"model":"gpt-5","stream":true,"input":"say hi","max_output_tokens":16}`)
+	reqBody := []byte(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":"say hi",
+		"max_output_tokens":16,
+		"include":["reasoning.encrypted_content"],
+		"reasoning":{"effort":"xhigh","summary":"detailed"},
+		"store":false,
+		"service_tier":"priority",
+		"prompt_cache_key":"cache-key",
+		"text":{"verbosity":"low"},
+		"parallel_tool_calls":true,
+		"metadata":{"client":"test"},
+		"client_metadata":{"trace_id":"abc"}
+	}`)
 	resp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		t.Fatalf("POST /v1/responses: %v", err)
@@ -159,6 +183,20 @@ func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 
 	if !sawStream {
 		t.Fatal("backend request did not set stream=true")
+	}
+	if capturedReq.ReasoningEffort != "xhigh" {
+		t.Fatalf("backend reasoning_effort = %q, want xhigh", capturedReq.ReasoningEffort)
+	}
+	if capturedReq.Verbosity != "low" {
+		t.Fatalf("backend verbosity = %q, want low", capturedReq.Verbosity)
+	}
+	if capturedReq.ServiceTier != "priority" {
+		t.Fatalf("backend service_tier = %q, want priority", capturedReq.ServiceTier)
+	}
+	for _, field := range []string{"include", "reasoning", "prompt_cache_key", "parallel_tool_calls", "client_metadata"} {
+		if _, ok := capturedMap[field]; ok {
+			t.Fatalf("backend request unexpectedly included %q: %s", field, string(capturedRaw))
+		}
 	}
 	if !strings.HasSuffix(sawPath, "/v1/chat/completions") {
 		t.Fatalf("backend path=%s", sawPath)

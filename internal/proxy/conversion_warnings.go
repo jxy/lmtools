@@ -36,20 +36,50 @@ func warnDroppedResponsesToolChoice(ctx context.Context, choiceType string) {
 }
 
 func warnOpenAIResponsesRequestDropsForTarget(ctx context.Context, req *OpenAIResponsesRequest, provider, model string, useLegacyArgo bool) {
-	if req == nil || req.Text == nil || strings.TrimSpace(req.Text.Verbosity) == "" {
+	if req == nil {
 		return
 	}
 	normalizedProvider := constants.NormalizeProvider(provider)
 	switch normalizedProvider {
-	case constants.ProviderAnthropic, constants.ProviderGoogle:
-	case constants.ProviderArgo:
-		if !useLegacyArgo && isArgoOpenAIChatRoute(provider, model) {
-			return
-		}
+	case constants.ProviderAnthropic, constants.ProviderGoogle, constants.ProviderArgo:
 	default:
 		return
 	}
-	warnDroppedField(ctx, "OpenAI Responses", providers.DisplayName(normalizedProvider), "text.verbosity", "")
+	nativeArgoOpenAI := useNativeArgoOpenAIChatRoute(provider, model, useLegacyArgo)
+	target := providers.DisplayName(normalizedProvider)
+	if nativeArgoOpenAI {
+		target = "Argo OpenAI"
+	}
+	if req.Text != nil && strings.TrimSpace(req.Text.Verbosity) != "" && !nativeArgoOpenAI {
+		warnDroppedField(ctx, "OpenAI Responses", target, "text.verbosity", "")
+	}
+	warnDroppedOpenAIResponsesIncludes(ctx, req.Include, target)
+	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Summary) != "" {
+		warnDroppedField(ctx, "OpenAI Responses", target, "reasoning.summary", "Responses reasoning summaries are not supported by compatibility provider paths")
+	}
+	if strings.TrimSpace(req.PromptCacheKey) != "" {
+		warnDroppedField(ctx, "OpenAI Responses", target, "prompt_cache_key", "OpenAI Responses prompt cache keys have no equivalent in this compatibility path")
+	}
+	if req.ParallelToolCalls != nil {
+		warnDroppedField(ctx, "OpenAI Responses", target, "parallel_tool_calls", "parallel tool-call policy is not represented in this compatibility path")
+	}
+	if strings.TrimSpace(req.Truncation) != "" {
+		warnDroppedField(ctx, "OpenAI Responses", target, "truncation", "OpenAI Responses truncation policy is not represented in this compatibility path")
+	}
+}
+
+func warnDroppedOpenAIResponsesIncludes(ctx context.Context, includes []string, target string) {
+	for _, include := range includes {
+		include = strings.TrimSpace(include)
+		if include == "" {
+			continue
+		}
+		reason := "Responses include enrichments are not supported by compatibility provider paths"
+		if include == "reasoning.encrypted_content" {
+			reason = "encrypted reasoning content is only available from direct OpenAI Responses passthrough"
+		}
+		warnDroppedField(ctx, "OpenAI Responses", target, "include."+include, reason)
+	}
 }
 
 func warnOpenAIRequestDropsForAnthropic(ctx context.Context, req *OpenAIRequest) {

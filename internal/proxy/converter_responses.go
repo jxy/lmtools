@@ -89,11 +89,6 @@ func validateConvertedResponsesUnsupportedFields(req *OpenAIResponsesRequest) er
 	if req.TopLogprobs != nil {
 		return fmt.Errorf("top_logprobs is not supported for converted Responses providers")
 	}
-	for _, include := range req.Include {
-		if strings.TrimSpace(include) != "" {
-			return fmt.Errorf("include is not supported for converted Responses providers")
-		}
-	}
 	for i, tool := range req.Tools {
 		if isOpenAIHostedResponsesTool(tool) {
 			toolType, _ := tool["type"].(string)

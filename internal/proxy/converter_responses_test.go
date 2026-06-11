@@ -66,6 +66,47 @@ func TestOpenAIResponsesRequestToTyped(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesRequestToTypedAllowsIncludeForConvertedProviders(t *testing.T) {
+	store := false
+	parallelToolCalls := true
+	req := &OpenAIResponsesRequest{
+		Model:             "gpt-5.4-nano",
+		Input:             "hi",
+		Include:           []string{"reasoning.encrypted_content"},
+		Reasoning:         &OpenAIResponsesReasoning{Effort: "xhigh", Summary: "detailed"},
+		Text:              &OpenAIResponsesText{Verbosity: "low"},
+		Stream:            true,
+		Store:             &store,
+		ServiceTier:       "priority",
+		PromptCacheKey:    "cache-key",
+		ParallelToolCalls: &parallelToolCalls,
+		Metadata:          map[string]interface{}{"client": "test"},
+	}
+
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if typed.ReasoningEffort != "xhigh" {
+		t.Fatalf("reasoning effort = %q, want xhigh", typed.ReasoningEffort)
+	}
+	if typed.Verbosity != "low" {
+		t.Fatalf("verbosity = %q, want low", typed.Verbosity)
+	}
+	if !typed.Stream {
+		t.Fatal("stream = false, want true")
+	}
+	if typed.ServiceTier != "priority" {
+		t.Fatalf("service tier = %q, want priority", typed.ServiceTier)
+	}
+	if got := typed.Metadata["client"]; got != "test" {
+		t.Fatalf("metadata client = %#v, want test", got)
+	}
+	if len(typed.Messages) != 1 || typed.Messages[0].Role != string(core.RoleUser) {
+		t.Fatalf("messages = %+v, want one user message", typed.Messages)
+	}
+}
+
 func TestOpenAIResponsesRequestToTypedWarnsAndDropsUnsupportedInputItem(t *testing.T) {
 	req := &OpenAIResponsesRequest{
 		Model: "gpt-5.4-nano",
@@ -867,11 +908,6 @@ func TestOpenAIResponsesConvertedProviderRejectsUnsupportedFields(t *testing.T) 
 		req  OpenAIResponsesRequest
 		want string
 	}{
-		{
-			name: "include",
-			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", Include: []string{"file_search_call.results"}},
-			want: "include is not supported for converted Responses providers",
-		},
 		{
 			name: "max_tool_calls",
 			req:  OpenAIResponsesRequest{Model: "gpt-5.4-nano", Input: "hi", MaxToolCalls: intPtr(1)},

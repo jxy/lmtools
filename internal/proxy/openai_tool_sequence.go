@@ -263,7 +263,11 @@ func (s *Server) validateConvertedOpenAIChatToolSequence(typed TypedRequest, pro
 }
 
 func (s *Server) useNativeArgoOpenAIChatRoute(provider, model string) bool {
-	return !s.useLegacyArgo() && isArgoOpenAIChatRoute(provider, model)
+	return useNativeArgoOpenAIChatRoute(provider, model, s.useLegacyArgo())
+}
+
+func useNativeArgoOpenAIChatRoute(provider, model string, useLegacyArgo bool) bool {
+	return !useLegacyArgo && isArgoOpenAIChatRoute(provider, model)
 }
 
 func isArgoOpenAIChatRoute(provider, model string) bool {
