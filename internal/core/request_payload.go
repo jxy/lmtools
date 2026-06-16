@@ -16,6 +16,7 @@ type PreparedRequestPayload struct {
 	ToolChoice interface{}
 	Stream     bool
 	Effort     string
+	MaxTokens  int
 	JSONMode   bool
 	JSONSchema json.RawMessage
 }

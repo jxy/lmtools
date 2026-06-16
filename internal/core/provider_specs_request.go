@@ -1,6 +1,7 @@
 package core
 
 import (
+	"lmtools/internal/providers"
 	"strings"
 )
 
@@ -24,9 +25,22 @@ func anthropicRequestMap(payload PreparedRequestPayload) map[string]interface{} 
 	if payload.System != "" {
 		reqMap["system"] = payload.System
 	}
+	// The Anthropic Messages wire format (used by the direct anthropic provider
+	// and the modern Argo claude* route) requires a positive max_tokens.
+	reqMap["max_tokens"] = effectiveAnthropicMaxTokens(payload)
 	addToolFields(reqMap, payload)
 	addAnthropicOutputFields(reqMap, payload)
 	return reqMap
+}
+
+// effectiveAnthropicMaxTokens resolves the max_tokens to send on an Anthropic-wire
+// request: the explicit caller value when positive, otherwise the Claude
+// compatibility default for the model.
+func effectiveAnthropicMaxTokens(payload PreparedRequestPayload) int {
+	if payload.MaxTokens > 0 {
+		return payload.MaxTokens
+	}
+	return providers.DefaultClaudeMaxTokens(payload.Model)
 }
 
 func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
@@ -46,6 +60,7 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 
 func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg RequestOptions) {
 	payload.Effort = strings.ToLower(strings.TrimSpace(cfg.Effort))
+	payload.MaxTokens = cfg.MaxTokens
 	payload.JSONMode = cfg.JSONMode
 	if schema := cfg.GetJSONSchema(); len(schema) > 0 {
 		payload.JSONSchema = append(payload.JSONSchema[:0], schema...)
@@ -53,6 +68,9 @@ func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg RequestOp
 }
 
 func addOpenAIOutputFields(reqMap map[string]interface{}, payload PreparedRequestPayload) {
+	if payload.MaxTokens > 0 {
+		reqMap["max_completion_tokens"] = payload.MaxTokens
+	}
 	if effort := openAIReasoningEffort(payload.Effort); effort != "" {
 		reqMap["reasoning_effort"] = effort
 	}
@@ -80,6 +98,9 @@ func addGoogleOutputFields(reqMap map[string]interface{}, payload PreparedReques
 		generationConfig = existing
 	}
 
+	if payload.MaxTokens > 0 {
+		generationConfig["maxOutputTokens"] = payload.MaxTokens
+	}
 	if payload.JSONMode || len(payload.JSONSchema) > 0 {
 		generationConfig["responseMimeType"] = "application/json"
 	}

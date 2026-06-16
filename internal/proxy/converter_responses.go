@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	defaultClaudeOpusMaxTokens    = 128000
-	defaultClaudeDefaultMaxTokens = 64000
+	defaultClaudeOpusMaxTokens    = providers.DefaultClaudeOpusMaxTokens
+	defaultClaudeDefaultMaxTokens = providers.DefaultClaudeDefaultMaxTokens
 )
 
 func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
@@ -127,10 +127,7 @@ func providerRequiresClaudeMaxTokens(provider, model string) bool {
 }
 
 func defaultClaudeMaxTokens(model string) int {
-	if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "opus") {
-		return defaultClaudeOpusMaxTokens
-	}
-	return defaultClaudeDefaultMaxTokens
+	return providers.DefaultClaudeMaxTokens(model)
 }
 
 func responsesInputToTypedMessages(ctx context.Context, input interface{}) ([]core.TypedMessage, error) {

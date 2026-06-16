@@ -80,6 +80,23 @@ func isArgoLegacyMode(cfg RequestOptions) bool {
 	return cfg.ArgoLegacy
 }
 
+// argoLegacyAnthropicMaxTokensDropThreshold mirrors the apiproxy legacy Argo
+// behavior: non-streaming Claude routes (including streaming-with-tools, which
+// fall back to the non-streaming endpoint) reject large max_tokens values.
+const argoLegacyAnthropicMaxTokensDropThreshold = 21000
+
+// setLegacyArgoAnthropicMaxTokens sets max_tokens for legacy Argo Claude requests,
+// dropping the field when the non-streaming endpoint would reject it. The stream
+// argument is the effective stream flag (false when tools are present, since those
+// requests use the non-streaming endpoint).
+func setLegacyArgoAnthropicMaxTokens(bodyMap map[string]interface{}, payload PreparedRequestPayload, stream bool) {
+	maxTokens := effectiveAnthropicMaxTokens(payload)
+	if !stream && maxTokens >= argoLegacyAnthropicMaxTokensDropThreshold {
+		return
+	}
+	bodyMap["max_tokens"] = maxTokens
+}
+
 func buildLegacyArgoChatRequest(cfg RequestOptions, model string, messages []TypedMessage, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	actualStream := stream && len(toolDefs) == 0
 	endpoint, err := providers.ResolveChatURLWithArgoOptions(constants.ProviderArgo, cfg.ProviderURL, cfg.Env, model, actualStream, true)
@@ -112,6 +129,7 @@ func buildLegacyArgoChatRequest(cfg RequestOptions, model string, messages []Typ
 	applyOutputOptionsFromConfig(&payload, cfg)
 	if providers.DetermineArgoModelProvider(model) == constants.ProviderAnthropic {
 		addAnthropicOutputFields(bodyMap, payload)
+		setLegacyArgoAnthropicMaxTokens(bodyMap, payload, actualStream)
 	} else {
 		addOpenAIOutputFields(bodyMap, payload)
 	}

@@ -134,6 +134,7 @@ Chat output:
   With `-resume -tool`, pending tool calls are represented by placeholder results.
 - `-s string`: System prompt.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+- `-max-tokens int`: Maximum output tokens. `0` (the default) uses the provider default; Anthropic-wire requests (the `anthropic` provider and Argo `claude*` models) default to `128000` for Opus models and `64000` for other Claude models.
 - `-json`: Request JSON object output.
 - `-json-schema path`: Request schema-constrained JSON output.
 

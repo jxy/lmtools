@@ -36,6 +36,7 @@ type RequestOptions struct {
 	ProviderURL         string
 	APIKeyFile          string
 	Effort              string
+	MaxTokens           int
 	JSONMode            bool
 	JSONSchema          json.RawMessage
 	OpenAIResponses     bool

@@ -22,6 +22,7 @@ type Config struct {
 	OpenAIResponses bool   // whether OpenAI chat mode should use /v1/responses
 	PrintCurl       bool   // print the equivalent curl command instead of sending the request
 	Effort          string // reasoning effort hint
+	MaxTokens       int    // maximum output tokens (0 = provider default)
 	JSONMode        bool   // request JSON object output
 	JSONSchemaPath  string // path to JSON schema for structured output
 	JSONSchema      json.RawMessage
@@ -112,6 +113,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
+	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "maximum output tokens (0 uses provider default; Claude defaults to 128000 for Opus, 64000 otherwise)")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
 	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")
 
@@ -221,6 +223,7 @@ func (c Config) RequestOptions() core.RequestOptions {
 		ProviderURL:         c.ProviderURL,
 		APIKeyFile:          c.APIKeyFile,
 		Effort:              c.Effort,
+		MaxTokens:           c.MaxTokens,
 		JSONMode:            c.JSONMode,
 		JSONSchema:          append(json.RawMessage(nil), c.JSONSchema...),
 		OpenAIResponses:     c.OpenAIResponses,
