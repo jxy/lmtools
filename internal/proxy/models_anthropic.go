@@ -242,14 +242,21 @@ type AnthropicResponse struct {
 
 // AnthropicUsage represents token usage information.
 type AnthropicUsage struct {
-	InputTokens              int         `json:"input_tokens"`
-	OutputTokens             int         `json:"output_tokens"`
-	CacheCreationInputTokens int         `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int         `json:"cache_read_input_tokens,omitempty"`
-	CacheCreation            interface{} `json:"cache_creation,omitempty"`
-	ServerToolUse            interface{} `json:"server_tool_use,omitempty"`
-	ServiceTier              string      `json:"service_tier,omitempty"`
-	InferenceGeo             string      `json:"inference_geo,omitempty"`
+	InputTokens              int                           `json:"input_tokens"`
+	OutputTokens             int                           `json:"output_tokens"`
+	CacheCreationInputTokens int                           `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int                           `json:"cache_read_input_tokens,omitempty"`
+	CacheCreation            interface{}                   `json:"cache_creation,omitempty"`
+	OutputTokensDetails      *AnthropicOutputTokensDetails `json:"output_tokens_details,omitempty"`
+	ServerToolUse            interface{}                   `json:"server_tool_use,omitempty"`
+	ServiceTier              string                        `json:"service_tier,omitempty"`
+	InferenceGeo             string                        `json:"inference_geo,omitempty"`
+}
+
+// AnthropicOutputTokensDetails breaks down output token usage. Anthropic reports
+// thinking_tokens, the number of output tokens generated as internal reasoning.
+type AnthropicOutputTokensDetails struct {
+	ThinkingTokens int `json:"thinking_tokens,omitempty"`
 }
 
 // AnthropicStreamEvent represents a server-sent event from the streaming API.

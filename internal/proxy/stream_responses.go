@@ -62,8 +62,13 @@ type anthropicStreamMessageDeltaEvent struct {
 }
 
 type anthropicStreamUsageDelta struct {
-	InputTokens  *int `json:"input_tokens,omitempty"`
-	OutputTokens *int `json:"output_tokens,omitempty"`
+	InputTokens         *int                                `json:"input_tokens,omitempty"`
+	OutputTokens        *int                                `json:"output_tokens,omitempty"`
+	OutputTokensDetails *anthropicStreamOutputTokensDetails `json:"output_tokens_details,omitempty"`
+}
+
+type anthropicStreamOutputTokensDetails struct {
+	ThinkingTokens *int `json:"thinking_tokens,omitempty"`
 }
 
 // newResponsesStreamWriter emits OpenAI Responses-compatible SSE for converted
@@ -488,6 +493,18 @@ func (w *responsesStreamWriter) SetUsageCounts(inputTokens, outputTokens *int) {
 	w.usage.TotalTokens = w.usage.InputTokens + w.usage.OutputTokens
 }
 
+// SetReasoningTokens records the reasoning (thinking) token count in the output
+// token details, allocating the usage structures as needed.
+func (w *responsesStreamWriter) SetReasoningTokens(reasoningTokens int) {
+	if w.usage == nil {
+		w.usage = &OpenAIResponsesUsage{}
+	}
+	if w.usage.OutputTokensDetails == nil {
+		w.usage.OutputTokensDetails = &OpenAIResponsesOutputDetails{}
+	}
+	w.usage.OutputTokensDetails.ReasoningTokens = reasoningTokens
+}
+
 func (w *responsesStreamWriter) Finish(finishReason string) (*OpenAIResponsesResponse, error) {
 	status := "completed"
 	itemStatus := "completed"
@@ -862,6 +879,9 @@ func (s *Server) convertAnthropicStreamToResponses(ctx context.Context, body io.
 			}
 			if evt.Usage != nil {
 				writer.SetUsageCounts(evt.Usage.InputTokens, evt.Usage.OutputTokens)
+				if evt.Usage.OutputTokensDetails != nil && evt.Usage.OutputTokensDetails.ThinkingTokens != nil {
+					writer.SetReasoningTokens(*evt.Usage.OutputTokensDetails.ThinkingTokens)
+				}
 			}
 		case EventError:
 			var evt ErrorEvent

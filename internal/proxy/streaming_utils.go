@@ -95,6 +95,11 @@ func AnthropicUsageToOpenAI(usage *AnthropicUsage) *OpenAIUsage {
 			CachedTokens: usage.CacheReadInputTokens,
 		}
 	}
+	if usage.OutputTokensDetails != nil {
+		openAIUsage.CompletionTokensDetails = &OpenAICompletionTokenDetails{
+			ReasoningTokens: usage.OutputTokensDetails.ThinkingTokens,
+		}
+	}
 	return openAIUsage
 }
 
@@ -109,6 +114,11 @@ func OpenAIUsageToAnthropic(usage *OpenAIUsage) *AnthropicUsage {
 	}
 	if usage.PromptTokensDetails != nil {
 		anthropicUsage.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
+	}
+	if usage.CompletionTokensDetails != nil {
+		anthropicUsage.OutputTokensDetails = &AnthropicOutputTokensDetails{
+			ThinkingTokens: usage.CompletionTokensDetails.ReasoningTokens,
+		}
 	}
 	return anthropicUsage
 }
