@@ -294,6 +294,7 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 // parseAnthropicStream parses Anthropic's SSE format
 func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHandler) error {
 	log := logger.From(handler.ctx)
+	auditor := newThinkingStreamAuditor()
 	if err := consumeSSEStream(body, func(currentEvent string, data json.RawMessage) error {
 		recognized := warnAnthropicStreamEventFields(handler.ctx, currentEvent, data)
 		switch currentEvent {
@@ -317,6 +318,7 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 				return nil
 			}
 			log.Debugf("Content block start: type=%s", evt.ContentBlock.Type)
+			auditor.observeBlockStart(evt.Index, evt.ContentBlock)
 			return handler.SendEvent(EventContentBlockStart, evt)
 
 		case EventContentBlockDelta:
@@ -330,6 +332,7 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			if evt.Delta.Type == "text_delta" {
 				handler.state.AccumulatedText += evt.Delta.Text
 			}
+			auditor.observeDelta(evt.Index, evt.Delta)
 			return handler.SendEvent(EventContentBlockDelta, evt)
 
 		case EventContentBlockStop:
@@ -340,6 +343,7 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 				}
 				return nil
 			}
+			auditor.observeBlockStop(handler.ctx, evt.Index, "Anthropic stream")
 			return handler.SendEvent(EventContentBlockStop, evt)
 
 		case EventMessageDelta:

@@ -555,11 +555,14 @@ func TestArgoStreamingContextCancellation(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 
-	// Parser should complete quickly after cancellation
+	// Parser should complete quickly after cancellation. A client disconnect /
+	// context cancellation is a non-fatal, expected end of stream, so the parser
+	// returns nil (see handleStreamError: it is logged at WARN, not treated as a
+	// fatal parse error, and the client is not notified).
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "context canceled") {
-			t.Errorf("Expected context canceled error, got: %v", err)
+		if err != nil {
+			t.Errorf("Expected nil (non-fatal) after context cancellation, got: %v", err)
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Parser did not respond to context cancellation")

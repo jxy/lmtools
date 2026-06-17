@@ -37,7 +37,8 @@ type StreamErrorEmitter interface {
 //
 // Error classification:
 //   - Recoverable (returns nil): io.EOF (normal termination),
-//     io.ErrUnexpectedEOF (connection issues), JSON syntax/type errors
+//     io.ErrUnexpectedEOF (connection issues), JSON syntax/type errors,
+//     context cancellation / client disconnect (logged at WARN, client not notified)
 //   - Fatal (returns error): All other errors
 //
 // For recoverable errors, the function logs at appropriate severity and
@@ -62,11 +63,24 @@ func handleStreamError(ctx context.Context, emitter StreamErrorEmitter, parser s
 		log.Warnf("%s: malformed JSON chunk (skipping): %v", parser, err)
 		return nil // Skip bad chunk, continue
 
+	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+		// The client disconnected (or the request context was cancelled) before
+		// the stream finished. This is not a parse failure, and there is no one
+		// left to notify, so skip the emitter and treat it as a non-fatal,
+		// expected end of stream. (context.DeadlineExceeded stays fatal below.)
+		log.Warnf("%s: client disconnected (%v)", parser, err)
+		return nil
+
 	default:
 		log.Errorf("%s parse error (fatal): %v", parser, err)
 		if emitter != nil {
 			if sendErr := emitter.SendStreamError(fmt.Sprintf("Stream processing error: %v", err)); sendErr != nil {
-				log.Errorf("%s: failed to send error event: %v", parser, sendErr)
+				if errors.Is(sendErr, context.Canceled) {
+					// Client already gone; the fatal error has nowhere to go.
+					log.Warnf("%s: client disconnected before error event could be sent", parser)
+				} else {
+					log.Errorf("%s: failed to send error event: %v", parser, sendErr)
+				}
 			}
 		}
 		return err // Fatal error

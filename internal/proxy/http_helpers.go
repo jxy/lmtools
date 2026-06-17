@@ -108,6 +108,10 @@ func (s *Server) doJSON(
 		return nil
 	}
 
+	if _, ok := respBody.(*AnthropicResponse); ok {
+		warnMalformedAnthropicThinkingBlocks(ctx, body, name)
+	}
+
 	// Parse response
 	warnUnknownFields(ctx, body, respBody, name+" response")
 	if err := json.Unmarshal(body, respBody); err != nil {

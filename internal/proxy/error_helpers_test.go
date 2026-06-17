@@ -365,6 +365,16 @@ func TestHandleStreamError(t *testing.T) {
 			err:         errors.New("network error"),
 			expectFatal: true,
 		},
+		{
+			name:        "context_canceled_is_recoverable",
+			err:         context.Canceled,
+			expectFatal: false,
+		},
+		{
+			name:        "wrapped_context_canceled_is_recoverable",
+			err:         fmt.Errorf("read body: %w", context.Canceled),
+			expectFatal: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -380,6 +390,65 @@ func TestHandleStreamError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordingStreamErrorEmitter records SendStreamError calls for assertions.
+type recordingStreamErrorEmitter struct {
+	calls int
+	ret   error
+}
+
+func (r *recordingStreamErrorEmitter) SendStreamError(string) error {
+	r.calls++
+	return r.ret
+}
+
+// TestHandleStreamErrorClientDisconnect verifies that a client disconnect /
+// context cancellation is treated as non-fatal and never notifies the client.
+func TestHandleStreamErrorClientDisconnect(t *testing.T) {
+	t.Run("canceled_ctx_with_generic_error_is_recoverable", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		emitter := &recordingStreamErrorEmitter{}
+
+		// A generic read error surfaced, but the cancelled context is the cause.
+		result := handleStreamError(ctx, emitter, "test-parser", errors.New("connection reset by peer"))
+
+		if result != nil {
+			t.Errorf("expected nil (recoverable) for cancelled context, got %v", result)
+		}
+		if emitter.calls != 0 {
+			t.Errorf("expected emitter not to be called on client disconnect, got %d calls", emitter.calls)
+		}
+	})
+
+	t.Run("context_canceled_error_skips_emitter", func(t *testing.T) {
+		emitter := &recordingStreamErrorEmitter{}
+
+		result := handleStreamError(context.Background(), emitter, "test-parser", context.Canceled)
+
+		if result != nil {
+			t.Errorf("expected nil (recoverable) for context.Canceled, got %v", result)
+		}
+		if emitter.calls != 0 {
+			t.Errorf("expected emitter not to be called for context.Canceled, got %d calls", emitter.calls)
+		}
+	})
+
+	t.Run("fatal_error_with_disconnected_client_stays_fatal", func(t *testing.T) {
+		fatal := errors.New("boom")
+		// The client is already gone, so SendStreamError reports cancellation.
+		emitter := &recordingStreamErrorEmitter{ret: context.Canceled}
+
+		result := handleStreamError(context.Background(), emitter, "test-parser", fatal)
+
+		if !errors.Is(result, fatal) {
+			t.Errorf("expected the fatal error to be returned, got %v", result)
+		}
+		if emitter.calls != 1 {
+			t.Errorf("expected emitter to be called once for a genuine fatal error, got %d calls", emitter.calls)
+		}
+	})
 }
 
 // TestIsJSONSyntaxError tests the isJSONSyntaxError function

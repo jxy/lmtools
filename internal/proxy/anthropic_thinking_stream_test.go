@@ -52,3 +52,96 @@ func TestParseAnthropicStreamPreservesThinkingDeltas(t *testing.T) {
 		}
 	}
 }
+
+// TestParseAnthropicStreamWarnsOnMissingSignature drives a thinking block that
+// streams thinking content but never a signature_delta (e.g. a provider that
+// drops it). The auditor should warn once at content_block_stop while the stream
+// is still forwarded to the client unchanged.
+func TestParseAnthropicStreamWarnsOnMissingSignature(t *testing.T) {
+	raw := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-7","usage":{"input_tokens":10,"output_tokens":0}}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"I should compute this carefully."}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+
+	recorder := newFlushableRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "claude-opus-4-7", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	server := &Server{}
+
+	var parseErr error
+	logs := captureStderrWithLevel(t, "warn", func() {
+		parseErr = server.parseAnthropicStream(strings.NewReader(raw), handler)
+	})
+	if parseErr != nil {
+		t.Fatalf("parseAnthropicStream() error = %v", parseErr)
+	}
+
+	const want = "Anthropic stream response contains type=thinking block missing thinking or signature at index 0"
+	if !strings.Contains(logs, want) {
+		t.Fatalf("expected malformed-thinking warning %q\nlogs:\n%s", want, logs)
+	}
+	// The stream itself must still be forwarded to the client.
+	if out := recorder.Body.String(); !strings.Contains(out, `"type":"thinking_delta"`) {
+		t.Fatalf("stream output missing thinking delta:\n%s", out)
+	}
+}
+
+// TestParseAnthropicStreamCompleteThinkingNoWarning is the regression guard for
+// the original false positive: a complete thinking block (thinking_delta +
+// signature_delta) must NOT produce a malformed-thinking warning.
+func TestParseAnthropicStreamCompleteThinkingNoWarning(t *testing.T) {
+	raw := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-7","usage":{"input_tokens":10,"output_tokens":0}}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"I should compute this carefully."}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_fixture"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+
+	recorder := newFlushableRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "claude-opus-4-7", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	server := &Server{}
+
+	var parseErr error
+	logs := captureStderrWithLevel(t, "warn", func() {
+		parseErr = server.parseAnthropicStream(strings.NewReader(raw), handler)
+	})
+	if parseErr != nil {
+		t.Fatalf("parseAnthropicStream() error = %v", parseErr)
+	}
+
+	if strings.Contains(logs, "missing thinking or signature") {
+		t.Fatalf("unexpected malformed-thinking warning for a complete block:\n%s", logs)
+	}
+}
