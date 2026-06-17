@@ -195,7 +195,6 @@ func (s *Server) argoOpenAIStreamingRequest(ctx context.Context, openAIReq *Open
 	warnOpenAICompatibleStopSpecialProcessing(ctx, "Argo OpenAI", strippedStops)
 	normalizeArgoOpenAIChatRequest(openAIReq)
 	openAIReq.Stream = true
-	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", openAIReq)
 	return s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
 		URL:          s.endpoints.ArgoOpenAI,
 		Provider:     constants.ProviderArgo,
@@ -215,7 +214,6 @@ func (s *Server) argoOpenAIStreamingRequestFromAnthropic(ctx context.Context, an
 }
 
 func (s *Server) argoAnthropicStreamingRequest(ctx context.Context, anthReq *AnthropicRequest) (*http.Response, error) {
-	logger.DebugJSON(logger.From(ctx), "Outgoing Argo Streaming Request", anthReq)
 	anthReq.Stream = true
 	extraHeaders := map[string]string{
 		"Accept": "text/event-stream",
@@ -318,16 +316,11 @@ func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicReque
 // forwardToArgoStream forwards a request to Argo's streaming endpoint
 // This should only be used when no tools are configured
 func (s *Server) forwardToArgoStream(ctx context.Context, anthReq *AnthropicRequest) (io.ReadCloser, error) {
-	log := logger.From(ctx)
-
 	// Convert to Argo format
 	argoReq, err := ConvertAnthropicToArgo(ctx, anthReq, s.config.ArgoUser)
 	if err != nil {
 		return nil, fmt.Errorf("convert to Argo format: %w", err)
 	}
-
-	// Log request if debug enabled
-	logger.DebugJSON(log, "Outgoing Argo Streaming Request", argoReq)
 
 	resp, err := s.sendProviderStreamingJSONRequest(ctx, providerJSONRequest{
 		URL:         s.endpoints.ArgoStreamChat,

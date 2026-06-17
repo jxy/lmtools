@@ -593,7 +593,11 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 	}
 }
 
-func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
+// TestJSONLog_ArgoStreamingRequestWireOnly verifies that an Argo Anthropic-wire
+// streaming request is logged exactly once at DEBUG, by the WIRE BACKEND REQUEST
+// entry that reflects the bytes actually sent. The earlier redundant pre-send
+// "Outgoing Argo Streaming Request" debug line must no longer appear.
+func TestJSONLog_ArgoStreamingRequestWireOnly(t *testing.T) {
 	logger.ResetForTesting()
 	_ = logger.InitializeWithOptions(
 		logger.WithLevel("debug"),
@@ -623,7 +627,7 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	lines := strings.Split(buf.String(), "\n")
-	found := false
+	foundWire := false
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -633,18 +637,18 @@ func TestJSONLog_OutgoingArgoStreamingRequest(t *testing.T) {
 			continue
 		}
 		msg, _ := m["message"].(string)
-		if strings.HasPrefix(msg, "Outgoing Argo Streaming Request: ") {
-			payload := strings.TrimPrefix(msg, "Outgoing Argo Streaming Request: ")
-			var pj map[string]interface{}
-			if json.Unmarshal([]byte(payload), &pj) == nil && pj["model"] != nil {
-				found = true
-				break
-			}
+		// The redundant pre-send debug line must be gone; the wire log of the
+		// bytes actually sent is the single source of truth.
+		if strings.Contains(msg, "Outgoing Argo Streaming Request") {
+			t.Errorf("unexpected redundant 'Outgoing Argo Streaming Request' log:\n%s", line)
+		}
+		if strings.HasPrefix(msg, "WIRE BACKEND REQUEST Argo Anthropic:") && strings.Contains(msg, "claude-3-haiku-20240307") {
+			foundWire = true
 		}
 	}
-	if !found {
+	if !foundWire {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON Outgoing Argo Streaming Request log")
+		t.Errorf("missing WIRE BACKEND REQUEST Argo Anthropic log carrying the request body")
 	}
 }
 
