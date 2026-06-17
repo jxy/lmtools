@@ -477,25 +477,18 @@ func openAIResponsesOutputToolCalls(output []OpenAIResponsesOutputItem) []core.T
 		if item.Type != "function_call" && item.Type != "custom_tool_call" {
 			continue
 		}
-		if item.Type == "custom_tool_call" {
-			calls = append(calls, core.ToolCall{
-				ID:           firstNonEmpty(item.CallID, item.ID),
-				Type:         "custom",
-				Namespace:    item.Namespace,
-				OriginalName: item.Name,
-				Name:         responseOutputToolName(item),
-				Args:         mustMarshalJSON(item.Input),
-				Input:        item.Input,
-			})
-			continue
-		}
+		// Reuse the shared tool-use block conversion so function/custom
+		// classification, name flattening, and argument normalization stay in
+		// one place. core.ToolCall.Args/Input mirror ToolUseBlock.Input/InputString.
+		block := openAIResponsesOutputToolUseBlock(item)
 		calls = append(calls, core.ToolCall{
-			ID:           firstNonEmpty(item.CallID, item.ID),
-			Type:         "function",
-			Namespace:    item.Namespace,
-			OriginalName: item.Name,
-			Name:         responseOutputToolName(item),
-			Args:         core.NormalizeOpenAIResponsesArguments(item.Arguments),
+			ID:           block.ID,
+			Type:         block.Type,
+			Namespace:    block.Namespace,
+			OriginalName: block.OriginalName,
+			Name:         block.Name,
+			Args:         block.Input,
+			Input:        block.InputString,
 		})
 	}
 	return calls

@@ -11,9 +11,8 @@ import (
 
 // TestConcurrentToolMessageWrites tests that concurrent writes with tool calls work correctly
 func TestConcurrentToolMessageWrites(t *testing.T) {
-	// Use a temporary directory for testing
-	tmpDir := t.TempDir()
-	SetSessionsDir(tmpDir)
+	// Use an isolated session directory with global-state cleanup
+	UseTestSessionDir(t)
 
 	// Create a session with a user message
 	sess, err := CreateSession("test user message", core.NewTestLogger(false))
@@ -101,9 +100,8 @@ func TestConcurrentToolMessageWrites(t *testing.T) {
 
 // TestConcurrentToolResults tests concurrent writes of tool results
 func TestConcurrentToolResults(t *testing.T) {
-	// Use a temporary directory for testing
-	tmpDir := t.TempDir()
-	SetSessionsDir(tmpDir)
+	// Use an isolated session directory with global-state cleanup
+	UseTestSessionDir(t)
 
 	// Create a session with a user message
 	sess, err := CreateSession("test user message", core.NewTestLogger(false))
@@ -190,9 +188,8 @@ func TestConcurrentToolResults(t *testing.T) {
 
 // TestMixedConcurrentToolOperations tests mixed concurrent operations with tool calls and results
 func TestMixedConcurrentToolOperations(t *testing.T) {
-	// Use a temporary directory for testing
-	tmpDir := t.TempDir()
-	SetSessionsDir(tmpDir)
+	// Use an isolated session directory with global-state cleanup
+	UseTestSessionDir(t)
 
 	// Create a session with a user message
 	sess, err := CreateSession("test user message", core.NewTestLogger(false))

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -73,10 +72,7 @@ func (m *MockLogger) Errorf(format string, args ...interface{}) {}
 
 // TestExecutePendingTools tests the pending tools execution functionality
 func TestExecutePendingTools(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir := t.TempDir()
-	sessionsDir := filepath.Join(tempDir, "sessions")
-	SetSessionsDir(sessionsDir)
+	UseTestSessionDir(t)
 
 	tests := []struct {
 		name             string
@@ -324,8 +320,7 @@ func TestExecutePendingTools(t *testing.T) {
 }
 
 func TestExecutePendingToolsRequiresToolFlag(t *testing.T) {
-	tempDir := t.TempDir()
-	SetSessionsDir(filepath.Join(tempDir, "sessions"))
+	UseTestSessionDir(t)
 
 	sess, err := CreateSession("", core.NewTestLogger(false))
 	if err != nil {
@@ -370,9 +365,7 @@ func TestExecutePendingToolsRequiresToolFlag(t *testing.T) {
 
 // TestCheckForPendingToolCalls tests the detection of pending tool calls
 func TestCheckForPendingToolCalls(t *testing.T) {
-	tempDir := t.TempDir()
-	sessionsDir := filepath.Join(tempDir, "sessions")
-	SetSessionsDir(sessionsDir)
+	UseTestSessionDir(t)
 
 	tests := []struct {
 		name         string
