@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"lmtools/internal/logger"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // StreamingState tracks the state of a streaming response.
@@ -36,6 +38,7 @@ type AnthropicStreamHandler struct {
 	state         *StreamingState
 	originalModel string
 	ctx           context.Context
+	lastEventAt   time.Time
 }
 
 // NewAnthropicStreamHandler creates a new Anthropic stream handler.
@@ -106,6 +109,73 @@ func (h *AnthropicStreamHandler) SendContentBlockStop(index int) error {
 // SendPing sends a ping event.
 func (h *AnthropicStreamHandler) SendPing() error {
 	return h.SendEvent(EventPing, NewPing())
+}
+
+// StartIdleHeartbeat sends Anthropic ping events after periods with no
+// downstream SSE writes. The returned function stops the heartbeat and waits
+// for its goroutine to exit.
+func (h *AnthropicStreamHandler) StartIdleHeartbeat(interval time.Duration) func() {
+	if interval <= 0 {
+		return func() {}
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var stopOnce sync.Once
+
+	h.mu.Lock()
+	h.lastEventAt = time.Now()
+	h.mu.Unlock()
+
+	go func() {
+		defer close(done)
+
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-stop:
+				return
+			case <-timer.C:
+				wait, err := h.sendIdlePingIfDue(interval)
+				if err != nil {
+					if handleErr := handleStreamError(h.ctx, nil, "AnthropicIdleHeartbeat",
+						fmt.Errorf("send ping: %w", err)); handleErr != nil {
+						return
+					}
+					return
+				}
+				if wait <= 0 {
+					wait = interval
+				}
+				timer.Reset(wait)
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(stop)
+			<-done
+		})
+	}
+}
+
+func (h *AnthropicStreamHandler) sendIdlePingIfDue(interval time.Duration) (time.Duration, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	wait := interval - time.Since(h.lastEventAt)
+	if wait <= 0 {
+		if err := h.sse.WriteJSON(EventPing, NewPing()); err != nil {
+			return 0, err
+		}
+		h.lastEventAt = time.Now()
+	}
+	return wait, nil
 }
 
 // SendMessageDelta sends a message_delta event.
@@ -285,5 +355,9 @@ func (h *AnthropicStreamHandler) beginParsedToolUseBlock(key *openAIStreamToolKe
 func (h *AnthropicStreamHandler) SendEvent(eventType string, data interface{}) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.sse.WriteJSON(eventType, data)
+	if err := h.sse.WriteJSON(eventType, data); err != nil {
+		return err
+	}
+	h.lastEventAt = time.Now()
+	return nil
 }

@@ -244,6 +244,11 @@ Anthropic-compatible:
 - `POST /v1/messages`
 - `POST /v1/messages/count_tokens`
 
+Streaming `/v1/messages` responses emit Anthropic-format SSE. After the
+upstream streaming request returns HTTP 200, `apiproxy` sends `event: ping`
+keepalives when no downstream SSE event has been written for the ping interval
+(15 seconds by default).
+
 OpenAI-compatible:
 
 - `POST /v1/chat/completions`

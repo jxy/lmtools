@@ -171,6 +171,8 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderOpenAI, resp); err != nil {
 		return err
 	}
+	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
+	defer stopHeartbeat()
 
 	if err := ensureAnthropicTextPreamble(handler); err != nil {
 		return err
@@ -192,6 +194,8 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderGoogle, resp); err != nil {
 		return err
 	}
+	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
+	defer stopHeartbeat()
 
 	if err := ensureAnthropicTextPreamble(handler); err != nil {
 		return err
@@ -252,6 +256,8 @@ func (s *Server) streamNativeArgoAnthropic(ctx context.Context, anthReq *Anthrop
 	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
 		return err
 	}
+	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
+	defer stopHeartbeat()
 
 	return s.parseAnthropicStream(resp.Body, handler)
 }
@@ -266,6 +272,8 @@ func (s *Server) streamNativeArgoOpenAI(ctx context.Context, anthReq *AnthropicR
 	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderArgo, resp); err != nil {
 		return err
 	}
+	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
+	defer stopHeartbeat()
 
 	if err := ensureAnthropicTextPreamble(handler); err != nil {
 		return err
@@ -286,6 +294,8 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 	if err := s.ensureStreamingResponseOK(ctx, constants.ProviderAnthropic, resp); err != nil {
 		return err
 	}
+	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
+	defer stopHeartbeat()
 
 	// Parse Anthropic SSE stream directly
 	return s.parseAnthropicStream(resp.Body, handler)
@@ -456,6 +466,14 @@ func (s *Server) validatePingInterval(ctx context.Context, pingInterval time.Dur
 	}
 
 	return pingInterval
+}
+
+func (s *Server) startAnthropicIdleHeartbeat(ctx context.Context, handler *AnthropicStreamHandler) func() {
+	pingInterval := constants.DefaultPingInterval * time.Second
+	if s.config.PingInterval > 0 {
+		pingInterval = s.validatePingInterval(ctx, s.config.PingInterval)
+	}
+	return handler.StartIdleHeartbeat(pingInterval)
 }
 
 // waitForArgoResponseWithPings waits for Argo response while sending pings
