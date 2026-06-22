@@ -7,7 +7,6 @@ import (
 )
 
 type ArgoEndpoints struct {
-	Root                 string
 	BaseAPI              string
 	Resource             string
 	Chat                 string
@@ -135,7 +134,6 @@ func BuildArgoEndpoints(base string) (ArgoEndpoints, error) {
 	}
 
 	return ArgoEndpoints{
-		Root:                 root,
 		BaseAPI:              baseAPI,
 		Resource:             resource,
 		Chat:                 chat,
@@ -155,7 +153,6 @@ func buildNormalizedArgoEndpoints(baseURL string) (EndpointSet, error) {
 	}
 	return EndpointSet{
 		Base:                 eps.Resource,
-		APIBase:              eps.BaseAPI,
 		Chat:                 eps.Chat,
 		Stream:               eps.Stream,
 		Embed:                eps.Embed,

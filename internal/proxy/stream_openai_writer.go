@@ -64,11 +64,6 @@ func NewOpenAIStreamWriter(w http.ResponseWriter, model string, ctx context.Cont
 	return writer, nil
 }
 
-// WriteChunk writes a complete OpenAI streaming chunk.
-func (w *OpenAIStreamWriter) WriteChunk(chunk *OpenAIStreamChunk) error {
-	return w.writeChunk(chunk, false)
-}
-
 func (w *OpenAIStreamWriter) writeChunk(chunk *OpenAIStreamChunk, allowFinished bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -115,7 +110,7 @@ func (w *OpenAIStreamWriter) WriteInitialAssistantTextDelta() error {
 			},
 		},
 	}
-	return w.WriteChunk(chunk)
+	return w.writeChunk(chunk, false)
 }
 
 // WriteInitialAssistantToolCallDelta writes the initial assistant delta for a tool-call stream.
@@ -145,7 +140,7 @@ func (w *OpenAIStreamWriter) WriteInitialAssistantToolCallDelta(index int, id, n
 			},
 		},
 	}
-	return w.WriteChunk(chunk)
+	return w.writeChunk(chunk, false)
 }
 
 // WriteDelta writes a delta update.
@@ -233,12 +228,7 @@ func (w *OpenAIStreamWriter) WriteToolCallDelta(index int, toolCall *ToolCallDel
 		},
 	}
 
-	return w.WriteChunk(chunk)
-}
-
-// WriteUsage writes usage information.
-func (w *OpenAIStreamWriter) WriteUsage(usage *OpenAIUsage) error {
-	return w.writeUsage(usage, false)
+	return w.writeChunk(chunk, false)
 }
 
 func (w *OpenAIStreamWriter) writeUsage(usage *OpenAIUsage, allowFinished bool) error {
@@ -287,11 +277,6 @@ func (w *OpenAIStreamWriter) WriteFinish(finishReason string, usage *OpenAIUsage
 	}
 
 	return w.writeDone(true)
-}
-
-// WriteDone writes the OpenAI stream termination marker "[DONE]".
-func (w *OpenAIStreamWriter) WriteDone() error {
-	return w.writeDone(false)
 }
 
 func (w *OpenAIStreamWriter) writeDone(allowFinished bool) error {

@@ -247,73 +247,6 @@ func TestGetInt64(t *testing.T) {
 	}
 }
 
-func TestGetBool(t *testing.T) {
-	tests := []struct {
-		name     string
-		m        map[string]interface{}
-		key      string
-		expected bool
-	}{
-		{
-			name:     "true value",
-			m:        map[string]interface{}{"key": true},
-			key:      "key",
-			expected: true,
-		},
-		{
-			name:     "false value",
-			m:        map[string]interface{}{"key": false},
-			key:      "key",
-			expected: false,
-		},
-		{
-			name:     "missing key",
-			m:        map[string]interface{}{"other": true},
-			key:      "key",
-			expected: false,
-		},
-		{
-			name:     "nil map",
-			m:        nil,
-			key:      "key",
-			expected: false,
-		},
-		{
-			name:     "wrong type - string",
-			m:        map[string]interface{}{"key": "true"},
-			key:      "key",
-			expected: false,
-		},
-		{
-			name:     "wrong type - int",
-			m:        map[string]interface{}{"key": 1},
-			key:      "key",
-			expected: false,
-		},
-		{
-			name:     "wrong type - float",
-			m:        map[string]interface{}{"key": 1.0},
-			key:      "key",
-			expected: false,
-		},
-		{
-			name:     "nil value",
-			m:        map[string]interface{}{"key": nil},
-			key:      "key",
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GetBool(tt.m, tt.key)
-			if result != tt.expected {
-				t.Errorf("GetBool() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestEnsureAudioFormat(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -486,23 +419,6 @@ func BenchmarkGetInt64(b *testing.B) {
 		_ = GetInt64(m, "float64")
 		_ = GetInt64(m, "string") // wrong type
 		_ = GetInt64(m, "missing")
-	}
-}
-
-func BenchmarkGetBool(b *testing.B) {
-	m := map[string]interface{}{
-		"true":   true,
-		"false":  false,
-		"int":    1,
-		"string": "true",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = GetBool(m, "true")
-		_ = GetBool(m, "false")
-		_ = GetBool(m, "int") // wrong type
-		_ = GetBool(m, "missing")
 	}
 }
 

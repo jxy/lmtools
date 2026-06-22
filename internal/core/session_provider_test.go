@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"lmtools/internal/constants"
+	"lmtools/internal/providers"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func buildTestRequestWithMessages(t *testing.T, cfg TestRequestConfig) RequestBu
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 	model := cfg.Model
 	if model == "" {
-		model = GetDefaultChatModel(provider)
+		model = providers.DefaultChatModel(provider)
 	}
 	return RequestBuild{Request: req, Body: body, Model: model}
 }

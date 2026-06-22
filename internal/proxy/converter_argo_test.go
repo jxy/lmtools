@@ -79,7 +79,7 @@ func TestConvertArgoToAnthropicWithRequest_ToolCallsAsObject(t *testing.T) {
 				},
 			}
 
-			result := ConvertArgoToAnthropicWithRequest(tt.response, "claude-3-sonnet-20240229", req)
+			result := convertArgoToAnthropicWithRequest(tt.response, "claude-3-sonnet-20240229", req, false)
 
 			if result == nil {
 				t.Fatal("Expected non-nil result")
@@ -129,7 +129,7 @@ func TestConvertArgoToAnthropicWithRequest_EmbeddedToolIgnoredOutsideLegacy(t *t
 		Tools:    []AnthropicTool{{Name: "Read"}},
 	}
 
-	result := ConvertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req)
+	result := convertArgoToAnthropicWithRequest(argo, "claude-3-sonnet-20240229", req, false)
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 		return
@@ -155,7 +155,7 @@ func TestConvertArgoToAnthropicWithRequest_LegacyModeIsExplicit(t *testing.T) {
 		Tools:    []AnthropicTool{{Name: "Read"}},
 	}
 
-	normal := ConvertArgoToAnthropicWithRequest(argo, req.Model, req)
+	normal := convertArgoToAnthropicWithRequest(argo, req.Model, req, false)
 	legacy := ConvertLegacyArgoToAnthropicWithRequest(argo, req.Model, req)
 	if len(normal.Content) != 1 || normal.Content[0].Type != "text" {
 		t.Fatalf("normal content = %#v, want embedded tool left as text", normal.Content)

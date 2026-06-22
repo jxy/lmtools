@@ -205,7 +205,6 @@ func (s *Server) parseOpenAIResponsesUtilityRequest(w http.ResponseWriter, r *ht
 	}
 	info := endpointRequestInfo{
 		Model:     req.Model,
-		Payload:   &req,
 		ToolCount: len(req.Tools),
 		Tools:     req.Tools,
 	}

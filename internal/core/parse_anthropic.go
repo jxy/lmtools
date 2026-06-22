@@ -5,12 +5,6 @@ import (
 	"fmt"
 )
 
-// parseAnthropicResponseWithTools parses Anthropic responses that may contain tool calls
-func parseAnthropicResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
-	text, toolCalls, _, err := parseAnthropicResponseDetailed(data, isEmbed)
-	return text, toolCalls, err
-}
-
 func parseAnthropicResponseDetailed(data []byte, isEmbed bool) (string, []ToolCall, []Block, error) {
 	if isEmbed {
 		// Anthropic doesn't support embeddings

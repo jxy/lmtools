@@ -313,15 +313,6 @@ func (e *Executor) executeCommand(ctx context.Context, cmdArgs *commandArgs) (st
 	return output, truncated, err
 }
 
-// executeSingle executes a single tool call
-func (e *Executor) executeSingle(ctx context.Context, call ToolCall) ToolResult {
-	exec, result, ok := e.prepareSingle(ctx, call)
-	if !ok {
-		return result
-	}
-	return e.executePrepared(ctx, exec)
-}
-
 func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedExecution, ToolResult, bool) {
 	result := ToolResult{ID: call.ID}
 

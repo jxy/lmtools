@@ -152,7 +152,7 @@ func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []b
 func buildOpenAIEmbedRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
 	model := cfg.Model
 	if model == "" {
-		model = GetDefaultChatModel(constants.ProviderOpenAI)
+		model = providers.DefaultChatModel(constants.ProviderOpenAI)
 	}
 
 	// OpenAI embedding format
@@ -249,7 +249,7 @@ func effectiveResponseProvider(cfg RequestOptions) string {
 	if provider != constants.ProviderArgo || cfg.Embed {
 		return provider
 	}
-	if isArgoLegacyMode(cfg) {
+	if cfg.ArgoLegacy {
 		return constants.ProviderArgo
 	}
 
@@ -260,7 +260,7 @@ func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *ht
 	if !cfg.StreamChat {
 		return false
 	}
-	if provider != constants.ProviderArgo || !isArgoLegacyMode(cfg) {
+	if provider != constants.ProviderArgo || !cfg.ArgoLegacy {
 		return true
 	}
 
@@ -366,7 +366,7 @@ func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts Cha
 	if model == "" {
 		model = cfg.Model
 		if model == "" {
-			model = GetDefaultChatModel(provider)
+			model = providers.DefaultChatModel(provider)
 		}
 	}
 

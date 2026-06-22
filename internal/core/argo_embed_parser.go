@@ -64,7 +64,6 @@ func parseAnthropicEmbedded(raw map[string]interface{}, validTools []ToolDefinit
 	}
 
 	return &EmbeddedCall{
-		Style:    "anthropic",
 		ID:       id,
 		Name:     name,
 		ArgsJSON: argsJSON,
@@ -113,7 +112,6 @@ func parseOpenAIEmbedded(raw map[string]interface{}, validTools []ToolDefinition
 
 		id := GetString(raw, "id")
 		return &EmbeddedCall{
-			Style:    "openai",
 			ID:       id,
 			Name:     name,
 			ArgsJSON: argsJSON,
@@ -160,7 +158,6 @@ func parseOpenAIEmbedded(raw map[string]interface{}, validTools []ToolDefinition
 
 	id, _ := raw["id"].(string)
 	return &EmbeddedCall{
-		Style:    "openai",
 		ID:       id,
 		Name:     name,
 		ArgsJSON: argsJSON,

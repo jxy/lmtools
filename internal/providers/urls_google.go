@@ -47,8 +47,7 @@ func GoogleURLs(base string) (string, string) {
 func resolveGoogleEndpoints(providerURL, _ string) (EndpointSet, error) {
 	base, models := GoogleURLs(providerURL)
 	return EndpointSet{
-		Base:    base,
-		APIBase: base,
-		Models:  models,
+		Base:   base,
+		Models: models,
 	}, nil
 }

@@ -5,12 +5,6 @@ import (
 	"strings"
 )
 
-var emptyToolSchemaJSON = json.RawMessage(`{"type":"object","properties":{}}`)
-
-func defaultToolSchemaJSON() json.RawMessage {
-	return append(json.RawMessage(nil), emptyToolSchemaJSON...)
-}
-
 func marshalToolSchema(inputSchema interface{}, transform func(interface{}) interface{}) json.RawMessage {
 	schema := inputSchema
 	if transform != nil && schema != nil {
@@ -32,7 +26,7 @@ func marshalToolSchema(inputSchema interface{}, transform func(interface{}) inte
 		}
 	}
 
-	return defaultToolSchemaJSON()
+	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
 
 // ConvertToolsToOpenAITyped converts tool definitions to strongly typed OpenAI format.

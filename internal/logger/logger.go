@@ -156,10 +156,6 @@ func WithStderrMinLevel(level string) Option {
 	return func(c *Config) { c.StderrMinLevel = parseLevel(level) }
 }
 
-func WithFileMinLevel(level string) Option {
-	return func(c *Config) { c.FileMinLevel = parseLevel(level) }
-}
-
 func WithComponent(name string) Option {
 	return func(c *Config) { c.Component = name }
 }
@@ -587,14 +583,6 @@ func GetLogDir() string {
 		return filepath.Join(".", ".lmc", "logs")
 	}
 	return filepath.Join(homeDir, ".lmc", "logs")
-}
-
-// GetWriteErrorCount returns the number of write errors encountered
-func GetWriteErrorCount() int64 {
-	if globalLogger == nil {
-		return 0
-	}
-	return atomic.LoadInt64(&globalLogger.writeErrors)
 }
 
 // DebugJSON logs data as JSON only if debug logging is enabled.

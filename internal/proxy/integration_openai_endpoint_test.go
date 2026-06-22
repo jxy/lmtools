@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"lmtools/internal/constants"
+	"lmtools/internal/providers"
 	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
@@ -961,8 +962,8 @@ func TestOpenAIChatArgoAnthropicDefaultsMaxTokens(t *testing.T) {
 		maxTokens *int
 		want      int
 	}{
-		{name: "opus_default", model: "claudeopus46", want: defaultClaudeOpusMaxTokens},
-		{name: "claude_default", model: "claude-3-haiku-20240307", want: defaultClaudeDefaultMaxTokens},
+		{name: "opus_default", model: "claudeopus46", want: providers.DefaultClaudeOpusMaxTokens},
+		{name: "claude_default", model: "claude-3-haiku-20240307", want: providers.DefaultClaudeDefaultMaxTokens},
 		{name: "explicit_preserved", model: "claudeopus46", maxTokens: intPtr(17), want: 17},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

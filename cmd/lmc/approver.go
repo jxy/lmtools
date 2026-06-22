@@ -16,11 +16,6 @@ type cliApprover struct {
 	notifier core.Notifier
 }
 
-// NewCliApprover creates a new CLI approver with a notifier
-func NewCliApprover(notifier core.Notifier) *cliApprover {
-	return &cliApprover{notifier: notifier}
-}
-
 func (a *cliApprover) Approve(ctx context.Context, command []string) (bool, error) {
 	// Check if context is already cancelled
 	select {

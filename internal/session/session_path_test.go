@@ -46,7 +46,7 @@ func TestParseSessionPath(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				root, comps := ParseSessionPath(tt.path)
+				root, comps := DefaultManager().ParseSessionPath(tt.path)
 
 				if root != tt.expectedRoot {
 					t.Errorf("Expected root %s, got %s", tt.expectedRoot, root)
@@ -304,7 +304,7 @@ func TestIsSessionRoot(t *testing.T) {
 		}
 
 		// Test session root
-		if !IsSessionRoot(session.Path) {
+		if !DefaultManager().IsSessionRoot(session.Path) {
 			t.Errorf("Expected %s to be a session root", session.Path)
 		}
 
@@ -315,12 +315,12 @@ func TestIsSessionRoot(t *testing.T) {
 		}
 
 		// Test sibling is not root
-		if IsSessionRoot(siblingPath) {
+		if DefaultManager().IsSessionRoot(siblingPath) {
 			t.Errorf("Expected %s to NOT be a session root", siblingPath)
 		}
 
 		// Test sessions directory itself is not a root
-		if IsSessionRoot(sessionsDir) {
+		if DefaultManager().IsSessionRoot(sessionsDir) {
 			t.Errorf("Expected sessions directory to NOT be a session root")
 		}
 	})
@@ -428,31 +428,6 @@ func TestValidationHelpers(t *testing.T) {
 			t.Run(tt.id, func(t *testing.T) {
 				if got := IsValidMessageID(tt.id); got != tt.expected {
 					t.Errorf("isValidMessageID(%q) = %v, want %v", tt.id, got, tt.expected)
-				}
-			})
-		}
-	})
-
-	t.Run("isValidSessionID", func(t *testing.T) {
-		tests := []struct {
-			id       string
-			expected bool
-		}{
-			{"abc123", true},
-			{"deadbeef", true},
-			{"a", true},                // single char is valid
-			{"1234567890abcdef", true}, // long hex is valid
-			{"ABC123", false},          // uppercase not allowed
-			{"abc-123", false},         // dash not allowed
-			{"abc 123", false},         // space not allowed
-			{"abc.123", false},         // dot not allowed
-			{"", false},                // empty not allowed
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.id, func(t *testing.T) {
-				if got := isValidSessionID(tt.id); got != tt.expected {
-					t.Errorf("isValidSessionID(%q) = %v, want %v", tt.id, got, tt.expected)
 				}
 			})
 		}

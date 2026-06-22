@@ -41,19 +41,7 @@ func validateParsedOpenAIResponsesRequest(req *OpenAIResponsesRequest) error {
 }
 
 func validateAnthropicRequestForProvider(req *AnthropicRequest, provider string) error {
-	if err := validateAnthropicOpus47Features(req, provider); err != nil {
-		return err
-	}
-
-	normalized := constants.NormalizeProvider(provider)
-	if normalized == constants.ProviderArgo {
-		normalized = providers.DetermineArgoModelProvider(req.Model)
-	}
-	if normalized == constants.ProviderAnthropic {
-		return nil
-	}
-
-	return nil
+	return validateAnthropicOpus47Features(req, provider)
 }
 
 func validateAnthropicOpus47Features(req *AnthropicRequest, provider string) error {

@@ -123,15 +123,6 @@ func OpenAIUsageToAnthropic(usage *OpenAIUsage) *AnthropicUsage {
 	return anthropicUsage
 }
 
-// OpenAIUsageFromCounts creates OpenAI usage from token counts
-func OpenAIUsageFromCounts(promptTokens, completionTokens int) *OpenAIUsage {
-	return &OpenAIUsage{
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      promptTokens + completionTokens,
-	}
-}
-
 // mapGoogleFinishReason maps Google finish reasons to OpenAI format
 func mapGoogleFinishReason(finishReason string) string {
 	switch finishReason {

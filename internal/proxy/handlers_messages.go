@@ -61,7 +61,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		Stream:       anthReq.Stream,
 		MessageCount: len(anthReq.Messages),
 		ToolCount:    len(anthReq.Tools),
-		Payload:      anthReq,
 		Tools:        anthReq.Tools,
 	}
 	logEndpointRequest(ctx, info)

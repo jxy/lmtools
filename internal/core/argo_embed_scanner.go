@@ -1,9 +1,6 @@
 package core
 
-import (
-	"lmtools/internal/logger"
-	"strings"
-)
+import "strings"
 
 // scanJSONObjects scans content for JSON objects and identifies tool calls
 // Returns sequences with position information needed for suffix extraction
@@ -14,13 +11,14 @@ func scanJSONObjects(content string, validTools []ToolDefinition) []EmbeddedSequ
 
 	for currentPos < len(content) {
 		// Find next potential JSON object
-		jsonStart := findNextJSONStart(content, currentPos)
-		if jsonStart < 0 {
+		rel := strings.IndexByte(content[currentPos:], '{')
+		if rel < 0 {
 			break
 		}
+		jsonStart := currentPos + rel
 
 		// Try to parse and validate JSON object
-		parsedMap, jsonEnd, ok := parseJSONObjectAt(content, jsonStart)
+		parsedMap, jsonEnd, ok := parseLooseJSONObjectAt(content, jsonStart)
 		if !ok {
 			currentPos = jsonStart + 1
 			continue
@@ -47,25 +45,6 @@ func scanJSONObjects(content string, validTools []ToolDefinition) []EmbeddedSequ
 	}
 
 	return sequences
-}
-
-// findNextJSONStart finds the next '{' character starting from pos
-func findNextJSONStart(content string, pos int) int {
-	idx := strings.IndexByte(content[pos:], '{')
-	if idx < 0 {
-		return -1
-	}
-	return pos + idx
-}
-
-// parseJSONObjectAt attempts to parse a JSON object at the given position
-func parseJSONObjectAt(content string, jsonStart int) (map[string]interface{}, int, bool) {
-	// Check size limits
-	if len(content)-jsonStart > MaxJSONObjectSize {
-		logger.GetLogger().Debugf("parseEmbeddedToolCalls: limiting parse window at position %d", jsonStart)
-	}
-
-	return parseLooseJSONObjectAt(content, jsonStart)
 }
 
 // extractSuffix extracts the trailing content after the last tool call

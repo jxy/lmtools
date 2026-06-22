@@ -379,7 +379,7 @@ func TestConvertArgoToAnthropicWithRequest_IDGeneration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ConvertArgoToAnthropicWithRequest(tt.input, tt.model, tt.request)
+			got := convertArgoToAnthropicWithRequest(tt.input, tt.model, tt.request, false)
 			tt.validate(t, got)
 		})
 	}
@@ -629,7 +629,7 @@ func TestMultimodalContentPipeline(t *testing.T) {
 	}
 
 	// Step 4: Argo -> Anthropic (response)
-	anthResp := ConvertArgoToAnthropicWithRequest(argoResp, "gpt-4-vision", anthReq)
+	anthResp := convertArgoToAnthropicWithRequest(argoResp, "gpt-4-vision", anthReq, false)
 
 	// Verify ID was generated
 	if anthResp.ID == "" {

@@ -166,7 +166,7 @@ func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
 			Response: "Here's a fibonacci function:\n\nfunc fibonacci(n int) int {\n    if n <= 1 {\n        return n\n    }\n    return fibonacci(n-1) + fibonacci(n-2)\n}",
 		}
 
-		anthResp := ConvertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request)
+		anthResp := convertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request, false)
 
 		if anthResp.Usage == nil {
 			t.Fatal("Expected Usage to be set")
@@ -201,7 +201,7 @@ func TestConvertArgoToAnthropicWithRequest_TokenCounting(t *testing.T) {
 			},
 		}
 
-		anthResp := ConvertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request)
+		anthResp := convertArgoToAnthropicWithRequest(argoResp, "claude-3-opus", request, false)
 
 		if anthResp.Usage == nil {
 			t.Fatal("Expected Usage to be set")

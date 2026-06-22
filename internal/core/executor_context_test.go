@@ -32,11 +32,11 @@ func TestApproverContextCancellation(t *testing.T) {
 	// Start the execution in a goroutine
 	resultChan := make(chan ToolResult)
 	go func() {
-		result := executor.executeSingle(ctx, ToolCall{
+		result := executor.ExecuteParallel(ctx, []ToolCall{{
 			ID:   "test-1",
 			Name: "universal_command",
 			Args: []byte(`{"command": ["echo", "test"]}`),
-		})
+		}})[0]
 		resultChan <- result
 	}()
 
@@ -87,11 +87,11 @@ func TestApproverContextAlreadyCancelled(t *testing.T) {
 	cancel()
 
 	// Execute with cancelled context
-	result := executor.executeSingle(ctx, ToolCall{
+	result := executor.ExecuteParallel(ctx, []ToolCall{{
 		ID:   "test-1",
 		Name: "universal_command",
 		Args: []byte(`{"command": ["echo", "test"]}`),
-	})
+	}})[0]
 
 	// Should fail immediately
 	if result.Error == "" {

@@ -13,12 +13,6 @@ func EstimateTokenCount(text string) int {
 	return len(text) / 3
 }
 
-// EstimateTokenCountFromChars estimates the number of tokens from character count
-// using a simple heuristic of dividing character count by 3.
-func EstimateTokenCountFromChars(charCount int) int {
-	return charCount / 3
-}
-
 // EstimateRequestTokens estimates the total input tokens for an Anthropic request.
 // This includes system message, conversation messages, and tool definitions.
 func EstimateRequestTokens(req *AnthropicRequest) int {
@@ -51,5 +45,5 @@ func EstimateRequestTokens(req *AnthropicRequest) int {
 	}
 
 	totalChars += 100
-	return EstimateTokenCountFromChars(totalChars)
+	return totalChars / 3
 }

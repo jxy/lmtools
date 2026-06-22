@@ -247,10 +247,7 @@ func TestParseEmbeddedToolCallsLastCallBehavior(t *testing.T) {
 			ok := err == nil
 			var call *EmbeddedCall
 			if ok && len(seq) > 0 {
-				// Get the last call and set its Trimmed field
-				last := seq[len(seq)-1]
-				call = last.Call
-				call.Trimmed = strings.TrimSpace(last.Prefix)
+				call = seq[len(seq)-1].Call
 			}
 
 			if ok != tt.expectedOK {
@@ -262,10 +259,6 @@ func TestParseEmbeddedToolCallsLastCallBehavior(t *testing.T) {
 			}
 
 			if ok && call != nil {
-				// Verify the Trimmed field is set
-				// Note: Trimmed can be empty if the entire content was the JSON,
-				// which is valid and expected in some cases
-
 				// For multiple calls test, verify we got the last one
 				if tt.name == "multiple_calls_returns_last" {
 					if call.Name != "test2" || call.ID != "2" {
@@ -446,12 +439,7 @@ func TestParseEmbeddedToolCalls_DeeplyNestedEscapes(t *testing.T) {
 		t.Errorf("Name mismatch:\n  Expected: %q\n  Got:      %q", expectedName, call.Name)
 	}
 
-	// 3. Verify Style field
-	if call.Style != "anthropic" {
-		t.Errorf("Style mismatch:\n  Expected: %q\n  Got:      %q", "anthropic", call.Style)
-	}
-
-	// 4. Parse and verify the ArgsJSON
+	// 3. Parse and verify the ArgsJSON
 	if len(call.ArgsJSON) == 0 {
 		t.Fatalf("ArgsJSON is empty")
 	}
@@ -563,7 +551,6 @@ func TestParseEmbeddedToolCalls_DeeplyNestedEscapes(t *testing.T) {
 	t.Logf("Successfully extracted tool call:")
 	t.Logf("  ID: %q", call.ID)
 	t.Logf("  Name: %q", call.Name)
-	t.Logf("  Style: %q", call.Style)
 	t.Logf("  file_path: %q", filePath)
 	t.Logf("  new_string length: %d chars", len(newString))
 	t.Logf("  old_string length: %d chars", len(oldString))

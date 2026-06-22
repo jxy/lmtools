@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	stdErrors "errors"
 	"fmt"
 	"lmtools/internal/constants"
@@ -63,10 +61,6 @@ func LoadProviderKeyFile(provider, path string) (ProviderKey, error) {
 	return NewProviderKey(provider, key)
 }
 
-func (k ProviderKey) Apply(req *http.Request) error {
-	return ApplyProviderCredentials(req, k.Provider, k.Value)
-}
-
 func (k ProviderKey) Set() ProviderKeySet {
 	switch k.Provider {
 	case constants.ProviderAnthropic:
@@ -97,14 +91,6 @@ func (s ProviderKeySet) KeyForProvider(provider string) string {
 	}
 }
 
-// HashAPIKey creates a hash of an API key for use as a pseudo-username
-// This allows session management for API key-based providers
-func HashAPIKey(apiKey string) string {
-	hash := sha256.Sum256([]byte(apiKey))
-	// Use first 8 bytes of hash for a reasonable length identifier
-	return "apikey_" + hex.EncodeToString(hash[:8])
-}
-
 // SetProviderHeaders sets authentication and required headers for a provider
 func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 	switch provider {
@@ -128,12 +114,6 @@ func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 			req.Header.Set("x-api-key", apiKey)
 		}
 	}
-}
-
-// ApplyProviderCredentials applies provider-specific authentication details.
-func ApplyProviderCredentials(req *http.Request, provider string, apiKey string) error {
-	SetProviderHeaders(req, provider, apiKey)
-	return nil
 }
 
 // SetRequestHeaders sets common headers based on request type

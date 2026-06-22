@@ -47,7 +47,6 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 		Stream:       openAIReq.Stream,
 		MessageCount: len(openAIReq.Messages),
 		ToolCount:    len(openAIReq.Tools),
-		Payload:      openAIReq,
 		Tools:        openAIReq.Tools,
 	}
 	logEndpointRequest(ctx, info)
@@ -292,7 +291,7 @@ func (s *Server) forwardOpenAIToGoogle(w http.ResponseWriter, r *http.Request, o
 		return
 	}
 
-	url, err := buildGoogleModelURL(s.endpoints.Google, mappedModel, "generateContent")
+	url, err := providers.BuildGoogleModelURL(s.endpoints.Google, mappedModel, "generateContent")
 	if err != nil {
 		log.Errorf("Failed to build Google URL: %v", err)
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to build upstream request", "configuration_error", http.StatusInternalServerError)

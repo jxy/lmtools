@@ -38,14 +38,6 @@ func GetInt64(m map[string]interface{}, key string) int64 {
 	return 0
 }
 
-// GetBool safely extracts a bool value from a map
-func GetBool(m map[string]interface{}, key string) bool {
-	if v, ok := m[key].(bool); ok {
-		return v
-	}
-	return false
-}
-
 // ensureAudioFormat ensures audio data has a format, defaulting to "wav" if needed.
 // This centralizes the audio format defaulting logic used across conversions.
 func ensureAudioFormat(audio *AudioData) {

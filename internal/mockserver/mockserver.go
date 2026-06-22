@@ -20,8 +20,6 @@ type MockServer struct {
 	responseFunc    func(*http.Request) (interface{}, int, error)
 	defaultModel    string
 	defaultResponse string
-	simulateErrors  bool
-	errorRate       float64
 }
 
 // MockRequest captures details about incoming requests
@@ -54,14 +52,6 @@ func WithDefaultResponse(response string) MockServerOption {
 func WithResponseFunc(f func(*http.Request) (interface{}, int, error)) MockServerOption {
 	return func(ms *MockServer) {
 		ms.responseFunc = f
-	}
-}
-
-// WithErrorSimulation enables random error responses
-func WithErrorSimulation(rate float64) MockServerOption {
-	return func(ms *MockServer) {
-		ms.simulateErrors = true
-		ms.errorRate = rate
 	}
 }
 
@@ -581,11 +571,6 @@ func (ms *MockServer) Reset() {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.requests = ms.requests[:0]
-}
-
-// Close shuts down the mock server
-func (ms *MockServer) Close() {
-	ms.Server.Close()
 }
 
 // URL returns the mock server's URL

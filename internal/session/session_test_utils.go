@@ -1,21 +1,10 @@
 package session
 
 import (
-	"lmtools/internal/core"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
-
-// TestMessage creates a test message with default values
-func TestMessage(role, content string) Message {
-	return Message{
-		Role:      core.Role(role),
-		Content:   content,
-		Timestamp: time.Now(),
-	}
-}
 
 // NewTestManager returns a session manager rooted in a test-owned temp
 // directory. New tests should prefer this over mutating the package default

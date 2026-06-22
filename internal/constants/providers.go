@@ -9,13 +9,6 @@ var validProviders = []string{
 	ProviderAnthropic,
 }
 
-// ValidProviders returns the supported provider list in display order.
-func ValidProviders() []string {
-	providers := make([]string, len(validProviders))
-	copy(providers, validProviders)
-	return providers
-}
-
 // JoinedProviders returns the supported provider list as a comma-separated string.
 func JoinedProviders() string {
 	return strings.Join(validProviders, ", ")

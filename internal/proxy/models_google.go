@@ -76,9 +76,6 @@ type GoogleFunction struct {
 	Parameters  interface{} `json:"parameters"`
 }
 
-// GoogleFunctionDeclaration is an alias for GoogleFunction.
-type GoogleFunctionDeclaration = GoogleFunction
-
 // GoogleToolConfig represents tool configuration.
 type GoogleToolConfig struct {
 	FunctionCallingConfig GoogleFunctionConfig `json:"functionCallingConfig"`
@@ -115,9 +112,6 @@ type GoogleThinkingConfig struct {
 	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
 }
-
-// GoogleGenerationConfig is an alias for GoogleGenConfig.
-type GoogleGenerationConfig = GoogleGenConfig
 
 // GoogleResponse represents a response from the Google AI API.
 type GoogleResponse struct {

@@ -55,11 +55,6 @@ func GetSessionsDir() string {
 	return DefaultManager().SessionsDir()
 }
 
-// TestFlockSupport checks if the filesystem supports flock.
-func TestFlockSupport() error {
-	return DefaultManager().TestFlockSupport()
-}
-
 // CreateSession creates a new session with a sequential ID
 // If systemPrompt is not empty, it will be saved as message 0000
 func CreateSession(systemPrompt string, log core.Logger) (*Session, error) {

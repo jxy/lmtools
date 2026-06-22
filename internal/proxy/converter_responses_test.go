@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/apifixtures"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/providers"
 	"strings"
 	"testing"
 )
@@ -227,31 +228,31 @@ func TestOpenAIResponsesAnthropicWireDefaultMaxTokens(t *testing.T) {
 			name:     "anthropic opus uses max opus default",
 			provider: constants.ProviderAnthropic,
 			model:    "claude-opus-4-1-20250805",
-			want:     defaultClaudeOpusMaxTokens,
+			want:     providers.DefaultClaudeOpusMaxTokens,
 		},
 		{
 			name:     "anthropic sonnet uses default claude max",
 			provider: constants.ProviderAnthropic,
 			model:    "claude-sonnet-4-5-20250929",
-			want:     defaultClaudeDefaultMaxTokens,
+			want:     providers.DefaultClaudeDefaultMaxTokens,
 		},
 		{
 			name:     "anthropic haiku uses default claude max",
 			provider: constants.ProviderAnthropic,
 			model:    "claude-haiku-4-5",
-			want:     defaultClaudeDefaultMaxTokens,
+			want:     providers.DefaultClaudeDefaultMaxTokens,
 		},
 		{
 			name:     "argo claude opus uses max opus default",
 			provider: constants.ProviderArgo,
 			model:    "claude-opus-4-1",
-			want:     defaultClaudeOpusMaxTokens,
+			want:     providers.DefaultClaudeOpusMaxTokens,
 		},
 		{
 			name:     "argo claude alias uses default claude max",
 			provider: constants.ProviderArgo,
 			model:    "claudesonnet4",
-			want:     defaultClaudeDefaultMaxTokens,
+			want:     providers.DefaultClaudeDefaultMaxTokens,
 		},
 	}
 
@@ -760,7 +761,7 @@ func TestOpenAIChatNamespacedToolCallsRestoreResponsesNamespace(t *testing.T) {
 		}},
 	}
 	anth := ConvertOpenAIToAnthropicWithToolNameRegistry(chatResp, "gpt-public", responseToolNameRegistryFromCoreTools(typed.Tools))
-	responses := ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
+	responses := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(anth, "gpt-public", nil)
 	if len(responses.Output) != 2 {
 		t.Fatalf("responses output len = %d, want 2: %+v", len(responses.Output), responses.Output)
 	}
@@ -989,7 +990,7 @@ func TestOpenAIResponsesConvertedProviderRejectsUnsupportedFields(t *testing.T) 
 }
 
 func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t *testing.T) {
-	resp := ConvertAnthropicResponseToOpenAIResponses(&AnthropicResponse{
+	resp := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(&AnthropicResponse{
 		ID:         "msg_backend",
 		Type:       "message",
 		Role:       core.RoleAssistant,
@@ -999,7 +1000,7 @@ func TestConvertAnthropicResponseToOpenAIResponsesPreservesMaxTokenTruncation(t 
 			Type: "text",
 			Text: "partial",
 		}},
-	}, "claude-public")
+	}, "claude-public", nil)
 
 	if resp.Status != "incomplete" {
 		t.Fatalf("status = %q, want incomplete", resp.Status)
@@ -1075,7 +1076,7 @@ func TestOpenAIResponsesCustomToolCallsConvertToChat(t *testing.T) {
 	}
 
 	anth := ConvertOpenAIToAnthropic(chat, "gpt-public")
-	roundTrip := ConvertAnthropicResponseToOpenAIResponses(anth, "gpt-public")
+	roundTrip := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(anth, "gpt-public", nil)
 	if len(roundTrip.Output) != 1 || roundTrip.Output[0].Type != "custom_tool_call" {
 		t.Fatalf("roundtrip responses output = %+v", roundTrip.Output)
 	}

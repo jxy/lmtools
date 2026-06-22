@@ -173,7 +173,7 @@ func renderTypedToGoogleRequest(typed TypedRequest, ctx typedRenderContext) (*Go
 	}
 
 	googleReq := &GoogleRequest{
-		GenerationConfig: &GoogleGenerationConfig{
+		GenerationConfig: &GoogleGenConfig{
 			Temperature:     typed.Temperature,
 			TopP:            typed.TopP,
 			MaxOutputTokens: typed.MaxTokens,

@@ -164,34 +164,6 @@ func TestToOpenAIAssistantWithToolCalls(t *testing.T) {
 	}
 }
 
-// TestGetImageMediaType tests the media type detection for various image formats
-func TestGetImageMediaType(t *testing.T) {
-	tests := []struct {
-		url      string
-		expected string
-	}{
-		{"https://example.com/image.png", "image/png"},
-		{"https://example.com/image.PNG", "image/png"},
-		{"https://example.com/photo.jpg", "image/jpeg"},
-		{"https://example.com/photo.jpeg", "image/jpeg"},
-		{"https://example.com/photo.JPEG", "image/jpeg"},
-		{"https://example.com/animation.gif", "image/gif"},
-		{"https://example.com/animation.GIF", "image/gif"},
-		{"https://example.com/image.webp", "image/webp"},
-		{"https://example.com/image.bmp", "image/bmp"},
-		{"https://example.com/logo.svg", "image/svg+xml"},
-		{"https://example.com/unknown", "image/jpeg"}, // Default
-		{"https://example.com/noext", "image/jpeg"},   // Default
-	}
-
-	for _, tt := range tests {
-		result := DetectImageMediaType(tt.url)
-		if result != tt.expected {
-			t.Errorf("For URL %s: expected %s, got %s", tt.url, tt.expected, result)
-		}
-	}
-}
-
 // TestToAnthropicWithImageMediaType tests Anthropic image URL request rendering.
 func TestToAnthropicWithImageMediaType(t *testing.T) {
 	messages := []TypedMessage{

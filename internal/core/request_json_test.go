@@ -82,7 +82,7 @@ func buildProviderTestRequest(cfg RequestOptions, messages []TypedMessage, model
 }
 
 func buildGoogleTestRequest(cfg RequestOptions, messages []TypedMessage, model string, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
-	system := configuredSystemPrompt(cfg)
+	system := cfg.System
 	return buildChatRequestFromTyped(cfg, messages, model, system, system != "", toolDefs, toolChoice, stream)
 }
 

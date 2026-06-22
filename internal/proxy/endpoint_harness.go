@@ -17,7 +17,6 @@ type endpointRequestInfo struct {
 	Stream       bool
 	MessageCount int
 	ToolCount    int
-	Payload      interface{}
 	Tools        interface{}
 }
 

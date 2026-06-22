@@ -18,59 +18,6 @@ import (
 	"time"
 )
 
-// LogCapture captures logs for testing
-type LogCapture struct {
-	entries []LogEntry
-	mu      sync.Mutex
-}
-
-type LogEntry struct {
-	RequestID int64
-	Timestamp time.Time
-	Level     string
-	Message   string
-}
-
-func NewLogCapture() *LogCapture {
-	return &LogCapture{
-		entries: make([]LogEntry, 0),
-	}
-}
-
-func (lc *LogCapture) CaptureEntry(requestID int64, level, message string) {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-
-	lc.entries = append(lc.entries, LogEntry{
-		RequestID: requestID,
-		Timestamp: time.Now(),
-		Level:     level,
-		Message:   message,
-	})
-}
-
-func (lc *LogCapture) GetLogsForRequest(requestID int64) []LogEntry {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-
-	var logs []LogEntry
-	for _, entry := range lc.entries {
-		if entry.RequestID == requestID {
-			logs = append(logs, entry)
-		}
-	}
-	return logs
-}
-
-func (lc *LogCapture) GetAllLogs() []LogEntry {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-
-	result := make([]LogEntry, len(lc.entries))
-	copy(result, lc.entries)
-	return result
-}
-
 // Test helper to create a mock provider server
 func createMockProvider(t *testing.T, responseFunc func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(responseFunc))

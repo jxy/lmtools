@@ -34,13 +34,11 @@ func TestParseEmbeddedToolCall_WithApostrophes(t *testing.T) {
 		t.Fatal("No embedded tool calls found")
 	}
 
-	// Get the last call and set its Trimmed field
+	// Get the last call and check its prefix
 	last := seq[len(seq)-1]
 	call := last.Call
-	call.Trimmed = strings.TrimSpace(last.Prefix)
-
-	if call.Trimmed != "Let me search for Alice's files:" {
-		t.Errorf("Unexpected trimmed text: %s", call.Trimmed)
+	if trimmed := strings.TrimSpace(last.Prefix); trimmed != "Let me search for Alice's files:" {
+		t.Errorf("Unexpected trimmed text: %s", trimmed)
 	}
 
 	if call.Name != "search" {

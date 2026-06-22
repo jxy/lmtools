@@ -51,7 +51,6 @@ func resolveAnthropicEndpoints(providerURL, _ string) (EndpointSet, error) {
 	}
 	return EndpointSet{
 		Base:                 base,
-		APIBase:              base,
 		Chat:                 messagesURL,
 		Models:               modelsURL,
 		AnthropicMessages:    messagesURL,

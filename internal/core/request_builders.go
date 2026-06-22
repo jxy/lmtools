@@ -50,9 +50,7 @@ func handleAPIKeyAuth(httpReq *http.Request, cfg RequestOptions, provider string
 		if err != nil {
 			return fmt.Errorf("failed to read API key file: %w", err)
 		}
-		if err := providerKey.Apply(httpReq); err != nil {
-			return err
-		}
+		auth.SetProviderHeaders(httpReq, providerKey.Provider, providerKey.Value)
 	}
 	return nil
 }
@@ -99,10 +97,6 @@ func buildProviderRequest(cfg RequestOptions, url string, body []byte, provider 
 	return httpReq, body, nil
 }
 
-func resolveCoreChatURL(cfg RequestOptions, provider, model string, stream bool) (string, error) {
-	return providers.ResolveChatURL(provider, cfg.ProviderURL, cfg.Env, model, stream)
-}
-
 func buildToolAwareRequest(cfg RequestOptions, provider string, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	spec, err := requireProviderRequestSpec(provider)
 	if err != nil {
@@ -120,7 +114,7 @@ func buildToolAwareRequest(cfg RequestOptions, provider string, typedMessages []
 		return nil, nil, fmt.Errorf("failed to marshal %s request: %w", provider, err)
 	}
 
-	endpoint, err := resolveCoreChatURL(cfg, provider, model, stream)
+	endpoint, err := providers.ResolveChatURLWithArgoOptions(provider, cfg.ProviderURL, cfg.Env, model, stream, false)
 	if err != nil {
 		return nil, nil, err
 	}

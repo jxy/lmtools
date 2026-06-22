@@ -189,12 +189,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create handler with proper middleware chain
-	handler := server
-
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", host, port),
-		Handler:      handler,
+		Handler:      server,
 		ReadTimeout:  15 * time.Minute,
 		WriteTimeout: 15 * time.Minute,
 		IdleTimeout:  60 * time.Second,

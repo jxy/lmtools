@@ -99,7 +99,7 @@ func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOp
 		ActualModel: rb.Model,
 	}
 
-	approver := NewCliApprover(notifier)
+	approver := &cliApprover{notifier: notifier}
 
 	ui := tools.NewCLIToolUI(notifier, opts)
 
@@ -243,7 +243,7 @@ func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts cor
 	if cfg.NoSession {
 		return nil, nil
 	}
-	approver := NewCliApprover(notifier)
+	approver := &cliApprover{notifier: notifier}
 	return session.PrepareRequest(ctx, opts, notifier, inputStr, isRegeneration, approver, pendingToolMode)
 }
 
@@ -396,7 +396,7 @@ func actualModelForConfig(cfg *config.Config, opts core.RequestOptions) string {
 		return core.DefaultEmbedModel
 	}
 	provider := providers.ResolveProvider(opts.Provider)
-	return core.GetDefaultChatModel(provider)
+	return providers.DefaultChatModel(provider)
 }
 
 func toolDefinitionsForOptions(opts core.RequestOptions) []core.ToolDefinition {

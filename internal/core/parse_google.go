@@ -33,13 +33,6 @@ func parseGoogleResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 	}, nil
 }
 
-// parseGoogleResponseWithTools parses Google responses that may contain tool calls
-// This parses Google-format responses for both direct Google usage and Argo-routed Google models.
-func parseGoogleResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
-	text, toolCalls, _, _, err := parseGoogleResponseWithMetadata(data, isEmbed)
-	return text, toolCalls, err
-}
-
 func parseGoogleResponseWithMetadata(data []byte, isEmbed bool) (string, []ToolCall, string, []Block, error) {
 	if isEmbed {
 		// Google AI doesn't support embeddings through this interface

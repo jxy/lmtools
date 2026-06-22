@@ -235,10 +235,7 @@ func TestParseEmbeddedToolCall_FieldOrder(t *testing.T) {
 			ok := err == nil
 			var call *EmbeddedCall
 			if ok && len(seq) > 0 {
-				// Get the last call and set its Trimmed field
-				last := seq[len(seq)-1]
-				call = last.Call
-				call.Trimmed = strings.TrimSpace(last.Prefix)
+				call = seq[len(seq)-1].Call
 			}
 
 			if ok != tt.expectedOK {

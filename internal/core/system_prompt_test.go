@@ -9,8 +9,8 @@ import (
 func TestConfiguredSystemPromptDoesNotUseDefault(t *testing.T) {
 	cfg := TestRequestConfig{}
 
-	if got := configuredSystemPrompt(cfg); got != "" {
-		t.Fatalf("configuredSystemPrompt() = %q, want empty string", got)
+	if got := cfg.System; got != "" {
+		t.Fatalf("cfg.System = %q, want empty string", got)
 	}
 	if got := resolvedSystemPrompt(cfg, ""); got != prompts.DefaultSystemPrompt {
 		t.Fatalf("resolvedSystemPrompt() = %q, want default prompt %q", got, prompts.DefaultSystemPrompt)

@@ -68,11 +68,6 @@ const (
 	ErrEmbedWithSession = "invalid flag combination: embed mode cannot be used with session flags (-resume, -branch)"
 )
 
-// Warning messages
-const (
-// Placeholder for future warning messages
-)
-
 // Command approval messages
 const (
 	// NonInteractiveDenialGuidance provides guidance when a command is denied in non-interactive mode

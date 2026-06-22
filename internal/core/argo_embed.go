@@ -26,8 +26,6 @@ import (
 // - argo_embed.go: Main API and coordination
 
 const (
-	// MaxJSONObjectSize limits the size of a single JSON object we'll attempt to parse
-	MaxJSONObjectSize = 256 * 1024 // 256KB
 	// MaxContentSize limits the total content size we'll scan
 	MaxContentSize = 1024 * 1024 // 1MB
 )
@@ -51,11 +49,9 @@ func IsValidToolName(name string, validTools []ToolDefinition) bool {
 
 // EmbeddedCall represents a tool call embedded in content by Argo
 type EmbeddedCall struct {
-	Style    string          // "anthropic" or "openai"
 	ID       string          // Tool call ID
 	Name     string          // Tool/function name
 	ArgsJSON json.RawMessage // Normalized marshaled arguments
-	Trimmed  string          // Content prefix before the JSON block; colon trimmed
 }
 
 // EmbeddedSequence represents an ordered pair of prefix text and a following call.

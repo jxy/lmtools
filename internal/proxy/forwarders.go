@@ -8,6 +8,7 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
+	"lmtools/internal/providers"
 	"net/http"
 	"strings"
 )
@@ -240,7 +241,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 	}
 
 	// Construct URL with model
-	url, err := buildGoogleModelURL(s.endpoints.Google, anthReq.Model, "generateContent")
+	url, err := providers.BuildGoogleModelURL(s.endpoints.Google, anthReq.Model, "generateContent")
 	if err != nil {
 		return nil, fmt.Errorf("build Google URL: %w", err)
 	}
@@ -257,7 +258,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 }
 
 func (s *Server) forwardGoogleCountTokens(ctx context.Context, googleReq *GoogleRequest, model string) (*GoogleCountTokensResponse, error) {
-	url, err := buildGoogleModelURL(s.endpoints.Google, model, "countTokens")
+	url, err := providers.BuildGoogleModelURL(s.endpoints.Google, model, "countTokens")
 	if err != nil {
 		return nil, fmt.Errorf("build Google countTokens URL: %w", err)
 	}

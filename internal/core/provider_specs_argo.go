@@ -20,9 +20,9 @@ func buildArgoChatRequest(cfg RequestOptions, messages []TypedMessage, model str
 		return nil, nil, err
 	}
 	if model == "" {
-		model = GetDefaultChatModel(constants.ProviderArgo)
+		model = providers.DefaultChatModel(constants.ProviderArgo)
 	}
-	if isArgoLegacyMode(cfg) {
+	if cfg.ArgoLegacy {
 		return buildLegacyArgoChatRequest(cfg, model, messages, system, systemExplicit, toolDefs, toolChoice, stream)
 	}
 
@@ -45,7 +45,7 @@ func buildArgoChatRequest(cfg RequestOptions, messages []TypedMessage, model str
 
 func newArgoChatRequestPlan(cfg RequestOptions, messages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (argoChatRequestPlan, error) {
 	if model == "" {
-		model = GetDefaultChatModel(constants.ProviderArgo)
+		model = providers.DefaultChatModel(constants.ProviderArgo)
 	}
 
 	wireProvider := providers.DetermineArgoModelProvider(model)
@@ -74,10 +74,6 @@ func newArgoChatRequestPlan(cfg RequestOptions, messages []TypedMessage, model s
 	}
 	plan.Endpoint = endpoint
 	return plan, nil
-}
-
-func isArgoLegacyMode(cfg RequestOptions) bool {
-	return cfg.ArgoLegacy
 }
 
 // argoLegacyAnthropicMaxTokensDropThreshold mirrors the apiproxy legacy Argo

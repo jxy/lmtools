@@ -379,18 +379,15 @@ func TestOpenAIResponsesLifecycleModelAliasesAreResponseIDScoped(t *testing.T) {
 
 func TestOpenAIResponsesDirectStreamRegistersModelAliasByResponseID(t *testing.T) {
 	server := &Server{}
-	line := server.rewriteResponsesStreamModel(
-		`data: {"type":"response.created","response":{"id":"resp_stream","model":"gpt-upstream"}}`,
+	data := server.rewriteResponsesStreamData(
+		`{"type":"response.created","response":{"id":"resp_stream","model":"gpt-upstream"}}`,
 		"gpt-upstream",
 		"claude-3-sonnet",
 	)
-	if !strings.HasPrefix(line, "data: ") {
-		t.Fatalf("stream line = %q, want data line", line)
-	}
 
 	var event map[string]interface{}
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
-		t.Fatalf("stream line is invalid JSON: %v; line = %s", err, line)
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		t.Fatalf("stream data is invalid JSON: %v; data = %s", err, data)
 	}
 	response, ok := event["response"].(map[string]interface{})
 	if !ok {
@@ -410,21 +407,17 @@ func TestOpenAIResponsesDirectStreamRegistersModelAliasByResponseID(t *testing.T
 	}
 }
 
-func TestOpenAIResponsesDirectStreamRewritesNoSpaceDataModelAlias(t *testing.T) {
+func TestOpenAIResponsesDirectStreamRewritesTopLevelDataModelAlias(t *testing.T) {
 	server := &Server{}
-	line := server.rewriteResponsesStreamModel(
-		`data:{"type":"response.created","model":"gpt-upstream","response":{"id":"resp_stream","model":"gpt-upstream"},"extra":true}`,
+	data := server.rewriteResponsesStreamData(
+		`{"type":"response.created","model":"gpt-upstream","response":{"id":"resp_stream","model":"gpt-upstream"},"extra":true}`,
 		"gpt-upstream",
 		"claude-3-sonnet",
 	)
-	data, ok := sseFieldValue(line, "data")
-	if !ok {
-		t.Fatalf("stream line = %q, want data line", line)
-	}
 
 	var event map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &event); err != nil {
-		t.Fatalf("stream line is invalid JSON: %v; line = %s", err, line)
+		t.Fatalf("stream data is invalid JSON: %v; data = %s", err, data)
 	}
 	if event["model"] != "claude-3-sonnet" {
 		t.Fatalf("top-level model = %#v, want claude-3-sonnet", event["model"])

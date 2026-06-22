@@ -43,7 +43,6 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	info := endpointRequestInfo{
 		Model:     responsesReq.Model,
 		Stream:    responsesReq.Stream,
-		Payload:   responsesReq,
 		ToolCount: len(responsesReq.Tools),
 		Tools:     responsesReq.Tools,
 	}
@@ -260,18 +259,6 @@ func (s *Server) rewriteResponsesStreamData(data, mappedModel, visibleModel stri
 		return data
 	}
 	return string(updated)
-}
-
-func (s *Server) rewriteResponsesStreamModel(line, mappedModel, visibleModel string) string {
-	data, ok := sseFieldValue(line, "data")
-	if !ok {
-		return line
-	}
-	rewritten := s.rewriteResponsesStreamData(data, mappedModel, visibleModel)
-	if rewritten == data {
-		return line
-	}
-	return "data: " + rewritten
 }
 
 func rewriteResponsesBodyModel(body []byte, originalModel string) []byte {

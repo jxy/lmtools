@@ -2,13 +2,6 @@ package core
 
 import "lmtools/internal/providers"
 
-// configuredSystemPrompt returns the raw configured prompt without applying defaults.
-// This keeps inline system messages authoritative when callers intentionally bypass
-// the higher-level effective/defaulted system handling.
-func configuredSystemPrompt(cfg RequestOptions) string {
-	return cfg.System
-}
-
 // resolvedSystemPrompt returns an explicit override when one is provided, otherwise
 // it falls back to the effective system prompt (including defaults).
 func resolvedSystemPrompt(cfg RequestOptions, override string) string {

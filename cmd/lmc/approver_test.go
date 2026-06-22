@@ -127,7 +127,7 @@ func TestApprover_EdgeCases(t *testing.T) {
 
 			// Create approver with mock notifier
 			notifier := &mockNotifier{}
-			approver := NewCliApprover(notifier)
+			approver := &cliApprover{notifier: notifier}
 
 			// Test with timeout to prevent hanging
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

@@ -41,13 +41,6 @@ type JSONSchema struct {
 func ConvertSchemaToGoogleFormat(schema interface{}) interface{} {
 	// Handle different input types
 	switch s := schema.(type) {
-	case JSONSchema:
-		return convertJSONSchemaToGoogle(s)
-	case *JSONSchema:
-		if s != nil {
-			return convertJSONSchemaToGoogle(*s)
-		}
-		return nil
 	case json.RawMessage:
 		var js JSONSchema
 		if err := json.Unmarshal(s, &js); err == nil {

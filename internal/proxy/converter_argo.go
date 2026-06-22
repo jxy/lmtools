@@ -139,11 +139,6 @@ func setArgoMaxTokens(ctx context.Context, req *AnthropicRequest, argoReq *ArgoC
 	}
 }
 
-// ConvertArgoToAnthropicWithRequest converts an Argo response to Anthropic format with request for token estimation.
-func ConvertArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
-	return convertArgoToAnthropicWithRequest(resp, originalModel, req, false)
-}
-
 func ConvertLegacyArgoToAnthropicWithRequest(resp *ArgoChatResponse, originalModel string, req *AnthropicRequest) *AnthropicResponse {
 	return convertArgoToAnthropicWithRequest(resp, originalModel, req, true)
 }

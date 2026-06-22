@@ -13,8 +13,6 @@ import (
 )
 
 type compareArtifact struct {
-	Kind   string
-	Target targetConfig
 	Source string
 	Data   []byte
 }
@@ -242,8 +240,6 @@ func captureArtifact(root string, meta apifixtures.CaseMeta, target targetConfig
 	}
 	if hasExpectedStatus && (expectedStatus < 200 || expectedStatus >= 300) {
 		return compareArtifact{
-			Kind:   artifactKind(target),
-			Target: target,
 			Source: "live:" + target.ID,
 			Data:   data,
 		}, nil
@@ -258,8 +254,6 @@ func captureArtifact(root string, meta apifixtures.CaseMeta, target targetConfig
 	}
 
 	return compareArtifact{
-		Kind:   artifactKind(target),
-		Target: target,
 		Source: "live:" + target.ID,
 		Data:   data,
 	}, nil
@@ -283,18 +277,9 @@ func comparisonArtifact(root string, meta apifixtures.CaseMeta, target targetCon
 	}
 
 	return compareArtifact{
-		Kind:   artifactKind(target),
-		Target: target,
 		Source: "capture:" + target.ID,
 		Data:   data,
 	}, nil
-}
-
-func artifactKind(target targetConfig) string {
-	if target.Stream {
-		return "stream"
-	}
-	return "response"
 }
 
 func supportsShapeCompare(target targetConfig) bool {

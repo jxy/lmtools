@@ -60,7 +60,6 @@ func resolveOpenAIEndpoints(providerURL, _ string) (EndpointSet, error) {
 		apiBase := endpointBaseURL(chatURL, "/chat/completions")
 		return EndpointSet{
 			Base:      apiBase,
-			APIBase:   apiBase,
 			Chat:      chatURL,
 			Responses: responsesURL,
 			Embed:     u.String(),
@@ -80,7 +79,6 @@ func resolveOpenAIEndpoints(providerURL, _ string) (EndpointSet, error) {
 
 	return EndpointSet{
 		Base:      base,
-		APIBase:   base,
 		Chat:      chatURL,
 		Responses: responsesURL,
 		Embed:     embedURL,

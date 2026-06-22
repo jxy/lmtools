@@ -8,97 +8,8 @@ import (
 	"lmtools/internal/format"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
-
-// ShowSessionTree displays the conversation tree for a session
-func ShowSessionTree(sessionPath string, notifier core.Notifier) error {
-	// Get session info
-	sessionID := GetSessionID(sessionPath)
-
-	// Build the conversation tree
-	nodes, err := buildTree(sessionPath)
-	if err != nil {
-		return errors.WrapError("build conversation tree", err)
-	}
-
-	if len(nodes) == 0 {
-		fmt.Println("No messages in session.")
-		return nil
-	}
-
-	// Print session header
-	fmt.Printf("Session %s:\n", sessionID)
-
-	// Print the tree
-	for i, node := range nodes {
-		isLast := i == len(nodes)-1
-		printTreeNode(node, "", isLast)
-	}
-
-	return nil
-}
-
-// printTreeNode recursively prints the message tree
-func printTreeNode(node *TreeNode, prefix string, isLast bool) {
-	if node == nil {
-		return
-	}
-
-	// Determine the connector
-	connector := "├── "
-	if isLast {
-		connector = "└── "
-	}
-
-	// Format the node display
-	roleDisplay := fmt.Sprintf("[%s]", node.Message.Role)
-	if node.Message.Role == "assistant" && node.Message.Model != "" {
-		roleDisplay = fmt.Sprintf("[%s(%s)]", node.Message.Role, node.Message.Model)
-	}
-
-	// Print the node
-	fmt.Printf("%s%s%s %s %s\n", prefix, connector, node.Message.ID, roleDisplay,
-		node.Message.Timestamp.Format("2006-01-02 15:04:05"))
-
-	// Prepare prefix for children
-	childPrefix := prefix
-	if isLast {
-		childPrefix += "    "
-	} else {
-		childPrefix += "│   "
-	}
-
-	// Sort children by ID for consistent display
-	children := make([]*TreeNode, 0, len(node.Children))
-	children = append(children, node.Children...)
-	sort.Slice(children, func(i, j int) bool {
-		return children[i].Message.ID < children[j].Message.ID
-	})
-
-	// Print children
-	for i, child := range children {
-		isLastChild := i == len(children)-1
-		printTreeNode(child, childPrefix, isLastChild)
-	}
-}
-
-// FormatBytes formats byte count for display
-func FormatBytes(bytes int) string {
-	switch {
-	case bytes < 1000:
-		return fmt.Sprintf("%dB", bytes)
-	case bytes < 10*1024:
-		return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
-	case bytes < 1024*1024:
-		return fmt.Sprintf("%dKB", bytes/1024)
-	case bytes < 10*1024*1024:
-		return fmt.Sprintf("%.1fMB", float64(bytes)/(1024*1024))
-	default:
-		return fmt.Sprintf("%dMB", bytes/(1024*1024))
-	}
-}
 
 // FormatRole formats role with optional model
 func FormatRole(role, model string) string {
@@ -106,11 +17,6 @@ func FormatRole(role, model string) string {
 		return fmt.Sprintf("%s/%s", role, model)
 	}
 	return role
-}
-
-// ShowMessage displays a single message with its metadata
-func ShowMessage(messagePath string, notifier core.Notifier) error {
-	return ShowMessageWithManager(DefaultManager(), messagePath, notifier)
 }
 
 // ShowMessageWithManager displays a single message with its metadata using the provided manager.

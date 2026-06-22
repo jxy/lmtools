@@ -329,12 +329,16 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 
 		case ToolUseBlock:
 			if v.Type == "custom" {
+				input := v.InputString
+				if input == "" {
+					input = rawJSONStringValue(v.Input)
+				}
 				toolCall := OpenAIToolCall{
 					ID:   v.ID,
 					Type: "custom",
 					Custom: &OpenAICustomCall{
 						Name:  v.Name,
-						Input: firstNonEmptyString(v.InputString, rawJSONStringValue(v.Input)),
+						Input: input,
 					},
 				}
 				toolCalls = append(toolCalls, toolCall)
@@ -397,13 +401,4 @@ func rawJSONStringValue(raw json.RawMessage) string {
 		return text
 	}
 	return string(raw)
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

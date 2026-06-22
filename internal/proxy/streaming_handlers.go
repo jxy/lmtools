@@ -97,7 +97,7 @@ func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicR
 	}
 
 	// Construct streaming URL with model
-	url, err := buildGoogleModelURL(s.endpoints.Google, anthReq.Model, "streamGenerateContent")
+	url, err := providers.BuildGoogleModelURL(s.endpoints.Google, anthReq.Model, "streamGenerateContent")
 	if err != nil {
 		return nil, fmt.Errorf("build Google streaming URL: %w", err)
 	}

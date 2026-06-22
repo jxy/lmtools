@@ -84,7 +84,7 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 		s.backgroundMu.Unlock()
 	}()
 
-	if err := s.updateBackgroundResponseStatus(respID, "in_progress", nil); err != nil {
+	if err := s.responsesState.updateResponseStatusIfPending(respID, "in_progress", nil); err != nil {
 		logger.From(ctx).Errorf("failed to mark background response %s in_progress: %v", respID, err)
 	}
 	upstreamResp, err := s.forwardTypedAsAnthropic(ctx, typedWithState, route.Provider, route.MappedModel, route.OriginalModel)
@@ -95,13 +95,13 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 			status = "cancelled"
 			errPayload = map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}
 		}
-		if err := s.updateBackgroundResponseStatus(respID, status, errPayload); err != nil {
+		if err := s.responsesState.updateResponseStatusIfPending(respID, status, errPayload); err != nil {
 			logger.From(ctx).Errorf("failed to mark background response %s %s: %v", respID, status, err)
 		}
 		return
 	}
 	if ctx.Err() != nil {
-		if err := s.updateBackgroundResponseStatus(respID, "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}); err != nil {
+		if err := s.responsesState.updateResponseStatusIfPending(respID, "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}); err != nil {
 			logger.From(ctx).Errorf("failed to mark background response %s cancelled: %v", respID, err)
 		}
 		return
@@ -114,12 +114,8 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 		if stdErrors.Is(err, errResponsesStateDeleted) || stdErrors.Is(err, errResponsesStateNotActive) {
 			return
 		}
-		if statusErr := s.updateBackgroundResponseStatus(respID, "failed", map[string]interface{}{"code": "state_error", "message": err.Error()}); statusErr != nil {
+		if statusErr := s.responsesState.updateResponseStatusIfPending(respID, "failed", map[string]interface{}{"code": "state_error", "message": err.Error()}); statusErr != nil {
 			logger.From(ctx).Errorf("failed to mark background response %s failed: %v", respID, statusErr)
 		}
 	}
-}
-
-func (s *Server) updateBackgroundResponseStatus(id, status string, errPayload interface{}) error {
-	return s.responsesState.updateResponseStatusIfPending(id, status, errPayload)
 }

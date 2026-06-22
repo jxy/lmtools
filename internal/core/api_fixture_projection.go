@@ -20,9 +20,9 @@ func ParseResponseProjection(provider string, data []byte) (map[string]interface
 	case "openai-responses":
 		return parseOpenAIResponsesFixtureProjection(data)
 	case "anthropic":
-		text, toolCalls, err = parseAnthropicResponseWithTools(data, false)
+		text, toolCalls, _, err = parseAnthropicResponseDetailed(data, false)
 	case "google":
-		text, toolCalls, err = parseGoogleResponseWithTools(data, false)
+		text, toolCalls, _, _, err = parseGoogleResponseWithMetadata(data, false)
 	case "argo":
 		text, toolCalls, err = parseArgoResponseWithTools(data, false)
 	default:

@@ -12,11 +12,6 @@ import (
 	"time"
 )
 
-const (
-	defaultClaudeOpusMaxTokens    = providers.DefaultClaudeOpusMaxTokens
-	defaultClaudeDefaultMaxTokens = providers.DefaultClaudeDefaultMaxTokens
-)
-
 func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequest) (TypedRequest, error) {
 	if req == nil {
 		return TypedRequest{}, fmt.Errorf("request is required")
@@ -96,7 +91,7 @@ func ensureResponsesAnthropicMaxTokens(typed TypedRequest, model string) TypedRe
 	if typed.MaxTokens != nil {
 		return typed
 	}
-	maxTokens := defaultClaudeMaxTokens(model)
+	maxTokens := providers.DefaultClaudeMaxTokens(model)
 	typed.MaxTokens = &maxTokens
 	return typed
 }
@@ -112,7 +107,7 @@ func ensureAnthropicRequestWireMaxTokens(req *AnthropicRequest, provider, model 
 	if req == nil || req.MaxTokens > 0 || !providerRequiresClaudeMaxTokens(provider, model) {
 		return
 	}
-	req.MaxTokens = defaultClaudeMaxTokens(model)
+	req.MaxTokens = providers.DefaultClaudeMaxTokens(model)
 }
 
 func providerRequiresClaudeMaxTokens(provider, model string) bool {
@@ -124,10 +119,6 @@ func providerRequiresClaudeMaxTokens(provider, model string) bool {
 	default:
 		return false
 	}
-}
-
-func defaultClaudeMaxTokens(model string) int {
-	return providers.DefaultClaudeMaxTokens(model)
 }
 
 func responsesInputToTypedMessages(ctx context.Context, input interface{}) ([]core.TypedMessage, error) {
@@ -543,8 +534,8 @@ func responsesTextToResponseFormat(text *OpenAIResponsesText) *ResponseFormat {
 		return &ResponseFormat{
 			Type: "json_schema",
 			JSONSchema: &OpenAIJSONSchema{
-				Name:        stringFromInterface(text.Format["name"]),
-				Description: stringFromInterface(text.Format["description"]),
+				Name:        core.GetString(text.Format, "name"),
+				Description: core.GetString(text.Format, "description"),
 				Schema:      text.Format["schema"],
 				Strict:      boolPointerFromInterface(text.Format["strict"]),
 			},
@@ -753,67 +744,6 @@ func responseFormatToResponsesText(format *ResponseFormat) *OpenAIResponsesText 
 	}
 }
 
-func ConvertOpenAIResponsesToAnthropic(resp *OpenAIResponsesResponse, originalModel string) *AnthropicResponse {
-	if resp == nil {
-		return &AnthropicResponse{Type: "message", Model: originalModel}
-	}
-	anthResp := &AnthropicResponse{
-		ID:          resp.ID,
-		Type:        "message",
-		Model:       originalModel,
-		Role:        core.RoleAssistant,
-		ServiceTier: resp.ServiceTier,
-	}
-	if resp.Usage != nil {
-		anthResp.Usage = &AnthropicUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-		}
-	}
-
-	var content []AnthropicContentBlock
-	hasTool := false
-	for _, item := range resp.Output {
-		switch item.Type {
-		case "message":
-			for _, part := range item.Content {
-				if part.Text != "" {
-					content = append(content, AnthropicContentBlock{Type: "text", Text: part.Text})
-				}
-			}
-		case "function_call":
-			hasTool = true
-			content = append(content, AnthropicContentBlock{
-				Type:      "tool_use",
-				ID:        firstNonEmpty(item.CallID, item.ID),
-				Namespace: item.Namespace,
-				Name:      item.Name,
-				Input:     rawJSONToMap(core.NormalizeOpenAIResponsesArguments(item.Arguments)),
-			})
-		case "custom_tool_call":
-			hasTool = true
-			content = append(content, AnthropicContentBlock{
-				Type:        "tool_use",
-				ToolType:    "custom",
-				ID:          firstNonEmpty(item.CallID, item.ID),
-				Namespace:   item.Namespace,
-				Name:        item.Name,
-				Input:       map[string]interface{}{core.CustomToolInputField: item.Input},
-				InputString: item.Input,
-			})
-		}
-	}
-	anthResp.Content = content
-	if hasTool {
-		anthResp.StopReason = "tool_use"
-	} else if resp.Status == "incomplete" {
-		anthResp.StopReason = "max_tokens"
-	} else {
-		anthResp.StopReason = "end_turn"
-	}
-	return anthResp
-}
-
 func ConvertOpenAIResponsesToOpenAI(resp *OpenAIResponsesResponse, originalModel string) *OpenAIResponse {
 	if resp == nil {
 		return &OpenAIResponse{Object: "chat.completion", Model: originalModel}
@@ -871,10 +801,6 @@ func ConvertOpenAIResponsesToOpenAI(resp *OpenAIResponsesResponse, originalModel
 			FinishReason: finishReason,
 		}},
 	}
-}
-
-func ConvertAnthropicResponseToOpenAIResponses(resp *AnthropicResponse, originalModel string) *OpenAIResponsesResponse {
-	return ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp, originalModel, nil)
 }
 
 func ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *AnthropicResponse, originalModel string, registry responseToolNameRegistry) *OpenAIResponsesResponse {
@@ -980,11 +906,6 @@ func responsesResponseID(upstreamID string) string {
 		return upstreamID
 	}
 	return generateUUID("resp_")
-}
-
-func stringFromInterface(value interface{}) string {
-	text, _ := value.(string)
-	return text
 }
 
 func boolPointerFromInterface(value interface{}) *bool {

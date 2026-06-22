@@ -215,7 +215,7 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 
 		// Handle the response
 		response, err = HandleResponseWithOptions(tc.Ctx, tc.Cfg, resp, tc.Logger, tc.Notifier, ResponseParseOptions{
-			ArgoLegacy: isArgoLegacyMode(tc.Cfg),
+			ArgoLegacy: tc.Cfg.ArgoLegacy,
 			ToolDefs:   tc.ToolDefs,
 		})
 		if err != nil {

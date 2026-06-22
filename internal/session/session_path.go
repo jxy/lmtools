@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-// ParseSessionPath breaks down a session path into root and components
-func ParseSessionPath(path string) (root string, components []string) {
-	return DefaultManager().ParseSessionPath(path)
-}
-
 // IsSiblingDir checks if a directory name is a sibling and extracts its parts
 func IsSiblingDir(name string) (isSibling bool, messageID string, siblingNum string) {
 	// Check for .s. pattern
@@ -77,38 +72,9 @@ func GetNextSiblingPath(sessionPath, messageID string) (string, error) {
 	return fmt.Sprintf("%s.s.%04x", messageID, nextNum), nil
 }
 
-// GetMessagePath constructs the full path to a message
-func GetMessagePath(sessionPath, messageID string) string {
-	return filepath.Join(sessionPath, messageID)
-}
-
 // ParseMessageID extracts session path and message ID from a full message path
 func ParseMessageID(messageIDPath string) (sessionPath string, messageID string) {
 	return DefaultManager().ParseMessageID(messageIDPath)
-}
-
-// GetParentPath returns the parent directory of a session path
-func GetParentPath(sessionPath string) string {
-	return filepath.Dir(sessionPath)
-}
-
-// IsSessionRoot checks if a path is a session root directory
-func IsSessionRoot(sessionPath string) bool {
-	return DefaultManager().IsSessionRoot(sessionPath)
-}
-
-// isValidSessionID checks if a string could be a valid session ID
-func isValidSessionID(id string) bool {
-	// Session IDs are hex strings of varying lengths
-	if id == "" {
-		return false
-	}
-	for _, c := range id {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // GetRootSession returns the root session directory from any nested path
@@ -121,7 +87,7 @@ func GetRootSession(sessionPath string) string {
 // until it reaches a non-sibling directory or the root
 func GetAnchorForBranching(sessionPath string, messageID string) (anchorPath string, anchorID string) {
 	// Parse the session path to understand its structure
-	rootDir, components := ParseSessionPath(sessionPath)
+	rootDir, components := DefaultManager().ParseSessionPath(sessionPath)
 
 	// Start from the end and bubble up through all sibling directories
 	lastOriginalMsgID := messageID

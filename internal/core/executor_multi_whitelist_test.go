@@ -184,18 +184,18 @@ func TestExecutorMultiArgumentWhitelistExecution(t *testing.T) {
 	ctx := context.Background()
 
 	// Execute whitelisted commands
-	result1 := executor.executeSingle(ctx, call1)
+	result1 := executor.ExecuteParallel(ctx, []ToolCall{call1})[0]
 	if result1.Error != "" {
 		t.Errorf("Expected echo test to succeed, got error: %s", result1.Error)
 	}
 
-	result2 := executor.executeSingle(ctx, call2)
+	result2 := executor.ExecuteParallel(ctx, []ToolCall{call2})[0]
 	if result2.Error != "" {
 		t.Errorf("Expected echo multi arg test to succeed, got error: %s", result2.Error)
 	}
 
 	// Execute non-whitelisted command (should fail)
-	result3 := executor.executeSingle(ctx, call3)
+	result3 := executor.ExecuteParallel(ctx, []ToolCall{call3})[0]
 	if !strings.HasPrefix(result3.Error, "denied: not in whitelist") {
 		t.Errorf("Expected error to start with 'denied: not in whitelist', got: %s", result3.Error)
 	}

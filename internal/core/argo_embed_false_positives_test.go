@@ -218,8 +218,8 @@ func TestParseEmbeddedToolCalls_FalsePositives(t *testing.T) {
 			if err == nil && len(seq) > 0 {
 				t.Errorf("%s: incorrectly detected as tool call", tt.description)
 				if len(seq) > 0 && seq[0].Call != nil {
-					t.Errorf("  Detected as: Style=%s, Name=%s, ID=%s",
-						seq[0].Call.Style, seq[0].Call.Name, seq[0].Call.ID)
+					t.Errorf("  Detected as: Name=%s, ID=%s",
+						seq[0].Call.Name, seq[0].Call.ID)
 				}
 			}
 		})

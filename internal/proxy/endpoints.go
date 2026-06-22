@@ -51,7 +51,7 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 
 	// Validate ProviderURL if set
 	if cfg.ProviderURL != "" {
-		if err := validateProviderURL(cfg.ProviderURL, provider); err != nil {
+		if err := providers.ValidateProviderURL(cfg.ProviderURL, provider); err != nil {
 			return nil, err
 		}
 	}
@@ -88,9 +88,4 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 	}
 
 	return endpoints, nil
-}
-
-// validateProviderURL validates a ProviderURL.
-func validateProviderURL(providerURL, provider string) error {
-	return providers.ValidateProviderURL(providerURL, provider)
 }

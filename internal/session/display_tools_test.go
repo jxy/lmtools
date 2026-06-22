@@ -265,23 +265,17 @@ func TestDisplayTreeWithTools(t *testing.T) {
 		t.Errorf("ShowSessions() error = %v", err)
 	}
 
-	// Test ShowSessionTree
-	err = ShowSessionTree(sessionPath, notifier)
-	if err != nil {
-		t.Errorf("ShowSessionTree() error = %v", err)
-	}
-
 	// Test ShowConversation
 	err = ShowConversation(sessionPath, notifier)
 	if err != nil {
 		t.Errorf("ShowConversation() error = %v", err)
 	}
 
-	// Test ShowMessage with tool interaction
+	// Test ShowMessageWithManager with tool interaction
 	msgPath := filepath.Join(sessionPath, msgID2)
-	err = ShowMessage(msgPath, notifier)
+	err = ShowMessageWithManager(DefaultManager(), msgPath, notifier)
 	if err != nil {
-		t.Errorf("ShowMessage() error = %v", err)
+		t.Errorf("ShowMessageWithManager() error = %v", err)
 	}
 
 	// Silence unused variables

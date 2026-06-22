@@ -2,7 +2,6 @@ package errors
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -42,87 +41,6 @@ func NewHTTPError(statusCode int, body string) *HTTPError {
 		StatusCode: statusCode,
 		Body:       body,
 	}
-}
-
-// IsRetryable returns true if the HTTP error is retryable
-func (e *HTTPError) IsRetryable() bool {
-	switch e.StatusCode {
-	case http.StatusTooManyRequests,
-		http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout:
-		return true
-	default:
-		return false
-	}
-}
-
-// ValidationError represents a validation error
-type ValidationError struct {
-	Field   string
-	Message string
-}
-
-// Error implements the error interface
-func (e *ValidationError) Error() string {
-	if e.Field != "" {
-		return fmt.Sprintf("validation error in field %s: %s", e.Field, e.Message)
-	}
-	return fmt.Sprintf("validation error: %s", e.Message)
-}
-
-// ConfigError represents a configuration error
-type ConfigError struct {
-	Param   string
-	Message string
-}
-
-// Error implements the error interface
-func (e *ConfigError) Error() string {
-	return fmt.Sprintf("config error for %s: %s", e.Param, e.Message)
-}
-
-// SessionError represents a session-related error
-type SessionError struct {
-	Path    string
-	Op      string
-	Message string
-	Err     error
-}
-
-// Error implements the error interface
-func (e *SessionError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("session error at %s during %s: %s: %v", e.Path, e.Op, e.Message, e.Err)
-	}
-	return fmt.Sprintf("session error at %s during %s: %s", e.Path, e.Op, e.Message)
-}
-
-// Unwrap returns the underlying error
-func (e *SessionError) Unwrap() error {
-	return e.Err
-}
-
-// ProxyError represents a proxy-related error
-type ProxyError struct {
-	Provider string
-	Op       string
-	Message  string
-	Err      error
-}
-
-// Error implements the error interface
-func (e *ProxyError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("proxy error for %s during %s: %s: %v", e.Provider, e.Op, e.Message, e.Err)
-	}
-	return fmt.Sprintf("proxy error for %s during %s: %s", e.Provider, e.Op, e.Message)
-}
-
-// Unwrap returns the underlying error
-func (e *ProxyError) Unwrap() error {
-	return e.Err
 }
 
 // ToolErrorExplanation contains the human-readable explanation of a tool error
