@@ -47,6 +47,10 @@ const (
 	minPingInterval = 100 * time.Millisecond
 	// maxPingInterval is the maximum allowed ping interval to prevent timeouts
 	maxPingInterval = 60 * time.Second
+	// noProviderRequestTimeout disables http.Client's total request deadline.
+	// Provider requests still end on context cancellation, transport errors, or
+	// provider-side connection close. This avoids cutting off long streams.
+	noProviderRequestTimeout time.Duration = 0
 )
 
 // Server represents the API proxy server.
@@ -82,7 +86,7 @@ func NewServer(config *Config) (http.Handler, error) {
 		config:                config,
 		endpoints:             endpoints,
 		mapper:                mapper,
-		client:                retry.NewClientWithProviderDefaults(10*time.Minute, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
+		client:                retry.NewClientWithProviderDefaults(noProviderRequestTimeout, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger),
 		responsesState:        newResponsesState(config.SessionsDir),
 		responsesModelAliases: make(map[string]string),
 		backgroundCancel:      make(map[string]context.CancelFunc),

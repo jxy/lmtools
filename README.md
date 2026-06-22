@@ -249,6 +249,11 @@ upstream streaming request returns HTTP 200, `apiproxy` sends `event: ping`
 keepalives when no downstream SSE event has been written for the ping interval
 (15 seconds by default).
 
+`apiproxy` does not impose an absolute timeout on outbound provider requests;
+requests still end when the client disconnects, the request context is
+cancelled, the provider closes the connection, or an external proxy/client
+timeout fires.
+
 OpenAI-compatible:
 
 - `POST /v1/chat/completions`
