@@ -232,13 +232,24 @@ func forwardSSERecords(ctx context.Context, w http.ResponseWriter, reader io.Rea
 	}
 	return consumeSSERecords(reader, func(record sseRecord) error {
 		payload := record.withData(transformData(record.data()))
-		logWireBytes(ctx, "WIRE CLIENT STREAM", []byte(payload))
+		logClientStreamBytesIfUnhandled(ctx, w, []byte(payload))
 		if _, err := io.WriteString(w, payload); err != nil {
 			return err
 		}
 		flusher.Flush()
 		return nil
 	})
+}
+
+type clientStreamWireLogger interface {
+	logsClientStreamWire() bool
+}
+
+func logClientStreamBytesIfUnhandled(ctx context.Context, w http.ResponseWriter, payload []byte) {
+	if streamLogger, ok := w.(clientStreamWireLogger); ok && streamLogger.logsClientStreamWire() {
+		return
+	}
+	logWireBytes(ctx, "WIRE CLIENT STREAM", payload)
 }
 
 // passthroughErrorResponse writes an error response directly to the client.

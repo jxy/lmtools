@@ -225,6 +225,14 @@ func TestClientSSEHeadersAndStreamLoggedWithoutDuplicateSemanticClientLog(t *tes
 	if strings.Contains(logs, "→ CLIENT:") {
 		t.Fatalf("duplicate semantic client stream log still present\nlogs:\n%s", logs)
 	}
+	if got := strings.Count(logs, "WIRE CLIENT STREAM"); got != 1 {
+		t.Fatalf("client stream wire log count = %d, want 1\nlogs:\n%s", got, logs)
+	}
+	assertLogOrder(t, logs,
+		"Client stream started",
+		"WIRE CLIENT RESPONSE HEADERS",
+		"WIRE CLIENT STREAM",
+	)
 }
 
 func TestLocalOpenAIErrorLogsClientResponseBody(t *testing.T) {
@@ -307,5 +315,20 @@ func TestClientResponseHeaderWireLoggingSkippedOutsideDebug(t *testing.T) {
 	logs := readAllLogs(t, logDir)
 	if strings.Contains(logs, "WIRE CLIENT RESPONSE HEADERS") || strings.Contains(logs, "hidden") {
 		t.Fatalf("client response header log should not be emitted outside debug mode\nlogs:\n%s", logs)
+	}
+}
+
+func assertLogOrder(t *testing.T, logs string, labels ...string) {
+	t.Helper()
+	lastIndex := -1
+	for _, label := range labels {
+		index := strings.Index(logs, label)
+		if index < 0 {
+			t.Fatalf("logs missing %q\nlogs:\n%s", label, logs)
+		}
+		if index <= lastIndex {
+			t.Fatalf("log %q was not after previous log\nlogs:\n%s", label, logs)
+		}
+		lastIndex = index
 	}
 }

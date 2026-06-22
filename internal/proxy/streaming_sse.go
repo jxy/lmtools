@@ -48,7 +48,7 @@ func (s *SSEWriter) WriteRaw(payload string) error {
 	default:
 	}
 
-	logWireBytes(s.ctx, "WIRE CLIENT STREAM", []byte(payload))
+	logClientStreamBytesIfUnhandled(s.ctx, s.w, []byte(payload))
 	if _, err := io.WriteString(s.w, payload); err != nil {
 		return err
 	}

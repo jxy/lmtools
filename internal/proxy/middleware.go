@@ -89,6 +89,7 @@ type proxyResponseWriter struct {
 
 func (rw *proxyResponseWriter) WriteHeader(code int) {
 	if !rw.written {
+		rw.detectStream()
 		if rw.request != nil {
 			logWireHTTPClientResponseHeaders(rw.request.Context(), "WIRE CLIENT RESPONSE HEADERS", code, rw.Header())
 		}
@@ -103,15 +104,8 @@ func (rw *proxyResponseWriter) Write(b []byte) (int, error) {
 		rw.WriteHeader(http.StatusOK)
 	}
 
-	if !rw.streamDetected {
-		if strings.HasPrefix(rw.Header().Get("Content-Type"), "text/event-stream") {
-			rw.streamDetected = true
-			rw.logFirstSSEStream()
-			// Disable write timeout for streaming
-			if rc := http.NewResponseController(rw.ResponseWriter); rc != nil {
-				_ = rc.SetWriteDeadline(time.Time{})
-			}
-		}
+	if rw.streamDetected {
+		logWireBytes(rw.request.Context(), "WIRE CLIENT STREAM", b)
 	}
 
 	n, err := rw.ResponseWriter.Write(b)
@@ -127,6 +121,22 @@ func (rw *proxyResponseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (rw *proxyResponseWriter) detectStream() {
+	if rw.streamDetected || !strings.HasPrefix(rw.Header().Get("Content-Type"), "text/event-stream") {
+		return
+	}
+	rw.streamDetected = true
+	rw.logFirstSSEStream()
+	// Disable write timeout for streaming.
+	if rc := http.NewResponseController(rw.ResponseWriter); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+}
+
+func (rw *proxyResponseWriter) logsClientStreamWire() bool {
+	return true
 }
 
 func (rw *proxyResponseWriter) logFirstSSEStream() {
