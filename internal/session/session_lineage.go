@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"lmtools/internal/constants"
-	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
 	"os"
@@ -60,98 +59,17 @@ func GetLineage(sessionPath string) ([]Message, error) {
 }
 
 func GetLineageWithManager(manager *Manager, sessionPath string) ([]Message, error) {
-	if manager == nil {
-		manager = DefaultManager()
+	// The lineage walk (branch-point resolution across sibling directories) lives
+	// in lineageMessageRefsWithManager; this is the same lineage without the
+	// per-message source paths.
+	refs, err := lineageMessageRefsWithManager(manager, sessionPath)
+	if err != nil {
+		return nil, err
 	}
-	sessionPath = manager.ResolveSessionPath(sessionPath)
-
-	// Split the path into "root dir" and the list of sibling-components that
-	// were traversed to arrive at sessionPath.
-	rootDir, components := manager.ParseSessionPath(sessionPath)
-
-	// Helper that loads messages in a dir and returns them sorted.
-	load := func(dir string) ([]Message, error) {
-		msgs, err := loadMessagesInDir(dir)
-		if err != nil {
-			return nil, errors.WrapError("load messages in "+dir, err)
-		}
-		return msgs, nil
+	lineage := make([]Message, 0, len(refs))
+	for _, ref := range refs {
+		lineage = append(lineage, ref.message)
 	}
-
-	var lineage []Message
-
-	// Track the last assistant seen along the path and whether it has already
-	// been appended to the lineage.
-	var lastAssistant *Message
-	assistantAlreadyInLineage := false
-
-	dir := rootDir
-
-	for i := 0; ; i++ {
-		msgs, err := load(dir)
-		if err != nil {
-			return nil, err
-		}
-
-		// Final directory: include everything and stop.
-		if i == len(components) {
-			lineage = append(lineage, msgs...)
-			break
-		}
-
-		// We are about to step into a sibling directory. Find the branch point.
-		comp := components[i]
-		_, branchMsgID, _ := IsSiblingDir(comp)
-
-		branchIdx := -1
-		for j := range msgs {
-			if msgs[j].ID == branchMsgID {
-				branchIdx = j
-				break
-			}
-		}
-		if branchIdx == -1 {
-			return nil, errors.WrapError("find branch point", fmt.Errorf("branch point %s not found in %s", branchMsgID, dir))
-		}
-
-		branchMsg := msgs[branchIdx]
-
-		switch branchMsg.Role {
-		case core.RoleAssistant:
-			// Regenerating an assistant: keep everything before it.
-			lineage = append(lineage, msgs[:branchIdx]...)
-			lastAssistant = &branchMsg
-			assistantAlreadyInLineage = false
-
-		case core.RoleUser:
-			// Alternative user input. Keep everything up to and including the
-			// previous assistant, if there is one.
-			prevAssistIdx := -1
-			for j := branchIdx - 1; j >= 0; j-- {
-				if msgs[j].Role == core.RoleAssistant {
-					prevAssistIdx = j
-					break
-				}
-			}
-
-			if prevAssistIdx != -1 {
-				lineage = append(lineage, msgs[:prevAssistIdx+1]...)
-				lastAssistant = &msgs[prevAssistIdx]
-				assistantAlreadyInLineage = true
-			} else {
-				if lastAssistant != nil && !assistantAlreadyInLineage {
-					lineage = append(lineage, *lastAssistant)
-					assistantAlreadyInLineage = true
-				}
-			}
-
-		default:
-			return nil, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", branchMsg.Role, branchMsg.ID))
-		}
-
-		dir = filepath.Join(dir, comp)
-	}
-
 	return lineage, nil
 }
 

@@ -80,7 +80,11 @@ func NewClient(timeout time.Duration, logger Logger) *Client {
 // NewClientWithRetries creates a new retryable HTTP client with custom retry count.
 // A maxRetries value of 0 is explicit and means one attempt total.
 func NewClientWithRetries(timeout time.Duration, maxRetries int, logger Logger) *Client {
-	return NewClientWithOptions(timeout, maxRetries, logger, nil)
+	return newClient(clientOptions{
+		timeout:    timeout,
+		maxRetries: maxRetries,
+		logger:     logger,
+	})
 }
 
 // NewClientWithProviderDefaults creates a new retryable HTTP client with full configuration options
@@ -89,17 +93,6 @@ func NewClientWithProviderDefaults(timeout time.Duration, logger Logger, loggerF
 	return newClient(clientOptions{
 		timeout:           timeout,
 		useDefaultRetries: true,
-		logger:            logger,
-		loggerFromContext: loggerFromContext,
-	})
-}
-
-// NewClientWithOptions creates a new retryable HTTP client with full configuration options.
-// A maxRetries value of 0 is explicit and means one attempt total.
-func NewClientWithOptions(timeout time.Duration, maxRetries int, logger Logger, loggerFromContext func(context.Context) Logger) *Client {
-	return newClient(clientOptions{
-		timeout:           timeout,
-		maxRetries:        maxRetries,
 		logger:            logger,
 		loggerFromContext: loggerFromContext,
 	})

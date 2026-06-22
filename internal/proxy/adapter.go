@@ -347,13 +347,11 @@ func typedMessageTextBlocks(blocks []core.Block) string {
 	return strings.Join(parts, "\n")
 }
 
+// cloneStringInterfaceMap is a shallow clone that maps both nil and empty input
+// to nil. It shares the copy loop with cloneMapInterface (which preserves empty).
 func cloneStringInterfaceMap(input map[string]interface{}) map[string]interface{} {
 	if len(input) == 0 {
 		return nil
 	}
-	output := make(map[string]interface{}, len(input))
-	for key, value := range input {
-		output[key] = value
-	}
-	return output
+	return cloneMapInterface(input)
 }

@@ -93,13 +93,19 @@ func (s *Server) forwardToArgoOpenAI(ctx context.Context, anthReq *AnthropicRequ
 	return &openAIResp, nil
 }
 
+// maxTokenRetryAttemptValues returns the escalating max-token values tried when a
+// provider rejects a request for an insufficient output-token limit.
+func maxTokenRetryAttemptValues(base int) []int {
+	return []int{base, base + 256, base + 512, base + 1024}
+}
+
 func (s *Server) doOpenAICompatibleJSONWithMaxTokenRetries(ctx context.Context, url string, openAIReq *OpenAIRequest, configure func(*http.Request), respBody interface{}, provider, requestName string) error {
 	fieldName, baseValue, ok := openAIChatTokenLimit(openAIReq)
 	if !ok {
 		return s.doJSON(ctx, url, openAIReq, configure, respBody, provider, requestName)
 	}
 
-	attemptValues := []int{baseValue, baseValue + 256, baseValue + 512, baseValue + 1024}
+	attemptValues := maxTokenRetryAttemptValues(baseValue)
 	var firstBadRequestBody []byte
 
 	for attempt, tokenLimit := range attemptValues {

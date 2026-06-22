@@ -158,7 +158,7 @@ func (s *Server) sendOpenAICompatibleRequestOnce(ctx context.Context, url, apiKe
 
 func (s *Server) sendOpenAICompatibleRequestWithMaxCompletionTokenRetries(ctx context.Context, url, apiKey, requestName, provider string, openAIReq *OpenAIRequest, extraHeaders map[string]string) (*http.Response, error) {
 	baseMaxCompletionTokens := *openAIReq.MaxCompletionTokens
-	attemptValues := []int{baseMaxCompletionTokens, baseMaxCompletionTokens + 256, baseMaxCompletionTokens + 512, baseMaxCompletionTokens + 1024}
+	attemptValues := maxTokenRetryAttemptValues(baseMaxCompletionTokens)
 	var firstBadRequest *http.Response
 	var firstBadRequestBody []byte
 

@@ -91,16 +91,6 @@ func modelProviderCapabilityFor(provider string) (modelProviderCapability, bool)
 	}
 }
 
-func (capability modelProviderCapability) displayName() string {
-	if info, ok := providers.InfoFor(capability.Provider); ok {
-		return info.DisplayName
-	}
-	if capability.Provider != "" {
-		return capability.Provider
-	}
-	return "unknown"
-}
-
 // handleModelsNonOK centralizes error handling for non-200 status codes from models endpoints
 // Uses centralized error helpers for consistency with streaming error handling
 func (s *Server) handleModelsNonOK(ctx context.Context, provider string, status int, body []byte) error {
@@ -181,7 +171,7 @@ func (s *Server) fetchModelsWithCapability(ctx context.Context, capability model
 	url := req.URL.String()
 
 	sanitizedURL := sanitizeURLForLogging(url)
-	log.Debugf("Fetching %s models from: %s", capability.displayName(), sanitizedURL)
+	log.Debugf("Fetching %s models from: %s", providers.DisplayName(capability.Provider), sanitizedURL)
 
 	prepareRequest := func(pageReq *http.Request) {
 		pageReq.Header = req.Header.Clone()
@@ -208,7 +198,7 @@ func (s *Server) fetchSingleModelPage(ctx context.Context, capability modelProvi
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, s.handleModelsNonOK(ctx, capability.displayName(), statusCode, data)
+		return nil, s.handleModelsNonOK(ctx, providers.DisplayName(capability.Provider), statusCode, data)
 	}
 
 	return capability.ParseModels(s, ctx, data)
@@ -233,7 +223,7 @@ func (s *Server) fetchAnthropicModelPages(ctx context.Context, capability modelP
 			return nil, err
 		}
 		if statusCode != http.StatusOK {
-			return nil, s.handleModelsNonOK(ctx, capability.displayName(), statusCode, data)
+			return nil, s.handleModelsNonOK(ctx, providers.DisplayName(capability.Provider), statusCode, data)
 		}
 
 		models, err := capability.ParseModels(s, ctx, data)
@@ -278,7 +268,7 @@ func (s *Server) fetchGoogleModelPages(ctx context.Context, capability modelProv
 			return nil, err
 		}
 		if statusCode != http.StatusOK {
-			return nil, s.handleModelsNonOK(ctx, capability.displayName(), statusCode, data)
+			return nil, s.handleModelsNonOK(ctx, providers.DisplayName(capability.Provider), statusCode, data)
 		}
 
 		models, err := capability.ParseModels(s, ctx, data)

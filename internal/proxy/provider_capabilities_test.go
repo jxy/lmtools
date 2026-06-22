@@ -18,9 +18,6 @@ func TestModelProviderCapabilitiesComplete(t *testing.T) {
 			if capability.Provider != provider {
 				t.Fatalf("capability provider = %q, want %q", capability.Provider, provider)
 			}
-			if capability.displayName() != providers.DisplayName(provider) {
-				t.Fatalf("displayName() = %q, want %q", capability.displayName(), providers.DisplayName(provider))
-			}
 			if providers.SupportsModelsEndpoint(provider) && capability.ParseModels == nil {
 				t.Fatal("ParseModels must be set when models endpoint is supported")
 			}
