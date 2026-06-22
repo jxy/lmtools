@@ -332,75 +332,68 @@ func TestTrailingSlashAlwaysPresent(t *testing.T) {
 // TestNewArgoEndpoints tests shared Argo endpoint normalization directly.
 func TestNewArgoEndpoints(t *testing.T) {
 	tests := []struct {
-		name         string
-		base         string
-		wantBaseAPI  string
-		wantResource string
-		wantChat     string
-		wantStream   string
-		wantEmbed    string
-		wantModels   string
-		wantErr      bool
+		name       string
+		base       string
+		wantBase   string
+		wantChat   string
+		wantStream string
+		wantEmbed  string
+		wantModels string
+		wantErr    bool
 	}{
 		{
-			name:         "url_with_api_v1",
-			base:         "https://api.example.com/api/v1",
-			wantBaseAPI:  "https://api.example.com/api/v1",
-			wantResource: "https://api.example.com/api/v1/resource",
-			wantChat:     "https://api.example.com/api/v1/resource/chat/",
-			wantStream:   "https://api.example.com/api/v1/resource/streamchat/",
-			wantEmbed:    "https://api.example.com/api/v1/resource/embed/",
-			wantModels:   "https://api.example.com/api/v1/models/",
+			name:       "url_with_api_v1",
+			base:       "https://api.example.com/api/v1",
+			wantBase:   "https://api.example.com/api/v1/resource",
+			wantChat:   "https://api.example.com/api/v1/resource/chat/",
+			wantStream: "https://api.example.com/api/v1/resource/streamchat/",
+			wantEmbed:  "https://api.example.com/api/v1/resource/embed/",
+			wantModels: "https://api.example.com/api/v1/models/",
 		},
 		{
-			name:         "url_without_api_v1",
-			base:         "https://api.example.com",
-			wantBaseAPI:  "https://api.example.com/api/v1",
-			wantResource: "https://api.example.com/api/v1/resource",
-			wantChat:     "https://api.example.com/api/v1/resource/chat/",
-			wantStream:   "https://api.example.com/api/v1/resource/streamchat/",
-			wantEmbed:    "https://api.example.com/api/v1/resource/embed/",
-			wantModels:   "https://api.example.com/api/v1/models/",
+			name:       "url_without_api_v1",
+			base:       "https://api.example.com",
+			wantBase:   "https://api.example.com/api/v1/resource",
+			wantChat:   "https://api.example.com/api/v1/resource/chat/",
+			wantStream: "https://api.example.com/api/v1/resource/streamchat/",
+			wantEmbed:  "https://api.example.com/api/v1/resource/embed/",
+			wantModels: "https://api.example.com/api/v1/models/",
 		},
 		{
-			name:         "url_with_nested_api_v1_path",
-			base:         "https://api.example.com/api/v1/resource/extra",
-			wantBaseAPI:  "https://api.example.com/api/v1",
-			wantResource: "https://api.example.com/api/v1/resource",
-			wantChat:     "https://api.example.com/api/v1/resource/chat/",
-			wantStream:   "https://api.example.com/api/v1/resource/streamchat/",
-			wantEmbed:    "https://api.example.com/api/v1/resource/embed/",
-			wantModels:   "https://api.example.com/api/v1/models/",
+			name:       "url_with_nested_api_v1_path",
+			base:       "https://api.example.com/api/v1/resource/extra",
+			wantBase:   "https://api.example.com/api/v1/resource",
+			wantChat:   "https://api.example.com/api/v1/resource/chat/",
+			wantStream: "https://api.example.com/api/v1/resource/streamchat/",
+			wantEmbed:  "https://api.example.com/api/v1/resource/embed/",
+			wantModels: "https://api.example.com/api/v1/models/",
 		},
 		{
-			name:         "url_with_trailing_slash",
-			base:         "https://api.example.com/api/v1/",
-			wantBaseAPI:  "https://api.example.com/api/v1",
-			wantResource: "https://api.example.com/api/v1/resource",
-			wantChat:     "https://api.example.com/api/v1/resource/chat/",
-			wantStream:   "https://api.example.com/api/v1/resource/streamchat/",
-			wantEmbed:    "https://api.example.com/api/v1/resource/embed/",
-			wantModels:   "https://api.example.com/api/v1/models/",
+			name:       "url_with_trailing_slash",
+			base:       "https://api.example.com/api/v1/",
+			wantBase:   "https://api.example.com/api/v1/resource",
+			wantChat:   "https://api.example.com/api/v1/resource/chat/",
+			wantStream: "https://api.example.com/api/v1/resource/streamchat/",
+			wantEmbed:  "https://api.example.com/api/v1/resource/embed/",
+			wantModels: "https://api.example.com/api/v1/models/",
 		},
 		{
-			name:         "url_with_port",
-			base:         "https://api.example.com:8443/api/v1",
-			wantBaseAPI:  "https://api.example.com:8443/api/v1",
-			wantResource: "https://api.example.com:8443/api/v1/resource",
-			wantChat:     "https://api.example.com:8443/api/v1/resource/chat/",
-			wantStream:   "https://api.example.com:8443/api/v1/resource/streamchat/",
-			wantEmbed:    "https://api.example.com:8443/api/v1/resource/embed/",
-			wantModels:   "https://api.example.com:8443/api/v1/models/",
+			name:       "url_with_port",
+			base:       "https://api.example.com:8443/api/v1",
+			wantBase:   "https://api.example.com:8443/api/v1/resource",
+			wantChat:   "https://api.example.com:8443/api/v1/resource/chat/",
+			wantStream: "https://api.example.com:8443/api/v1/resource/streamchat/",
+			wantEmbed:  "https://api.example.com:8443/api/v1/resource/embed/",
+			wantModels: "https://api.example.com:8443/api/v1/models/",
 		},
 		{
-			name:         "http_scheme",
-			base:         "http://localhost:8080/api/v1",
-			wantBaseAPI:  "http://localhost:8080/api/v1",
-			wantResource: "http://localhost:8080/api/v1/resource",
-			wantChat:     "http://localhost:8080/api/v1/resource/chat/",
-			wantStream:   "http://localhost:8080/api/v1/resource/streamchat/",
-			wantEmbed:    "http://localhost:8080/api/v1/resource/embed/",
-			wantModels:   "http://localhost:8080/api/v1/models/",
+			name:       "http_scheme",
+			base:       "http://localhost:8080/api/v1",
+			wantBase:   "http://localhost:8080/api/v1/resource",
+			wantChat:   "http://localhost:8080/api/v1/resource/chat/",
+			wantStream: "http://localhost:8080/api/v1/resource/streamchat/",
+			wantEmbed:  "http://localhost:8080/api/v1/resource/embed/",
+			wantModels: "http://localhost:8080/api/v1/models/",
 		},
 		// Error cases
 		{
@@ -433,11 +426,8 @@ func TestNewArgoEndpoints(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if eps.BaseAPI != tt.wantBaseAPI {
-				t.Errorf("baseAPI mismatch\ngot:  %s\nwant: %s", eps.BaseAPI, tt.wantBaseAPI)
-			}
-			if eps.Resource != tt.wantResource {
-				t.Errorf("resource mismatch\ngot:  %s\nwant: %s", eps.Resource, tt.wantResource)
+			if eps.Base != tt.wantBase {
+				t.Errorf("base mismatch\ngot:  %s\nwant: %s", eps.Base, tt.wantBase)
 			}
 			if eps.Chat != tt.wantChat {
 				t.Errorf("chat mismatch\ngot:  %s\nwant: %s", eps.Chat, tt.wantChat)

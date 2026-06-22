@@ -36,10 +36,6 @@ func (s *Server) handleOpenAIResponsesLifecycle(w http.ResponseWriter, r *http.R
 
 func (s *Server) handleOpenAIResponsesInputTokens(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if r.Method != http.MethodPost {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	req, rawBody, route, ok := s.parseOpenAIResponsesUtilityRequest(w, r, "OpenAI responses input_tokens endpoint")
 	if !ok {
 		return
@@ -133,10 +129,6 @@ func estimateOpenAIResponsesInputTokens(typed TypedRequest, model string) (int, 
 
 func (s *Server) handleOpenAIResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if r.Method != http.MethodPost {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Method not allowed", "method_not_allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	req, rawBody, route, ok := s.parseOpenAIResponsesUtilityRequest(w, r, "OpenAI responses compact endpoint")
 	if !ok {
 		return

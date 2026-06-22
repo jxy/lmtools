@@ -184,12 +184,6 @@ func customToolFormatMap(value interface{}) (map[string]interface{}, bool) {
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		return typed, len(typed) > 0
-	case map[string]string:
-		out := make(map[string]interface{}, len(typed))
-		for key, val := range typed {
-			out[key] = val
-		}
-		return out, len(out) > 0
 	default:
 		return nil, false
 	}

@@ -241,12 +241,10 @@ func forwardSSERecords(ctx context.Context, w http.ResponseWriter, reader io.Rea
 	})
 }
 
-type clientStreamWireLogger interface {
-	logsClientStreamWire() bool
-}
-
 func logClientStreamBytesIfUnhandled(ctx context.Context, w http.ResponseWriter, payload []byte) {
-	if streamLogger, ok := w.(clientStreamWireLogger); ok && streamLogger.logsClientStreamWire() {
+	// proxyResponseWriter already logs WIRE CLIENT STREAM in its own Write,
+	// so skip here to avoid double-logging.
+	if _, ok := w.(*proxyResponseWriter); ok {
 		return
 	}
 	logWireBytes(ctx, "WIRE CLIENT STREAM", payload)

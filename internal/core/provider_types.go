@@ -44,20 +44,6 @@ func (c OpenAIContentUnion) MarshalJSON() ([]byte, error) {
 	return nil, fmt.Errorf("OpenAIContentUnion must not be marshaled directly; use MarshalOpenAIMessagesForRequest")
 }
 
-// ValidateForMarshal ensures only one field is set (Text or Contents, not both)
-func (c *OpenAIContentUnion) ValidateForMarshal() error {
-	hasText := c.Text != nil && *c.Text != ""
-	hasContents := len(c.Contents) > 0
-	if hasText && hasContents {
-		return fmt.Errorf("invalid OpenAIContentUnion: both Text and Contents are set")
-	}
-	if !hasText && !hasContents {
-		// Both empty is valid (represents no content)
-		return nil
-	}
-	return nil
-}
-
 // UnmarshalJSON implements custom JSON unmarshaling from string or array
 // This is needed for parsing provider responses and test fixtures
 func (c *OpenAIContentUnion) UnmarshalJSON(data []byte) error {
@@ -200,20 +186,6 @@ type AnthropicContentUnion struct {
 // For request building, use MarshalAnthropicMessagesForRequest.
 func (c AnthropicContentUnion) MarshalJSON() ([]byte, error) {
 	return nil, fmt.Errorf("AnthropicContentUnion must not be marshaled directly; use MarshalAnthropicMessagesForRequest")
-}
-
-// ValidateForMarshal ensures only one field is set (Text or Contents, not both)
-func (c *AnthropicContentUnion) ValidateForMarshal() error {
-	hasText := c.Text != nil && *c.Text != ""
-	hasContents := len(c.Contents) > 0
-	if hasText && hasContents {
-		return fmt.Errorf("invalid AnthropicContentUnion: both Text and Contents are set")
-	}
-	if !hasText && !hasContents {
-		// Both empty is valid (represents no content)
-		return nil
-	}
-	return nil
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling from string or array

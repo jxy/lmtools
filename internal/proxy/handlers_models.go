@@ -44,21 +44,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		Data:   []ModelItem{},
 	}
 
-	// Use the fetched models
-	for _, m := range models {
-		response.Data = append(response.Data, ModelItem{
-			ID:                         m.ID,
-			Object:                     m.Object,
-			Created:                    m.Created,
-			OwnedBy:                    m.OwnedBy,
-			DisplayName:                m.DisplayName,
-			CreatedAt:                  m.CreatedAt,
-			MaxInputTokens:             m.MaxInputTokens,
-			MaxOutputTokens:            m.MaxOutputTokens,
-			SupportedGenerationMethods: append([]string(nil), m.SupportedGenerationMethods...),
-			Capabilities:               m.Capabilities,
-			Metadata:                   m.Metadata,
-		})
+	// Use the fetched models (keep the non-nil empty slice so the response
+	// always serializes "data": []).
+	if len(models) > 0 {
+		response.Data = models
 	}
 
 	log.Debugf("Models response: returning %d models", len(response.Data))

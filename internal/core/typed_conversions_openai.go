@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"log"
 	"strings"
 )
 
@@ -23,28 +22,11 @@ func AdaptCustomToolBlocksForFunctionCompatibility(messages []TypedMessage) []Ty
 			switch b := block.(type) {
 			case ToolUseBlock:
 				blocks[j] = adaptCustomToolUseBlockForFunction(b)
-			case *ToolUseBlock:
-				if b == nil {
-					blocks[j] = block
-					continue
-				}
-				adaptedBlock := adaptCustomToolUseBlockForFunction(*b)
-				blocks[j] = &adaptedBlock
 			case ToolResultBlock:
 				if b.Type == "custom" {
 					b.Type = "function"
 				}
 				blocks[j] = b
-			case *ToolResultBlock:
-				if b == nil {
-					blocks[j] = block
-					continue
-				}
-				adaptedBlock := *b
-				if adaptedBlock.Type == "custom" {
-					adaptedBlock.Type = "function"
-				}
-				blocks[j] = &adaptedBlock
 			default:
 				blocks[j] = block
 			}
@@ -236,10 +218,6 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 func MarshalOpenAIMessagesForRequest(messages []OpenAIMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
-		if err := msg.Content.ValidateForMarshal(); err != nil {
-			log.Printf("Warning: Invalid OpenAIContentUnion in message: %v", err)
-		}
-
 		msgMap := map[string]interface{}{
 			"role": msg.Role,
 		}
@@ -366,21 +344,10 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 		return union, toolCalls
 	}
 
-	if len(toolCalls) > 0 {
-		if textBuilder.Len() > 0 {
-			text := textBuilder.String()
-			union.Text = &text
-			return union, toolCalls
-		}
-		return union, toolCalls
-	}
-
 	if textBuilder.Len() > 0 {
 		text := textBuilder.String()
 		union.Text = &text
-		return union, toolCalls
 	}
-
 	return union, toolCalls
 }
 

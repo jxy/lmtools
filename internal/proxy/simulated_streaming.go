@@ -8,9 +8,9 @@ import (
 )
 
 type simulatedContentEmitter interface {
-	StartTextBlock(index int, content string) error
+	StartTextBlock(index int) error
 	WriteTextChunk(index int, chunk string) error
-	EndTextBlock(index int, content string) error
+	EndTextBlock(index int) error
 	StartToolBlock(index int, block AnthropicContentBlock) error
 	WriteToolInputChunk(index int, chunk string) error
 	EndToolBlock(index int, block AnthropicContentBlock) error
@@ -20,7 +20,7 @@ func streamSimulatedContentBlocks(ctx context.Context, content []AnthropicConten
 	for i, block := range content {
 		switch block.Type {
 		case "text":
-			if err := emitter.StartTextBlock(i, block.Text); err != nil {
+			if err := emitter.StartTextBlock(i); err != nil {
 				return err
 			}
 			if err := emitSimulatedTextChunks(ctx, block.Text, func(chunk string) error {
@@ -28,7 +28,7 @@ func streamSimulatedContentBlocks(ctx context.Context, content []AnthropicConten
 			}); err != nil {
 				return err
 			}
-			if err := emitter.EndTextBlock(i, block.Text); err != nil {
+			if err := emitter.EndTextBlock(i); err != nil {
 				return err
 			}
 
@@ -100,7 +100,7 @@ type anthropicSimulatedContentEmitter struct {
 	handler *AnthropicStreamHandler
 }
 
-func (e anthropicSimulatedContentEmitter) StartTextBlock(index int, _ string) error {
+func (e anthropicSimulatedContentEmitter) StartTextBlock(index int) error {
 	return e.handler.SendContentBlockStart(index, "text")
 }
 
@@ -108,7 +108,7 @@ func (e anthropicSimulatedContentEmitter) WriteTextChunk(_ int, chunk string) er
 	return e.handler.SendTextDelta(chunk)
 }
 
-func (e anthropicSimulatedContentEmitter) EndTextBlock(index int, _ string) error {
+func (e anthropicSimulatedContentEmitter) EndTextBlock(index int) error {
 	return e.handler.SendContentBlockStop(index)
 }
 
@@ -136,7 +136,7 @@ type openAISimulatedContentEmitter struct {
 	started bool
 }
 
-func (e *openAISimulatedContentEmitter) StartTextBlock(_ int, _ string) error {
+func (e *openAISimulatedContentEmitter) StartTextBlock(_ int) error {
 	if e.started {
 		return nil
 	}
@@ -148,7 +148,7 @@ func (e *openAISimulatedContentEmitter) WriteTextChunk(_ int, chunk string) erro
 	return e.writer.WriteContent(chunk)
 }
 
-func (e *openAISimulatedContentEmitter) EndTextBlock(_ int, _ string) error {
+func (e *openAISimulatedContentEmitter) EndTextBlock(_ int) error {
 	return nil
 }
 

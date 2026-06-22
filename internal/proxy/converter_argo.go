@@ -259,9 +259,7 @@ func rebuildEmbeddedToolCallContent(contentStr string, req *AnthropicRequest) ([
 	logger.From(context.Background()).Debugf("Argo workaround: extracted %d embedded tool calls using loose JSON parser", len(seq))
 
 	rebuilt := make([]AnthropicContentBlock, 0, len(seq)*2+1)
-	if len(seq) > 0 {
-		rebuilt = append(rebuilt, AnthropicContentBlock{Type: "text", Text: seq[0].Prefix})
-	}
+	rebuilt = append(rebuilt, AnthropicContentBlock{Type: "text", Text: seq[0].Prefix})
 
 	for i, part := range seq {
 		rebuilt = append(rebuilt, AnthropicContentBlock{

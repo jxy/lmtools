@@ -57,26 +57,18 @@ func (s *Server) decodeEndpointRequestWithDisposition(r *http.Request, dst inter
 }
 
 func decodeLenientJSON(body []byte, dst interface{}) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-
-	if err := decoder.Decode(dst); err != nil {
-		return normalizeJSONDecodeError(err)
-	}
-
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("invalid JSON in request body: unexpected trailing data")
-		}
-		return normalizeJSONDecodeError(err)
-	}
-
-	return nil
+	return decodeJSON(body, dst, false)
 }
 
 func decodeStrictJSON(body []byte, dst interface{}) error {
+	return decodeJSON(body, dst, true)
+}
+
+func decodeJSON(body []byte, dst interface{}, disallowUnknownFields bool) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	if disallowUnknownFields {
+		decoder.DisallowUnknownFields()
+	}
 
 	if err := decoder.Decode(dst); err != nil {
 		return normalizeJSONDecodeError(err)

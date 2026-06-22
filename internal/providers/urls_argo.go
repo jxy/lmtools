@@ -6,18 +6,6 @@ import (
 	"strings"
 )
 
-type ArgoEndpoints struct {
-	BaseAPI              string
-	Resource             string
-	Chat                 string
-	Stream               string
-	Embed                string
-	Models               string
-	OpenAIChat           string
-	AnthropicMessages    string
-	AnthropicCountTokens string
-}
-
 func isCustomArgoURL(argoEnv string) bool {
 	return strings.HasPrefix(argoEnv, "http://") || strings.HasPrefix(argoEnv, "https://")
 }
@@ -90,52 +78,47 @@ func argoRoot(rawBase string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-func BuildArgoEndpoints(base string) (ArgoEndpoints, error) {
+func BuildArgoEndpoints(base string) (EndpointSet, error) {
 	root, err := argoRoot(base)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 
-	baseAPI, err := buildArgoURL(root, "api/v1", false)
-	if err != nil {
-		return ArgoEndpoints{}, err
-	}
 	resource, err := buildArgoURL(root, "api/v1/resource", false)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	chat, err := buildArgoURL(root, "api/v1/resource/chat", true)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	stream, err := buildArgoURL(root, "api/v1/resource/streamchat", true)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	embed, err := buildArgoURL(root, "api/v1/resource/embed", true)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	models, err := buildArgoURL(root, "api/v1/models", true)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	openAIChat, err := buildArgoURL(root, "v1/chat/completions", false)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	anthropicMessages, err := buildArgoURL(root, "v1/messages", false)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 	anthropicCountTokens, err := buildArgoURL(root, "v1/messages/count_tokens", false)
 	if err != nil {
-		return ArgoEndpoints{}, err
+		return EndpointSet{}, err
 	}
 
-	return ArgoEndpoints{
-		BaseAPI:              baseAPI,
-		Resource:             resource,
+	return EndpointSet{
+		Base:                 resource,
 		Chat:                 chat,
 		Stream:               stream,
 		Embed:                embed,
@@ -143,23 +126,6 @@ func BuildArgoEndpoints(base string) (ArgoEndpoints, error) {
 		OpenAIChat:           openAIChat,
 		AnthropicMessages:    anthropicMessages,
 		AnthropicCountTokens: anthropicCountTokens,
-	}, nil
-}
-
-func buildNormalizedArgoEndpoints(baseURL string) (EndpointSet, error) {
-	eps, err := BuildArgoEndpoints(baseURL)
-	if err != nil {
-		return EndpointSet{}, err
-	}
-	return EndpointSet{
-		Base:                 eps.Resource,
-		Chat:                 eps.Chat,
-		Stream:               eps.Stream,
-		Embed:                eps.Embed,
-		Models:               eps.Models,
-		OpenAIChat:           eps.OpenAIChat,
-		AnthropicMessages:    eps.AnthropicMessages,
-		AnthropicCountTokens: eps.AnthropicCountTokens,
 	}, nil
 }
 
@@ -177,10 +143,8 @@ func ResolveArgoBaseURL(argoEnv string) string {
 }
 
 func resolveArgoEndpoints(providerURL, argoEnv string) (EndpointSet, error) {
-	switch {
-	case providerURL != "":
-		return buildNormalizedArgoEndpoints(providerURL)
-	default:
-		return buildNormalizedArgoEndpoints(ResolveArgoBaseURL(argoEnv))
+	if providerURL != "" {
+		return BuildArgoEndpoints(providerURL)
 	}
+	return BuildArgoEndpoints(ResolveArgoBaseURL(argoEnv))
 }

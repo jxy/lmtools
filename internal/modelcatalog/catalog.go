@@ -132,21 +132,13 @@ func ParseArgo(data []byte) ([]Item, error) {
 
 	var objectResponse ArgoModelsResponse
 	if err := json.Unmarshal(data, &objectResponse); err == nil {
-		if len(objectResponse.Data) > 0 {
-			items := make([]structuredModel, 0, len(objectResponse.Data))
-			for _, model := range objectResponse.Data {
-				items = append(items, structuredModel{
-					ID:          firstNonEmpty(model.InternalID, model.ID),
-					DisplayName: structuredDisplayName(model.ID, model.Name, model.InternalID),
-					OwnedBy:     firstNonEmpty(model.OwnedBy, constants.ProviderArgo),
-					Created:     model.Created,
-				})
-			}
-			return buildStructuredItems(created, items), nil
+		src := objectResponse.Data
+		if len(src) == 0 {
+			src = objectResponse.Models
 		}
-		if len(objectResponse.Models) > 0 {
-			items := make([]structuredModel, 0, len(objectResponse.Models))
-			for _, model := range objectResponse.Models {
+		if len(src) > 0 {
+			items := make([]structuredModel, 0, len(src))
+			for _, model := range src {
 				items = append(items, structuredModel{
 					ID:          firstNonEmpty(model.InternalID, model.ID),
 					DisplayName: structuredDisplayName(model.ID, model.Name, model.InternalID),

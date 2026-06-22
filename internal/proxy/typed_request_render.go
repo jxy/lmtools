@@ -97,11 +97,8 @@ func openAIModelUsesMaxCompletionTokens(model string) bool {
 }
 
 func openAIModelUsesDeveloperRole(model string) bool {
-	modelLower := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(modelLower, "gpt-5") ||
-		strings.HasPrefix(modelLower, "o1") ||
-		strings.HasPrefix(modelLower, "o3") ||
-		strings.HasPrefix(modelLower, "o4")
+	// Same model family that uses max_completion_tokens also uses the developer role.
+	return openAIModelUsesMaxCompletionTokens(model)
 }
 
 func TypedToAnthropicRequest(typed TypedRequest, model string) (*AnthropicRequest, error) {

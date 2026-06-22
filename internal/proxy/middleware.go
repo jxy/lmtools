@@ -135,10 +135,6 @@ func (rw *proxyResponseWriter) detectStream() {
 	}
 }
 
-func (rw *proxyResponseWriter) logsClientStreamWire() bool {
-	return true
-}
-
 func (rw *proxyResponseWriter) logFirstSSEStream() {
 	if rw.streamLogged || rw.request == nil {
 		return

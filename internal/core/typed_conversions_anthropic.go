@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"log"
 	"strings"
 )
 
@@ -307,10 +306,6 @@ func dedupeNonEmptyStrings(values []string) []string {
 func MarshalAnthropicMessagesForRequest(messages []AnthropicMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
-		if err := msg.Content.ValidateForMarshal(); err != nil {
-			log.Printf("Warning: Invalid AnthropicContentUnion in message: %v", err)
-		}
-
 		msgMap := map[string]interface{}{
 			"role": msg.Role,
 		}
