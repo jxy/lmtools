@@ -21,6 +21,7 @@ func (s *Server) parseAnthropicRequest(r *http.Request) (*AnthropicRequest, erro
 	if err := validateParsedAnthropicRequest(&req); err != nil {
 		return nil, err
 	}
+	normalizeAnthropicThinkingBlocks(r.Context(), req.Messages)
 	req.Betas = r.Header.Get("anthropic-beta")
 	return &req, nil
 }
@@ -36,6 +37,7 @@ func (s *Server) parseAnthropicTokenCountRequest(r *http.Request) (*AnthropicTok
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("messages array cannot be empty")
 	}
+	normalizeAnthropicThinkingBlocks(r.Context(), req.Messages)
 	return &req, nil
 }
 
