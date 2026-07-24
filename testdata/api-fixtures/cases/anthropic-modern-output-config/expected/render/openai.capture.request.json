@@ -33,6 +33,6 @@
       }
     }
   },
-  "reasoning_effort": "xhigh",
+  "reasoning_effort": "max",
   "service_tier": "auto"
 }

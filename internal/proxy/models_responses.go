@@ -41,6 +41,8 @@ type OpenAIResponsesText struct {
 
 type OpenAIResponsesReasoning struct {
 	Effort  string `json:"effort,omitempty"`
+	Mode    string `json:"mode,omitempty"`
+	Context string `json:"context,omitempty"`
 	Summary string `json:"summary,omitempty"`
 }
 

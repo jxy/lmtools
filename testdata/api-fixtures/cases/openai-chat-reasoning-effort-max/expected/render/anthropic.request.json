@@ -1,0 +1,13 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "content": "Solve this the hard way.",
+      "role": "user"
+    }
+  ],
+  "model": "claude-sonnet-4-5",
+  "output_config": {
+    "effort": "max"
+  }
+}

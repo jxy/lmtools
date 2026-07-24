@@ -87,6 +87,41 @@ func TestBuildOpenAIResponsesRequest(t *testing.T) {
 	}
 }
 
+func TestBuildOpenAIResponsesRequestReasoningModeAndContext(t *testing.T) {
+	cfg := RequestOptions{
+		Provider:         "openai",
+		ProviderURL:      "https://example.test/v1",
+		Model:            "gpt-5.6",
+		OpenAIResponses:  true,
+		Effort:           "max",
+		ReasoningMode:    "pro",
+		ReasoningContext: "all_turns",
+	}
+
+	_, body, err := BuildRequest(cfg, "Think hard.")
+	if err != nil {
+		t.Fatalf("BuildRequest() error = %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("request body is invalid JSON: %v", err)
+	}
+	reasoning, ok := decoded["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasoning = %#v, want object", decoded["reasoning"])
+	}
+	if reasoning["effort"] != "max" {
+		t.Fatalf("reasoning.effort = %v, want max", reasoning["effort"])
+	}
+	if reasoning["mode"] != "pro" {
+		t.Fatalf("reasoning.mode = %v, want pro", reasoning["mode"])
+	}
+	if reasoning["context"] != "all_turns" {
+		t.Fatalf("reasoning.context = %v, want all_turns", reasoning["context"])
+	}
+}
+
 func TestBuildOpenAIResponsesRequestPreservesCustomTools(t *testing.T) {
 	cfg := RequestOptions{
 		Provider:        "openai",

@@ -24,12 +24,17 @@ type TypedRequest struct {
 	Stop            []string
 	Stream          bool
 	ReasoningEffort string // for OpenAI o1 models
-	Verbosity       string
-	Thinking        *AnthropicThinking
-	OutputConfig    *AnthropicOutputConfig
-	ResponseFormat  *ResponseFormat
-	Metadata        map[string]interface{}
-	ServiceTier     string
+	// ReasoningMode and ReasoningContext are OpenAI Responses-only reasoning
+	// controls (reasoning.mode, reasoning.context). They have no equivalent on
+	// other provider request shapes and are only emitted on OpenAI Responses.
+	ReasoningMode    string
+	ReasoningContext string
+	Verbosity        string
+	Thinking         *AnthropicThinking
+	OutputConfig     *AnthropicOutputConfig
+	ResponseFormat   *ResponseFormat
+	Metadata         map[string]interface{}
+	ServiceTier      string
 }
 
 // OpenAIRequestToTyped converts an OpenAI request to TypedRequest

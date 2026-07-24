@@ -248,6 +248,12 @@ func projectTypedRequest(typed TypedRequest) map[string]interface{} {
 	if typed.ReasoningEffort != "" {
 		projected["reasoning_effort"] = typed.ReasoningEffort
 	}
+	if typed.ReasoningMode != "" {
+		projected["reasoning_mode"] = typed.ReasoningMode
+	}
+	if typed.ReasoningContext != "" {
+		projected["reasoning_context"] = typed.ReasoningContext
+	}
 	if typed.Verbosity != "" {
 		projected["verbosity"] = typed.Verbosity
 	}

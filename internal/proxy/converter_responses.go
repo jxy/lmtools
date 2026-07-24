@@ -28,6 +28,8 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 	}
 	if req.Reasoning != nil {
 		typed.ReasoningEffort = req.Reasoning.Effort
+		typed.ReasoningMode = req.Reasoning.Mode
+		typed.ReasoningContext = req.Reasoning.Context
 	}
 	if req.User != "" {
 		if typed.Metadata == nil {
@@ -564,8 +566,12 @@ func TypedToOpenAIResponsesRequest(typed TypedRequest, model string) (*OpenAIRes
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:     serviceTierForOpenAI(typed.ServiceTier),
 	}
-	if typed.ReasoningEffort != "" {
-		req.Reasoning = &OpenAIResponsesReasoning{Effort: typed.ReasoningEffort}
+	if typed.ReasoningEffort != "" || typed.ReasoningMode != "" || typed.ReasoningContext != "" {
+		req.Reasoning = &OpenAIResponsesReasoning{
+			Effort:  typed.ReasoningEffort,
+			Mode:    typed.ReasoningMode,
+			Context: typed.ReasoningContext,
+		}
 	}
 	if req.Instructions == "" {
 		req.Instructions = nil

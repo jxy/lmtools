@@ -57,6 +57,12 @@ func warnOpenAIResponsesRequestDropsForTarget(ctx context.Context, req *OpenAIRe
 	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Summary) != "" {
 		warnDroppedField(ctx, "OpenAI Responses", target, "reasoning.summary", "Responses reasoning summaries are not supported by compatibility provider paths")
 	}
+	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Mode) != "" {
+		warnDroppedField(ctx, "OpenAI Responses", target, "reasoning.mode", "reasoning.mode is an OpenAI Responses-only control with no equivalent in this compatibility path")
+	}
+	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Context) != "" {
+		warnDroppedField(ctx, "OpenAI Responses", target, "reasoning.context", "reasoning.context is an OpenAI Responses-only control with no equivalent in this compatibility path")
+	}
 	if strings.TrimSpace(req.PromptCacheKey) != "" {
 		warnDroppedField(ctx, "OpenAI Responses", target, "prompt_cache_key", "OpenAI Responses prompt cache keys have no equivalent in this compatibility path")
 	}

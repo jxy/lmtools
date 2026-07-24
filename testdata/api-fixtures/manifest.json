@@ -91,6 +91,13 @@
       ]
     },
     {
+      "id": "openai-chat-reasoning-effort-max",
+      "description": "OpenAI Chat Completions request with reasoning_effort max preserved to OpenAI and converted to Anthropic output_config.effort max",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
       "id": "openai-responses-basic-json",
       "description": "OpenAI Responses API request with instructions, reasoning effort, and JSON output",
       "kinds": [
@@ -135,6 +142,13 @@
     {
       "id": "openai-responses-tool-followup",
       "description": "OpenAI Responses API request with function call output returned to the model",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
+      "id": "openai-responses-reasoning-mode-context",
+      "description": "OpenAI Responses request with reasoning effort, mode, and context; mode/context preserved to Responses and dropped on Chat Completions",
       "kinds": [
         "request"
       ]

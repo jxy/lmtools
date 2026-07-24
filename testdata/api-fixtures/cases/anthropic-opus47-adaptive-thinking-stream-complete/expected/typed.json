@@ -14,7 +14,7 @@
   "output_config": {
     "effort": "max"
   },
-  "reasoning_effort": "xhigh",
+  "reasoning_effort": "max",
   "stream": true,
   "thinking": {
     "display": "summarized",

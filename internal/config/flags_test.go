@@ -232,6 +232,21 @@ func TestParseFlagsOutputOptionValidation(t *testing.T) {
 			wantErr: "-effort must be one of",
 		},
 		{
+			name:    "invalid reasoning mode",
+			args:    []string{"-argo-user", "alice", "-reasoning-mode", "turbo"},
+			wantErr: "-reasoning-mode must be one of",
+		},
+		{
+			name:    "invalid reasoning context",
+			args:    []string{"-argo-user", "alice", "-reasoning-context", "everything"},
+			wantErr: "-reasoning-context must be one of",
+		},
+		{
+			name:    "embed reasoning mode",
+			args:    []string{"-argo-user", "alice", "-e", "-reasoning-mode", "pro"},
+			wantErr: "only supported in chat mode",
+		},
+		{
 			name:    "embed output option",
 			args:    []string{"-argo-user", "alice", "-e", "-json"},
 			wantErr: "only supported in chat mode",

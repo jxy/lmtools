@@ -36,6 +36,8 @@ type RequestOptions struct {
 	ProviderURL         string
 	APIKeyFile          string
 	Effort              string
+	ReasoningMode       string
+	ReasoningContext    string
 	MaxTokens           int
 	JSONMode            bool
 	JSONSchema          json.RawMessage

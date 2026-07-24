@@ -1,0 +1,16 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Solve this the hard way.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "reasoning_effort": "max",
+  "stream": false
+}

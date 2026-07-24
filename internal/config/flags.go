@@ -14,18 +14,20 @@ import (
 
 type Config struct {
 	// Tool execution settings
-	MaxToolRounds   int    `json:"max_tool_rounds,omitempty"`
-	MaxToolParallel int    `json:"max_tool_parallel,omitempty"`
-	Model           string // model to use
-	Embed           bool   // whether to run in embed mode
-	StreamChat      bool   // whether to use streaming chat mode
-	OpenAIResponses bool   // whether OpenAI chat mode should use /v1/responses
-	PrintCurl       bool   // print the equivalent curl command instead of sending the request
-	Effort          string // reasoning effort hint
-	MaxTokens       int    // maximum output tokens (0 = provider default)
-	JSONMode        bool   // request JSON object output
-	JSONSchemaPath  string // path to JSON schema for structured output
-	JSONSchema      json.RawMessage
+	MaxToolRounds    int    `json:"max_tool_rounds,omitempty"`
+	MaxToolParallel  int    `json:"max_tool_parallel,omitempty"`
+	Model            string // model to use
+	Embed            bool   // whether to run in embed mode
+	StreamChat       bool   // whether to use streaming chat mode
+	OpenAIResponses  bool   // whether OpenAI chat mode should use /v1/responses
+	PrintCurl        bool   // print the equivalent curl command instead of sending the request
+	Effort           string // reasoning effort hint
+	ReasoningMode    string // OpenAI Responses reasoning.mode (standard, pro)
+	ReasoningContext string // OpenAI Responses reasoning.context (auto, current_turn, all_turns)
+	MaxTokens        int    // maximum output tokens (0 = provider default)
+	JSONMode         bool   // request JSON object output
+	JSONSchemaPath   string // path to JSON schema for structured output
+	JSONSchema       json.RawMessage
 	providerconfig.Options
 	System              string        // system prompt for chat
 	SystemExplicitlySet bool          // whether -s flag was explicitly provided
@@ -113,6 +115,8 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
+	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "OpenAI Responses reasoning mode: standard, pro (requires -openai-responses; pro is GPT-5.6 only)")
+	fs.StringVar(&cfg.ReasoningContext, "reasoning-context", "", "OpenAI Responses reasoning context: auto, current_turn, all_turns (requires -openai-responses)")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "maximum output tokens (0 uses provider default; Claude defaults to 128000 for Opus, 64000 otherwise)")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
 	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")
@@ -223,6 +227,8 @@ func (c Config) RequestOptions() core.RequestOptions {
 		ProviderURL:         c.ProviderURL,
 		APIKeyFile:          c.APIKeyFile,
 		Effort:              c.Effort,
+		ReasoningMode:       c.ReasoningMode,
+		ReasoningContext:    c.ReasoningContext,
 		MaxTokens:           c.MaxTokens,
 		JSONMode:            c.JSONMode,
 		JSONSchema:          append(json.RawMessage(nil), c.JSONSchema...),

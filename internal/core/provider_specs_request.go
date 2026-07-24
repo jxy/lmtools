@@ -60,6 +60,8 @@ func googleRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 
 func applyOutputOptionsFromConfig(payload *PreparedRequestPayload, cfg RequestOptions) {
 	payload.Effort = strings.ToLower(strings.TrimSpace(cfg.Effort))
+	payload.ReasoningMode = strings.ToLower(strings.TrimSpace(cfg.ReasoningMode))
+	payload.ReasoningContext = strings.ToLower(strings.TrimSpace(cfg.ReasoningContext))
 	payload.MaxTokens = cfg.MaxTokens
 	payload.JSONMode = cfg.JSONMode
 	if schema := cfg.GetJSONSchema(); len(schema) > 0 {
@@ -117,10 +119,8 @@ func addGoogleOutputFields(reqMap map[string]interface{}, payload PreparedReques
 
 func openAIReasoningEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
 		return strings.ToLower(strings.TrimSpace(effort))
-	case "max":
-		return "xhigh"
 	default:
 		return ""
 	}
@@ -130,10 +130,8 @@ func anthropicOutputEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
 	case "minimal", "low":
 		return "low"
-	case "medium", "high", "xhigh":
+	case "medium", "high", "xhigh", "max":
 		return strings.ToLower(strings.TrimSpace(effort))
-	case "max":
-		return "xhigh"
 	default:
 		return ""
 	}

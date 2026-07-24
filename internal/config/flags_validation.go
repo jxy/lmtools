@@ -61,8 +61,8 @@ func validateOutputFlags(cfg *Config) error {
 		return fmt.Errorf("invalid flag combination: -json and -json-schema cannot be used together")
 	}
 
-	if cfg.Embed && (cfg.Effort != "" || cfg.JSONMode || cfg.JSONSchemaPath != "") {
-		return fmt.Errorf("invalid flag combination: -effort, -json, and -json-schema are only supported in chat mode")
+	if cfg.Embed && (cfg.Effort != "" || cfg.ReasoningMode != "" || cfg.ReasoningContext != "" || cfg.JSONMode || cfg.JSONSchemaPath != "") {
+		return fmt.Errorf("invalid flag combination: -effort, -reasoning-mode, -reasoning-context, -json, and -json-schema are only supported in chat mode")
 	}
 	if cfg.OpenAIResponses && cfg.Embed {
 		return fmt.Errorf("invalid flag combination: -openai-responses is only supported in chat mode")
@@ -70,6 +70,14 @@ func validateOutputFlags(cfg *Config) error {
 
 	if cfg.Effort != "" && !isValidEffortFlag(cfg.Effort) {
 		return fmt.Errorf("-effort must be one of: none, minimal, low, medium, high, xhigh, max")
+	}
+
+	if cfg.ReasoningMode != "" && !isValidReasoningModeFlag(cfg.ReasoningMode) {
+		return fmt.Errorf("-reasoning-mode must be one of: standard, pro")
+	}
+
+	if cfg.ReasoningContext != "" && !isValidReasoningContextFlag(cfg.ReasoningContext) {
+		return fmt.Errorf("-reasoning-context must be one of: auto, current_turn, all_turns")
 	}
 
 	if cfg.JSONSchemaPath == "" {
@@ -97,6 +105,24 @@ func validateOutputFlags(cfg *Config) error {
 func isValidEffortFlag(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidReasoningModeFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "standard", "pro":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidReasoningContextFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "auto", "current_turn", "all_turns":
 		return true
 	default:
 		return false

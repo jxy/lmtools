@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Plan the migration carefully.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "reasoning_context": "all_turns",
+  "reasoning_effort": "max",
+  "reasoning_mode": "pro",
+  "stream": false
+}

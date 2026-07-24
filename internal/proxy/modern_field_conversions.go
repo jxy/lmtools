@@ -188,6 +188,8 @@ func reasoningEffortToAnthropicEffort(reasoningEffort string) string {
 		return "high"
 	case "xhigh":
 		return "xhigh"
+	case "max":
+		return "max"
 	default:
 		return ""
 	}
@@ -201,8 +203,10 @@ func anthropicEffortToOpenAIReasoningEffort(effort string) string {
 		return "medium"
 	case "high":
 		return "high"
-	case "xhigh", "max":
+	case "xhigh":
 		return "xhigh"
+	case "max":
+		return "max"
 	default:
 		return ""
 	}
@@ -332,7 +336,7 @@ func googleThinkingBudgetForEffort(effort string) *int {
 		budget = 1024
 	case "medium":
 		budget = 8192
-	case "high", "xhigh":
+	case "high", "xhigh", "max":
 		budget = 24576
 	default:
 		return nil
@@ -346,7 +350,7 @@ func googleThinkingLevelForEffort(effort string) string {
 		return "minimal"
 	case "low", "medium", "high":
 		return effort
-	case "xhigh":
+	case "xhigh", "max":
 		return "high"
 	default:
 		return ""

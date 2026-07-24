@@ -1,0 +1,11 @@
+{
+  "max_completion_tokens": 512,
+  "messages": [
+    {
+      "content": "Solve this the hard way.",
+      "role": "user"
+    }
+  ],
+  "model": "gpt-5.6",
+  "reasoning_effort": "max"
+}

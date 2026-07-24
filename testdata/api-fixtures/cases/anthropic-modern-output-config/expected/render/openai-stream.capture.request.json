@@ -33,7 +33,7 @@
       }
     }
   },
-  "reasoning_effort": "xhigh",
+  "reasoning_effort": "max",
   "stream_options": {
     "include_usage": true
   },

@@ -13,8 +13,8 @@ func TestOpenAIRequestOutputOptions(t *testing.T) {
 	}
 	payload := decodeRequestBody(t, body)
 
-	if payload["reasoning_effort"] != "xhigh" {
-		t.Fatalf("reasoning_effort = %v, want xhigh", payload["reasoning_effort"])
+	if payload["reasoning_effort"] != "max" {
+		t.Fatalf("reasoning_effort = %v, want max", payload["reasoning_effort"])
 	}
 	format, ok := payload["response_format"].(map[string]interface{})
 	if !ok || format["type"] != "json_object" {

@@ -1,0 +1,19 @@
+{
+  "id": "openai-chat-reasoning-effort-max",
+  "description": "OpenAI Chat Completions request with reasoning_effort max preserved to OpenAI and converted to Anthropic output_config.effort max",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai",
+  "models": {
+    "openai": "gpt-5.6",
+    "anthropic": "claude-sonnet-4-5"
+  },
+  "render_targets": [
+    "openai",
+    "anthropic"
+  ],
+  "capture_targets": [
+    "openai"
+  ]
+}

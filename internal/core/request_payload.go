@@ -9,16 +9,18 @@ import (
 // PreparedRequestPayload captures the provider-normalized inputs required to
 // render a provider-specific request.
 type PreparedRequestPayload struct {
-	Model      string
-	Messages   []TypedMessage
-	System     string
-	Tools      interface{}
-	ToolChoice interface{}
-	Stream     bool
-	Effort     string
-	MaxTokens  int
-	JSONMode   bool
-	JSONSchema json.RawMessage
+	Model            string
+	Messages         []TypedMessage
+	System           string
+	Tools            interface{}
+	ToolChoice       interface{}
+	Stream           bool
+	Effort           string
+	ReasoningMode    string
+	ReasoningContext string
+	MaxTokens        int
+	JSONMode         bool
+	JSONSchema       json.RawMessage
 }
 
 // PrepareRequestPayload applies provider-specific request normalization,

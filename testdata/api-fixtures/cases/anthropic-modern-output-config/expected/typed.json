@@ -36,7 +36,7 @@
       }
     }
   },
-  "reasoning_effort": "xhigh",
+  "reasoning_effort": "max",
   "response_format": {
     "type": "json_schema",
     "json_schema": {

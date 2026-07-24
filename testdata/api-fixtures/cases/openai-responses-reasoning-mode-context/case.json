@@ -1,0 +1,19 @@
+{
+  "id": "openai-responses-reasoning-mode-context",
+  "description": "OpenAI Responses request with reasoning effort, mode, and context; mode/context preserved to Responses and dropped on Chat Completions",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai-responses": "gpt-5.6",
+    "openai": "gpt-5.6"
+  },
+  "render_targets": [
+    "openai-responses",
+    "openai"
+  ],
+  "capture_targets": [
+    "openai-responses"
+  ]
+}

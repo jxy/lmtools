@@ -181,6 +181,8 @@ func run(notifier core.Notifier) error {
 	}
 	opts := cfg.RequestOptions()
 
+	warnUnusedReasoningControls(cfg, notifier)
+
 	// Initialize logging
 	logDir, err := setupLogging(cfg, notifier)
 	if err != nil {
@@ -237,6 +239,20 @@ func run(notifier core.Notifier) error {
 	}
 
 	return executeRequest(ctx, &cfg, opts, notifier, logDir, inputStr, plan)
+}
+
+// warnUnusedReasoningControls warns when reasoning.mode/context are set but the
+// effective request is not OpenAI Responses. These are OpenAI Responses-only
+// controls; on any other path they are silently omitted downstream, so surface
+// a warning rather than dropping them without notice.
+func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
+	if cfg.ReasoningMode == "" && cfg.ReasoningContext == "" {
+		return
+	}
+	if cfg.Provider == constants.ProviderOpenAI && cfg.OpenAIResponses {
+		return
+	}
+	notifier.Warnf("-reasoning-mode/-reasoning-context are OpenAI Responses-only controls; ignoring them because the request does not use -provider openai with -openai-responses")
 }
 
 func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {

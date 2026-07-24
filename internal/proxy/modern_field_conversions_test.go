@@ -224,8 +224,8 @@ func TestAnthropicToOpenAIConvertsEffortFormatMetadataAndServiceTier(t *testing.
 	if err != nil {
 		t.Fatalf("ConvertAnthropicToOpenAI() error = %v", err)
 	}
-	if got.ReasoningEffort != "xhigh" {
-		t.Fatalf("ReasoningEffort = %q, want xhigh", got.ReasoningEffort)
+	if got.ReasoningEffort != "max" {
+		t.Fatalf("ReasoningEffort = %q, want max", got.ReasoningEffort)
 	}
 	if got.ResponseFormat == nil || got.ResponseFormat.Type != "json_schema" || got.ResponseFormat.JSONSchema == nil || got.ResponseFormat.JSONSchema.Name != "response" {
 		t.Fatalf("ResponseFormat = %+v, want json_schema response", got.ResponseFormat)

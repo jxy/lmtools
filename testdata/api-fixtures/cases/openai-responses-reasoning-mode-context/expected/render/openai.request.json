@@ -1,0 +1,10 @@
+{
+  "messages": [
+    {
+      "content": "Plan the migration carefully.",
+      "role": "user"
+    }
+  ],
+  "model": "gpt-5.6",
+  "reasoning_effort": "max"
+}

@@ -134,6 +134,8 @@ Chat output:
   With `-resume -tool`, pending tool calls are represented by placeholder results.
 - `-s string`: System prompt.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+- `-reasoning-mode string`: OpenAI Responses reasoning mode: `standard` or `pro` (`pro` is GPT-5.6 only). Only applies with `-provider openai -openai-responses`; otherwise it is warned and ignored.
+- `-reasoning-context string`: OpenAI Responses reasoning context: `auto`, `current_turn`, or `all_turns`. Only applies with `-provider openai -openai-responses`; otherwise it is warned and ignored.
 - `-max-tokens int`: Maximum output tokens. `0` (the default) uses the provider default; Anthropic-wire requests (the `anthropic` provider and Argo `claude*` models) default to `128000` for Opus models and `64000` for other Claude models.
 - `-json`: Request JSON object output.
 - `-json-schema path`: Request schema-constrained JSON output.
@@ -444,9 +446,12 @@ Known limitations when `-provider` is not `openai`:
 - Custom tools are represented, but target providers may not enforce OpenAI custom-tool grammar or validation semantics.
 - Some OpenAI-only controls have no portable effect, including
   `max_tool_calls`, `parallel_tool_calls`, `include`, `truncation`,
-  `top_logprobs`, `prompt_cache_key`, and `reasoning.summary`.
-  `text.verbosity` is forwarded on OpenAI-compatible converted routes but is
-  warned and dropped for providers without an equivalent verbosity field.
+  `top_logprobs`, `prompt_cache_key`, `reasoning.summary`, `reasoning.mode`,
+  and `reasoning.context`. `reasoning.mode` and `reasoning.context` are
+  preserved on the direct OpenAI Responses path but warned and dropped on
+  converted provider paths. `text.verbosity` is forwarded on OpenAI-compatible
+  converted routes but is warned and dropped for providers without an
+  equivalent verbosity field.
 - Output images, files, audio, annotations, and logprobs are not synthesized by the converted response path.
 - Local response and conversation state lives under `~/.apiproxy/sessions` or `-sessions-dir`; it is not OpenAI-hosted state.
 - `store:false` disables local persistence for foreground converted requests, so

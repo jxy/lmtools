@@ -54,7 +54,7 @@
       }
     }
   },
-  "reasoning_effort": "xhigh",
+  "reasoning_effort": "max",
   "metadata": {
     "fixture": "anthropic-modern-output-config"
   },

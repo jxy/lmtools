@@ -52,9 +52,9 @@ func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interf
 	if payload.ToolChoice != nil {
 		reqMap["tool_choice"] = openAIResponsesToolChoice(payload.ToolChoice)
 	}
-	if effort := openAIReasoningEffort(payload.Effort); effort != "" {
-		reqMap["reasoning"] = map[string]interface{}{"effort": effort}
-		if payload.Tools != nil {
+	if reasoning := openAIResponsesReasoningConfig(payload); reasoning != nil {
+		reqMap["reasoning"] = reasoning
+		if _, hasEffort := reasoning["effort"]; hasEffort && payload.Tools != nil {
 			reqMap["include"] = []string{"reasoning.encrypted_content"}
 		}
 	}
@@ -62,6 +62,44 @@ func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interf
 		reqMap["text"] = text
 	}
 	return reqMap
+}
+
+// openAIResponsesReasoningConfig builds the OpenAI Responses `reasoning` object
+// from effort, mode, and context. reasoning.mode and reasoning.context are
+// OpenAI Responses-only controls and only apply on this path.
+func openAIResponsesReasoningConfig(payload PreparedRequestPayload) map[string]interface{} {
+	reasoning := map[string]interface{}{}
+	if effort := openAIReasoningEffort(payload.Effort); effort != "" {
+		reasoning["effort"] = effort
+	}
+	if mode := openAIReasoningMode(payload.ReasoningMode); mode != "" {
+		reasoning["mode"] = mode
+	}
+	if reasoningContext := openAIReasoningContext(payload.ReasoningContext); reasoningContext != "" {
+		reasoning["context"] = reasoningContext
+	}
+	if len(reasoning) == 0 {
+		return nil
+	}
+	return reasoning
+}
+
+func openAIReasoningMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "standard", "pro":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return ""
+	}
+}
+
+func openAIReasoningContext(reasoningContext string) string {
+	switch strings.ToLower(strings.TrimSpace(reasoningContext)) {
+	case "auto", "current_turn", "all_turns":
+		return strings.ToLower(strings.TrimSpace(reasoningContext))
+	default:
+		return ""
+	}
 }
 
 type OpenAIResponsesInputProjectionItem struct {

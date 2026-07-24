@@ -108,6 +108,48 @@ func TestOpenAIResponsesRequestToTypedAllowsIncludeForConvertedProviders(t *test
 	}
 }
 
+func TestOpenAIResponsesReasoningModeContextRoundTrip(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model:     "gpt-5.6",
+		Input:     "hi",
+		Reasoning: &OpenAIResponsesReasoning{Effort: "max", Mode: "pro", Context: "all_turns"},
+	}
+
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if typed.ReasoningEffort != "max" || typed.ReasoningMode != "pro" || typed.ReasoningContext != "all_turns" {
+		t.Fatalf("typed reasoning = effort:%q mode:%q context:%q, want max/pro/all_turns",
+			typed.ReasoningEffort, typed.ReasoningMode, typed.ReasoningContext)
+	}
+
+	back, err := TypedToOpenAIResponsesRequest(typed, "gpt-5.6")
+	if err != nil {
+		t.Fatalf("TypedToOpenAIResponsesRequest() error = %v", err)
+	}
+	if back.Reasoning == nil || back.Reasoning.Effort != "max" || back.Reasoning.Mode != "pro" || back.Reasoning.Context != "all_turns" {
+		t.Fatalf("rendered reasoning = %#v, want effort:max mode:pro context:all_turns", back.Reasoning)
+	}
+}
+
+func TestOpenAIResponsesReasoningModeContextWarnsForConvertedTarget(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model:     "claude-test",
+		Input:     "hi",
+		Reasoning: &OpenAIResponsesReasoning{Effort: "high", Mode: "pro", Context: "all_turns"},
+	}
+
+	logs := captureWarnLogs(t, func() {
+		warnOpenAIResponsesRequestDropsForTarget(context.Background(), req, constants.ProviderAnthropic, "claude-test", false)
+	})
+	for _, want := range []string{`field "reasoning.mode"`, `field "reasoning.context"`} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("warning %q not found in logs:\n%s", want, logs)
+		}
+	}
+}
+
 func TestOpenAIResponsesRequestToTypedWarnsAndDropsUnsupportedInputItem(t *testing.T) {
 	req := &OpenAIResponsesRequest{
 		Model: "gpt-5.4-nano",
