@@ -199,6 +199,7 @@ func TestArgoOpenAIResponseFieldsDoNotWarn(t *testing.T) {
 			"prompt_filter_results":[{"prompt_index":0,"content_filter_results":{}}],
 			"service_tier":"default",
 			"system_fingerprint":null,
+			"moderation":null,
 			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
 		}`), OpenAIResponse{}, "Argo OpenAI response")
 	})
@@ -231,6 +232,7 @@ func TestArgoOpenAIStreamFieldsDoNotWarn(t *testing.T) {
 			"prompt_filter_results":[{"prompt_index":0,"content_filter_results":{}}],
 			"service_tier":"default",
 			"system_fingerprint":null,
+			"moderation":null,
 			"usage":null,
 			"obfuscation":"abc"
 		}`), OpenAIStreamChunk{}, "Argo OpenAI stream chunk")

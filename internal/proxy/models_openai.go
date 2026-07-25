@@ -204,6 +204,7 @@ type OpenAIResponse struct {
 	ServiceTier         string         `json:"service_tier,omitempty"`
 	SystemFingerprint   string         `json:"system_fingerprint,omitempty"`
 	PromptFilterResults interface{}    `json:"prompt_filter_results,omitempty"`
+	Moderation          interface{}    `json:"moderation,omitempty"`
 }
 
 // OpenAIChoice represents a choice in the response.
@@ -249,6 +250,7 @@ type OpenAIStreamChunk struct {
 	SystemFingerprint   string              `json:"system_fingerprint,omitempty"`
 	Obfuscation         string              `json:"obfuscation,omitempty"`
 	PromptFilterResults interface{}         `json:"prompt_filter_results,omitempty"`
+	Moderation          interface{}         `json:"moderation,omitempty"`
 	// Always include usage key; nil encodes as null to match OpenAI include_usage behavior.
 	Usage *OpenAIUsage `json:"usage"`
 }
