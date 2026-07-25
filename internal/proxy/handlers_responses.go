@@ -40,11 +40,12 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
+	loggedTools := responsesRequestTools(responsesReq)
 	info := endpointRequestInfo{
 		Model:     responsesReq.Model,
 		Stream:    responsesReq.Stream,
-		ToolCount: len(responsesReq.Tools),
-		Tools:     responsesReq.Tools,
+		ToolCount: len(loggedTools),
+		Tools:     loggedTools,
 	}
 	logEndpointRequest(ctx, info)
 

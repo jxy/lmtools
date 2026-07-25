@@ -1193,3 +1193,170 @@ func TestRewriteResponsesBodyModelPreservesUnknownFields(t *testing.T) {
 		t.Fatalf("text metadata was not preserved: %+v", got["text"])
 	}
 }
+
+func TestOpenAIResponsesRequestToTypedExtractsAdditionalTools(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: []interface{}{
+			map[string]interface{}{
+				"type": "additional_tools",
+				"role": "developer",
+				"tools": []interface{}{
+					map[string]interface{}{
+						"type":        "custom",
+						"name":        "exec",
+						"description": "Run a shell command.",
+						"format": map[string]interface{}{
+							"type":       "grammar",
+							"syntax":     "lark",
+							"definition": "start: /.+/",
+						},
+					},
+					map[string]interface{}{
+						"type":        "function",
+						"name":        "wait",
+						"description": "Wait for a cell.",
+						"parameters": map[string]interface{}{
+							"type":                 "object",
+							"additionalProperties": false,
+							"properties": map[string]interface{}{
+								"cell_id": map[string]interface{}{"type": "string"},
+							},
+							"required": []interface{}{"cell_id"},
+						},
+					},
+					map[string]interface{}{
+						"type":        "namespace",
+						"name":        "collaboration",
+						"description": "Sub-agent tools.",
+						"tools": []interface{}{
+							map[string]interface{}{
+								"type":        "function",
+								"name":        "spawn_agent",
+								"description": "Spawn a sub-agent.",
+								"parameters": map[string]interface{}{
+									"type":                 "object",
+									"additionalProperties": false,
+								},
+							},
+						},
+					},
+				},
+			},
+			map[string]interface{}{
+				"type": "message",
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "input_text", "text": "Hello, this is a test"},
+				},
+			},
+		},
+	}
+
+	var typed TypedRequest
+	var err error
+	logs := captureWarnLogs(t, func() {
+		typed, err = OpenAIResponsesRequestToTyped(context.Background(), req)
+	})
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if strings.Contains(logs, `Dropping unsupported Responses input item type "additional_tools"`) {
+		t.Fatalf("additional_tools item was dropped instead of harvested:\n%s", logs)
+	}
+	if len(typed.Messages) != 1 || typed.Messages[0].Role != string(core.RoleUser) {
+		t.Fatalf("messages = %#v, want one user message", typed.Messages)
+	}
+	if len(typed.Tools) != 3 {
+		t.Fatalf("typed tools = %#v, want 3", typed.Tools)
+	}
+	if typed.Tools[0].Type != "custom" || typed.Tools[0].Name != "exec" {
+		t.Fatalf("tool[0] = %#v, want custom exec", typed.Tools[0])
+	}
+	if typed.Tools[1].Type != "function" || typed.Tools[1].Name != "wait" {
+		t.Fatalf("tool[1] = %#v, want function wait", typed.Tools[1])
+	}
+	if typed.Tools[2].Name != "collaboration__spawn_agent" || typed.Tools[2].Namespace != "collaboration" || typed.Tools[2].OriginalName != "spawn_agent" {
+		t.Fatalf("tool[2] = %#v, want flattened collaboration spawn_agent", typed.Tools[2])
+	}
+}
+
+func TestOpenAIResponsesRequestToTypedMergesTopLevelAndAdditionalTools(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: []interface{}{
+			map[string]interface{}{
+				"type": "additional_tools",
+				"role": "developer",
+				"tools": []interface{}{
+					map[string]interface{}{
+						"type":        "function",
+						"name":        "inline_tool",
+						"description": "Inline tool.",
+						"parameters":  map[string]interface{}{"type": "object"},
+					},
+				},
+			},
+			map[string]interface{}{
+				"type":    "message",
+				"role":    "user",
+				"content": []interface{}{map[string]interface{}{"type": "input_text", "text": "hi"}},
+			},
+		},
+		Tools: []map[string]interface{}{{
+			"type":        "function",
+			"name":        "top_level_tool",
+			"description": "Top level tool.",
+			"parameters":  map[string]interface{}{"type": "object"},
+		}},
+	}
+
+	typed, err := OpenAIResponsesRequestToTyped(context.Background(), req)
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if len(typed.Tools) != 2 {
+		t.Fatalf("typed tools = %#v, want 2", typed.Tools)
+	}
+	if typed.Tools[0].Name != "top_level_tool" || typed.Tools[1].Name != "inline_tool" {
+		t.Fatalf("tool order = [%q, %q], want [top_level_tool, inline_tool]", typed.Tools[0].Name, typed.Tools[1].Name)
+	}
+}
+
+func TestOpenAIResponsesRequestToTypedWarnsAndDropsHostedToolInAdditionalTools(t *testing.T) {
+	req := &OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: []interface{}{
+			map[string]interface{}{
+				"type": "additional_tools",
+				"role": "developer",
+				"tools": []interface{}{
+					map[string]interface{}{
+						"type":        "function",
+						"name":        "kept",
+						"description": "Kept tool.",
+						"parameters":  map[string]interface{}{"type": "object"},
+					},
+					map[string]interface{}{
+						"type": "tool_search",
+					},
+				},
+			},
+		},
+	}
+
+	var typed TypedRequest
+	var err error
+	logs := captureWarnLogs(t, func() {
+		typed, err = OpenAIResponsesRequestToTyped(context.Background(), req)
+	})
+	if err != nil {
+		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
+	}
+	if len(typed.Tools) != 1 || typed.Tools[0].Name != "kept" {
+		t.Fatalf("typed tools = %#v, want only the kept function tool", typed.Tools)
+	}
+	if want := `Dropping unsupported Responses tool type "tool_search"`; !strings.Contains(logs, want) {
+		t.Fatalf("warning %q not found in logs:\n%s", want, logs)
+	}
+}

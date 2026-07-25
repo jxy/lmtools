@@ -1,0 +1,16 @@
+{
+  "id": "openai-responses-additional-tools",
+  "description": "OpenAI Responses request carrying tools inside an additional_tools input item",
+  "kinds": [
+    "request"
+  ],
+  "ingress_family": "openai-responses",
+  "models": {
+    "openai": "gpt56sol",
+    "anthropic": "claude-sonnet-4-5-20250929"
+  },
+  "render_targets": [
+    "openai",
+    "anthropic"
+  ]
+}

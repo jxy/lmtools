@@ -1,0 +1,55 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "blocks": [
+        {
+          "text": "Hello, this is a test",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false,
+  "tools": [
+    {
+      "description": "Run a shell command.",
+      "input_schema": null,
+      "name": "exec"
+    },
+    {
+      "description": "Wait for a running exec cell.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_id": {
+            "description": "Identifier of the running exec cell.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cell_id"
+        ],
+        "type": "object"
+      },
+      "name": "wait"
+    },
+    {
+      "description": "Namespace: collaboration. Tools for spawning and managing sub-agents.\nOriginal tool name: spawn_agent.\nSpawn a new sub-agent.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "task_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_name"
+        ],
+        "type": "object"
+      },
+      "name": "collaboration__spawn_agent"
+    }
+  ]
+}

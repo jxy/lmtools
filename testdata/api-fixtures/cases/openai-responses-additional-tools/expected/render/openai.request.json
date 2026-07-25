@@ -1,0 +1,65 @@
+{
+  "max_tokens": 256,
+  "messages": [
+    {
+      "content": "Hello, this is a test",
+      "role": "user"
+    }
+  ],
+  "model": "gpt56sol",
+  "tools": [
+    {
+      "custom": {
+        "description": "Run a shell command.",
+        "format": {
+          "grammar": {
+            "definition": "start: /[\\s\\S]+/",
+            "syntax": "lark"
+          },
+          "type": "grammar"
+        },
+        "name": "exec"
+      },
+      "type": "custom"
+    },
+    {
+      "function": {
+        "description": "Wait for a running exec cell.",
+        "name": "wait",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "cell_id": {
+              "description": "Identifier of the running exec cell.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cell_id"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Namespace: collaboration. Tools for spawning and managing sub-agents.\nOriginal tool name: spawn_agent.\nSpawn a new sub-agent.",
+        "name": "collaboration__spawn_agent",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "task_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_name"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

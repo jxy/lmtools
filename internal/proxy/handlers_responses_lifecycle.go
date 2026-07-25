@@ -195,10 +195,11 @@ func (s *Server) parseOpenAIResponsesUtilityRequest(w http.ResponseWriter, r *ht
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, "model is required", "", http.StatusBadRequest)
 		return nil, nil, nil, false
 	}
+	loggedTools := responsesRequestTools(&req)
 	info := endpointRequestInfo{
 		Model:     req.Model,
-		ToolCount: len(req.Tools),
-		Tools:     req.Tools,
+		ToolCount: len(loggedTools),
+		Tools:     loggedTools,
 	}
 	logEndpointRequest(ctx, info)
 

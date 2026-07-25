@@ -147,6 +147,13 @@
       ]
     },
     {
+      "id": "openai-responses-additional-tools",
+      "description": "OpenAI Responses request carrying tools inside an additional_tools input item",
+      "kinds": [
+        "request"
+      ]
+    },
+    {
       "id": "openai-responses-reasoning-mode-context",
       "description": "OpenAI Responses request with reasoning effort, mode, and context; mode/context preserved to Responses and dropped on Chat Completions",
       "kinds": [

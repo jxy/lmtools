@@ -1,0 +1,74 @@
+{
+  "model": "gpt-5.6-sol",
+  "input": [
+    {
+      "type": "additional_tools",
+      "role": "developer",
+      "tools": [
+        {
+          "type": "custom",
+          "name": "exec",
+          "description": "Run a shell command.",
+          "format": {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": "start: /[\\s\\S]+/"
+          }
+        },
+        {
+          "type": "function",
+          "name": "wait",
+          "description": "Wait for a running exec cell.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cell_id": {
+                "type": "string",
+                "description": "Identifier of the running exec cell."
+              }
+            },
+            "required": [
+              "cell_id"
+            ]
+          }
+        },
+        {
+          "type": "namespace",
+          "name": "collaboration",
+          "description": "Tools for spawning and managing sub-agents.",
+          "tools": [
+            {
+              "type": "function",
+              "name": "spawn_agent",
+              "description": "Spawn a new sub-agent.",
+              "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "task_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "task_name"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello, this is a test"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 256
+}

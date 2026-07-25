@@ -67,7 +67,7 @@ func OpenAIResponsesRequestToTyped(ctx context.Context, req *OpenAIResponsesRequ
 		return TypedRequest{}, err
 	}
 	typed.Messages = messages
-	tools, droppedUnsupportedTools, err := responsesToolsToCore(ctx, req.Tools)
+	tools, droppedUnsupportedTools, err := responsesToolsToCore(ctx, responsesRequestTools(req))
 	if err != nil {
 		return TypedRequest{}, err
 	}
@@ -220,6 +220,10 @@ func responsesInputItemToTypedMessages(ctx context.Context, rawItem interface{},
 			return nil, nil
 		}
 		return []core.TypedMessage{core.NewTextMessage(string(core.RoleAssistant), "Compacted conversation state:\n"+encryptedContent)}, nil
+	case "additional_tools":
+		// Tool definitions are harvested separately via responsesRequestTools;
+		// this container carries no message content to convert.
+		return nil, nil
 	default:
 		logger.From(ctx).Warnf("Dropping unsupported Responses input item type %q while converting to TypedRequest", itemType)
 		return nil, nil
@@ -364,6 +368,52 @@ func responsesInstructionText(ctx context.Context, value interface{}) string {
 	default:
 		return ""
 	}
+}
+
+// responsesRequestTools returns the tools that should be converted for a
+// Responses request. Tools may arrive either in the top-level `tools` field or
+// nested inside `additional_tools` input items (the Codex/GPT-5 mechanism for
+// attaching developer tools through the input array). Both sources are merged,
+// top-level first, preserving order; downstream duplicate-name detection is
+// unchanged.
+func responsesRequestTools(req *OpenAIResponsesRequest) []map[string]interface{} {
+	inline := collectResponsesAdditionalTools(req.Input)
+	if len(inline) == 0 {
+		return req.Tools
+	}
+	merged := make([]map[string]interface{}, 0, len(req.Tools)+len(inline))
+	merged = append(merged, req.Tools...)
+	merged = append(merged, inline...)
+	return merged
+}
+
+// collectResponsesAdditionalTools scans the Responses input array for
+// `additional_tools` items and returns the tool definitions they carry.
+func collectResponsesAdditionalTools(input interface{}) []map[string]interface{} {
+	items, ok := input.([]interface{})
+	if !ok {
+		return nil
+	}
+	var extra []map[string]interface{}
+	for _, rawItem := range items {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if itemType, _ := item["type"].(string); itemType != "additional_tools" {
+			continue
+		}
+		toolList, ok := item["tools"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, rawTool := range toolList {
+			if tool, ok := rawTool.(map[string]interface{}); ok {
+				extra = append(extra, tool)
+			}
+		}
+	}
+	return extra
 }
 
 func responsesToolsToCore(ctx context.Context, tools []map[string]interface{}) ([]core.ToolDefinition, bool, error) {
