@@ -210,28 +210,6 @@ chmod 600 ~/.google-key
 
 By default the server binds to `127.0.0.1:8082`. Use `-host 0.0.0.0` only when you intend to expose it beyond localhost.
 
-### Codex With Argo
-
-Codex can use Argo through `apiproxy` by configuring a local OpenAI-compatible provider. Add a provider and profile to `.codex/config.toml`:
-
-```toml
-[model_providers.apiproxy]
-name = "apiproxy to argo"
-base_url = "http://127.0.0.1:8082/v1"
-
-[profiles.apiproxy]
-model_provider = "apiproxy"
-```
-
-Then start `apiproxy` with a model map from the Codex-requested model name to the Argo backend model:
-
-```bash
-./bin/apiproxy -provider argo -argo-user "$USER" \
-  -model-map '^gpt-5\.5$=gpt55'
-```
-
-Run Codex with the `apiproxy` profile. Requests for `gpt-5.5` are sent to Argo as `gpt55`.
-
 ### apiproxy Flags
 
 - `-provider string`: `argo` (default), `anthropic`, `openai`, or `google`.
@@ -357,6 +335,70 @@ curl http://localhost:8082/v1/responses \
 export ANTHROPIC_BASE_URL=http://localhost:8082
 claude
 ```
+
+### Using With Codex
+
+Codex can reach any `apiproxy` backend by pointing a custom model provider at the
+local proxy. Since Codex 0.134.0 a profile is a separate file next to
+`config.toml` rather than a `[profiles.NAME]` table inside it, so the setup takes
+two files.
+
+First define the provider in `~/.codex/config.toml`:
+
+```toml
+[model_providers.apiproxy]
+name = "apiproxy"
+base_url = "http://127.0.0.1:8082/v1"
+```
+
+The provider must live in user-level config. Project-local `.codex/config.toml`
+files ignore `model_provider` and `model_providers` and print a startup warning.
+
+Then create the profile as its own file, `~/.codex/apiproxy.config.toml`, using
+top-level keys rather than a `[profiles.apiproxy]` table:
+
+```toml
+model = "gpt-5.5"
+model_provider = "apiproxy"
+```
+
+Start `apiproxy` with a model map from the Codex-requested model name to the
+backend model:
+
+```bash
+./bin/apiproxy -provider argo -argo-user "$USER" \
+  -model-map '^gpt-5\.5$=gpt55'
+```
+
+Run Codex with the profile:
+
+```bash
+codex --profile apiproxy
+codex exec --profile apiproxy "summarize this repository"
+```
+
+Requests for `gpt-5.5` are sent to Argo as `gpt55`.
+
+Notes:
+
+- Codex speaks the Responses API. `wire_api` defaults to `responses` and is the
+  only supported value, so Codex traffic arrives at `POST /v1/responses`, not
+  `/v1/chat/completions`. On Argo this takes the converted Responses path, which
+  renders Anthropic Messages upstream for `claude*` backend models and Chat
+  Completions for everything else. See
+  [Converted Responses Limitations](#converted-responses-limitations).
+- `apiproxy` authenticates to the backend with its own `-argo-user` or
+  `-api-key-file` and ignores client credentials, so no `env_key` is needed. If
+  your Codex version insists on one, point `env_key` at any environment variable
+  holding a non-empty placeholder value.
+- Any `-provider` works. Swap the `apiproxy` flags for an Anthropic, OpenAI, or
+  Google backend and keep the same Codex provider and profile files.
+- Bind to `127.0.0.1` (the default). `base_url` is plain HTTP and carries no
+  client authentication.
+
+Migrating from an older Codex config: move the keys out of the
+`[profiles.apiproxy]` table into `~/.codex/apiproxy.config.toml`, then delete
+that table and any top-level `profile = "apiproxy"` selector.
 
 ## Provider Routing
 
@@ -521,3 +563,6 @@ and `-provider argo -openai-responses` with a `gpt*` model:
 - For Argo, verify whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
 - If a converted Responses request loses an OpenAI-only field, use `-provider openai`, or
   `-provider argo -openai-responses` with a `gpt*` model, for direct Responses API passthrough.
+- If Codex ignores your settings and still talks to OpenAI, check that the profile
+  lives in `~/.codex/<name>.config.toml` with top-level keys. Codex 0.134.0 and
+  later no longer read `[profiles.<name>]` tables from `config.toml`.
