@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"lmtools/internal/auth"
-	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"net/http"
 	"strings"
@@ -24,11 +22,13 @@ func (s *Server) forwardOpenAIRawLifecycle(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) forwardOpenAIRawLifecycleWithBody(w http.ResponseWriter, r *http.Request, family string, body []byte) {
 	ctx := r.Context()
-	if s.endpoints.OpenAIResponses == "" {
-		s.sendOpenAIError(w, ErrTypeServer, "OpenAI responses URL not configured", "configuration_error", http.StatusInternalServerError)
+	passthrough, ok := s.responsesPassthroughTarget()
+	if !ok {
+		s.sendOpenAIError(w, ErrTypeServer, "Responses URL not configured", "configuration_error", http.StatusInternalServerError)
 		return
 	}
-	target := s.openAIRawLifecycleURL(r, family)
+	logName := passthrough.logName("lifecycle")
+	target := rawLifecycleURL(passthrough.URL, r, family)
 	upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(body))
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to create upstream request", "upstream_error", http.StatusBadGateway)
@@ -39,17 +39,17 @@ func (s *Server) forwardOpenAIRawLifecycleWithBody(w http.ResponseWriter, r *htt
 	} else if len(body) > 0 {
 		upstreamReq.Header.Set("Content-Type", "application/json")
 	}
-	auth.SetProviderHeaders(upstreamReq, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
-	logWireHTTPRequest(ctx, "WIRE BACKEND REQUEST OpenAI lifecycle", upstreamReq, body)
-	resp, err := s.client.Do(ctx, upstreamReq, constants.ProviderOpenAI)
+	passthrough.Configure(upstreamReq)
+	logWireHTTPRequest(ctx, "WIRE BACKEND REQUEST "+logName, upstreamReq, body)
+	resp, err := s.client.Do(ctx, upstreamReq, passthrough.Provider)
 	if err != nil {
-		logger.From(ctx).Errorf("OpenAI lifecycle request failed: %v", err)
+		logger.From(ctx).Errorf("%s request failed: %v", logName, err)
 		s.sendOpenAIError(w, ErrTypeServer, "Upstream request failed", "upstream_error", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-	logWireHTTPResponseHeaders(ctx, "WIRE BACKEND RESPONSE HEADERS OpenAI lifecycle", resp)
-	wrapWireLoggedResponseBody(ctx, "WIRE BACKEND RESPONSE BODY OpenAI lifecycle", resp)
+	logWireHTTPResponseHeaders(ctx, "WIRE BACKEND RESPONSE HEADERS "+logName, resp)
+	wrapWireLoggedResponseBody(ctx, "WIRE BACKEND RESPONSE BODY "+logName, resp)
 	respBody, err := s.readResponseBody(resp)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to read upstream response", "read_error", http.StatusBadGateway)
@@ -117,8 +117,12 @@ func responseIDFromResponsesLifecyclePath(path string) string {
 	return strings.Split(rest, "/")[0]
 }
 
-func (s *Server) openAIRawLifecycleURL(r *http.Request, family string) string {
-	base := strings.TrimRight(s.endpoints.OpenAIResponses, "/")
+// rawLifecycleURL maps a client lifecycle or conversations path onto the upstream
+// Responses base URL, preserving the sub-path and query string. The conversations
+// family assumes the upstream serves /conversations as a sibling of /responses,
+// which holds for both OpenAI (/v1/...) and Argo (/argoapi/v1/...).
+func rawLifecycleURL(responsesURL string, r *http.Request, family string) string {
+	base := strings.TrimRight(responsesURL, "/")
 	if family == "conversations" {
 		base = strings.TrimSuffix(base, "/responses") + "/conversations"
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/conversations")

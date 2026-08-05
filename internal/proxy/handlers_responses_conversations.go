@@ -2,8 +2,8 @@ package proxy
 
 import (
 	"context"
-	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/logger"
 	"lmtools/internal/session"
 	"net/http"
 	"strings"
@@ -11,14 +11,16 @@ import (
 )
 
 func (s *Server) handleOpenAIConversations(w http.ResponseWriter, r *http.Request) {
-	if s.config.Provider == constants.ProviderOpenAI {
-		s.forwardOpenAIRawLifecycle(w, r, "conversations")
-		return
-	}
-
 	ctx := r.Context()
 	rest := strings.TrimPrefix(r.URL.Path, "/v1/conversations")
 	rest = strings.TrimPrefix(rest, "/")
+	// strings.Split("", "/") is [""], so parts[0] is "" for the id-less create route.
+	parts := strings.Split(rest, "/")
+
+	if s.forwardConversationsUpstream(w, r, parts[0]) {
+		return
+	}
+
 	if rest == "" {
 		switch r.Method {
 		case http.MethodPost:
@@ -29,7 +31,6 @@ func (s *Server) handleOpenAIConversations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	parts := strings.Split(rest, "/")
 	id := parts[0]
 	switch {
 	case len(parts) == 1 && r.Method == http.MethodGet:
@@ -49,6 +50,28 @@ func (s *Server) handleOpenAIConversations(w http.ResponseWriter, r *http.Reques
 	default:
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Unsupported Conversations API operation", "", http.StatusNotFound)
 	}
+}
+
+// forwardConversationsUpstream forwards a Conversations API call to the provider's
+// own endpoint and reports whether it handled the request. Local state wins when the
+// conversation exists here, so a proxy that mixes direct and converted Responses
+// traffic keeps serving its converted conversations. id is empty for the id-less
+// create route, which has nothing to look up locally.
+func (s *Server) forwardConversationsUpstream(w http.ResponseWriter, r *http.Request, id string) bool {
+	if !s.responsesPassthroughEnabled() {
+		return false
+	}
+	if id != "" {
+		_, ok, err := s.responsesState.loadConversation(id)
+		if ok {
+			return false
+		}
+		if err != nil {
+			logger.From(r.Context()).Warnf("Conversation %s state unreadable, forwarding upstream: %v", id, err)
+		}
+	}
+	s.forwardOpenAIRawLifecycle(w, r, "conversations")
+	return true
 }
 
 func (s *Server) createOpenAIConversation(ctx context.Context, w http.ResponseWriter, r *http.Request) {

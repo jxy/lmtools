@@ -54,6 +54,9 @@ Provider Options:
   -argo-dev                  Use the Argo dev environment instead of prod
   -argo-test                 Use the Argo test environment instead of prod
   -argo-legacy               Use legacy Argo /api/v1/resource chat endpoints
+  -openai-responses          Forward /v1/responses to the provider's own Responses
+                            API instead of converting it (openai, and argo gpt*
+                            models; not valid with -argo-legacy)
 
 Model Options:
   -model-map REGEX=MODEL     Map matching request models to a backend model
@@ -160,6 +163,7 @@ func main() {
 		ArgoEnv:            providerOpts.ArgoEnv,
 		Provider:           providerOpts.Provider,
 		ProviderURL:        providerOpts.ProviderURL,
+		OpenAIResponses:    providerOpts.OpenAIResponses,
 		ModelMapRules:      modelMapRules,
 		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
 		SessionsDir:        sessionsDir,

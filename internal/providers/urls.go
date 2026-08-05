@@ -124,7 +124,7 @@ func ResolveResponsesURL(provider, providerURL, argoEnv string) (string, error) 
 	}
 
 	switch constants.NormalizeProvider(provider) {
-	case constants.ProviderOpenAI:
+	case constants.ProviderOpenAI, constants.ProviderArgo:
 		return endpoints.Responses, nil
 	default:
 		return "", fmt.Errorf("%s provider does not support responses", DisplayName(provider))

@@ -40,7 +40,7 @@ func (s *Server) handleOpenAIResponsesInputTokens(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	if route.Provider == constants.ProviderOpenAI {
+	if s.useDirectResponsesForModel(route.MappedModel) {
 		req.Model = route.MappedModel
 		s.forwardOpenAIRawLifecycleWithBody(w, r, "responses", rewriteResponsesRequestModel(rawBody, route.MappedModel))
 		return
@@ -133,7 +133,7 @@ func (s *Server) handleOpenAIResponsesCompact(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if route.Provider == constants.ProviderOpenAI {
+	if s.useDirectResponsesForModel(route.MappedModel) {
 		req.Model = route.MappedModel
 		s.forwardOpenAIRawLifecycleWithBody(w, r, "responses", rewriteResponsesRequestModel(rawBody, route.MappedModel))
 		return
@@ -246,7 +246,7 @@ func (s *Server) retrieveOpenAIResponse(ctx context.Context, w http.ResponseWrit
 		_ = s.sendJSONResponse(ctx, w, responseRecordPayload(rec))
 		return
 	}
-	if s.config.Provider == constants.ProviderOpenAI {
+	if s.responsesPassthroughEnabled() {
 		s.forwardOpenAIRawLifecycle(w, r, "responses")
 		return
 	}
@@ -266,7 +266,7 @@ func (s *Server) deleteOpenAIResponse(ctx context.Context, w http.ResponseWriter
 		})
 		return
 	}
-	if s.config.Provider == constants.ProviderOpenAI {
+	if s.responsesPassthroughEnabled() {
 		s.forwardOpenAIRawLifecycle(w, r, "responses")
 		return
 	}
@@ -280,7 +280,7 @@ func (s *Server) cancelOpenAIResponse(ctx context.Context, w http.ResponseWriter
 		return
 	}
 	if !ok || rec.Deleted {
-		if s.config.Provider == constants.ProviderOpenAI {
+		if s.responsesPassthroughEnabled() {
 			s.forwardOpenAIRawLifecycle(w, r, "responses")
 			return
 		}
@@ -337,7 +337,7 @@ func (s *Server) listOpenAIResponseInputItems(ctx context.Context, w http.Respon
 		return
 	}
 	if !ok || rec.Deleted {
-		if s.config.Provider == constants.ProviderOpenAI {
+		if s.responsesPassthroughEnabled() {
 			s.forwardOpenAIRawLifecycle(w, r, "responses")
 			return
 		}

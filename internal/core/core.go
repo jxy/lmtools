@@ -244,6 +244,29 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	return response, nil
 }
 
+// effectiveChatModel resolves the model a chat request is actually built with:
+// the configured model, or the provider default when -model was not given.
+// Response parsing sees only cfg, so it must resolve the model exactly the way
+// BuildChatRequest does; otherwise an Argo request built for the default gpt5
+// model would be parsed as if no model had been chosen.
+func effectiveChatModel(cfg RequestOptions) string {
+	if cfg.Model != "" {
+		return cfg.Model
+	}
+	return providers.DefaultChatModel(getProviderWithDefault(cfg, constants.ProviderArgo))
+}
+
+// usesOpenAIResponsesWire reports whether the request identified by cfg and model
+// is rendered and parsed as OpenAI Responses. Request building and response parsing
+// must agree, so both consult this one predicate: for Argo only gpt* models use the
+// Responses endpoint, while other Argo models still route by model prefix.
+func usesOpenAIResponsesWire(cfg RequestOptions, model string) bool {
+	if cfg.Embed {
+		return false
+	}
+	return providers.UsesResponsesAPIWire(getProviderWithDefault(cfg, constants.ProviderArgo), model, cfg.OpenAIResponses, cfg.ArgoLegacy)
+}
+
 func effectiveResponseProvider(cfg RequestOptions) string {
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 	if provider != constants.ProviderArgo || cfg.Embed {
@@ -253,7 +276,7 @@ func effectiveResponseProvider(cfg RequestOptions) string {
 		return constants.ProviderArgo
 	}
 
-	return providers.DetermineArgoModelProvider(cfg.Model)
+	return providers.DetermineArgoModelProvider(effectiveChatModel(cfg))
 }
 
 func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *http.Response) bool {
@@ -270,7 +293,7 @@ func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *ht
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
 func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
-	if provider == constants.ProviderOpenAI && cfg.OpenAIResponses {
+	if usesOpenAIResponsesWire(cfg, effectiveChatModel(cfg)) {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
 			return Response{}, fmt.Errorf("failed to create log file: %w", err)
@@ -328,7 +351,7 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 		})
 		return Response{Text: text, ToolCalls: toolCalls}, err
 	}
-	if provider == constants.ProviderOpenAI && cfg.OpenAIResponses {
+	if usesOpenAIResponsesWire(cfg, effectiveChatModel(cfg)) {
 		return parseOpenAIResponses(data, cfg.Embed)
 	}
 	return spec.parseResponseData(data, cfg.Embed)
@@ -360,14 +383,10 @@ type ChatBuildOptions struct {
 // BuildChatRequest is the unified entry point for building chat requests
 // It handles all providers and configurations through a single interface
 func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts ChatBuildOptions) (*http.Request, []byte, error) {
-	// Determine provider and model
-	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
+	// Determine the model
 	model := opts.ModelOverride
 	if model == "" {
-		model = cfg.Model
-		if model == "" {
-			model = providers.DefaultChatModel(provider)
-		}
+		model = effectiveChatModel(cfg)
 	}
 
 	// Determine system prompt

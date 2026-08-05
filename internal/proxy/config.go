@@ -26,6 +26,10 @@ type Config struct {
 	ProviderURL   string
 	ModelMapRules []ModelMapRule
 
+	// OpenAIResponses forwards /v1/responses to the provider's own Responses API
+	// instead of converting it. Valid for openai and native argo only.
+	OpenAIResponses bool
+
 	// Security Configuration
 	MaxRequestBodySize  int64 // Maximum request body size in bytes
 	MaxResponseBodySize int64 // Maximum response body size in bytes
@@ -51,6 +55,10 @@ func (c *Config) Validate() error {
 	if !constants.IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid -provider: %s, must be one of: %s",
 			c.Provider, constants.JoinedProviders())
+	}
+
+	if err := providerconfig.ValidateResponsesAPIFlag(c.Provider, c.OpenAIResponses, c.ArgoLegacy); err != nil {
+		return err
 	}
 
 	if ok, _ := evaluateProviderCredentials(c.Provider, newProviderCredentialState(c)); !ok {

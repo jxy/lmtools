@@ -219,6 +219,79 @@ func TestResolveEmbedURL(t *testing.T) {
 	}
 }
 
+func TestResolveResponsesURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		provider    string
+		providerURL string
+		argoEnv     string
+		want        string
+	}{
+		{
+			name:        "openai responses from chat url",
+			provider:    "openai",
+			providerURL: "https://api.openai.com/v1/chat/completions",
+			want:        "https://api.openai.com/v1/responses",
+		},
+		{
+			name:     "argo prod",
+			provider: "argo",
+			argoEnv:  "prod",
+			want:     "https://apps.inside.anl.gov/argoapi/v1/responses",
+		},
+		{
+			name:     "argo dev",
+			provider: "argo",
+			argoEnv:  "dev",
+			want:     "https://apps-dev.inside.anl.gov/argoapi/v1/responses",
+		},
+		{
+			name:     "argo test",
+			provider: "argo",
+			argoEnv:  "test",
+			want:     "https://apps-test.inside.anl.gov/argoapi/v1/responses",
+		},
+		{
+			name:        "argo provider url root",
+			provider:    "argo",
+			providerURL: "https://custom.example/argoapi",
+			want:        "https://custom.example/argoapi/v1/responses",
+		},
+		{
+			name:        "argo provider url pointing at chat completions",
+			provider:    "argo",
+			providerURL: "https://custom.example/argoapi/v1/chat/completions",
+			want:        "https://custom.example/argoapi/v1/responses",
+		},
+		{
+			name:        "argo provider url pointing at responses",
+			provider:    "argo",
+			providerURL: "https://custom.example/argoapi/v1/responses",
+			want:        "https://custom.example/argoapi/v1/responses",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveResponsesURL(tt.provider, tt.providerURL, tt.argoEnv)
+			if err != nil {
+				t.Fatalf("ResolveResponsesURL() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ResolveResponsesURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveResponsesURLRejectsUnsupportedProviders(t *testing.T) {
+	for _, provider := range []string{"anthropic", "google"} {
+		if _, err := ResolveResponsesURL(provider, "", ""); err == nil {
+			t.Fatalf("ResolveResponsesURL(%q) error = nil, want an error", provider)
+		}
+	}
+}
+
 func TestResolveModelsURL(t *testing.T) {
 	got, err := ResolveModelsURL("argo", "", "https://custom.example/api")
 	if err != nil {

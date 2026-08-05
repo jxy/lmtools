@@ -25,6 +25,9 @@ func buildArgoChatRequest(cfg RequestOptions, messages []TypedMessage, model str
 	if cfg.ArgoLegacy {
 		return buildLegacyArgoChatRequest(cfg, model, messages, system, systemExplicit, toolDefs, toolChoice, stream)
 	}
+	if usesOpenAIResponsesWire(cfg, model) {
+		return buildOpenAIResponsesChatRequest(cfg, messages, model, system, systemExplicit, toolDefs, toolChoice, stream)
+	}
 
 	plan, err := newArgoChatRequestPlan(cfg, messages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {

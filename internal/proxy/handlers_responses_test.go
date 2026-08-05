@@ -473,9 +473,14 @@ func TestOpenAIResponsesDirectStreamPassThroughPreservesNonDataLines(t *testing.
 	recorder := newFlushableRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-3-sonnet","stream":true,"input":"hi"}`))
 
+	target, ok := server.responsesPassthroughTarget()
+	if !ok {
+		t.Fatal("responsesPassthroughTarget() ok = false, want true for -provider openai")
+	}
 	server.forwardOpenAIResponsesStreamDirectly(
 		recorder,
 		req,
+		target,
 		&OpenAIResponsesRequest{Model: "gpt-upstream", Stream: true},
 		[]byte(`{"model":"gpt-upstream","stream":true,"input":"hi"}`),
 		"claude-3-sonnet",

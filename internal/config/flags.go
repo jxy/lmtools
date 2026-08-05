@@ -19,7 +19,6 @@ type Config struct {
 	Model            string // model to use
 	Embed            bool   // whether to run in embed mode
 	StreamChat       bool   // whether to use streaming chat mode
-	OpenAIResponses  bool   // whether OpenAI chat mode should use /v1/responses
 	PrintCurl        bool   // print the equivalent curl command instead of sending the request
 	Effort           string // reasoning effort hint
 	ReasoningMode    string // OpenAI Responses reasoning.mode (standard, pro)
@@ -88,7 +87,7 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, err
 	}
 
-	if err := normalizeAndValidateProvider(&cfg); err != nil {
+	if err := cfg.Normalize(); err != nil {
 		return cfg, err
 	}
 
@@ -111,12 +110,11 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
-	fs.BoolVar(&cfg.OpenAIResponses, "openai-responses", false, "use OpenAI /v1/responses instead of /v1/chat/completions when -provider openai")
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
-	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "OpenAI Responses reasoning mode: standard, pro (requires -openai-responses; pro is GPT-5.6 only)")
-	fs.StringVar(&cfg.ReasoningContext, "reasoning-context", "", "OpenAI Responses reasoning context: auto, current_turn, all_turns (requires -openai-responses)")
+	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "Responses API reasoning mode: standard, pro (requires -openai-responses; pro is GPT-5.6 only)")
+	fs.StringVar(&cfg.ReasoningContext, "reasoning-context", "", "Responses API reasoning context: auto, current_turn, all_turns (requires -openai-responses)")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "maximum output tokens (0 uses provider default; Claude defaults to 128000 for Opus, 64000 otherwise)")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
 	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")

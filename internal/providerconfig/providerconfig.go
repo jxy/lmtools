@@ -9,14 +9,15 @@ import (
 )
 
 type Options struct {
-	Provider    string
-	ProviderURL string
-	APIKeyFile  string
-	ArgoUser    string
-	ArgoDev     bool
-	ArgoTest    bool
-	ArgoLegacy  bool
-	ArgoEnv     string
+	Provider        string
+	ProviderURL     string
+	APIKeyFile      string
+	ArgoUser        string
+	ArgoDev         bool
+	ArgoTest        bool
+	ArgoLegacy      bool
+	ArgoEnv         string
+	OpenAIResponses bool
 }
 
 type Defaults struct {
@@ -37,6 +38,27 @@ func RegisterFlags(fs *flag.FlagSet, opts *Options, defaults Defaults) {
 	fs.StringVar(&opts.Provider, "provider", provider, "provider: argo, openai, google, anthropic")
 	fs.StringVar(&opts.ProviderURL, "provider-url", "", "custom provider API endpoint")
 	fs.StringVar(&opts.APIKeyFile, "api-key-file", "", "path to API key file (required for openai/google/anthropic; optional alternative for argo)")
+	fs.BoolVar(&opts.OpenAIResponses, "openai-responses", false, "use the OpenAI Responses API (/v1/responses) instead of chat/completions; supported by -provider openai and -provider argo (argo gpt* models only)")
+}
+
+// ValidateResponsesAPIFlag reports whether -openai-responses is usable with the
+// selected provider. Only OpenAI and native Argo expose a Responses endpoint;
+// legacy Argo has no /v1/responses route at all.
+func ValidateResponsesAPIFlag(provider string, openaiResponses, argoLegacy bool) error {
+	if !openaiResponses {
+		return nil
+	}
+	switch constants.NormalizeProvider(provider) {
+	case constants.ProviderOpenAI:
+		return nil
+	case constants.ProviderArgo:
+		if argoLegacy {
+			return fmt.Errorf("invalid flag combination: -openai-responses cannot be used with -argo-legacy")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid flag combination: -openai-responses requires -provider openai or -provider argo")
+	}
 }
 
 func ResolveArgoEnvironment(dev, test bool) string {
@@ -49,6 +71,9 @@ func ResolveArgoEnvironment(dev, test bool) string {
 	return "prod"
 }
 
+// Normalize resolves the provider and Argo environment and validates the
+// provider-level flag combinations. lmc and apiproxy both go through it (apiproxy
+// via proxy.Config.Validate) so they reject the same combinations.
 func (o *Options) Normalize() error {
 	if err := ValidateArgoEnvironmentFlags(o.ArgoDev, o.ArgoTest); err != nil {
 		return err
@@ -63,7 +88,7 @@ func (o *Options) Normalize() error {
 	if o.ArgoEnv == "" {
 		o.ArgoEnv = ResolveArgoEnvironment(o.ArgoDev, o.ArgoTest)
 	}
-	return nil
+	return ValidateResponsesAPIFlag(o.Provider, o.OpenAIResponses, o.ArgoLegacy)
 }
 
 func ValidateArgoEnvironmentFlags(dev, test bool) error {

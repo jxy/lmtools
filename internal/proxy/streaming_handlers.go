@@ -154,9 +154,7 @@ func (s *Server) openAIStreamingRequest(ctx context.Context, anthReq *AnthropicR
 		Provider:    constants.ProviderOpenAI,
 		RequestName: "OpenAI",
 		Payload:     openAIReq,
-		Configure: func(req *http.Request) {
-			auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
-		},
+		Configure:   s.configureOpenAIRequest,
 	})
 }
 

@@ -47,6 +47,12 @@ echo "Return three bullet points" | ./bin/lmc \
   -api-key-file "$HOME/.openai-key" \
   -openai-responses
 
+# Use Argo's Responses API. Argo serves /v1/responses for gpt* models.
+echo "Return three bullet points" | ./bin/lmc \
+  -argo-user "$USER" \
+  -model gpt5 \
+  -openai-responses
+
 # Print the equivalent curl command without sending the request.
 echo "Explain quantum computing" | ./bin/lmc \
   -provider openai \
@@ -128,14 +134,17 @@ Provider and model:
 Chat output:
 
 - `-stream`: Stream chat responses.
-- `-openai-responses`: With `-provider openai`, send chat through OpenAI `/v1/responses`.
+- `-openai-responses`: Send chat through the provider's Responses API instead of chat completions.
+  Requires `-provider openai` or `-provider argo`, and is rejected with `-argo-legacy`.
+  With `-provider argo` it applies to `gpt*` models only, which are the models Argo serves at
+  `/v1/responses`; other Argo models keep their usual routing.
 - `-print-curl`: Print the equivalent `curl` command and exit without sending the request.
   With `-resume` or `-branch`, session history is read only and session files are not changed.
   With `-resume -tool`, pending tool calls are represented by placeholder results.
 - `-s string`: System prompt.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
-- `-reasoning-mode string`: OpenAI Responses reasoning mode: `standard` or `pro` (`pro` is GPT-5.6 only). Only applies with `-provider openai -openai-responses`; otherwise it is warned and ignored.
-- `-reasoning-context string`: OpenAI Responses reasoning context: `auto`, `current_turn`, or `all_turns`. Only applies with `-provider openai -openai-responses`; otherwise it is warned and ignored.
+- `-reasoning-mode string`: Responses API reasoning mode: `standard` or `pro` (`pro` is GPT-5.6 only). Only applies on an effective `-openai-responses` path; otherwise it is warned and ignored.
+- `-reasoning-context string`: Responses API reasoning context: `auto`, `current_turn`, or `all_turns`. Only applies on an effective `-openai-responses` path; otherwise it is warned and ignored.
 - `-max-tokens int`: Maximum output tokens. `0` (the default) uses the provider default; Anthropic-wire requests (the `anthropic` provider and Argo `claude*` models) default to `128000` for Opus models and `64000` for other Claude models.
 - `-json`: Request JSON object output.
 - `-json-schema path`: Request schema-constrained JSON output.
@@ -232,6 +241,9 @@ Run Codex with the `apiproxy` profile. Requests for `gpt-5.5` are sent to Argo a
 - `-model-map REGEX=MODEL_NAME`: Map matching request models to a backend model.
   Can be repeated; the first matching rule wins.
 - `-argo-dev`, `-argo-test`, `-argo-legacy`
+- `-openai-responses`: Forward `/v1/responses` to the provider's own Responses API instead of
+  converting it. Requires `-provider openai` or `-provider argo`, and is rejected with
+  `-argo-legacy`. With `-provider argo` it applies to `gpt*` models only.
 - `-host string`: Bind host. Default `127.0.0.1`.
 - `-port int`: Bind port. Default `8082`.
 - `-sessions-dir string`: Local Responses API state directory. Default `~/.apiproxy/sessions`.
@@ -374,7 +386,8 @@ With `-provider argo` in native mode:
 
 ## Responses API Compatibility
 
-`apiproxy` supports `/v1/responses` in two modes.
+`apiproxy` supports `/v1/responses` in two modes: direct passthrough to a backend
+that speaks the Responses API, and conversion to another wire format.
 
 ### Direct OpenAI Backend
 
@@ -388,6 +401,30 @@ In this mode:
 - Non-stream and stream responses are passed back in OpenAI Responses format.
 - Responses lifecycle and Conversations API calls are forwarded upstream.
 - Returned model names are rewritten only where the proxy has enough request context to restore the client-visible model alias.
+
+### Direct Argo Backend
+
+Argo serves an OpenAI-compatible Responses API at `<argo-host>/argoapi/v1/responses`
+for its `gpt*` models. Start the proxy with `-openai-responses` to use it:
+
+```bash
+./bin/apiproxy -provider argo -argo-user "$USER" -openai-responses
+```
+
+In this mode:
+
+- `/v1/responses` requests for `gpt*` backend models are forwarded to Argo with the
+  request body preserved byte-for-byte, apart from `-model-map` model rewriting.
+  Argo's response body is returned unchanged apart from restoring the client-visible
+  model alias. Streams are passed through the same way.
+- Requests for any other Argo model still take the converted path below, so a single
+  proxy can serve both. `-openai-responses` is rejected with `-argo-legacy`.
+- Responses lifecycle routes (`GET`/`DELETE` `/v1/responses/{id}`, `cancel`,
+  `input_items`) and Conversations routes resolve local state first and fall back to
+  Argo, so converted responses stay retrievable while passed-through ids resolve
+  upstream. `POST /v1/conversations` has no id to look up and is forwarded to Argo.
+- `/v1/responses/input_tokens` and `/v1/responses/compact` forward to Argo for `gpt*`
+  models and use the converted behavior otherwise.
 
 ### Converted Backends
 
@@ -430,7 +467,7 @@ Response conversion:
 
 Streaming conversion:
 
-- Direct OpenAI Responses streams are passed through.
+- Direct OpenAI and direct Argo Responses streams are passed through.
 - Converted streams emit Responses SSE events synthesized from upstream Anthropic, OpenAI Chat Completions, Google, or Argo stream chunks.
 - Legacy Argo mode may simulate streaming from a non-streaming upstream response.
 
@@ -438,7 +475,8 @@ Streaming conversion:
 
 Converted Responses support is a compatibility layer, not a full replacement for OpenAI's official Responses API backend.
 
-Known limitations when `-provider` is not `openai`:
+Known limitations on converted paths, which is everything except `-provider openai`
+and `-provider argo -openai-responses` with a `gpt*` model:
 
 - OpenAI prompt templates (`prompt`) are rejected because they do not have a portable provider representation.
 - OpenAI-hosted tools such as web search and file search are not run by the
@@ -481,4 +519,5 @@ Known limitations when `-provider` is not `openai`:
 - Use `-log-level DEBUG` on either binary to inspect request routing and conversion warnings.
 - Confirm that the selected `-provider` has credentials or a `-provider-url`.
 - For Argo, verify whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
-- If a converted Responses request loses an OpenAI-only field, use `-provider openai` for direct official Responses API passthrough.
+- If a converted Responses request loses an OpenAI-only field, use `-provider openai`, or
+  `-provider argo -openai-responses` with a `gpt*` model, for direct Responses API passthrough.

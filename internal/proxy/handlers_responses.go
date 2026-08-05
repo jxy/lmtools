@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
@@ -60,7 +59,7 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	responsesReq.Model = route.MappedModel
 
-	if route.Provider == constants.ProviderOpenAI {
+	if s.useDirectResponsesForModel(route.MappedModel) {
 		if route.MappedModel != route.OriginalModel {
 			responsesRawBody = rewriteResponsesRequestModel(responsesRawBody, route.MappedModel)
 		}
@@ -146,21 +145,19 @@ func (s *Server) forwardTypedAsAnthropic(ctx context.Context, typed TypedRequest
 	return s.forwardAnthropicRequest(ctx, anthReq, provider, originalModel)
 }
 
-func (s *Server) sendOpenAIResponsesRequest(ctx context.Context, reqBody *OpenAIResponsesRequest, rawBody []byte, stream bool) (*http.Response, error) {
+func (s *Server) sendOpenAIResponsesRequest(ctx context.Context, target responsesPassthroughTarget, reqBody *OpenAIResponsesRequest, rawBody []byte, stream bool) (*http.Response, error) {
 	extraHeaders := map[string]string{}
 	if stream {
 		extraHeaders["Accept"] = "text/event-stream"
 	}
 	resp, _, err := s.sendProviderJSONRequest(ctx, providerJSONRequest{
-		URL:          s.endpoints.OpenAIResponses,
-		Provider:     constants.ProviderOpenAI,
-		RequestName:  "OpenAI responses",
+		URL:          target.URL,
+		Provider:     target.Provider,
+		RequestName:  target.logName("responses"),
 		Payload:      reqBody,
 		RawBody:      rawBody,
 		ExtraHeaders: extraHeaders,
-		Configure: func(req *http.Request) {
-			auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
-		},
+		Configure:    target.Configure,
 	})
 	return resp, err
 }
@@ -168,25 +165,27 @@ func (s *Server) sendOpenAIResponsesRequest(ctx context.Context, reqBody *OpenAI
 func (s *Server) forwardOpenAIResponsesDirectly(w http.ResponseWriter, r *http.Request, responsesReq *OpenAIResponsesRequest, rawBody []byte, originalModel string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
-	if s.endpoints.OpenAIResponses == "" {
-		log.Errorf("OpenAI responses URL not configured")
-		s.sendOpenAIError(w, ErrTypeServer, "OpenAI responses URL not configured", "configuration_error", http.StatusInternalServerError)
+	target, ok := s.responsesPassthroughTarget()
+	if !ok {
+		log.Errorf("Responses URL not configured")
+		s.sendOpenAIError(w, ErrTypeServer, "Responses URL not configured", "configuration_error", http.StatusInternalServerError)
 		return
 	}
 	if responsesReq.Stream {
-		s.forwardOpenAIResponsesStreamDirectly(w, r, responsesReq, rawBody, originalModel)
+		s.forwardOpenAIResponsesStreamDirectly(w, r, target, responsesReq, rawBody, originalModel)
 		return
 	}
 
-	resp, err := s.sendOpenAIResponsesRequest(ctx, responsesReq, rawBody, false)
+	logName := target.logName("responses")
+	resp, err := s.sendOpenAIResponsesRequest(ctx, target, responsesReq, rawBody, false)
 	if err != nil {
-		log.Errorf("OpenAI responses request failed: %v", err)
+		log.Errorf("%s request failed: %v", logName, err)
 		s.sendOpenAIError(w, ErrTypeServer, "Upstream request failed", "upstream_error", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
-	respBody, ok := s.readDirectProviderResponse(ctx, w, resp, constants.ProviderOpenAI, "OpenAI responses")
+	respBody, ok := s.readDirectProviderResponse(ctx, w, resp, target.Provider, logName)
 	if !ok {
 		return
 	}
@@ -198,23 +197,23 @@ func (s *Server) forwardOpenAIResponsesDirectly(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "application/json")
 	logWireBytes(ctx, "WIRE CLIENT RESPONSE BODY", body)
 	if _, err := w.Write(body); err != nil {
-		log.Errorf("Failed to write OpenAI responses response: %v", err)
+		log.Errorf("Failed to write %s response: %v", logName, err)
 	}
 }
 
-func (s *Server) forwardOpenAIResponsesStreamDirectly(w http.ResponseWriter, r *http.Request, responsesReq *OpenAIResponsesRequest, rawBody []byte, originalModel string) {
+func (s *Server) forwardOpenAIResponsesStreamDirectly(w http.ResponseWriter, r *http.Request, target responsesPassthroughTarget, responsesReq *OpenAIResponsesRequest, rawBody []byte, originalModel string) {
 	ctx := r.Context()
 	log := logger.From(ctx)
-	resp, err := s.sendOpenAIResponsesRequest(ctx, responsesReq, rawBody, true)
+	resp, err := s.sendOpenAIResponsesRequest(ctx, target, responsesReq, rawBody, true)
 	if err != nil {
-		log.Errorf("OpenAI responses streaming request failed: %v", err)
+		log.Errorf("%s streaming request failed: %v", target.logName("responses"), err)
 		s.sendOpenAIError(w, ErrTypeServer, "Upstream request failed", "upstream_error", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := s.readErrorBody(resp)
-		passthroughErrorResponse(ctx, w, constants.ProviderOpenAI, resp.StatusCode, body)
+		passthroughErrorResponse(ctx, w, target.Provider, resp.StatusCode, body)
 		return
 	}
 	visibleModel := clientVisibleCreatedResponsesModel(responsesReq.Model, originalModel)

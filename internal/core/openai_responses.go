@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// buildOpenAIResponsesChatRequest renders a Responses API request. The payload and
+// auth always use the OpenAI wire provider, but the endpoint is resolved for the
+// configured provider so Argo requests reach Argo's own /v1/responses route.
 func buildOpenAIResponsesChatRequest(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
 	payload, err := PrepareRequestPayloadWithSystemExplicit(constants.ProviderOpenAI, model, typedMessages, system, systemExplicit, toolDefs, toolChoice, stream)
 	if err != nil {
@@ -30,7 +33,7 @@ func buildOpenAIResponsesChatRequest(cfg RequestOptions, typedMessages []TypedMe
 		return nil, nil, fmt.Errorf("failed to marshal OpenAI responses request: %w", err)
 	}
 
-	url, err := providers.ResolveResponsesURL(constants.ProviderOpenAI, cfg.ProviderURL, cfg.Env)
+	url, err := providers.ResolveResponsesURL(getProviderWithDefault(cfg, constants.ProviderArgo), cfg.ProviderURL, cfg.Env)
 	if err != nil {
 		return nil, nil, err
 	}

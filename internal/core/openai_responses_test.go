@@ -1,7 +1,11 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"lmtools/internal/providers"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -641,5 +645,159 @@ func TestOpenAIResponsesStreamStatePreservesReasoningBlocks(t *testing.T) {
 	tool, ok := blocks[2].(ToolUseBlock)
 	if !ok || tool.ID != "call_1" || tool.Name != "lookup" || string(tool.Input) != `{"city":"Chicago"}` {
 		t.Fatalf("blocks[2] = %#v, want lookup tool call", blocks[2])
+	}
+}
+
+// TestBuildArgoResponsesRequestRoutesGPTModels covers the Argo Responses route:
+// gpt* models use Argo's own /v1/responses endpoint with the OpenAI wire format
+// and Argo bearer auth, while every other Argo model keeps its existing route.
+func TestBuildArgoResponsesRequestRoutesGPTModels(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		wantURL  string
+		wantBody string // "responses" or "chat"
+	}{
+		{
+			name:     "gpt model uses responses endpoint",
+			model:    "gpt5",
+			wantURL:  "https://apps.inside.anl.gov/argoapi/v1/responses",
+			wantBody: "responses",
+		},
+		{
+			name:     "claude model keeps anthropic messages endpoint",
+			model:    "claude-opus-4-1-20250805",
+			wantURL:  "https://apps.inside.anl.gov/argoapi/v1/messages",
+			wantBody: "chat",
+		},
+		{
+			name:     "other model keeps chat completions endpoint",
+			model:    "gemini25pro",
+			wantURL:  "https://apps.inside.anl.gov/argoapi/v1/chat/completions",
+			wantBody: "chat",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := RequestOptions{
+				Provider:        "argo",
+				User:            "argo-user",
+				Env:             "prod",
+				Model:           tt.model,
+				System:          "Use the CLI system prompt.",
+				OpenAIResponses: true,
+			}
+
+			req, body, err := BuildRequest(cfg, "hi")
+			if err != nil {
+				t.Fatalf("BuildRequest() error = %v", err)
+			}
+			if got := req.URL.String(); got != tt.wantURL {
+				t.Fatalf("URL = %q, want %q", got, tt.wantURL)
+			}
+
+			var decoded map[string]interface{}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("request body is invalid JSON: %v", err)
+			}
+			_, hasInput := decoded["input"]
+			_, hasMessages := decoded["messages"]
+			if tt.wantBody == "responses" {
+				if !hasInput || hasMessages {
+					t.Fatalf("want Responses body with input and no messages, got %s", body)
+				}
+				if got := req.Header.Get("Authorization"); got != "Bearer argo-user" {
+					t.Fatalf("Authorization = %q, want Bearer argo-user", got)
+				}
+			} else {
+				if hasInput || !hasMessages {
+					t.Fatalf("want chat body with messages and no input, got %s", body)
+				}
+			}
+		})
+	}
+}
+
+// TestArgoResponsesParsesResponsesPayloadForGPTOnly guards against the response
+// parser and request builder disagreeing: Argo routes non-Claude models through
+// the OpenAI wire provider, so the Responses parser must key off the same gpt*
+// rule the builder uses rather than the wire provider alone.
+func TestArgoResponsesParsesResponsesPayloadForGPTOnly(t *testing.T) {
+	responsesBody := `{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"from responses"}]}]}`
+	chatBody := `{"id":"chat_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"from chat"}}]}`
+
+	tests := []struct {
+		name     string
+		model    string
+		body     string
+		wantText string
+	}{
+		{name: "gpt model parses responses payload", model: "gpt5", body: responsesBody, wantText: "from responses"},
+		{name: "other model parses chat payload", model: "gemini25pro", body: chatBody, wantText: "from chat"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := RequestOptions{
+				Provider:        "argo",
+				User:            "argo-user",
+				Env:             "prod",
+				Model:           tt.model,
+				OpenAIResponses: true,
+			}
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}
+			got, err := HandleResponse(context.Background(), cfg, resp, &MockLogger{}, &MockNotifier{})
+			if err != nil {
+				t.Fatalf("HandleResponse() error = %v", err)
+			}
+			if got.Text != tt.wantText {
+				t.Fatalf("Text = %q, want %q", got.Text, tt.wantText)
+			}
+		})
+	}
+}
+
+// TestArgoResponsesDefaultModelRoutesConsistently covers `lmc -openai-responses`
+// with no -model: the builder falls back to Argo's default chat model, which is a
+// gpt* model, so the parser must resolve the same default instead of treating the
+// empty model as non-gpt and parsing a Responses payload as chat/completions.
+func TestArgoResponsesDefaultModelRoutesConsistently(t *testing.T) {
+	cfg := RequestOptions{
+		Provider:        "argo",
+		User:            "argo-user",
+		Env:             "prod",
+		OpenAIResponses: true,
+	}
+
+	req, body, err := BuildRequest(cfg, "hi")
+	if err != nil {
+		t.Fatalf("BuildRequest() error = %v", err)
+	}
+	if got, want := req.URL.String(), "https://apps.inside.anl.gov/argoapi/v1/responses"; got != want {
+		t.Fatalf("URL = %q, want %q", got, want)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("request body is invalid JSON: %v", err)
+	}
+	if decoded["model"] != providers.DefaultArgoChatModel {
+		t.Fatalf("model = %#v, want %q", decoded["model"], providers.DefaultArgoChatModel)
+	}
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"from responses"}]}]}`)),
+	}
+	got, err := HandleResponse(context.Background(), cfg, resp, &MockLogger{}, &MockNotifier{})
+	if err != nil {
+		t.Fatalf("HandleResponse() error = %v", err)
+	}
+	if got.Text != "from responses" {
+		t.Fatalf("Text = %q, want %q", got.Text, "from responses")
 	}
 }

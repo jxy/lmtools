@@ -247,6 +247,51 @@ func TestConfigValidateArgoDevAndTestConflict(t *testing.T) {
 	}
 }
 
+func TestConfigValidateOpenAIResponsesFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr string
+	}{
+		{
+			name:   "argo native",
+			config: &Config{Provider: constants.ProviderArgo, ArgoUser: "testuser", OpenAIResponses: true},
+		},
+		{
+			name:   "openai",
+			config: &Config{Provider: constants.ProviderOpenAI, ProviderKeySet: ProviderKeySet{OpenAIAPIKey: "k"}, OpenAIResponses: true},
+		},
+		{
+			name:    "argo legacy",
+			config:  &Config{Provider: constants.ProviderArgo, ArgoUser: "testuser", ArgoLegacy: true, OpenAIResponses: true},
+			wantErr: "-openai-responses cannot be used with -argo-legacy",
+		},
+		{
+			name:    "anthropic",
+			config:  &Config{Provider: constants.ProviderAnthropic, ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "k"}, OpenAIResponses: true},
+			wantErr: "-openai-responses requires -provider openai or -provider argo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestOpenAIProviderURLNormalization(t *testing.T) {
 	tests := []struct {
 		name        string

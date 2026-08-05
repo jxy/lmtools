@@ -242,17 +242,17 @@ func run(notifier core.Notifier) error {
 }
 
 // warnUnusedReasoningControls warns when reasoning.mode/context are set but the
-// effective request is not OpenAI Responses. These are OpenAI Responses-only
+// effective request does not use the Responses API. These are Responses-only
 // controls; on any other path they are silently omitted downstream, so surface
 // a warning rather than dropping them without notice.
 func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
 	if cfg.ReasoningMode == "" && cfg.ReasoningContext == "" {
 		return
 	}
-	if cfg.Provider == constants.ProviderOpenAI && cfg.OpenAIResponses {
+	if providers.UsesResponsesAPIWire(cfg.Provider, cfg.Model, cfg.OpenAIResponses, cfg.ArgoLegacy) {
 		return
 	}
-	notifier.Warnf("-reasoning-mode/-reasoning-context are OpenAI Responses-only controls; ignoring them because the request does not use -provider openai with -openai-responses")
+	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API-only controls; ignoring them because the request does not use -openai-responses on a Responses-capable provider and model")
 }
 
 func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {

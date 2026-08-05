@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"lmtools/internal/auth"
-	"lmtools/internal/constants"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providers"
 	"os"
@@ -150,16 +149,6 @@ func validateSessionFlagCombinations(cfg Config) error {
 		return fmt.Errorf("invalid flag combination: -no-session cannot be used with -resume or -branch")
 	}
 
-	return nil
-}
-
-func normalizeAndValidateProvider(cfg *Config) error {
-	if err := cfg.Normalize(); err != nil {
-		return err
-	}
-	if cfg.OpenAIResponses && cfg.Provider != constants.ProviderOpenAI {
-		return fmt.Errorf("invalid flag combination: -openai-responses requires -provider openai")
-	}
 	return nil
 }
 

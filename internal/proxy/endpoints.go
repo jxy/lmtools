@@ -27,6 +27,7 @@ type Endpoints struct {
 	ArgoStreamChat           string // Legacy Argo streaming chat endpoint
 	ArgoEmbed                string // Argo embeddings endpoint
 	ArgoOpenAI               string // Argo OpenAI chat/completions endpoint
+	ArgoResponses            string // Argo OpenAI-compatible responses endpoint
 	ArgoAnthropic            string // Argo Anthropic messages endpoint
 	ArgoAnthropicCountTokens string // Argo Anthropic count_tokens endpoint
 
@@ -80,6 +81,7 @@ func NewEndpoints(cfg *Config) (*Endpoints, error) {
 		endpoints.ArgoStreamChat = resolved.Stream
 		endpoints.ArgoEmbed = resolved.Embed
 		endpoints.ArgoOpenAI = resolved.OpenAIChat
+		endpoints.ArgoResponses = resolved.Responses
 		endpoints.ArgoAnthropic = resolved.AnthropicMessages
 		endpoints.ArgoAnthropicCountTokens = resolved.AnthropicCountTokens
 		endpoints.ArgoModels = resolved.Models

@@ -65,6 +65,8 @@ func argoRoot(rawBase string) (string, error) {
 		path = strings.TrimSuffix(path, "/v1/messages/count_tokens")
 	case strings.HasSuffix(path, "/v1/messages"):
 		path = strings.TrimSuffix(path, "/v1/messages")
+	case strings.HasSuffix(path, "/v1/responses"):
+		path = strings.TrimSuffix(path, "/v1/responses")
 	case strings.Contains(path, "/api/v1"):
 		path = path[:strings.Index(path, "/api/v1")]
 	case strings.Contains(path, "/v1"):
@@ -116,12 +118,17 @@ func BuildArgoEndpoints(base string) (EndpointSet, error) {
 	if err != nil {
 		return EndpointSet{}, err
 	}
+	responses, err := buildArgoURL(root, "v1/responses", false)
+	if err != nil {
+		return EndpointSet{}, err
+	}
 
 	return EndpointSet{
 		Base:                 resource,
 		Chat:                 chat,
 		Stream:               stream,
 		Embed:                embed,
+		Responses:            responses,
 		Models:               models,
 		OpenAIChat:           openAIChat,
 		AnthropicMessages:    anthropicMessages,

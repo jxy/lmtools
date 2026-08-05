@@ -26,9 +26,8 @@ func (s *Server) forwardToOpenAI(ctx context.Context, anthReq *AnthropicRequest)
 	warnOpenAICompatibleStopSpecialProcessing(ctx, "OpenAI", strippedStops)
 
 	var openAIResp OpenAIResponse
-	err = s.doOpenAICompatibleJSONWithMaxTokenRetries(ctx, s.endpoints.OpenAI, openAIReq, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
-	}, &openAIResp, constants.ProviderOpenAI, "OpenAI")
+	err = s.doOpenAICompatibleJSONWithMaxTokenRetries(ctx, s.endpoints.OpenAI, openAIReq,
+		s.configureOpenAIRequest, &openAIResp, constants.ProviderOpenAI, "OpenAI")
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +50,10 @@ func (s *Server) argoAPIKey() string {
 	// Argo currently expects -argo-user to act as the native API key; keep this
 	// fallback until Argo changes authentication.
 	return s.config.ArgoUser
+}
+
+func (s *Server) configureOpenAIRequest(req *http.Request) {
+	auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
 }
 
 func (s *Server) configureArgoOpenAIRequest(req *http.Request) {
