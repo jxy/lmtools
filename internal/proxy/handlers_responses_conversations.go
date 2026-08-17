@@ -77,7 +77,7 @@ func (s *Server) forwardConversationsUpstream(w http.ResponseWriter, r *http.Req
 func (s *Server) createOpenAIConversation(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	var body openAIConversationRequestBody
 	if err := s.decodeOptionalJSON(r, &body); err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return
 	}
 	instructions := responsesInstructionText(ctx, body.Instructions)
@@ -128,7 +128,7 @@ func (s *Server) updateOpenAIConversation(ctx context.Context, w http.ResponseWr
 	}
 	var body openAIConversationRequestBody
 	if err := s.decodeOptionalJSON(r, &body); err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return
 	}
 	if body.Metadata != nil {
@@ -185,7 +185,7 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 
 	var body openAIConversationRequestBody
 	if err := s.decodeOptionalJSON(r, &body); err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return
 	}
 	messages, err := conversationMessagesFromRequest(ctx, body)

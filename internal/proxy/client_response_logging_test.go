@@ -235,6 +235,38 @@ func TestClientSSEHeadersAndStreamLoggedWithoutDuplicateSemanticClientLog(t *tes
 	)
 }
 
+func TestClientSSEWireLoggingIncludesCompleteLongStream(t *testing.T) {
+	const tail = "client-stream-after-former-wire-log-limit"
+	logs := captureStderr(t, func() {
+		handler := NewProxyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writer, err := NewSSEWriter(w, r.Context())
+			if err != nil {
+				t.Fatalf("NewSSEWriter() error = %v", err)
+			}
+			for i := 0; i < 80; i++ {
+				data := strings.Repeat("x", 1024)
+				if i == 79 {
+					data += tail
+				}
+				if err := writer.WriteEvent("message", data); err != nil {
+					t.Fatalf("WriteEvent() error = %v", err)
+				}
+			}
+		}), &Config{MaxRequestBodySize: 1024})
+
+		rr := newFlushableRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+		handler.ServeHTTP(rr, req)
+		if !strings.Contains(rr.Body.String(), tail) {
+			t.Fatal("client did not receive the complete stream")
+		}
+	})
+
+	if !strings.Contains(logs, tail) {
+		t.Fatalf("client stream wire log omitted bytes after the former %d-byte limit", formerWireLogLimit)
+	}
+}
+
 func TestLocalOpenAIErrorLogsClientResponseBody(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderOpenAI,

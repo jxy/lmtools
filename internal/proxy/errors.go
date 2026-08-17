@@ -91,6 +91,30 @@ func (s *Server) sendOpenAIError(w http.ResponseWriter, errType, message, code s
 	sendError(w, status, errorResponse)
 }
 
+// sendOpenAIRequestError reports a failure to read or decode a client request in
+// OpenAI format. An oversized body becomes 413 with code request_too_large;
+// everything else stays a 400 invalid_request_error.
+func (s *Server) sendOpenAIRequestError(w http.ResponseWriter, err error) {
+	if tooLarge, ok := asRequestTooLarge(err); ok {
+		markLocalBodyLimitRejection(w)
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, tooLarge.Error(), ErrTypePayloadTooLarge, http.StatusRequestEntityTooLarge)
+		return
+	}
+	s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+}
+
+// sendAnthropicRequestError is sendOpenAIRequestError for Anthropic-format
+// endpoints. Anthropic documents 413 as the request_too_large error type, so
+// oversized bodies use that type directly.
+func (s *Server) sendAnthropicRequestError(w http.ResponseWriter, err error) {
+	if tooLarge, ok := asRequestTooLarge(err); ok {
+		markLocalBodyLimitRejection(w)
+		s.sendAnthropicError(w, ErrTypePayloadTooLarge, tooLarge.Error(), http.StatusRequestEntityTooLarge)
+		return
+	}
+	s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
+}
+
 // sendAnthropicError sends an error response in Anthropic format
 func (s *Server) sendAnthropicError(w http.ResponseWriter, errType, message string, status int) {
 	errorResponse := AnthropicError{

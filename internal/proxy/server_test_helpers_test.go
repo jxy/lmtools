@@ -1,5 +1,3 @@
-//go:build !prod
-
 // Test Server Helpers
 //
 // This file provides test server constructors for different testing scenarios.
@@ -58,7 +56,7 @@ import (
 // It disables keep-alives to ensure connections are closed after each request.
 // Use this for most tests. For tests that exercise error handling and retry
 // logic, use NewTestServerWithFastRetries instead.
-func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
+func NewTestServer(t testing.TB, config *Config) (http.Handler, func()) {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 
@@ -87,7 +85,7 @@ func NewTestServer(t *testing.T, config *Config) (http.Handler, func()) {
 // NewTestServerWithFastRetries creates a server with minimal retry delays for error propagation tests.
 // Uses t.Fatalf for better test debugging when NewEndpoints fails.
 // Use this for tests that exercise error handling and retry logic.
-func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
+func NewTestServerWithFastRetries(t testing.TB, config *Config) http.Handler {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 
@@ -106,13 +104,13 @@ func NewTestServerWithFastRetries(t *testing.T, config *Config) http.Handler {
 
 // NewTestServerDirectWithClient creates a Server with a custom retry client.
 // Use this for tests that need specific client configurations.
-func NewTestServerDirectWithClient(t *testing.T, config *Config, client *retry.Client) *Server {
+func NewTestServerDirectWithClient(t testing.TB, config *Config, client *retry.Client) *Server {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 	return newTestServerCore(t, config, client, "NewTestServerDirectWithClient")
 }
 
-func newTestServerCore(t *testing.T, config *Config, client *retry.Client, caller string) *Server {
+func newTestServerCore(t testing.TB, config *Config, client *retry.Client, caller string) *Server {
 	t.Helper()
 	endpoints, err := NewEndpoints(config)
 	if err != nil {
@@ -133,7 +131,7 @@ func newTestServerCore(t *testing.T, config *Config, client *retry.Client, calle
 // Use this for unit tests that test individual Server methods in isolation
 // (e.g., handleMessages error paths, readResponseBody, readErrorBody).
 // For tests that need full server functionality, use NewTestServer instead.
-func NewMinimalTestServer(t *testing.T, config *Config) *Server {
+func NewMinimalTestServer(t testing.TB, config *Config) *Server {
 	t.Helper()
 	defaultTestResponsesSessionsDir(t, config)
 	return &Server{
@@ -144,7 +142,7 @@ func NewMinimalTestServer(t *testing.T, config *Config) *Server {
 	}
 }
 
-func defaultTestResponsesSessionsDir(t *testing.T, config *Config) {
+func defaultTestResponsesSessionsDir(t testing.TB, config *Config) {
 	t.Helper()
 	if config == nil {
 		return

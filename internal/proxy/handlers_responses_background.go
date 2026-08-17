@@ -13,9 +13,9 @@ func responsesBackgroundRequested(req *OpenAIResponsesRequest) bool {
 	return req != nil && req.Background != nil && *req.Background
 }
 
-func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter, r *http.Request, responsesReq *OpenAIResponsesRequest, typedCurrent TypedRequest, route *endpointRoute) {
+func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter, r *http.Request, responsesReq *OpenAIResponsesRequest, rawRequest json.RawMessage, typedCurrent TypedRequest, route *endpointRoute) {
 	ctx := r.Context()
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateBackground(ctx, responsesReq, typedCurrent)
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateBackground(ctx, responsesReq, rawRequest, typedCurrent)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
 		return
@@ -57,7 +57,7 @@ func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter,
 		Store:              stateCtx.Store,
 		Instructions:       stateCtx.Instructions,
 		Metadata:           cloneStringInterfaceMap(responsesReq.Metadata),
-		Request:            append(json.RawMessage(nil), stateCtx.CurrentRequest...),
+		Request:            stateCtx.CurrentRequest,
 		Raw:                initialRaw,
 	}
 	if stateCtx.Conversation != nil {

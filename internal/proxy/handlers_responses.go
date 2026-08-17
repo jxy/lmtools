@@ -36,7 +36,7 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	responsesReq, responsesRawBody, err := s.parseOpenAIResponsesRequest(r)
 	if err != nil {
 		log.Errorf("Failed to parse request: %s", err)
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return
 	}
 	loggedTools := responsesRequestTools(responsesReq)
@@ -81,11 +81,11 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 			s.sendOpenAIError(w, ErrTypeInvalidRequest, "background responses cannot be streamed by the compatibility layer", "", http.StatusBadRequest)
 			return
 		}
-		s.handleConvertedOpenAIResponsesBackground(w, r, responsesReq, typedCurrent, route)
+		s.handleConvertedOpenAIResponsesBackground(w, r, responsesReq, responsesRawBody, typedCurrent, route)
 		return
 	}
 
-	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateForeground(ctx, responsesReq, typed)
+	stateCtx, typedWithState, err := s.prepareOpenAIResponsesStateForeground(ctx, responsesReq, responsesRawBody, typed)
 	if err != nil {
 		logger.From(ctx).Errorf("Failed to prepare OpenAI responses state: %v", err)
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "state_error", http.StatusBadRequest)
@@ -219,10 +219,11 @@ func (s *Server) forwardOpenAIResponsesStreamDirectly(w http.ResponseWriter, r *
 	visibleModel := clientVisibleCreatedResponsesModel(responsesReq.Model, originalModel)
 
 	setSSEHeaders(w)
-	if err := forwardSSERecords(ctx, w, resp.Body, func(data string) string {
+	wroteAny := relayResponsesSSE(ctx, w, resp.Body, visibleModel, func(data string) string {
 		return s.rewriteResponsesStreamData(data, responsesReq.Model, visibleModel)
-	}); err != nil {
-		_ = handleStreamError(ctx, nil, "OpenAIResponsesDirectSSE", err)
+	}, target.logName("responses"))
+	if !wroteAny && downstreamStreamIsLive(ctx) {
+		s.sendOpenAIError(w, ErrTypeServer, "Upstream stream produced no events", "upstream_error", http.StatusBadGateway)
 	}
 }
 

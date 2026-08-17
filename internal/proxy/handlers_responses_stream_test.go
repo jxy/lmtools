@@ -727,7 +727,7 @@ func TestOpenAIResponsesStreamFailureCommitSurvivesCanceledContext(t *testing.T)
 	if err != nil {
 		t.Fatalf("OpenAIResponsesRequestToTyped() error = %v", err)
 	}
-	stateCtx, _, err := server.prepareOpenAIResponsesStateForeground(context.Background(), req, typedCurrent)
+	stateCtx, _, err := server.prepareOpenAIResponsesStateForeground(context.Background(), req, nil, typedCurrent)
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}

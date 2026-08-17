@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 )
 
 func warnUnknownFields(ctx context.Context, jsonData []byte, v interface{}, source string) {
@@ -14,9 +15,13 @@ func warnUnknownFields(ctx context.Context, jsonData []byte, v interface{}, sour
 }
 
 func warnUnknownFieldsWithDisposition(ctx context.Context, jsonData []byte, v interface{}, source, disposition string) {
-	unknownFields, err := detectUnknownFieldPaths(jsonData, v)
+	log := logger.From(ctx)
+	if !log.IsWarnEnabled() {
+		return
+	}
+	unknownFields, truncated, err := detectUnknownFieldPaths(jsonData, v)
 	if err != nil {
-		logger.From(ctx).Debugf("Failed to detect unknown fields in %s: %v", source, err)
+		log.Debugf("Failed to detect unknown fields in %s: %v", source, err)
 		return
 	}
 	if len(unknownFields) == 0 {
@@ -25,65 +30,20 @@ func warnUnknownFieldsWithDisposition(ctx context.Context, jsonData []byte, v in
 	if disposition == "" {
 		disposition = "ignored"
 	}
-	logger.From(ctx).Warnf("Unknown JSON fields in %s (%s): %s", source, disposition, strings.Join(unknownFields, ", "))
+	list := strings.Join(unknownFields, ", ")
+	if truncated {
+		list += ", and more"
+	}
+	log.Warnf("Unknown JSON fields in %s (%s): %s", source, disposition, list)
 }
 
-func detectUnknownFieldPaths(jsonData []byte, v interface{}) ([]string, error) {
-	var decoded interface{}
-	if err := json.Unmarshal(jsonData, &decoded); err != nil {
-		return nil, err
+func detectUnknownFieldPaths(jsonData []byte, v interface{}) ([]string, bool, error) {
+	paths, truncated, err := scanUnknownFieldPaths(jsonData, reflect.TypeOf(v))
+	if err != nil {
+		return nil, false, err
 	}
-
-	paths := detectUnknownFieldPathsForValue(decoded, reflect.TypeOf(v), "")
 	sort.Strings(paths)
-	return compactStrings(paths), nil
-}
-
-func detectUnknownFieldPathsForValue(value interface{}, targetType reflect.Type, prefix string) []string {
-	targetType = dereferenceType(targetType)
-	if targetType == nil {
-		return nil
-	}
-	if shouldSkipUnknownFieldDetection(targetType) {
-		return nil
-	}
-
-	switch typedValue := value.(type) {
-	case map[string]interface{}:
-		if targetType.Kind() != reflect.Struct {
-			return nil
-		}
-		fieldTypes := getStructJSONFieldTypes(targetType)
-		paths := make([]string, 0)
-		for key, child := range typedValue {
-			childType, ok := fieldTypes[key]
-			childPath := joinJSONPath(prefix, key)
-			if !ok {
-				paths = append(paths, childPath)
-				continue
-			}
-			paths = append(paths, detectUnknownFieldPathsForValue(child, childType, childPath)...)
-		}
-		return paths
-	case []interface{}:
-		switch targetType.Kind() {
-		case reflect.Slice, reflect.Array:
-			childType := targetType.Elem()
-			childPath := prefix
-			if childPath != "" {
-				childPath += "[]"
-			}
-			paths := make([]string, 0)
-			for _, child := range typedValue {
-				paths = append(paths, detectUnknownFieldPathsForValue(child, childType, childPath)...)
-			}
-			return paths
-		default:
-			return nil
-		}
-	default:
-		return nil
-	}
+	return paths, truncated, nil
 }
 
 func dereferenceType(targetType reflect.Type) reflect.Type {
@@ -108,8 +68,33 @@ func shouldSkipUnknownFieldDetection(targetType reflect.Type) bool {
 	}
 }
 
-func getStructJSONFieldTypes(targetType reflect.Type) map[string]reflect.Type {
-	fields := make(map[string]reflect.Type)
+// structJSONFieldTypes caches the field map per struct type. The scanner asks
+// for one on entry to every object it descends into, and a body carrying a long
+// array of messages descends into thousands, so building the map each time made
+// the scanner's cost scale with the payload it was written to avoid scaling
+// with. A type's fields do not change at runtime, and the map is read-only from
+// here on, so one copy per type serves every request for the life of the
+// process — bounded by the number of struct types in the binary.
+var structJSONFieldTypes sync.Map
+
+type structJSONFieldType struct {
+	// name is the canonical, allocation-stable path segment returned by a map
+	// lookup whose temporary string may point into request or decode storage.
+	name       string
+	targetType reflect.Type
+}
+
+func getStructJSONFieldTypes(targetType reflect.Type) map[string]structJSONFieldType {
+	if cached, ok := structJSONFieldTypes.Load(targetType); ok {
+		return cached.(map[string]structJSONFieldType)
+	}
+	fields := buildStructJSONFieldTypes(targetType)
+	structJSONFieldTypes.Store(targetType, fields)
+	return fields
+}
+
+func buildStructJSONFieldTypes(targetType reflect.Type) map[string]structJSONFieldType {
+	fields := make(map[string]structJSONFieldType)
 	for i := 0; i < targetType.NumField(); i++ {
 		field := targetType.Field(i)
 		if field.PkgPath != "" {
@@ -130,7 +115,7 @@ func getStructJSONFieldTypes(targetType reflect.Type) map[string]reflect.Type {
 				name = parts[0]
 			}
 		}
-		fields[name] = field.Type
+		fields[name] = structJSONFieldType{name: name, targetType: field.Type}
 	}
 	return fields
 }
@@ -140,20 +125,4 @@ func joinJSONPath(prefix, field string) string {
 		return field
 	}
 	return prefix + "." + field
-}
-
-func compactStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := values[:0]
-	var previous string
-	for i, value := range values {
-		if i > 0 && value == previous {
-			continue
-		}
-		out = append(out, value)
-		previous = value
-	}
-	return out
 }

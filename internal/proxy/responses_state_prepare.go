@@ -67,21 +67,25 @@ func responsesStoreRequested(req *OpenAIResponsesRequest) bool {
 }
 
 func (s *Server) prepareOpenAIResponsesStateReadOnly(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
-	return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeReadOnly)
+	return s.prepareOpenAIResponsesState(ctx, req, nil, typed, responsesStateModeReadOnly)
 }
 
-func (s *Server) prepareOpenAIResponsesStateForeground(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
+// prepareOpenAIResponsesStateForeground records rawRequest as the stored request
+// when the response is persisted. Passing the client's own bytes avoids
+// re-marshalling a request that can be hundreds of megabytes; callers without
+// them may pass nil.
+func (s *Server) prepareOpenAIResponsesStateForeground(ctx context.Context, req *OpenAIResponsesRequest, rawRequest json.RawMessage, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
 	if responsesStoreRequested(req) {
-		return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeForegroundStored)
+		return s.prepareOpenAIResponsesState(ctx, req, rawRequest, typed, responsesStateModeForegroundStored)
 	}
-	return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeForegroundTransient)
+	return s.prepareOpenAIResponsesState(ctx, req, rawRequest, typed, responsesStateModeForegroundTransient)
 }
 
-func (s *Server) prepareOpenAIResponsesStateBackground(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
-	return s.prepareOpenAIResponsesState(ctx, req, typed, responsesStateModeBackground)
+func (s *Server) prepareOpenAIResponsesStateBackground(ctx context.Context, req *OpenAIResponsesRequest, rawRequest json.RawMessage, typed TypedRequest) (*openAIResponsesStateContext, TypedRequest, error) {
+	return s.prepareOpenAIResponsesState(ctx, req, rawRequest, typed, responsesStateModeBackground)
 }
 
-func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, mode openAIResponsesStateMode) (*openAIResponsesStateContext, TypedRequest, error) {
+func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIResponsesRequest, rawRequest json.RawMessage, typed TypedRequest, mode openAIResponsesStateMode) (*openAIResponsesStateContext, TypedRequest, error) {
 	convSpec, err := parseConversationSpec(req.Conversation)
 	if err != nil {
 		return nil, typed, err
@@ -96,7 +100,7 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 		}
 	}
 
-	stateCtx, err := newOpenAIResponsesStateContext(ctx, req, typed, mode)
+	stateCtx, err := newOpenAIResponsesStateContext(ctx, req, rawRequest, typed, mode)
 	if err != nil {
 		return nil, typed, err
 	}
@@ -130,10 +134,17 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 	return stateCtx, typed, nil
 }
 
-func newOpenAIResponsesStateContext(ctx context.Context, req *OpenAIResponsesRequest, typed TypedRequest, mode openAIResponsesStateMode) (*openAIResponsesStateContext, error) {
-	currentRequest, err := marshalJSONRaw(req)
-	if err != nil {
-		return nil, err
+func newOpenAIResponsesStateContext(ctx context.Context, req *OpenAIResponsesRequest, rawRequest json.RawMessage, typed TypedRequest, mode openAIResponsesStateMode) (*openAIResponsesStateContext, error) {
+	// Only writable modes persist the request, and the client's raw bytes are a
+	// more faithful record than a re-marshal of the parsed struct. Re-marshal
+	// only when a caller had no raw body to hand over.
+	currentRequest := rawRequest
+	if len(currentRequest) == 0 && mode.writable() {
+		marshalled, err := marshalJSONRaw(req)
+		if err != nil {
+			return nil, err
+		}
+		currentRequest = marshalled
 	}
 	stateCtx := &openAIResponsesStateContext{
 		Store:          mode.store(req),
@@ -365,20 +376,29 @@ func (s *Server) prepareOpenAIResponsesCommitTargetLocked(ctx context.Context, s
 }
 
 func appendOpenAIResponsesCommitMessages(ctx context.Context, commitSession *session.Session, typedCurrent TypedRequest, resp *OpenAIResponsesResponse, originalModel string, assistantBlocks []core.Block) (session.SaveResult, error) {
+	// Clients that replay their whole transcript send every prior message again,
+	// so commit them as one batch: appending them one at a time rescans the
+	// session directory per message, which is quadratic in transcript length.
+	entries := make([]session.MessageEntry, 0, len(typedCurrent.Messages)+1)
 	for _, msg := range typedCurrent.Messages {
-		if err := appendTypedMessageToSession(ctx, commitSession, msg, originalModel); err != nil {
-			return session.SaveResult{}, err
-		}
+		entries = append(entries, typedMessageToSessionEntry(msg, originalModel))
 	}
 	assistantResponse := openAIResponsesCoreResponse(resp)
 	if len(assistantBlocks) > 0 {
 		assistantResponse.Blocks = assistantBlocks
 	}
-	result, err := session.SaveAssistantResponse(ctx, commitSession, assistantResponse, originalModel)
-	if err != nil {
-		return session.SaveResult{}, err
-	}
-	return result, nil
+	entries = append(entries, session.MessageEntry{
+		Message: session.Message{
+			Role:             core.RoleAssistant,
+			Content:          assistantResponse.Text,
+			ThoughtSignature: assistantResponse.ThoughtSignature,
+			Timestamp:        time.Now(),
+			Model:            originalModel,
+		},
+		ToolCalls: assistantResponse.ToolCalls,
+		Blocks:    assistantResponse.Blocks,
+	})
+	return session.AppendMessagesWithBlocks(ctx, commitSession, entries)
 }
 
 func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel string, result session.SaveResult, target openAIResponsesCommitTarget, raw json.RawMessage) error {
@@ -398,7 +418,7 @@ func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponse
 		Store:              stateCtx.Store,
 		Instructions:       stateCtx.Instructions,
 		Metadata:           cloneStringInterfaceMap(req.Metadata),
-		Request:            append(json.RawMessage(nil), stateCtx.CurrentRequest...),
+		Request:            stateCtx.CurrentRequest,
 		Raw:                raw,
 		Error:              resp.Error,
 		IncompleteDetails:  resp.IncompleteDetails,
@@ -565,7 +585,7 @@ func (s *Server) ensureOpenAIResponsesStateWritableLocked(stateCtx *openAIRespon
 	return nil
 }
 
-func appendTypedMessageToSession(ctx context.Context, sess *session.Session, msg core.TypedMessage, model string) error {
+func typedMessageToSessionEntry(msg core.TypedMessage, model string) session.MessageEntry {
 	text, calls, results := typedMessageToolProjection(msg)
 	role := core.Role(msg.Role)
 	if role == "" {
@@ -579,7 +599,17 @@ func appendTypedMessageToSession(ctx context.Context, sess *session.Session, msg
 	if role == core.RoleAssistant {
 		message.Model = model
 	}
-	result, err := session.AppendMessageWithBlocks(ctx, sess, message, calls, results, msg.Blocks)
+	return session.MessageEntry{
+		Message:     message,
+		ToolCalls:   calls,
+		ToolResults: results,
+		Blocks:      msg.Blocks,
+	}
+}
+
+func appendTypedMessageToSession(ctx context.Context, sess *session.Session, msg core.TypedMessage, model string) error {
+	entry := typedMessageToSessionEntry(msg, model)
+	result, err := session.AppendMessageWithBlocks(ctx, sess, entry.Message, entry.ToolCalls, entry.ToolResults, entry.Blocks)
 	if err != nil {
 		return err
 	}

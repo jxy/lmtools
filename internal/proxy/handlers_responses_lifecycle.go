@@ -184,7 +184,7 @@ func (s *Server) parseOpenAIResponsesUtilityRequest(w http.ResponseWriter, r *ht
 	rawBody, err := s.decodeEndpointRequestWithDisposition(r, &req, "preserved for direct OpenAI passthrough, ignored by converted providers")
 	if err != nil {
 		log.Errorf("Failed to parse request: %s", err)
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return nil, nil, nil, false
 	}
 	if req.Model == "" {

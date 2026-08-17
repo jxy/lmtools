@@ -39,6 +39,11 @@ type AnthropicStreamHandler struct {
 	originalModel string
 	ctx           context.Context
 	lastEventAt   time.Time
+
+	// Terminal-event tracking. Anthropic clients treat a stream that ends
+	// without message_stop or error as a dropped connection, so the handler
+	// remembers what it has already sent and can close the stream out itself.
+	terminated bool
 }
 
 // NewAnthropicStreamHandler creates a new Anthropic stream handler.
@@ -170,10 +175,13 @@ func (h *AnthropicStreamHandler) sendIdlePingIfDue(interval time.Duration) (time
 
 	wait := interval - time.Since(h.lastEventAt)
 	if wait <= 0 {
-		if err := h.sse.WriteJSON(EventPing, NewPing()); err != nil {
+		wrote, err := h.sendEventLocked(EventPing, NewPing())
+		if err != nil {
 			return 0, err
 		}
-		h.lastEventAt = time.Now()
+		if !wrote {
+			return interval, nil
+		}
 	}
 	return wait, nil
 }
@@ -251,9 +259,36 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	return h.FinishStream(stopReason, nil)
 }
 
-// SendStreamError sends an error event to the client.
+// SendStreamError sends an error event to the client, unless the stream already
+// ended. Both terminal events close the door, and they close it against
+// whoever knocks: message_stop said the turn finished, and an Anthropic error
+// event is itself terminal, so one failure gets one error.
+//
+// A turn the client was told had finished does not un-finish because the
+// upstream ran into trouble behind it — an error there has the client throw
+// away, or pay to regenerate, an answer it already holds complete. In the other
+// direction, a failure the upstream has already reported in its own words and
+// with its own type is the account the client can act on; the proxy's generic
+// "stream processing error" behind it only competes with it. Both are ordinary
+// rather than exotic: an upstream error event reaches the parser and then the
+// handler a second time on the way out, and stop sequences are stripped from
+// the forwarded request, so the upstream keeps generating past the point the
+// client was told the answer ended.
+//
+// The drop is logged. The client has its ending either way, but an operator
+// watching for upstream trouble still wants to see it.
 func (h *AnthropicStreamHandler) SendStreamError(message string) error {
-	return h.SendEvent(EventError, NewError(message))
+	h.mu.Lock()
+	wrote, err := h.sendEventLocked(EventError, NewError(message))
+	h.mu.Unlock()
+
+	if err != nil {
+		return err
+	}
+	if !wrote {
+		logger.From(h.ctx).Warnf("Dropping error on an Anthropic stream that already ended: %s", message)
+	}
+	return nil
 }
 
 // UpdateModel updates the model in the handler state.
@@ -355,9 +390,56 @@ func (h *AnthropicStreamHandler) beginParsedToolUseBlock(key *openAIStreamToolKe
 func (h *AnthropicStreamHandler) SendEvent(eventType string, data interface{}) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	_, err := h.sendEventLocked(eventType, data)
+	return err
+}
+
+// sendEventLocked is the terminal-event boundary for Anthropic streams. The
+// caller must hold h.mu. Once message_stop or error is written, every later
+// event is suppressed, including heartbeat pings.
+func (h *AnthropicStreamHandler) sendEventLocked(eventType string, data interface{}) (bool, error) {
+	if h.terminated {
+		return false, nil
+	}
 	if err := h.sse.WriteJSON(eventType, data); err != nil {
-		return err
+		return false, err
 	}
 	h.lastEventAt = time.Now()
-	return nil
+	if eventType == EventMessageStop || eventType == EventError {
+		h.terminated = true
+	}
+	return true, nil
+}
+
+// EnsureTerminated closes out a provider stream that never reached a terminal
+// event. An upstream that is truncated, killed by a gateway, or cut off by a
+// size limit otherwise leaves the client waiting on a message_stop that never
+// arrives, which clients report as a disconnect rather than a failure. An error
+// event is already terminal under the Anthropic streaming contract, so a stream
+// that emitted one is left alone. Zero events is also a truncation here: once an
+// accepted provider stream reaches this owner, returning nothing would leave an
+// empty 200 rather than an ordinary HTTP error or a terminal SSE failure.
+//
+// SendStreamError refuses a late error too, so the terminal checks here are not
+// what makes this safe. They are what keeps an ordinary completed stream from
+// logging a dropped error on the way out.
+func (h *AnthropicStreamHandler) EnsureTerminated(streamErr error) error {
+	if !downstreamStreamIsLive(h.ctx) {
+		return nil
+	}
+
+	h.mu.Lock()
+	terminated := h.terminated
+	h.mu.Unlock()
+
+	if terminated {
+		return nil
+	}
+
+	message := "upstream stream ended before message_stop"
+	if streamErr != nil {
+		message = fmt.Sprintf("upstream stream ended before message_stop: %v", streamErr)
+	}
+	logger.From(h.ctx).Warnf("Anthropic stream had no terminal event; sending error event: %s", message)
+	return h.SendStreamError(message)
 }

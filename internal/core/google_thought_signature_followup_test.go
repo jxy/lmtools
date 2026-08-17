@@ -10,6 +10,7 @@ import (
 	"lmtools/internal/session"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -51,6 +52,17 @@ func TestGoogleThoughtSignatureRoundTripFromCapture_Streaming(t *testing.T) {
 
 func testGoogleThoughtSignatureRoundTripFromCapture(t *testing.T, stream bool) {
 	t.Helper()
+	oldSessionsDir := session.GetSessionsDir()
+	testSessionsDir := filepath.Join(t.TempDir(), "sessions")
+	if err := os.MkdirAll(testSessionsDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll(test sessions) error = %v", err)
+	}
+	session.SetSessionsDir(testSessionsDir)
+	session.SetSkipFlockCheck(true)
+	t.Cleanup(func() {
+		session.SetSessionsDir(oldSessionsDir)
+		session.SetSkipFlockCheck(false)
+	})
 
 	suite, err := apifixtures.LoadSuite()
 	if err != nil {
@@ -66,71 +78,69 @@ func testGoogleThoughtSignatureRoundTripFromCapture(t *testing.T, stream bool) {
 		t.Fatalf("ReadCaseFile(%q) error = %v", file, err)
 	}
 
-	session.WithTestSessionDir(t, func(string) {
-		ctx := context.Background()
-		logDir := t.TempDir()
-		cfg := core.NewTestRequestConfig()
-		cfg.Provider = "google"
-		cfg.ProviderURL = "https://generativelanguage.googleapis.com/v1beta"
-		cfg.Model = "gemini-3.1-flash-lite-preview"
-		cfg.System = ""
-		cfg.StreamChat = stream
+	ctx := context.Background()
+	logDir := t.TempDir()
+	cfg := core.NewTestRequestConfig()
+	cfg.Provider = "google"
+	cfg.ProviderURL = "https://generativelanguage.googleapis.com/v1beta"
+	cfg.Model = "gemini-3.1-flash-lite-preview"
+	cfg.System = ""
+	cfg.StreamChat = stream
 
-		resp := &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(bytes.NewReader(raw)),
-		}
-		parsed, err := core.HandleResponse(ctx, cfg, resp, googleThoughtSignatureLogger{dir: logDir}, googleThoughtSignatureNotifier{})
-		if err != nil {
-			t.Fatalf("HandleResponse() error = %v", err)
-		}
-		if parsed.Text == "" {
-			t.Fatal("parsed.Text is empty")
-		}
-		if parsed.ThoughtSignature == "" {
-			t.Fatal("parsed.ThoughtSignature is empty")
-		}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader(raw)),
+	}
+	parsed, err := core.HandleResponse(ctx, cfg, resp, googleThoughtSignatureLogger{dir: logDir}, googleThoughtSignatureNotifier{})
+	if err != nil {
+		t.Fatalf("HandleResponse() error = %v", err)
+	}
+	if parsed.Text == "" {
+		t.Fatal("parsed.Text is empty")
+	}
+	if parsed.ThoughtSignature == "" {
+		t.Fatal("parsed.ThoughtSignature is empty")
+	}
 
-		sess, err := session.CreateSession("", core.NewTestLogger(false))
-		if err != nil {
-			t.Fatalf("CreateSession() error = %v", err)
-		}
+	sess, err := session.CreateSession("", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
 
-		if _, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
-			Role:      core.RoleUser,
-			Content:   "Hello",
-			Timestamp: time.Now(),
-		}, nil, nil); err != nil {
-			t.Fatalf("AppendMessageWithToolInteraction(user) error = %v", err)
-		}
+	if _, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
+		Role:      core.RoleUser,
+		Content:   "Hello",
+		Timestamp: time.Now(),
+	}, nil, nil); err != nil {
+		t.Fatalf("AppendMessageWithToolInteraction(user) error = %v", err)
+	}
 
-		if _, err := session.SaveAssistantResponseWithMetadata(ctx, sess, parsed.Text, parsed.ToolCalls, cfg.Model, parsed.ThoughtSignature); err != nil {
-			t.Fatalf("SaveAssistantResponseWithMetadata() error = %v", err)
-		}
+	if _, err := session.SaveAssistantResponseWithMetadata(ctx, sess, parsed.Text, parsed.ToolCalls, cfg.Model, parsed.ThoughtSignature); err != nil {
+		t.Fatalf("SaveAssistantResponseWithMetadata() error = %v", err)
+	}
 
-		if _, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
-			Role:      core.RoleUser,
-			Content:   "Follow up",
-			Timestamp: time.Now().Add(time.Second),
-		}, nil, nil); err != nil {
-			t.Fatalf("AppendMessageWithToolInteraction(follow-up) error = %v", err)
-		}
+	if _, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
+		Role:      core.RoleUser,
+		Content:   "Follow up",
+		Timestamp: time.Now().Add(time.Second),
+	}, nil, nil); err != nil {
+		t.Fatalf("AppendMessageWithToolInteraction(follow-up) error = %v", err)
+	}
 
-		typedMessages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
-		if err != nil {
-			t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
-		}
+	typedMessages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+	}
 
-		_, body, err := core.BuildChatRequest(cfg, typedMessages, core.ChatBuildOptions{ModelOverride: cfg.Model})
-		if err != nil {
-			t.Fatalf("BuildChatRequest() error = %v", err)
-		}
+	_, body, err := core.BuildChatRequest(cfg, typedMessages, core.ChatBuildOptions{ModelOverride: cfg.Model})
+	if err != nil {
+		t.Fatalf("BuildChatRequest() error = %v", err)
+	}
 
-		gotSignature := extractGoogleAssistantThoughtSignature(t, body)
-		if gotSignature != parsed.ThoughtSignature {
-			t.Fatalf("assistant thoughtSignature = %q, want %q", gotSignature, parsed.ThoughtSignature)
-		}
-	})
+	gotSignature := extractGoogleAssistantThoughtSignature(t, body)
+	if gotSignature != parsed.ThoughtSignature {
+		t.Fatalf("assistant thoughtSignature = %q, want %q", gotSignature, parsed.ThoughtSignature)
+	}
 }
 
 func extractGoogleAssistantThoughtSignature(t *testing.T, body []byte) string {

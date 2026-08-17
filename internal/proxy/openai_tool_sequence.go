@@ -14,7 +14,6 @@ func normalizeTypedMessagesForOpenAIChat(messages []core.TypedMessage) []core.Ty
 	out := make([]core.TypedMessage, 0, len(messages))
 	buffered := make([]core.TypedMessage, 0)
 	pending := map[string]struct{}{}
-	pendingOrder := make([]string, 0)
 	canMergeAssistantToolCalls := false
 
 	for len(queue) > 0 {
@@ -23,14 +22,14 @@ func normalizeTypedMessagesForOpenAIChat(messages []core.TypedMessage) []core.Ty
 
 		if len(pending) == 0 {
 			out = append(out, msg)
-			pendingOrder = appendToolUseIDsFromMessage(pending, pendingOrder, msg)
+			noteToolUseIDsFromMessage(pending, msg)
 			canMergeAssistantToolCalls = len(pending) > 0
 			continue
 		}
 
 		if canMergeAssistantToolCalls && assistantOnlyToolUseOrReasoning(msg) {
 			out = appendBlocksToLastAssistant(out, msg.Blocks)
-			pendingOrder = appendToolUseIDsFromMessage(pending, pendingOrder, msg)
+			noteToolUseIDsFromMessage(pending, msg)
 			continue
 		}
 
@@ -46,9 +45,18 @@ func normalizeTypedMessagesForOpenAIChat(messages []core.TypedMessage) []core.Ty
 			buffered = append(buffered, remainder)
 		}
 		if len(pending) == 0 {
-			queue = append(append([]core.TypedMessage(nil), buffered...), queue...)
-			buffered = buffered[:0]
-			pendingOrder = pendingOrder[:0]
+			// Re-queue anything held back while tool results were outstanding.
+			// Skipping the splice when nothing was buffered matters: pending
+			// drains on every tool result, and rebuilding the queue each time
+			// copies the whole remaining transcript, which is quadratic in the
+			// number of messages.
+			if len(buffered) > 0 {
+				next := make([]core.TypedMessage, 0, len(buffered)+len(queue))
+				next = append(next, buffered...)
+				next = append(next, queue...)
+				queue = next
+				buffered = buffered[:0]
+			}
 		}
 	}
 
@@ -111,9 +119,9 @@ func appendBlocksToLastAssistant(messages []core.TypedMessage, blocks []core.Blo
 	return append(messages, core.TypedMessage{Role: string(core.RoleAssistant), Blocks: blocks})
 }
 
-func appendToolUseIDsFromMessage(pending map[string]struct{}, order []string, msg core.TypedMessage) []string {
+func noteToolUseIDsFromMessage(pending map[string]struct{}, msg core.TypedMessage) {
 	if msg.Role != string(core.RoleAssistant) {
-		return order
+		return
 	}
 	for _, block := range msg.Blocks {
 		toolUse, ok := asToolUseBlock(block)
@@ -124,9 +132,7 @@ func appendToolUseIDsFromMessage(pending map[string]struct{}, order []string, ms
 			continue
 		}
 		pending[toolUse.ID] = struct{}{}
-		order = append(order, toolUse.ID)
 	}
-	return order
 }
 
 func splitMatchingToolResults(msg core.TypedMessage, pending map[string]struct{}) ([]core.Block, core.TypedMessage) {

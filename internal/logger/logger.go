@@ -407,22 +407,30 @@ func From(ctx context.Context) *RequestLogger {
 	}
 }
 
-// IsDebugEnabled returns true if debug logging is enabled
-func (l *Logger) IsDebugEnabled() bool {
-	if l == nil {
+// enabled reports whether a record at level can reach at least one configured
+// sink. Keep this predicate aligned with logInternal so callers can safely skip
+// expensive argument construction when a record would be discarded.
+func (l *Logger) enabled(level int) bool {
+	if l == nil || level < l.level {
 		return false
 	}
-	return (l.toStderr && LevelDebug >= l.stderrMinLevel) ||
-		(l.toFile && LevelDebug >= l.fileMinLevel)
+	return (l.toStderr && level >= l.stderrMinLevel) ||
+		(l.toFile && level >= l.fileMinLevel)
 }
 
-// IsInfoEnabled returns true if info logging is enabled
+// IsDebugEnabled returns true if debug logging is enabled.
+func (l *Logger) IsDebugEnabled() bool {
+	return l.enabled(LevelDebug)
+}
+
+// IsInfoEnabled returns true if info logging is enabled.
 func (l *Logger) IsInfoEnabled() bool {
-	if l == nil {
-		return false
-	}
-	return (l.toStderr && LevelInfo >= l.stderrMinLevel) ||
-		(l.toFile && LevelInfo >= l.fileMinLevel)
+	return l.enabled(LevelInfo)
+}
+
+// IsWarnEnabled returns true if warning logging is enabled.
+func (l *Logger) IsWarnEnabled() bool {
+	return l.enabled(LevelWarn)
 }
 
 // logInternal is the unified internal logging implementation

@@ -55,7 +55,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	anthReq, err := s.parseAnthropicRequest(r)
 	if err != nil {
 		log.Errorf("Failed to parse request: %s", err)
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
+		s.sendAnthropicRequestError(w, err)
 		return
 	}
 	info := endpointRequestInfo{
@@ -108,7 +108,7 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	req, err := s.parseAnthropicTokenCountRequest(r)
 	if err != nil {
 		log.Errorf("Failed to parse count tokens request: %s", err)
-		s.sendAnthropicError(w, ErrTypeInvalidRequest, err.Error(), http.StatusBadRequest)
+		s.sendAnthropicRequestError(w, err)
 		return
 	}
 
@@ -334,5 +334,8 @@ func (s *Server) handleStreamingRequest(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		// handleStreamError classifies error, logs appropriately, and notifies client
 		_ = handleStreamError(ctx, handler, fmt.Sprintf("Anthropic->%s", provider), err)
+	}
+	if termErr := handler.EnsureTerminated(err); termErr != nil && downstreamStreamIsLive(ctx) {
+		log.Errorf("Failed to send terminal Anthropic stream event: %v", termErr)
 	}
 }

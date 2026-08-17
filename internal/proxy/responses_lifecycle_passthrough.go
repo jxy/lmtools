@@ -13,10 +13,10 @@ func (s *Server) forwardOpenAIRawLifecycle(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	body, err := s.readRequestBody(r)
 	if err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, fmt.Sprintf("failed to read request body: %v", err), "read_error", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return
 	}
-	logWireHTTPRequest(ctx, "WIRE CLIENT REQUEST", r, body)
+	logWireClientRequest(ctx, r, body)
 	s.forwardOpenAIRawLifecycleWithBody(w, r, family, body)
 }
 
@@ -146,7 +146,7 @@ func (s *Server) decodeOptionalJSON(r *http.Request, dst interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
-	logWireHTTPRequest(r.Context(), "WIRE CLIENT REQUEST", r, body)
+	logWireClientRequest(r.Context(), r, body)
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil
 	}

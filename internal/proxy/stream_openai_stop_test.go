@@ -224,7 +224,7 @@ func TestForwardOpenAICompatibleSSEWithStopsSplitMatch(t *testing.T) {
 		"",
 	}, "\n")
 	recorder := httptest.NewRecorder()
-	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}, 1); err != nil {
 		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
 	}
 	body := recorder.Body.String()
@@ -247,7 +247,7 @@ func TestForwardOpenAICompatibleSSEWithStopsFlushesFinalChunkTail(t *testing.T) 
 		"",
 	}, "\n")
 	recorder := httptest.NewRecorder()
-	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"XYZ"}); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"XYZ"}, 1); err != nil {
 		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
 	}
 	body := recorder.Body.String()
@@ -292,7 +292,7 @@ func TestForwardOpenAICompatibleSSEWithStopsPreservesUnknownFields(t *testing.T)
 		"",
 	}, "\n")
 	recorder := httptest.NewRecorder()
-	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}, 1); err != nil {
 		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
 	}
 	body := recorder.Body.String()
@@ -364,7 +364,7 @@ func TestForwardOpenAICompatibleSSEWithStopsPerChoice(t *testing.T) {
 		"",
 	}, "\n")
 	recorder := httptest.NewRecorder()
-	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}, 1); err != nil {
 		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
 	}
 	body := recorder.Body.String()
@@ -389,7 +389,7 @@ func TestForwardOpenAICompatibleSSEWithStopsPreservesCustomToolCallDelta(t *test
 		"",
 	}, "\n")
 	recorder := httptest.NewRecorder()
-	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}, 1); err != nil {
 		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
 	}
 	body := recorder.Body.String()
@@ -413,7 +413,7 @@ func TestForwardOpenAICompatibleSSEWithStopsDeletesStoppedChoiceTypedDeltaFields
 		"",
 	}, "\n")
 	recorder := httptest.NewRecorder()
-	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(context.Background(), recorder, strings.NewReader(upstream), "client-model", "OpenAI", []string{"<STOP>"}, 1); err != nil {
 		t.Fatalf("forwardOpenAICompatibleSSEWithStops() error = %v", err)
 	}
 	body := recorder.Body.String()

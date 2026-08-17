@@ -1,5 +1,7 @@
 package session
 
+// Shared session test fixtures and assertions.
+
 import (
 	"os"
 	"path/filepath"

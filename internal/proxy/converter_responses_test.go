@@ -950,7 +950,8 @@ func TestOpenAIResponsesRequestToTypedDropsHostedToolsForConvertedProviders(t *t
 		Model: "gpt-5.4-nano",
 		Input: "hi",
 		Tools: []map[string]interface{}{
-			{"type": "tool_search"},
+			{"type": "web_search_preview"},
+			{"type": "file_search"},
 			{"type": "function", "name": "lookup", "parameters": map[string]interface{}{"type": "object"}},
 		},
 	}
@@ -964,8 +965,13 @@ func TestOpenAIResponsesRequestToTypedDropsHostedToolsForConvertedProviders(t *t
 			t.Fatalf("tools = %+v, want only lookup function tool", typed.Tools)
 		}
 	})
-	if !strings.Contains(logs, `Dropping unsupported Responses tool type "tool_search" at index 0`) {
-		t.Fatalf("tool_search warning not found in logs:\n%s", logs)
+	for _, want := range []string{
+		`Dropping unsupported Responses tool type "web_search_preview" at index 0`,
+		`Dropping unsupported Responses tool type "file_search" at index 1`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("hosted tool warning %q not found in logs:\n%s", want, logs)
+		}
 	}
 }
 

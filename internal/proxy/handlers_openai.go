@@ -39,7 +39,7 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	openAIReq, err := s.parseOpenAIRequest(r)
 	if err != nil {
 		log.Errorf("Failed to parse request: %s", err)
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+		s.sendOpenAIRequestError(w, err)
 		return
 	}
 	info := endpointRequestInfo{
@@ -342,6 +342,9 @@ func (s *Server) handleOpenAIStreamingRequest(w http.ResponseWriter, r *http.Req
 		// handleStreamError classifies error, logs appropriately, and notifies client
 		_ = handleStreamError(ctx, writer, fmt.Sprintf("OpenAI->%s", provider), err)
 	}
+	if termErr := writer.EnsureTerminated(err); termErr != nil && downstreamStreamIsLive(ctx) {
+		log.Errorf("Failed to send terminal OpenAI stream marker: %v", termErr)
+	}
 }
 
 // forwardOpenAICompatibleStreamDirectly forwards an OpenAI-compatible streaming request directly upstream.
@@ -366,7 +369,7 @@ func (s *Server) forwardOpenAICompatibleStreamDirectly(w http.ResponseWriter, r 
 
 	// Stream the response directly with model name replacement and local stop enforcement.
 	setSSEHeaders(w)
-	if err := forwardOpenAICompatibleSSEWithStops(ctx, w, resp.Body, originalModel, requestName, stops); err != nil {
+	if err := forwardOpenAICompatibleSSEWithStops(ctx, w, resp.Body, originalModel, requestName, stops, requestedChoiceCount(openAIReq)); err != nil {
 		_ = handleStreamError(ctx, nil, "OpenAIDirectSSE", err)
 	}
 }

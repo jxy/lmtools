@@ -201,12 +201,27 @@ func buildCommitTriplet(sessionPath, msgID string, staging *MessageStaging) []fi
 	}
 }
 
+// commitStagedMessageLocked atomically places one staged message at msgID and
+// reports orphan cleanup. The caller must hold the session lock.
+func commitStagedMessageLocked(ctx context.Context, sessionPath, msgID string, staging *MessageStaging) error {
+	commitResult, err := commitFiles(ctx, buildCommitTriplet(sessionPath, msgID, staging))
+	if err != nil {
+		return errors.WrapError("commit message files", err)
+	}
+	for _, orphanedFile := range commitResult.OrphanedFiles {
+		logger.From(ctx).Debugf("Removed orphaned file during commit: %s (no matching .json metadata found)", orphanedFile)
+	}
+	return nil
+}
+
 // messageCommitter encapsulates the atomic commit logic for session messages.
 type messageCommitter struct {
 	sessionPath string
 }
 
 var afterGetNextMessageIDForTest func(sessionPath, msgID string)
+
+const messageCommitLockTimeout = 5 * time.Second
 
 // newMessageCommitter creates a new message committer for the given session path.
 func newMessageCommitter(sessionPath string) *messageCommitter {
@@ -221,7 +236,7 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 	var conflictMsgID string
 	var siblingPath string
 
-	err := WithSessionLock(mc.sessionPath, 5*time.Second, func() error {
+	err := WithSessionLock(mc.sessionPath, messageCommitLockTimeout, func() error {
 		var err error
 		msgID, err = GetNextMessageID(mc.sessionPath)
 		if err != nil {
@@ -238,16 +253,7 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 			return nil
 		}
 
-		commitResult, err := commitFiles(ctx, buildCommitTriplet(mc.sessionPath, msgID, staging))
-		if err != nil {
-			return errors.WrapError("commit message files", err)
-		}
-
-		for _, orphanedFile := range commitResult.OrphanedFiles {
-			logger.From(ctx).Debugf("Removed orphaned file during commit: %s (no matching .json metadata found)", orphanedFile)
-		}
-
-		return nil
+		return commitStagedMessageLocked(ctx, mc.sessionPath, msgID, staging)
 	})
 	if err != nil {
 		return "", false, "", err

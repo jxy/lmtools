@@ -241,7 +241,12 @@ chmod 600 ~/.google-key
 - `-host string`: Bind host. Default `127.0.0.1`.
 - `-port int`: Bind port. Default `8082`.
 - `-sessions-dir string`: Local Responses API state directory. Default `~/.apiproxy/sessions`.
-- `-max-request-body-size int`: Request body limit in MB. Default `10`.
+- `-max-request-body-size int`: Request body limit in MB. Default `512`, matching
+  OpenAI's documented payload limit so the proxy never rejects a request the
+  provider would have accepted. Anthropic caps Messages requests at 32MB and
+  Argo enforces its own limit; those rejections pass through untouched. Requests
+  over the proxy's own limit get `413 request_too_large`; when `Content-Length`
+  is known, the message includes the observed size and exact whole-MB setting.
 - `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
 - `-log-format string`: `text` or `json`.
 
@@ -569,6 +574,8 @@ applies to every path except `-provider openai` and
 ## Troubleshooting
 
 - Pass `-log-level DEBUG` to either binary to inspect request routing and conversion warnings.
+  DEBUG wire logs include complete, unredacted request, response, and stream
+  bytes; they can contain credentials and grow without bound on long streams.
 - Confirm that the selected `-provider` has credentials or a `-provider-url`.
 - For Argo, check whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
 - When a converted Responses request loses an OpenAI-only field, switch to
@@ -578,3 +585,32 @@ applies to every path except `-provider openai` and
   into `~/.codex/<name>.config.toml` with top-level keys and delete the old
   `[profiles.<name>]` table. Codex 0.134.0 and later read neither that table nor
   a top-level `profile` selector from `config.toml`.
+
+### Large Requests And Truncated Streams
+
+Sessions that carry large attachments, such as page images of a PDF or a long
+build log, grow every turn because clients resend the whole transcript. Three
+things can go wrong, and each reports itself differently:
+
+- `413 request_too_large` from `apiproxy` means the body passed
+  `-max-request-body-size`. When the client supplied `Content-Length`, the
+  message states the observed size and the value that would admit it. Otherwise,
+  it names the setting without guessing how large the body was.
+- A `413` or a size complaint whose body came from the provider means the
+  provider's own limit was hit. Raising `-max-request-body-size` will not help;
+  shrink the attachment or start a new session.
+- A stream that ends with `response.failed`, an Anthropic `error` event, or an
+  error chunk followed by `[DONE]` means generation or stream processing failed
+  part way through. While the downstream connection remains writable,
+  `apiproxy` closes a started stream with the appropriate terminal marker. If a
+  client still reports "stream closed before completion," inspect the proxy logs
+  and the client-to-proxy connection; cancellation or a write failure can prevent
+  a final marker from reaching the client. A connection that drops *after* the
+  model finished its turn is not reported as a failure.
+
+Every path buffers the request body, and converted or stored paths create
+additional representations of it. Peak memory depends on payload shape and
+concurrency rather than a fixed multiple of body size.
+`-max-request-body-size` defaults to 512MB to match OpenAI's own payload limit;
+treat that as an admission ceiling, not a per-request memory estimate, and lower
+it if the machine cannot safely absorb concurrent large requests.

@@ -34,8 +34,12 @@ const (
 
 // HTTP Request/Response size limits
 const (
-	// DefaultMaxRequestBodySize is the default maximum size for HTTP request bodies
-	DefaultMaxRequestBodySize = 10 * 1024 * 1024 // 10MB
+	// DefaultMaxRequestBodySize is the default maximum size for HTTP request bodies.
+	// This matches OpenAI's documented 512MB Responses/Chat payload limit so the
+	// proxy is never a tighter constraint than the provider it forwards to.
+	// Anthropic's Messages API caps requests at 32MB and Argo enforces its own
+	// limit; those errors are forwarded to the client unchanged.
+	DefaultMaxRequestBodySize = 512 * 1024 * 1024 // 512MB
 
 	// DefaultMaxResponseBodySize is the default maximum size for HTTP response bodies
 	DefaultMaxResponseBodySize = 20 * 1024 * 1024 // 20MB

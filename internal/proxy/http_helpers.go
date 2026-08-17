@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"lmtools/internal/constants"
@@ -52,13 +53,21 @@ func (s *Server) readDirectProviderResponse(ctx context.Context, w http.Response
 	return body, true
 }
 
-// readRequestBody safely reads an HTTP request body with size limit
+// readRequestBody safely reads an HTTP request body with size limit.
+// An oversized body is reported as *requestTooLargeError so handlers can answer
+// with 413 request_too_large instead of a generic 400.
 func (s *Server) readRequestBody(r *http.Request) ([]byte, error) {
-	maxSize := s.config.MaxRequestBodySize
-	if maxSize <= 0 {
-		maxSize = constants.DefaultMaxRequestBodySize
+	maxSize := effectiveMaxRequestBodySize(s.config)
+	if r.ContentLength > maxSize {
+		// The declared length already exceeds the limit, so the upload does not
+		// need to be read before it is refused.
+		return nil, newRequestTooLargeError(maxSize, r.ContentLength)
 	}
-	return limitio.ReadLimitedWithKind(r.Body, maxSize, "request body")
+	body, err := limitio.ReadLimitedWithSizeHint(r.Body, maxSize, "request body", r.ContentLength)
+	if err != nil && isBodySizeLimitError(err) {
+		return nil, newRequestTooLargeError(maxSize, r.ContentLength)
+	}
+	return body, err
 }
 
 // extractRequestLogger is a helper function to extract the request logger from context
@@ -150,6 +159,11 @@ type sseRecord struct {
 	DataLines []string
 }
 
+// errStopConsumingSSERecords is callback control flow, not a read or write
+// failure. Keeping it distinct from io.EOF prevents a downstream writer that
+// returns io.EOF from being mistaken for a clean provider-owned termination.
+var errStopConsumingSSERecords = errors.New("stop consuming SSE records")
+
 func (r sseRecord) data() string {
 	return strings.Join(r.DataLines, "\n")
 }
@@ -223,22 +237,6 @@ func consumeSSERecords(reader io.Reader, onRecord func(sseRecord) error) error {
 		return err
 	}
 	return flush()
-}
-
-func forwardSSERecords(ctx context.Context, w http.ResponseWriter, reader io.Reader, transformData func(string) string) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return fmt.Errorf("ResponseWriter does not support flushing")
-	}
-	return consumeSSERecords(reader, func(record sseRecord) error {
-		payload := record.withData(transformData(record.data()))
-		logClientStreamBytesIfUnhandled(ctx, w, []byte(payload))
-		if _, err := io.WriteString(w, payload); err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
-	})
 }
 
 func logClientStreamBytesIfUnhandled(ctx context.Context, w http.ResponseWriter, payload []byte) {

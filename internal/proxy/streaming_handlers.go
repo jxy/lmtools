@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"lmtools/internal/auth"
@@ -374,7 +375,7 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			if err := handler.SendEvent(EventMessageStop, evt); err != nil {
 				return err
 			}
-			return io.EOF
+			return errStopConsumingSSERecords
 
 		case EventPing:
 			var evt PingEvent
@@ -397,8 +398,8 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			if err := handler.SendEvent(EventError, evt); err != nil {
 				return err
 			}
-			upstreamErr := fmt.Errorf("%s: %s", evt.Error.Type, evt.Error.Message)
-			return handleStreamError(handler.ctx, nil, "AnthropicStreamParser:upstream", upstreamErr)
+			log.Errorf("Anthropic upstream stream error: %s: %s", evt.Error.Type, evt.Error.Message)
+			return errStopConsumingSSERecords
 
 		default:
 			if !recognized {
@@ -407,12 +408,10 @@ func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHa
 			return nil
 		}
 	}); err != nil {
-		if err == io.EOF {
+		if errors.Is(err, errStopConsumingSSERecords) {
 			return nil
 		}
-		if handleErr := handleStreamError(handler.ctx, nil, "AnthropicSSEScanner", err); handleErr != nil {
-			return handleErr
-		}
+		return err
 	}
 
 	return nil

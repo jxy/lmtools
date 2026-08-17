@@ -313,6 +313,29 @@ func TestOpenAIStreamParserFlushesAllStopTailsOnEOFAfterFinishReason(t *testing.
 	}
 }
 
+func TestOpenAIStreamParserFlushesStopTailBeforeReturningTruncatedStream(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())
+	if err != nil {
+		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	}
+
+	stream := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"abcX\"}}]}\n\n"
+	parser := NewOpenAIStreamParserWithStops(handler, []string{"XYZ"})
+	if err := parser.Parse(strings.NewReader(stream)); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if got := handler.state.AccumulatedText; got != "abcX" {
+		t.Fatalf("AccumulatedText = %q, want the complete generated text %q", got, "abcX")
+	}
+	if strings.Contains(recorder.Body.String(), "event: "+EventMessageStop) {
+		t.Fatalf("truncated parser input completed the stream: %s", recorder.Body.String())
+	}
+}
+
 func TestOpenAIStreamParserBuffersFunctionToolUntilName(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler, err := NewAnthropicStreamHandler(recorder, "gpt-4", context.Background())

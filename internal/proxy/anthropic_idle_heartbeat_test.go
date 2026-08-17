@@ -91,6 +91,54 @@ func TestAnthropicStreamHandlerIdleHeartbeatStopsOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamHandlerSuppressesEventsAfterTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		terminal  string
+		terminate func(*AnthropicStreamHandler) error
+	}{
+		{name: "message stop", terminal: EventMessageStop, terminate: func(h *AnthropicStreamHandler) error {
+			return h.SendMessageStop()
+		}},
+		{name: "error", terminal: EventError, terminate: func(h *AnthropicStreamHandler) error {
+			return h.SendStreamError("upstream failed")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler, err := NewAnthropicStreamHandler(recorder, "claude-test", context.Background())
+			if err != nil {
+				t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
+			}
+			if err := tc.terminate(handler); err != nil {
+				t.Fatalf("terminate stream: %v", err)
+			}
+
+			// Make the heartbeat due without relying on a timer or scheduler race.
+			handler.mu.Lock()
+			handler.lastEventAt = time.Now().Add(-time.Hour)
+			handler.mu.Unlock()
+			if _, err := handler.sendIdlePingIfDue(time.Second); err != nil {
+				t.Fatalf("sendIdlePingIfDue() error = %v", err)
+			}
+			if err := handler.SendTextDelta("late text"); err != nil {
+				t.Fatalf("SendTextDelta() error = %v", err)
+			}
+			if err := handler.SendMessageStop(); err != nil {
+				t.Fatalf("SendMessageStop() error = %v", err)
+			}
+			if err := handler.SendStreamError("late failure"); err != nil {
+				t.Fatalf("SendStreamError() error = %v", err)
+			}
+
+			events := parseSimpleSSEEvents(recorder.Body.String())
+			if len(events) != 1 || events[0].Event != tc.terminal {
+				t.Fatalf("events after terminal = %#v, want only %q; body:\n%s", events, tc.terminal, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestStreamFromAnthropicSendsIdlePingAfterUpstreamOK(t *testing.T) {
 	stream := strings.Join([]string{
 		"event: message_start",

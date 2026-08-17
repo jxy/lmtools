@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
@@ -39,19 +40,20 @@ func (p *GoogleStreamParser) Parse(reader io.Reader) error {
 		}
 
 		if err := p.processChunk(parsed); err != nil {
-			return handleStreamError(p.handler.ctx, p.handler, "GoogleStreamParser", err)
+			return err
 		}
 		return nil
 	}); err != nil {
-		if handleErr := handleStreamError(p.handler.ctx, nil, "GoogleStreamParser", err); handleErr != nil {
-			return handleErr
-		}
+		return err
 	}
 
 	if seenFinish {
 		return nil
 	}
-	return p.handler.Complete("end_turn")
+	// Gemini declares completion with finishReason. A clean EOF without one is
+	// still a truncation; synthesizing end_turn would turn a partial generation
+	// into a successful message_stop.
+	return errors.New("google stream ended before finishReason")
 }
 
 func (p *GoogleStreamParser) processChunk(chunk core.ParsedGoogleStreamChunk) error {

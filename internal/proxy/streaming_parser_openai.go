@@ -42,8 +42,12 @@ func NewOpenAIStreamParserWithStops(handler *AnthropicStreamHandler, stops []str
 	return &OpenAIStreamParser{handler: handler, stops: filtered, stoppers: make(map[int]*stopTextEnforcer), toolStates: make(map[openAIStreamToolKey]*openAIToAnthropicToolState)}
 }
 
-// Parse parses an OpenAI streaming response.
+// Parse parses an OpenAI streaming response. It releases any text held by local
+// stop enforcement before returning, so callers do not need to know about the
+// parser's internal buffering.
 func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
+	defer p.flushHeldStopTextBeforeTerminalEvent()
+
 	scanner := NewSSEScanner(reader)
 
 	for scanner.Scan() {
@@ -74,18 +78,25 @@ func (p *OpenAIStreamParser) Parse(reader io.Reader) error {
 			}
 
 			if err := p.processChunk(parsed); err != nil {
-				return handleStreamError(p.handler.ctx, p.handler, "OpenAIStreamParser", err)
+				return err
 			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return err
-	}
+	// A finish_reason the upstream already sent survives whatever happened to the
+	// connection afterwards. The generation ended; only the transport did not, so
+	// the client gets message_delta and message_stop exactly as the clean EOF over
+	// the same bytes would have produced — marking a complete answer failed has
+	// the client discard it, or pay to generate it again. The scan error still
+	// goes back to the caller for the log; the handler declines to show it to a
+	// client whose stream has already reached a terminal event.
+	scanErr := scanner.Err()
 	if p.pendingStopReason != "" && !p.finished {
-		return p.finishPending(p.pendingStopReason)
+		if err := p.finishPending(p.pendingStopReason); err != nil {
+			return err
+		}
 	}
-	return nil
+	return scanErr
 }
 
 func (p *OpenAIStreamParser) processChunk(chunk core.ParsedOpenAIStreamChunk) error {
@@ -269,6 +280,25 @@ func (p *OpenAIStreamParser) flushStopTails() error {
 		}
 	}
 	return nil
+}
+
+// flushHeldStopTextBeforeTerminalEvent releases text local stop enforcement is
+// still holding as a possible stop-sequence prefix, for a stream that will not
+// reach finishPending. The caller is about to end the stream with an error
+// event, and that text was generated before the failure: it is real output and
+// belongs in front of the error rather than being discarded behind it.
+//
+// A failure to flush is logged rather than returned. The caller already holds
+// the error that ended the stream, and that is the one worth reporting; this
+// send fails only when the connection is gone, which is where the terminal
+// event was headed too.
+func (p *OpenAIStreamParser) flushHeldStopTextBeforeTerminalEvent() {
+	if p.finished || p.flushedFinal {
+		return
+	}
+	if err := p.flushStopTails(); err != nil {
+		logger.From(p.handler.ctx).Warnf("OpenAIStreamParser: failed to flush held stop-sequence text before the terminal event: %v", err)
+	}
 }
 
 func (p *OpenAIStreamParser) finishPending(defaultStopReason string) error {

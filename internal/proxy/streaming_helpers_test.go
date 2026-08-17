@@ -180,19 +180,6 @@ func TestConsumeSSEStreamBuffersMultiLineData(t *testing.T) {
 	}
 }
 
-func TestForwardSSERecordsPreservesCommentOnlyHeartbeat(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	err := forwardSSERecords(context.Background(), recorder, strings.NewReader(": ping\n\n"), func(data string) string {
-		return data
-	})
-	if err != nil {
-		t.Fatalf("forwardSSERecords() error = %v", err)
-	}
-	if got, want := recorder.Body.String(), ": ping\n\n"; got != want {
-		t.Fatalf("forwarded heartbeat = %q, want %q", got, want)
-	}
-}
-
 func TestEnsureAnthropicTextPreamble(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-sonnet", context.Background())

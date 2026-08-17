@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/providerconfig"
 	"lmtools/internal/providers"
 	"lmtools/internal/proxy"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,8 +34,22 @@ func (f *repeatableStringFlag) Set(value string) error {
 	return nil
 }
 
-func printUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: %s [options]
+const bytesPerMB int64 = 1024 * 1024
+
+// defaultMaxRequestBodySizeMB is the -max-request-body-size default in the MB
+// the flag is expressed in. The flag registration and the usage text both read
+// it, so the help cannot quote a limit the server does not enforce.
+const defaultMaxRequestBodySizeMB = constants.DefaultMaxRequestBodySize / bytesPerMB
+
+func requestBodyLimitBytes(megabytes int64) (int64, error) {
+	if megabytes <= 0 || megabytes > math.MaxInt64/bytesPerMB {
+		return 0, fmt.Errorf("-max-request-body-size must be between 1 and %d MB", int64(math.MaxInt64)/bytesPerMB)
+	}
+	return megabytes * bytesPerMB, nil
+}
+
+func printUsage(out io.Writer) {
+	fmt.Fprintf(out, `Usage: %s [options]
 
 apiproxy is an HTTP proxy server that provides an Anthropic-compatible API interface 
 for Anthropic, OpenAI, Google, and Argo providers.
@@ -63,7 +79,7 @@ Model Options:
                              (repeatable, first match wins)
 
 Request Options:
-  -max-request-body-size int Maximum request body size in MB (default: 10)
+  -max-request-body-size int Maximum request body size in MB (default: %d)
 
 Logging Options:
   -log-level string          Log level: DEBUG, INFO, WARN, ERROR (default: "INFO")
@@ -90,12 +106,13 @@ Examples:
   %s -port 8080 -log-level DEBUG -argo-user myuser
 `,
 		os.Args[0],
+		defaultMaxRequestBodySizeMB,
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 func main() {
 	// Set custom usage function
-	flag.Usage = printUsage
+	flag.Usage = func() { printUsage(os.Stderr) }
 	// Parse command-line flags
 	var (
 		host string
@@ -119,7 +136,8 @@ func main() {
 	// Configuration flags
 	providerconfig.RegisterFlags(flag.CommandLine, &providerOpts, providerconfig.Defaults{Provider: constants.ProviderArgo})
 	flag.Var(&modelMapSpecs, "model-map", "Map matching request models to a backend model as REGEX=MODEL (repeatable, first match wins)")
-	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", 10, "Maximum request body size in MB")
+	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", defaultMaxRequestBodySizeMB,
+		fmt.Sprintf("Maximum request body size in MB (matches OpenAI's %dMB payload limit)", defaultMaxRequestBodySizeMB))
 	flag.StringVar(&sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
 
 	// Logging flags
@@ -127,6 +145,11 @@ func main() {
 	flag.StringVar(&logFormat, "log-format", "text", "Log format (text, json)")
 
 	flag.Parse()
+	maxRequestBodySizeBytes, err := requestBodyLimitBytes(maxRequestBodySize)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Read API key from file based on provider
 	if err := providerOpts.Normalize(); err != nil {
@@ -165,7 +188,7 @@ func main() {
 		ProviderURL:        providerOpts.ProviderURL,
 		OpenAIResponses:    providerOpts.OpenAIResponses,
 		ModelMapRules:      modelMapRules,
-		MaxRequestBodySize: maxRequestBodySize * 1024 * 1024, // Convert MB to bytes
+		MaxRequestBodySize: maxRequestBodySizeBytes,
 		SessionsDir:        sessionsDir,
 	}
 

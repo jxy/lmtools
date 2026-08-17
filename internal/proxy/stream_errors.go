@@ -33,6 +33,14 @@ type StreamErrorEmitter interface {
 	SendStreamError(msg string) error
 }
 
+// downstreamStreamIsLive reports whether terminal synthesis can still reach
+// the client. A canceled or expired request context means the downstream has
+// already ended; writing a fallback event then only turns normal disconnect
+// cleanup into a second context error.
+func downstreamStreamIsLive(ctx context.Context) bool {
+	return ctx == nil || ctx.Err() == nil
+}
+
 // handleStreamError processes errors that occur during stream parsing.
 //
 // Error classification:

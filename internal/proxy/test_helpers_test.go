@@ -1,5 +1,7 @@
 package proxy
 
+// Shared proxy test fixtures and recorders.
+
 import (
 	"context"
 	"encoding/json"

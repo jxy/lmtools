@@ -443,7 +443,8 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	lines := strings.Split(buf.String(), "\n")
-	foundWireRequest := false
+	foundWireRequestHeaders := false
+	foundWireRequestBody := false
 	foundRequestDetails := false
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
@@ -457,13 +458,16 @@ func TestJSONLog_IncomingAnthropicRequest(t *testing.T) {
 		if strings.HasPrefix(msg, "Request details: ") {
 			foundRequestDetails = true
 		}
-		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST:") && strings.Contains(msg, `"max_tokens":10`) {
-			foundWireRequest = true
+		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST:") && strings.Contains(msg, "POST /v1/messages") {
+			foundWireRequestHeaders = true
+		}
+		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST BODY:") && strings.Contains(msg, `"max_tokens":10`) {
+			foundWireRequestBody = true
 		}
 	}
-	if !foundWireRequest {
+	if !foundWireRequestHeaders || !foundWireRequestBody {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON wire client request log")
+		t.Errorf("missing JSON wire client request headers or body log")
 	}
 	if foundRequestDetails {
 		t.Logf("Captured logs:\n%s", buf.String())
@@ -512,7 +516,8 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	lines := strings.Split(buf.String(), "\n")
-	foundWireRequest := false
+	foundWireRequestHeaders := false
+	foundWireRequestBody := false
 	foundStreamingDetails := false
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
@@ -526,13 +531,16 @@ func TestJSONLog_IncomingAnthropicStreamingRequest(t *testing.T) {
 		if strings.HasPrefix(msg, "Streaming request details: ") {
 			foundStreamingDetails = true
 		}
-		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST:") && strings.Contains(msg, `"stream":true`) {
-			foundWireRequest = true
+		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST:") && strings.Contains(msg, "POST /v1/messages") {
+			foundWireRequestHeaders = true
+		}
+		if strings.HasPrefix(msg, "WIRE CLIENT REQUEST BODY:") && strings.Contains(msg, `"stream":true`) {
+			foundWireRequestBody = true
 		}
 	}
-	if !foundWireRequest {
+	if !foundWireRequestHeaders || !foundWireRequestBody {
 		t.Logf("Captured logs:\n%s", buf.String())
-		t.Errorf("missing JSON wire client streaming request log")
+		t.Errorf("missing JSON wire client streaming request headers or body log")
 	}
 	if foundStreamingDetails {
 		t.Logf("Captured logs:\n%s", buf.String())

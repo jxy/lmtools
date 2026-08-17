@@ -36,6 +36,46 @@ func TestLogger_IsDebugEnabled(t *testing.T) {
 	}
 }
 
+func TestLogger_LevelChecksHonorGlobalLevelWithFileSink(t *testing.T) {
+	tests := []struct {
+		level string
+		debug bool
+		info  bool
+		warn  bool
+	}{
+		{level: "debug", debug: true, info: true, warn: true},
+		{level: "info", debug: false, info: true, warn: true},
+		{level: "warn", debug: false, info: false, warn: true},
+		{level: "error", debug: false, info: false, warn: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.level, func(t *testing.T) {
+			ResetForTesting()
+			t.Cleanup(ResetForTesting)
+			if err := InitializeWithOptions(
+				WithLogDir(t.TempDir()),
+				WithLevel(tt.level),
+				WithStderr(false),
+				WithFile(true),
+			); err != nil {
+				t.Fatalf("InitializeWithOptions() error = %v", err)
+			}
+
+			log := GetLogger()
+			if got := log.IsDebugEnabled(); got != tt.debug {
+				t.Errorf("IsDebugEnabled() = %t, want %t", got, tt.debug)
+			}
+			if got := log.IsInfoEnabled(); got != tt.info {
+				t.Errorf("IsInfoEnabled() = %t, want %t", got, tt.info)
+			}
+			if got := log.IsWarnEnabled(); got != tt.warn {
+				t.Errorf("IsWarnEnabled() = %t, want %t", got, tt.warn)
+			}
+		})
+	}
+}
+
 func TestLogger_Initialization(t *testing.T) {
 	// Test various initialization options
 	ResetForTesting()
@@ -100,5 +140,8 @@ func TestLogger_NilSafety(t *testing.T) {
 	// These should not panic
 	if logger.IsDebugEnabled() {
 		t.Error("Nil logger should return false for IsDebugEnabled")
+	}
+	if logger.IsWarnEnabled() {
+		t.Error("Nil logger should return false for IsWarnEnabled")
 	}
 }

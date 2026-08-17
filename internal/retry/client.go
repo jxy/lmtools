@@ -153,7 +153,18 @@ func (c *Client) retryer(provider string) *Retryer {
 	return retryer
 }
 
-// Do executes an HTTP request with provider-specific retry logic
+// Do executes an HTTP request with provider-specific retry logic.
+//
+// Note what this costs a non-idempotent request. Whenever the body can be
+// rewound, a 429 or 5xx resubmits the request up to MaxRetries more times —
+// repeat inference, on a POST the client made once — and once the attempts run
+// out the caller gets a generic failure in place of the provider's own status.
+// GetBody makes a body rewindable at any size, and http.NewRequest sets it for
+// every in-memory body, so most requests in this repository retry. A body
+// without GetBody is read into memory below maxRetryBodySize precisely so it
+// can be replayed; only one above that size, or one with no declared length,
+// is sent once. Callers that must reach the provider exactly once should use
+// GetHTTPClient().Do instead.
 func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*http.Response, error) {
 	retryer := c.retryer(provider)
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/core"
+	"lmtools/internal/logger"
 	"net/http"
 	"sync"
 	"time"
@@ -12,18 +13,25 @@ import (
 
 // OpenAIStreamWriter handles Server-Sent Events writing for OpenAI format.
 type OpenAIStreamWriter struct {
-	mu                sync.Mutex
-	sse               *SSEWriter
-	ctx               context.Context
-	streamID          string
-	model             string
-	created           int64
-	includeUsage      bool
-	stopper           *stopTextEnforcer
-	finished          bool
-	localStopFinished bool
-	doneWritten       bool
+	mu           sync.Mutex
+	sse          *SSEWriter
+	ctx          context.Context
+	streamID     string
+	model        string
+	created      int64
+	includeUsage bool
+	stopper      *stopTextEnforcer
+	state        openAIStreamState
 }
+
+type openAIStreamState uint8
+
+const (
+	openAIStreamOpen openAIStreamState = iota
+	openAIStreamAwaitingUsage
+	openAIStreamFinished
+	openAIStreamDone
+)
 
 // OpenAIStreamOption is a functional option for configuring OpenAIStreamWriter.
 type OpenAIStreamOption func(*OpenAIStreamWriter)
@@ -64,14 +72,9 @@ func NewOpenAIStreamWriter(w http.ResponseWriter, model string, ctx context.Cont
 	return writer, nil
 }
 
-func (w *OpenAIStreamWriter) writeChunk(chunk *OpenAIStreamChunk, allowFinished bool) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.finished && !allowFinished {
-		return nil
-	}
-
+// writeChunkLocked writes one chunk. The caller holds w.mu and has already
+// decided that the chunk is valid for the current stream state.
+func (w *OpenAIStreamWriter) writeChunkLocked(chunk *OpenAIStreamChunk) error {
 	if chunk.ID == "" {
 		chunk.ID = w.streamID
 	}
@@ -110,7 +113,12 @@ func (w *OpenAIStreamWriter) WriteInitialAssistantTextDelta() error {
 			},
 		},
 	}
-	return w.writeChunk(chunk, false)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state != openAIStreamOpen {
+		return nil
+	}
+	return w.writeChunkLocked(chunk)
 }
 
 // WriteInitialAssistantToolCallDelta writes the initial assistant delta for a tool-call stream.
@@ -140,15 +148,25 @@ func (w *OpenAIStreamWriter) WriteInitialAssistantToolCallDelta(index int, id, n
 			},
 		},
 	}
-	return w.writeChunk(chunk, false)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state != openAIStreamOpen {
+		return nil
+	}
+	return w.writeChunkLocked(chunk)
 }
 
 // WriteDelta writes a delta update.
 func (w *OpenAIStreamWriter) WriteDelta(content string, role *string, finishReason *string) error {
-	return w.writeDelta(content, role, finishReason, false)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state != openAIStreamOpen {
+		return nil
+	}
+	return w.writeDeltaLocked(content, role, finishReason)
 }
 
-func (w *OpenAIStreamWriter) writeDelta(content string, role *string, finishReason *string, allowFinished bool) error {
+func (w *OpenAIStreamWriter) writeDeltaLocked(content string, role *string, finishReason *string) error {
 	delta := OpenAIDelta{}
 
 	if role != nil {
@@ -172,46 +190,43 @@ func (w *OpenAIStreamWriter) writeDelta(content string, role *string, finishReas
 		},
 	}
 
-	return w.writeChunk(chunk, allowFinished)
+	return w.writeChunkLocked(chunk)
 }
 
 // WriteContent writes a content chunk.
 func (w *OpenAIStreamWriter) WriteContent(text string) error {
-	if w.finished {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.state != openAIStreamOpen {
 		return nil
 	}
 	if w.stopper == nil {
-		return w.WriteDelta(text, nil, nil)
+		return w.writeDeltaLocked(text, nil, nil)
 	}
 	filtered, matched := w.stopper.Push(text)
 	if filtered != "" {
-		if err := w.WriteDelta(filtered, nil, nil); err != nil {
+		if err := w.writeDeltaLocked(filtered, nil, nil); err != nil {
 			return err
 		}
 	}
 	if matched {
-		if err := w.writeLocalStopFinish(); err != nil {
+		finishReason := "stop"
+		if err := w.writeDeltaLocked("", nil, &finishReason); err != nil {
 			return err
 		}
-		if !w.includeUsage {
-			return w.writeDone(true)
+		if w.includeUsage {
+			w.state = openAIStreamAwaitingUsage
+			return nil
 		}
+		w.state = openAIStreamFinished
+		return w.writeDoneLocked()
 	}
 	return nil
 }
 
-func (w *OpenAIStreamWriter) writeLocalStopFinish() error {
-	w.finished = true
-	w.localStopFinished = true
-	finishReason := "stop"
-	return w.writeDelta("", nil, &finishReason, true)
-}
-
 // WriteToolCallDelta writes a tool call delta.
 func (w *OpenAIStreamWriter) WriteToolCallDelta(index int, toolCall *ToolCallDelta, role *string, finishReason *string) error {
-	if w.finished {
-		return nil
-	}
 	var delta OpenAIDelta
 	if role != nil {
 		r := core.Role(*role)
@@ -228,72 +243,122 @@ func (w *OpenAIStreamWriter) WriteToolCallDelta(index int, toolCall *ToolCallDel
 		},
 	}
 
-	return w.writeChunk(chunk, false)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state != openAIStreamOpen {
+		return nil
+	}
+	return w.writeChunkLocked(chunk)
 }
 
-func (w *OpenAIStreamWriter) writeUsage(usage *OpenAIUsage, allowFinished bool) error {
+func (w *OpenAIStreamWriter) writeUsageLocked(usage *OpenAIUsage) error {
 	chunk := &OpenAIStreamChunk{
 		Usage:   usage,
 		Choices: []OpenAIStreamDelta{},
 	}
 
-	return w.writeChunk(chunk, allowFinished)
+	return w.writeChunkLocked(chunk)
 }
 
 // WriteFinish writes the final chunk with finish_reason and optionally usage, then [DONE].
 func (w *OpenAIStreamWriter) WriteFinish(finishReason string, usage *OpenAIUsage) error {
-	if w.doneWritten {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	switch w.state {
+	case openAIStreamDone:
 		return nil
-	}
-	if w.finished && !w.localStopFinished {
-		return nil
-	}
-	if w.localStopFinished {
+	case openAIStreamFinished:
+		return w.writeDoneLocked()
+	case openAIStreamAwaitingUsage:
 		if w.includeUsage && usage != nil {
-			if err := w.writeUsage(usage, true); err != nil {
+			if err := w.writeUsageLocked(usage); err != nil {
 				return err
 			}
 		}
-		return w.writeDone(true)
+		w.state = openAIStreamFinished
+		return w.writeDoneLocked()
 	}
+
 	if w.stopper != nil {
 		if w.stopper.Stopped() {
 			finishReason = "stop"
 		} else if tail := w.stopper.Flush(); tail != "" {
-			if err := w.WriteDelta(tail, nil, nil); err != nil {
+			if err := w.writeDeltaLocked(tail, nil, nil); err != nil {
 				return err
 			}
 		}
 	}
-	w.finished = true
-	if err := w.writeDelta("", nil, &finishReason, true); err != nil {
+	if err := w.writeDeltaLocked("", nil, &finishReason); err != nil {
 		return err
 	}
+	w.state = openAIStreamFinished
 
 	if w.includeUsage && usage != nil {
-		if err := w.writeUsage(usage, true); err != nil {
+		if err := w.writeUsageLocked(usage); err != nil {
 			return err
 		}
 	}
 
-	return w.writeDone(true)
+	return w.writeDoneLocked()
 }
 
-func (w *OpenAIStreamWriter) writeDone(allowFinished bool) error {
+// flushHeldStopText releases text the stop enforcer is still holding as a
+// possible stop-sequence prefix. A stream that ends properly flushes in
+// WriteFinish; one that is cut short has to flush here, or the generated text
+// disappears behind the terminal error. A stream that already finished has
+// nothing held: either WriteFinish flushed it, or a local stop matched and the
+// enforcer is deliberately withholding the stop sequence itself.
+//
+// Callers run this ahead of whatever ends the stream, never after. It is
+// idempotent, so the two of them overlapping costs nothing.
+func (w *OpenAIStreamWriter) flushHeldStopText() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.doneWritten || (w.finished && !allowFinished) {
+	if w.stopper == nil || w.state != openAIStreamOpen || w.stopper.Stopped() {
 		return nil
 	}
-	w.doneWritten = true
-	return w.sse.WriteEvent("", OpenAIDoneMarker)
+	tail := w.stopper.Flush()
+	if tail == "" {
+		return nil
+	}
+	return w.writeDeltaLocked(tail, nil, nil)
 }
 
-// WriteError writes an error in OpenAI streaming format.
+func (w *OpenAIStreamWriter) writeDoneLocked() error {
+	if w.state == openAIStreamDone {
+		return nil
+	}
+	if err := w.sse.WriteEvent("", OpenAIDoneMarker); err != nil {
+		return err
+	}
+	w.state = openAIStreamDone
+	return nil
+}
+
+// WriteError flushes held stop-enforcement text, emits at most one error, and
+// closes the stream with [DONE]. If a finish_reason already ended the turn, the
+// late error is dropped but any outstanding [DONE] is still written; this
+// preserves the completed answer and releases a stream waiting for optional
+// usage that can no longer arrive.
 func (w *OpenAIStreamWriter) WriteError(errType, message string) error {
+	if err := w.flushHeldStopText(); err != nil {
+		return err
+	}
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	return w.writeErrorLocked(errType, message)
+}
+
+// writeErrorLocked emits one terminal error, or only the outstanding [DONE]
+// marker when the answer already finished. The caller holds w.mu.
+func (w *OpenAIStreamWriter) writeErrorLocked(errType, message string) error {
+	if w.state != openAIStreamOpen {
+		logger.From(w.ctx).Warnf("Dropping %s error on a stream that already ended: %s", errType, message)
+		return w.writeDoneLocked()
+	}
 
 	errorResp := OpenAIError{
 		Error: OpenAIErrorDetail{
@@ -307,10 +372,51 @@ func (w *OpenAIStreamWriter) WriteError(errType, message string) error {
 		return fmt.Errorf("failed to marshal error: %w", err)
 	}
 
-	return w.sse.WriteEvent("", string(data))
+	if err := w.sse.WriteEvent("", string(data)); err != nil {
+		return err
+	}
+	w.state = openAIStreamFinished
+	return w.writeDoneLocked()
 }
 
 // SendStreamError sends an error event to the client.
 func (w *OpenAIStreamWriter) SendStreamError(message string) error {
 	return w.WriteError("server_error", message)
+}
+
+// EnsureTerminated writes the [DONE] sentinel for a provider stream that was cut
+// short. A truncated upstream otherwise leaves the client waiting on a marker
+// that never arrives, which reads as a dropped connection instead of a failed
+// turn. A stream that never produced even its first convertible event still
+// gets an error chunk and [DONE]; returning an empty 200 there is the least
+// informative form of the same truncation.
+func (w *OpenAIStreamWriter) EnsureTerminated(streamErr error) error {
+	if !downstreamStreamIsLive(w.ctx) {
+		return nil
+	}
+
+	// Text held back as a possible stop-sequence prefix is real output that the
+	// enforcer was still deciding about, and only a stream that reaches
+	// WriteFinish or WriteError releases it — a stream that dies before either
+	// never gets there. Flush it before reading terminal state, and before
+	// WriteError closes the writer to later deltas.
+	if err := w.flushHeldStopText(); err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	switch w.state {
+	case openAIStreamDone:
+		return nil
+	case openAIStreamAwaitingUsage, openAIStreamFinished:
+		return w.writeDoneLocked()
+	}
+
+	message := "upstream stream ended before the terminal chunk"
+	if streamErr != nil {
+		message = fmt.Sprintf("upstream stream ended before the terminal chunk: %v", streamErr)
+	}
+	return w.writeErrorLocked("server_error", message)
 }

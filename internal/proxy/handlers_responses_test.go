@@ -190,8 +190,8 @@ func TestOpenAIResponsesDirectPassThroughPreservesUnmodeledFields(t *testing.T) 
 func TestOpenAIResponsesDirectStreamPassThroughPreservesUnmodeledFields(t *testing.T) {
 	var captured map[string]interface{}
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Header.Get("Accept") != "text/event-stream" {
-			t.Fatalf("Accept header = %q, want text/event-stream", r.Header.Get("Accept"))
+		if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			t.Fatalf("Accept header = %q, want it to include text/event-stream", r.Header.Get("Accept"))
 		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {

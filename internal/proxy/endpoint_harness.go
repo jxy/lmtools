@@ -48,7 +48,7 @@ func (s *Server) decodeEndpointRequestWithDisposition(r *http.Request, dst inter
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
-	logWireHTTPRequest(r.Context(), "WIRE CLIENT REQUEST", r, body)
+	logWireClientRequest(r.Context(), r, body)
 	warnUnknownFieldsWithDisposition(r.Context(), body, dst, "client request", unknownFieldDisposition)
 	if err := decodeLenientJSON(body, dst); err != nil {
 		return nil, err
@@ -65,10 +65,19 @@ func decodeStrictJSON(body []byte, dst interface{}) error {
 }
 
 func decodeJSON(body []byte, dst interface{}, disallowUnknownFields bool) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if disallowUnknownFields {
-		decoder.DisallowUnknownFields()
+	if !disallowUnknownFields {
+		// json.Unmarshal reads the caller's buffer directly and rejects trailing
+		// data on its own. A json.Decoder would accumulate a second copy of the
+		// whole body in its internal buffer, which is a full extra copy of every
+		// request the proxy converts.
+		if err := json.Unmarshal(body, dst); err != nil {
+			return normalizeJSONDecodeError(err)
+		}
+		return nil
 	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); err != nil {
 		return normalizeJSONDecodeError(err)

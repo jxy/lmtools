@@ -30,9 +30,15 @@ func buildProviderJSONRequest(ctx context.Context, spec providerJSONRequest) (*h
 		requestName = spec.Provider
 	}
 
+	// Nothing downstream mutates the body, so a raw body is forwarded as-is
+	// rather than copied. Payloads use json.Marshal deliberately: its encode
+	// buffer is pooled across calls, so a large request reuses the capacity the
+	// previous one grew. Encoding into a fresh bytes.Buffer to save Marshal's
+	// single right-sized copy costs far more than it saves, because that buffer
+	// doubles its way up from empty on every request.
 	var reqBody []byte
 	if spec.RawBody != nil {
-		reqBody = append([]byte(nil), spec.RawBody...)
+		reqBody = spec.RawBody
 	} else {
 		var err error
 		reqBody, err = json.Marshal(spec.Payload)

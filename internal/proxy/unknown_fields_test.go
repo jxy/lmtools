@@ -60,9 +60,12 @@ func TestDetectUnknownFieldPathsNested(t *testing.T) {
 		"unknownTop": true
 	}`
 
-	fields, err := detectUnknownFieldPaths([]byte(jsonData), GoogleResponse{})
+	fields, truncated, err := detectUnknownFieldPaths([]byte(jsonData), GoogleResponse{})
 	if err != nil {
 		t.Fatalf("detectUnknownFieldPaths() error = %v", err)
+	}
+	if truncated {
+		t.Error("detectUnknownFieldPaths() truncated = true, want false on a small document")
 	}
 
 	for _, want := range []string{
