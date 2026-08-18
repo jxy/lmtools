@@ -27,8 +27,9 @@ func listMessages(sessionPath string) ([]string, error) {
 		}
 
 		name := entry.Name()
-		// Look for .json files (metadata) which every message has.
-		// Skip sidecar JSON files as they're part of the message, not the ID.
+		// Only committed metadata files have a valid message ID as their stem.
+		// Staging files and JSON sidecars are visible in this directory too, but
+		// they must never become lineage entries.
 		if isMessageMetadataFilename(name) {
 			msgID := strings.TrimSuffix(name, ".json")
 			// Per documentation: "A message exists if and only if its JSON file exists".
@@ -52,9 +53,10 @@ func listMessages(sessionPath string) ([]string, error) {
 }
 
 func isMessageMetadataFilename(name string) bool {
-	return strings.HasSuffix(name, ".json") &&
-		!strings.HasSuffix(name, ".tools.json") &&
-		!strings.HasSuffix(name, ".blocks.json")
+	if !strings.HasSuffix(name, ".json") {
+		return false
+	}
+	return IsValidMessageID(strings.TrimSuffix(name, ".json"))
 }
 
 // loadMessagesInDir loads all messages from a directory.
@@ -68,8 +70,7 @@ func loadMessagesInDir(dirPath string) ([]Message, error) {
 	for _, msgID := range msgIDs {
 		msg, err := readMessage(dirPath, msgID)
 		if err != nil {
-			// Skip corrupted messages silently; caller can decide to log.
-			continue
+			return nil, errors.WrapError("read message "+msgID, err)
 		}
 		messages = append(messages, *msg)
 	}

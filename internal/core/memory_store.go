@@ -95,11 +95,11 @@ func (s *MemorySessionStore) SaveToolResults(ctx context.Context, results []Tool
 		Role:   string(RoleUser),
 		Blocks: make([]Block, 0, 1+len(results)),
 	}
-	if additionalText != "" {
-		msg.Blocks = append(msg.Blocks, TextBlock{Text: additionalText})
-	}
 	for _, result := range results {
 		msg.Blocks = append(msg.Blocks, ToolResultBlockFromResult(result, s.toolName[result.ID]))
+	}
+	if additionalText != "" {
+		msg.Blocks = append(msg.Blocks, TextBlock{Text: additionalText})
 	}
 	s.messages = append(s.messages, msg)
 	return s.path, s.nextMessageIDLocked(), nil

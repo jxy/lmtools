@@ -226,6 +226,9 @@ func openAIResponsesReasoningItem(block ReasoningBlock) map[string]interface{} {
 	}
 	if len(block.Raw) > 0 {
 		if raw := rawMessageToMap(block.Raw); raw != nil {
+			// Responses may include status on output reasoning items, but status is
+			// not accepted when the item is replayed as request input.
+			delete(raw, "status")
 			return raw
 		}
 	}
@@ -234,9 +237,6 @@ func openAIResponsesReasoningItem(block ReasoningBlock) map[string]interface{} {
 	}
 	if block.ID != "" {
 		item["id"] = block.ID
-	}
-	if block.Status != "" {
-		item["status"] = block.Status
 	}
 	if len(block.Summary) > 0 {
 		item["summary"] = rawMessageToInterface(block.Summary)
@@ -309,28 +309,20 @@ func openAIResponsesToolCallItem(block ToolUseBlock) map[string]interface{} {
 }
 
 func openAIResponsesFunctionCallOutputItem(block ToolResultBlock) map[string]interface{} {
-	item := map[string]interface{}{
+	return map[string]interface{}{
 		"type":    "function_call_output",
 		"call_id": block.ToolUseID,
 		"output":  block.Content,
 	}
-	if block.IsError {
-		item["status"] = "incomplete"
-	}
-	return item
 }
 
 func openAIResponsesToolCallOutputItem(block ToolResultBlock) map[string]interface{} {
 	if block.Type == "custom" {
-		item := map[string]interface{}{
+		return map[string]interface{}{
 			"type":    "custom_tool_call_output",
 			"call_id": block.ToolUseID,
 			"output":  block.Content,
 		}
-		if block.IsError {
-			item["status"] = "incomplete"
-		}
-		return item
 	}
 	return openAIResponsesFunctionCallOutputItem(block)
 }

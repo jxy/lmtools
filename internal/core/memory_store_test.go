@@ -51,9 +51,9 @@ func TestMemorySessionStorePreservesToolLoopMessages(t *testing.T) {
 		t.Fatalf("unexpected tool use block: %#v", toolUse)
 	}
 
-	toolResult, ok := messages[3].Blocks[1].(ToolResultBlock)
+	toolResult, ok := messages[3].Blocks[0].(ToolResultBlock)
 	if !ok {
-		t.Fatalf("user second block = %T, want ToolResultBlock", messages[3].Blocks[1])
+		t.Fatalf("user first block = %T, want ToolResultBlock", messages[3].Blocks[0])
 	}
 	if toolResult.Name != "universal_command" {
 		t.Fatalf("tool result name = %q, want universal_command", toolResult.Name)
@@ -63,5 +63,9 @@ func TestMemorySessionStorePreservesToolLoopMessages(t *testing.T) {
 	}
 	if !strings.Contains(toolResult.Content, "partial output") || !strings.Contains(toolResult.Content, "exit status 1") {
 		t.Fatalf("tool result should preserve output and error, got %q", toolResult.Content)
+	}
+	note, ok := messages[3].Blocks[1].(TextBlock)
+	if !ok || note.Text != "tool round note" {
+		t.Fatalf("user second block = %#v, want trailing tool round note", messages[3].Blocks[1])
 	}
 }

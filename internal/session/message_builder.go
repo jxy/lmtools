@@ -9,19 +9,16 @@ import (
 // BuildMessagesWithToolInteractions reconstructs messages with their tool interactions
 // for use in API requests. It loads the conversation lineage and attaches any
 // tool calls or results stored in .tools.json files.
-//
-// This function is a convenience wrapper around CreateCachedMessageBuilder for one-shot use.
-// For multiple calls (e.g., in tool execution loops), use CreateCachedMessageBuilder directly.
 func BuildMessagesWithToolInteractions(ctx context.Context, sessionPath string) ([]core.TypedMessage, error) {
 	return BuildMessagesWithToolInteractionsWithManager(ctx, DefaultManager(), sessionPath)
 }
 
 func BuildMessagesWithToolInteractionsWithManager(ctx context.Context, manager *Manager, sessionPath string) ([]core.TypedMessage, error) {
-	snapshot, err := newConversationSnapshotWithManager(manager, sessionPath)
+	refs, err := lineageMessageRefsWithManager(manager, sessionPath)
 	if err != nil {
 		return nil, err
 	}
-	return snapshot.buildTypedMessages(ctx, sessionPath)
+	return buildTypedMessagesFromLineageRefs(ctx, refs)
 }
 
 // BuildMessagesWithIndex reconstructs messages using a pre-built index
@@ -53,51 +50,10 @@ func resolveIndexedMessageDir(ctx context.Context, messageIndex map[string]strin
 }
 
 func buildTypedMessage(msg Message, toolInteraction *core.ToolInteraction, toolNamesByID map[string]string) core.TypedMessage {
-	typedMsg := core.TypedMessage{
+	return core.TypedMessage{
 		Role:   string(msg.Role),
-		Blocks: make([]core.Block, 0),
+		Blocks: applyToolNameIndex(blocksFromMessageProjection(msg, toolInteraction), toolNamesByID),
 	}
-
-	if msg.ThoughtSignature != "" {
-		typedMsg.Blocks = append(typedMsg.Blocks, core.ReasoningBlock{
-			Provider:  "google",
-			Type:      "thought_signature",
-			Signature: msg.ThoughtSignature,
-		})
-	}
-	if msg.Content != "" {
-		typedMsg.Blocks = append(typedMsg.Blocks, core.TextBlock{
-			Text: msg.Content,
-		})
-	}
-
-	if toolInteraction == nil {
-		return typedMsg
-	}
-
-	for _, call := range toolInteraction.Calls {
-		if call.ThoughtSignature != "" {
-			typedMsg.Blocks = append(typedMsg.Blocks, core.ReasoningBlock{
-				Provider:  "google",
-				Type:      "thought_signature",
-				Signature: call.ThoughtSignature,
-			})
-		}
-		typedMsg.Blocks = append(typedMsg.Blocks, core.ToolUseBlock{
-			ID:    call.ID,
-			Name:  call.Name,
-			Input: call.Args,
-		})
-		if call.ID != "" {
-			toolNamesByID[call.ID] = call.Name
-		}
-	}
-
-	for _, res := range toolInteraction.Results {
-		typedMsg.Blocks = append(typedMsg.Blocks, core.ToolResultBlockFromResult(res, toolNamesByID[res.ID]))
-	}
-
-	return typedMsg
 }
 
 func applyToolNameIndex(blocks []core.Block, toolNamesByID map[string]string) []core.Block {
@@ -120,12 +76,12 @@ func applyToolNameIndex(blocks []core.Block, toolNamesByID map[string]string) []
 // CheckForPendingToolCalls checks if the last message in a session has tool calls
 // without corresponding results, indicating pending tool execution
 func CheckForPendingToolCalls(ctx context.Context, sessionPath string) ([]core.ToolCall, error) {
-	snapshot, err := newConversationSnapshot(sessionPath)
+	refs, err := lineageMessageRefsWithManager(DefaultManager(), sessionPath)
 	if err != nil {
 		return nil, err
 	}
 
-	calls, err := snapshot.pendingToolCalls(ctx, sessionPath)
+	calls, err := pendingToolCallsFromLineageRefs(ctx, refs)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +91,10 @@ func CheckForPendingToolCalls(ctx context.Context, sessionPath string) ([]core.T
 	return calls, nil
 }
 
-// CreateCachedMessageBuilder creates a message builder function that caches the message index
-// This is useful for tool execution loops to avoid rebuilding the index on each round
+// CreateCachedMessageBuilder creates a message builder that caches the stable
+// lineage and refreshes messages appended to the active session directory.
 func CreateCachedMessageBuilder(ctx context.Context, sessionPath string) (func(string) ([]core.TypedMessage, error), error) {
-	snapshot, err := newConversationSnapshot(sessionPath)
+	snapshot, err := newConversationSnapshotWithManager(DefaultManager(), sessionPath)
 	if err != nil {
 		return nil, err
 	}

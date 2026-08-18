@@ -140,7 +140,13 @@ func TestToolIntegrationFlow(t *testing.T) {
 	log := logger.GetLogger()
 
 	// Set sessions directory and create session
+	oldSessionsDir := session.GetSessionsDir()
 	session.SetSessionsDir(cfg.SessionsDir)
+	session.SetSkipFlockCheck(true)
+	t.Cleanup(func() {
+		session.SetSessionsDir(oldSessionsDir)
+		session.SetSkipFlockCheck(false)
+	})
 	sess, err := session.CreateSession("", log)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -383,74 +389,25 @@ func TestMultiRoundToolExecution(t *testing.T) {
 
 	// Track request count to simulate multiple rounds
 	requestCount := 0
-	var capturedRequests []string
-
 	// Configure mock to return tool calls for multiple rounds
 	ms.SetResponseFunc(func(req *http.Request) (interface{}, int, error) {
-		// Read and capture request body
+		// Read and validate the complete accumulated tool history.
 		bodyBytes, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, 500, err
 		}
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		bodyStr := string(bodyBytes)
-		capturedRequests = append(capturedRequests, bodyStr)
 
 		requestCount++
 		t.Logf("Mock server handling request %d", requestCount)
-
-		// Check for duplicate assistant messages in the request
 		var requestData map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &requestData); err == nil {
-			if messages, ok := requestData["messages"].([]interface{}); ok {
-				// Track assistant messages to detect duplicates
-				assistantMessages := make(map[string]int)
-				for i, msg := range messages {
-					if msgMap, ok := msg.(map[string]interface{}); ok {
-						if role, ok := msgMap["role"].(string); ok && role == "assistant" {
-							// Create a unique key for this message
-							key := fmt.Sprintf("%v", msgMap)
-							if prevIdx, exists := assistantMessages[key]; exists {
-								t.Errorf("Request %d: Duplicate assistant message found at indices %d and %d",
-									requestCount, prevIdx, i)
-							}
-							assistantMessages[key] = i
-						}
-					}
-				}
-			}
+		if err := json.Unmarshal(bodyBytes, &requestData); err != nil {
+			return map[string]interface{}{"error": map[string]interface{}{"type": "invalid_request", "message": err.Error()}}, 400, nil
+		}
+		if err := validateAnthropicToolHistory(requestData, requestCount-1); err != nil {
+			return map[string]interface{}{"error": map[string]interface{}{"type": "invalid_tool_history", "message": err.Error()}}, 400, nil
 		}
 
-		// Return different responses based on request count
-		toolResultID := func() string {
-			if strings.Contains(bodyStr, "call-003") {
-				return "call-003"
-			}
-			if strings.Contains(bodyStr, "call-002") {
-				return "call-002"
-			}
-			if strings.Contains(bodyStr, "call-001") {
-				return "call-001"
-			}
-			var requestData map[string]interface{}
-			if err := json.Unmarshal(bodyBytes, &requestData); err != nil {
-				return ""
-			}
-			messages, _ := requestData["messages"].([]interface{})
-			for _, msg := range messages {
-				msgMap, _ := msg.(map[string]interface{})
-				content, _ := msgMap["content"].([]interface{})
-				for _, block := range content {
-					blockMap, _ := block.(map[string]interface{})
-					if blockMap["type"] == "tool_result" {
-						if id, _ := blockMap["tool_use_id"].(string); id != "" {
-							return id
-						}
-					}
-				}
-			}
-			return ""
-		}()
 		switch requestCount {
 		case 1:
 			// Initial request - return first tool call
@@ -505,27 +462,23 @@ func TestMultiRoundToolExecution(t *testing.T) {
 
 		case 4:
 			// Third follow-up with tool results - return final response without tools
-			if toolResultID == "call-003" {
-				return map[string]interface{}{
-					"content": []map[string]interface{}{
-						{
-							"type": "text",
-							"text": "All three commands have been executed successfully!",
-						},
+			return map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": "All three commands have been executed successfully!",
 					},
-				}, 200, nil
-			}
+				},
+			}, 200, nil
 		}
 
-		// Fallback response
+		// Any additional request is a hard failure, not a successful fallback.
 		return map[string]interface{}{
-			"content": []map[string]interface{}{
-				{
-					"type": "text",
-					"text": "Unexpected request state",
-				},
+			"error": map[string]interface{}{
+				"type":    "unexpected_request",
+				"message": fmt.Sprintf("unexpected request %d", requestCount),
 			},
-		}, 200, nil
+		}, 400, nil
 	})
 
 	// Start the mock server
@@ -555,7 +508,14 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	log := core.NewTestLogger(false)
 
 	// Create session
-	sess, err := session.CreateSession(sessionDir, log)
+	oldSessionsDir := session.GetSessionsDir()
+	session.SetSessionsDir(sessionDir)
+	session.SetSkipFlockCheck(true)
+	t.Cleanup(func() {
+		session.SetSessionsDir(oldSessionsDir)
+		session.SetSkipFlockCheck(false)
+	})
+	sess, err := session.CreateSession("", log)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -568,7 +528,8 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	messages := []core.TypedMessage{
 		core.NewTextMessage("user", userMsg),
 	}
-	req, reqBody, err := core.BuildChatRequest(cfg.RequestOptions(), messages, core.ChatBuildOptions{})
+	toolDefs := core.GetBuiltinUniversalCommandTool()
+	req, reqBody, err := core.BuildChatRequest(cfg.RequestOptions(), messages, core.ChatBuildOptions{ToolDefs: toolDefs})
 	if err != nil {
 		t.Fatalf("Failed to build chat request: %v", err)
 	}
@@ -625,7 +586,7 @@ func TestMultiRoundToolExecution(t *testing.T) {
 			ActualModel: cfg.Model,
 		},
 		Model:           cfg.Model,
-		ToolDefs:        []core.ToolDefinition{{Name: "universal_command", Description: "Execute commands"}},
+		ToolDefs:        toolDefs,
 		MessagesFn:      msgBuilder,
 		InitialResponse: response,
 	}
@@ -636,74 +597,109 @@ func TestMultiRoundToolExecution(t *testing.T) {
 		t.Fatalf("Tool execution failed: %v", result.Error)
 	}
 
-	// Verify we got final text
-	if result.FinalText == "" {
-		t.Error("Expected non-empty final text")
+	// Verify the tool loop reached the intended final response.
+	if result.FinalText != "All three commands have been executed successfully!" {
+		t.Fatalf("final text = %q", result.FinalText)
 	}
 
-	// Verify no duplicate messages were sent in requests
-	t.Logf("Total requests made: %d", requestCount)
+	// Verify the request and stored-message sequences completed exactly once.
 	if requestCount != 4 {
-		t.Errorf("Expected 4 requests (initial + 3 tool rounds), got %d", requestCount)
+		t.Fatalf("request count = %d, want 4", requestCount)
 	}
 
-	// Verify session has correct message sequence
 	lineage, err := session.GetLineage(sess.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Log the lineage for debugging
-	t.Logf("Session lineage has %d messages:", len(lineage))
-	for i, msg := range lineage {
-		t.Logf("  [%d] %s: %s", i, msg.Role, truncateForLog(msg.Content, 50))
+	if len(lineage) != 8 {
+		t.Fatalf("lineage length = %d, want 8", len(lineage))
 	}
-
-	// Build messages with tool interactions to verify structure
-	typedMessages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
-	if err != nil {
-		t.Fatal(err)
+	wantRoles := []core.Role{
+		core.RoleUser, core.RoleAssistant,
+		core.RoleUser, core.RoleAssistant,
+		core.RoleUser, core.RoleAssistant,
+		core.RoleUser, core.RoleAssistant,
 	}
-
-	// Verify no duplicate assistant messages in the built messages
-	assistantCount := 0
-	seenAssistantMessages := make(map[string]bool)
-
-	for i, msg := range typedMessages {
-		if msg.Role == "assistant" {
-			assistantCount++
-
-			// Create a unique identifier for this message
-			var textContent string
-			var toolCallCount int
-			for _, block := range msg.Blocks {
-				if tb, ok := block.(core.TextBlock); ok {
-					textContent = tb.Text
-				}
-				if _, ok := block.(core.ToolUseBlock); ok {
-					toolCallCount++
-				}
-			}
-
-			key := fmt.Sprintf("%s_%d_tools", textContent, toolCallCount)
-			if seenAssistantMessages[key] {
-				t.Errorf("Duplicate assistant message found at index %d: %s", i, key)
-			}
-			seenAssistantMessages[key] = true
+	for i, want := range wantRoles {
+		if lineage[i].Role != want {
+			t.Fatalf("lineage[%d].Role = %q, want %q", i, lineage[i].Role, want)
 		}
 	}
-
-	// We should have 4 assistant messages (one per round)
-	if assistantCount != 4 {
-		t.Errorf("Expected 4 assistant messages, got %d", assistantCount)
+	pending, err := session.CheckForPendingToolCalls(ctx, sess.Path)
+	if err != nil {
+		t.Fatalf("CheckForPendingToolCalls() error = %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending tool calls = %#v, want none", pending)
 	}
 }
 
-func truncateForLog(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func validateAnthropicToolHistory(body map[string]interface{}, completedRounds int) error {
+	tools, ok := body["tools"].([]interface{})
+	if !ok || len(tools) == 0 {
+		return fmt.Errorf("tools missing from request")
 	}
-	return s[:maxLen] + "..."
+	messages, ok := body["messages"].([]interface{})
+	if !ok {
+		return fmt.Errorf("messages has type %T", body["messages"])
+	}
+
+	foundUserPrompt := false
+	sequence := make([]string, 0, completedRounds*2)
+	resultContent := make(map[string]string, completedRounds)
+	for _, rawMessage := range messages {
+		message, ok := rawMessage.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("message has type %T", rawMessage)
+		}
+		role, _ := message["role"].(string)
+		if role == "user" && strings.Contains(fmt.Sprint(message["content"]), "Please run three commands in sequence") {
+			foundUserPrompt = true
+		}
+		content, ok := message["content"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, rawBlock := range content {
+			block, ok := rawBlock.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("content block has type %T", rawBlock)
+			}
+			switch block["type"] {
+			case "tool_use":
+				if role != "assistant" {
+					return fmt.Errorf("tool_use appears under role %q", role)
+				}
+				id, _ := block["id"].(string)
+				sequence = append(sequence, "call:"+id)
+			case "tool_result":
+				if role != "user" {
+					return fmt.Errorf("tool_result appears under role %q", role)
+				}
+				id, _ := block["tool_use_id"].(string)
+				sequence = append(sequence, "result:"+id)
+				resultContent[id] = fmt.Sprint(block["content"])
+			}
+		}
+	}
+	if !foundUserPrompt {
+		return fmt.Errorf("original user prompt missing")
+	}
+	if len(sequence) != completedRounds*2 {
+		return fmt.Errorf("tool sequence = %v, want %d entries", sequence, completedRounds*2)
+	}
+	expectedOutputs := []string{"First command", "Second command", "Third command"}
+	for round := 1; round <= completedRounds; round++ {
+		id := fmt.Sprintf("call-%03d", round)
+		callIndex := (round - 1) * 2
+		if sequence[callIndex] != "call:"+id || sequence[callIndex+1] != "result:"+id {
+			return fmt.Errorf("tool sequence = %v, want call/result pair for %s at round %d", sequence, id, round)
+		}
+		if !strings.Contains(resultContent[id], expectedOutputs[round-1]) {
+			return fmt.Errorf("result %s content = %q", id, resultContent[id])
+		}
+	}
+	return nil
 }
 
 func TestParallelToolExecution(t *testing.T) {

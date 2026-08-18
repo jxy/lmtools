@@ -434,6 +434,65 @@ func TestOpenAIResponsesInputPreservesItemOrder(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesToolFollowupOmitsOutputOnlyStatus(t *testing.T) {
+	parsed, err := parseOpenAIResponses([]byte(`{
+		"output": [
+			{
+				"id": "rs_1",
+				"type": "reasoning",
+				"status": "completed",
+				"summary": [{"type":"summary_text","text":"Use the tool."}],
+				"encrypted_content": "enc_1"
+			},
+			{
+				"id": "fc_1",
+				"type": "function_call",
+				"status": "completed",
+				"call_id": "call_1",
+				"name": "lookup",
+				"arguments": "{\"q\":\"x\"}"
+			}
+		]
+	}`), false)
+	if err != nil {
+		t.Fatalf("parseOpenAIResponses() error = %v", err)
+	}
+
+	input := OpenAIResponsesInput([]TypedMessage{
+		NewTextMessage(string(RoleUser), "look this up"),
+		{Role: string(RoleAssistant), Blocks: parsed.Blocks},
+		{
+			Role: string(RoleUser),
+			Blocks: []Block{ToolResultBlock{
+				ToolUseID: "call_1",
+				Content:   "lookup failed",
+				IsError:   true,
+			}},
+		},
+	})
+	if len(input) != 4 {
+		t.Fatalf("input len = %d, want 4: %#v", len(input), input)
+	}
+	for i, rawItem := range input {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok {
+			t.Fatalf("input[%d] type = %T, want object", i, rawItem)
+		}
+		if status, exists := item["status"]; exists {
+			t.Fatalf("input[%d].status = %v, want field omitted: %#v", i, status, item)
+		}
+	}
+
+	reasoning := input[1].(map[string]interface{})
+	if reasoning["type"] != "reasoning" || reasoning["id"] != "rs_1" || reasoning["encrypted_content"] != "enc_1" {
+		t.Fatalf("reasoning input = %#v", reasoning)
+	}
+	output := input[3].(map[string]interface{})
+	if output["type"] != "function_call_output" || output["call_id"] != "call_1" || output["output"] != "lookup failed" {
+		t.Fatalf("tool output input = %#v", output)
+	}
+}
+
 func TestOpenAIResponsesInputProjectionPreservesIndexesAndNamespace(t *testing.T) {
 	projection := OpenAIResponsesInputProjection([]TypedMessage{
 		{

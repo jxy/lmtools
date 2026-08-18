@@ -78,11 +78,19 @@ func blocksFromMessageProjection(msg Message, toolInteraction *core.ToolInteract
 			Signature: msg.ThoughtSignature,
 		})
 	}
+	if toolInteraction == nil {
+		if msg.Content != "" {
+			blocks = append(blocks, core.TextBlock{Text: msg.Content})
+		}
+		return blocks
+	}
+
+	resultsFirst := len(toolInteraction.Results) > 0 && len(toolInteraction.Calls) == 0
+	if resultsFirst {
+		blocks = appendStoredToolResultBlocks(blocks, toolInteraction.Results)
+	}
 	if msg.Content != "" {
 		blocks = append(blocks, core.TextBlock{Text: msg.Content})
-	}
-	if toolInteraction == nil {
-		return blocks
 	}
 	for _, call := range toolInteraction.Calls {
 		if call.ThoughtSignature != "" {
@@ -102,7 +110,14 @@ func blocksFromMessageProjection(msg Message, toolInteraction *core.ToolInteract
 			InputString:  call.Input,
 		})
 	}
-	for _, result := range toolInteraction.Results {
+	if !resultsFirst {
+		blocks = appendStoredToolResultBlocks(blocks, toolInteraction.Results)
+	}
+	return blocks
+}
+
+func appendStoredToolResultBlocks(blocks []core.Block, results []core.ToolResult) []core.Block {
+	for _, result := range results {
 		blocks = append(blocks, core.ToolResultBlockFromResult(result, ""))
 	}
 	return blocks
