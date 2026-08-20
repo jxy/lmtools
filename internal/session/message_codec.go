@@ -75,15 +75,14 @@ func buildMessageFileSetWithBlocks(msg Message, toolInteraction *core.ToolIntera
 	if err != nil {
 		return nil, err
 	}
-	blockData, err := marshalMessageBlocks(msg, toolInteraction)
-	if err != nil {
-		return nil, err
-	}
+	var blockData []byte
 	if len(blocks) > 0 {
 		blockData, err = marshalExplicitMessageBlocks(msg.Role, blocks)
-		if err != nil {
-			return nil, err
-		}
+	} else {
+		blockData, err = marshalMessageBlocks(msg, toolInteraction)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	return &messageFileSet{

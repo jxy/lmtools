@@ -141,6 +141,41 @@ func TestCoordinatorPrepareRequestPreviewPendingToolsUsesPlaceholderWithoutWriti
 	}
 }
 
+func TestAppendPendingToolPreviewResultsMatchesCommittedMessage(t *testing.T) {
+	ctx := setupCoordinatorTestEnv(t)
+	sess := createPlanSession(t, "session system")
+	appendPlanMessage(t, ctx, sess, core.RoleUser, "run a tool")
+	appendPlanAssistantToolCall(t, ctx, sess, "call-1", "universal_command")
+
+	pending := pendingToolResolution{
+		HasPending:     true,
+		PreviewCalls:   []core.ToolCall{{ID: "call-1", Name: "universal_command"}},
+		PreviewResults: []core.ToolResult{{ID: "call-1", Output: "partial output", Truncated: true}},
+		AdditionalText: "Note: Output for tool 'universal_command' was truncated to 1MB\n",
+	}
+
+	staged := appendPendingToolPreviewResults(nil, pending)
+	if len(staged) != 1 {
+		t.Fatalf("staged message count = %d, want 1", len(staged))
+	}
+	note, ok := staged[0].Blocks[len(staged[0].Blocks)-1].(core.TextBlock)
+	if !ok || note.Text != pending.AdditionalText {
+		t.Fatalf("staged trailing block = %#v, want truncation note %q",
+			staged[0].Blocks[len(staged[0].Blocks)-1], pending.AdditionalText)
+	}
+
+	if err := commitPendingToolResults(ctx, sess, pending, core.NewTestLogger(false)); err != nil {
+		t.Fatalf("commitPendingToolResults() error = %v", err)
+	}
+	rebuilt, err := BuildMessagesWithToolInteractions(ctx, sess.Path)
+	if err != nil {
+		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+	}
+	if got, want := rebuilt[len(rebuilt)-1], staged[0]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("committed tool-results message = %#v, want staged preview %#v", got, want)
+	}
+}
+
 func TestCoordinatorPrepareRequestBranchAssistantDefersSiblingUntilCommit(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "system prompt")

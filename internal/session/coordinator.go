@@ -127,7 +127,7 @@ func (c *requestPreparer) prepareSessionResumeRequest(ctx context.Context, resum
 		return nil, errors.WrapError("build session messages", err)
 	}
 	messages = applyPlannedSystemDecision(messages, decision)
-	messages = appendPendingToolPreviewResults(messages, pending.PreviewCalls, pending.PreviewResults)
+	messages = appendPendingToolPreviewResults(messages, pending)
 	messages = appendPlannedUserMessage(messages, inputStr, isRegeneration)
 
 	return &RequestPlan{
@@ -254,25 +254,26 @@ func applyPlannedSystemDecision(messages []core.TypedMessage, decision ResumeFor
 	return out
 }
 
-func appendPendingToolPreviewResults(messages []core.TypedMessage, calls []core.ToolCall, results []core.ToolResult) []core.TypedMessage {
-	if len(results) == 0 {
+// appendPendingToolPreviewResults stages the tool-results message that
+// RequestPlan.Commit later persists via SaveToolResults. It includes
+// AdditionalText (truncation notes) so the request the provider answers
+// matches the message the session records — the in-loop follow-up path
+// already sends the note this way.
+func appendPendingToolPreviewResults(messages []core.TypedMessage, pending pendingToolResolution) []core.TypedMessage {
+	if len(pending.PreviewResults) == 0 {
 		return messages
 	}
 
-	toolNamesByID := make(map[string]string, len(calls))
-	for _, call := range calls {
+	toolNamesByID := make(map[string]string, len(pending.PreviewCalls))
+	for _, call := range pending.PreviewCalls {
 		if call.ID != "" {
 			toolNamesByID[call.ID] = call.Name
 		}
 	}
 
-	blocks := make([]core.Block, 0, len(results))
-	for _, result := range results {
-		blocks = append(blocks, core.ToolResultBlockFromResult(result, toolNamesByID[result.ID]))
-	}
 	return append(messages, core.TypedMessage{
 		Role:   string(core.RoleUser),
-		Blocks: blocks,
+		Blocks: core.ToolResultsMessageBlocks(pending.PreviewResults, pending.AdditionalText, toolNamesByID),
 	})
 }
 

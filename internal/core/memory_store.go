@@ -91,17 +91,10 @@ func (s *MemorySessionStore) SaveToolResults(ctx context.Context, results []Tool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	msg := TypedMessage{
+	s.messages = append(s.messages, TypedMessage{
 		Role:   string(RoleUser),
-		Blocks: make([]Block, 0, 1+len(results)),
-	}
-	for _, result := range results {
-		msg.Blocks = append(msg.Blocks, ToolResultBlockFromResult(result, s.toolName[result.ID]))
-	}
-	if additionalText != "" {
-		msg.Blocks = append(msg.Blocks, TextBlock{Text: additionalText})
-	}
-	s.messages = append(s.messages, msg)
+		Blocks: ToolResultsMessageBlocks(results, additionalText, s.toolName),
+	})
 	return s.path, s.nextMessageIDLocked(), nil
 }
 

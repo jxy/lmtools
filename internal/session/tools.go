@@ -51,7 +51,7 @@ func SaveAssistantResponse(ctx context.Context, sess *Session, response core.Res
 }
 
 // SaveToolResults saves tool execution results to the session
-// This function uses proper locking via AppendMessageWithToolInteraction to ensure thread safety
+// This function uses proper locking via AppendMessageWithBlocks to ensure thread safety
 func SaveToolResults(ctx context.Context, sess *Session, results []core.ToolResult, additionalText string) (SaveResult, error) {
 	if sess == nil {
 		return SaveResult{}, errors.WrapError("validate session", stdErrors.New("session is nil"))
@@ -63,8 +63,10 @@ func SaveToolResults(ctx context.Context, sess *Session, results []core.ToolResu
 		Timestamp: time.Now(),
 	}
 
-	// Use AppendMessageWithToolInteraction which handles locking properly
-	return AppendMessageWithToolInteraction(ctx, sess, msg, nil, results)
+	// Commit explicit blocks so the stored layout comes from the canonical
+	// constructor; names stay empty here and are resolved at read time from the
+	// preceding assistant tool_use blocks.
+	return AppendMessageWithBlocks(ctx, sess, msg, nil, results, core.ToolResultsMessageBlocks(results, additionalText, nil))
 }
 
 // LoadToolInteraction loads tool calls or results from a .tools.json file
