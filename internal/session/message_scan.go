@@ -4,6 +4,7 @@ import (
 	stdErrors "errors"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
+	"lmtools/internal/logger"
 	"os"
 	"sort"
 	"strconv"
@@ -60,22 +61,44 @@ func isMessageMetadataFilename(name string) bool {
 }
 
 // loadMessagesInDir loads all messages from a directory.
+//
+// A committed metadata file that cannot be read or decoded is skipped with a
+// warning instead of failing the scan. The state is reachable without any
+// operator error: writeStagedTempFile does not sync before commitFiles renames
+// a temp into place, so power loss can leave a zero-length committed message.
+// Failing the whole load makes resume, branching, forking, and pending-tool
+// detection all report that one message, and the only in-tool remedy destroys
+// it together with every descendant, so one lost message must cost one message.
+// The staged-temp rule is a different rule and still holds ahead of this one:
+// listMessages only accepts names whose stem is a valid message ID, so a
+// half-written `.tmp-*.json` is never a message and never reaches this loop.
 func loadMessagesInDir(dirPath string) ([]Message, error) {
+	messages, _, err := loadMessagesInDirWithListing(dirPath)
+	return messages, err
+}
+
+// loadMessagesInDirWithListing also returns every message ID the directory
+// listed, in order, including the ones skipped as unreadable. A caller that
+// tracks what a directory held has to tell "not seen yet" from "seen and
+// unreadable": a skipped ID missing from that record looks like a later append
+// and fails on the read this function just chose to survive.
+func loadMessagesInDirWithListing(dirPath string) ([]Message, []string, error) {
 	msgIDs, err := listMessages(dirPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	messages := make([]Message, 0, len(msgIDs))
 	for _, msgID := range msgIDs {
 		msg, err := readMessage(dirPath, msgID)
 		if err != nil {
-			return nil, errors.WrapError("read message "+msgID, err)
+			logger.GetLogger().Warnf("Skipping unreadable session message %s in %s: %v", msgID, dirPath, err)
+			continue
 		}
 		messages = append(messages, *msg)
 	}
 
-	return messages, nil
+	return messages, msgIDs, nil
 }
 
 // findSiblings returns all sibling directories for a given message ID.

@@ -161,23 +161,42 @@ func lineageMessageRefsThroughMessageWithManager(manager *Manager, sessionPath, 
 	)
 }
 
+// lineageScan is one walk of a session lineage.
+type lineageScan struct {
+	refs []lineageMessageRef
+	// activeIDs is every message ID the active (leaf) directory listed during
+	// this walk, including any the walk skipped as unreadable. Append detection
+	// compares against it rather than against the IDs that made it into refs,
+	// so a message this walk already considered is never mistaken for a later
+	// append, while a message committed after the walk always is.
+	activeIDs []string
+}
+
 func lineageMessageRefsWithManager(manager *Manager, sessionPath string) ([]lineageMessageRef, error) {
+	scan, err := scanLineage(manager, sessionPath)
+	if err != nil {
+		return nil, err
+	}
+	return scan.refs, nil
+}
+
+func scanLineage(manager *Manager, sessionPath string) (lineageScan, error) {
 	if manager == nil {
 		manager = DefaultManager()
 	}
 	sessionPath = manager.ResolveSessionPath(sessionPath)
 
 	rootDir, components := manager.ParseSessionPath(sessionPath)
-	load := func(dir string) ([]lineageMessageRef, error) {
-		msgs, err := loadMessagesInDir(dir)
+	load := func(dir string) ([]lineageMessageRef, []string, error) {
+		msgs, listed, err := loadMessagesInDirWithListing(dir)
 		if err != nil {
-			return nil, errors.WrapError("load messages in "+dir, err)
+			return nil, nil, errors.WrapError("load messages in "+dir, err)
 		}
 		refs := make([]lineageMessageRef, 0, len(msgs))
 		for _, msg := range msgs {
 			refs = append(refs, lineageMessageRef{path: dir, message: msg})
 		}
-		return refs, nil
+		return refs, listed, nil
 	}
 
 	var lineage []lineageMessageRef
@@ -186,14 +205,14 @@ func lineageMessageRefsWithManager(manager *Manager, sessionPath string) ([]line
 	dir := rootDir
 
 	for i := 0; ; i++ {
-		refs, err := load(dir)
+		refs, listed, err := load(dir)
 		if err != nil {
-			return nil, err
+			return lineageScan{}, err
 		}
 
 		if i == len(components) {
 			lineage = append(lineage, refs...)
-			break
+			return lineageScan{refs: lineage, activeIDs: listed}, nil
 		}
 
 		comp := components[i]
@@ -206,7 +225,7 @@ func lineageMessageRefsWithManager(manager *Manager, sessionPath string) ([]line
 			}
 		}
 		if branchIdx == -1 {
-			return nil, errors.WrapError("find branch point", fmt.Errorf("branch point %s not found in %s", branchMsgID, dir))
+			return lineageScan{}, errors.WrapError("find branch point", fmt.Errorf("branch point %s not found in %s", branchMsgID, dir))
 		}
 
 		branchMsg := refs[branchIdx]
@@ -236,13 +255,11 @@ func lineageMessageRefsWithManager(manager *Manager, sessionPath string) ([]line
 			}
 
 		default:
-			return nil, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", branchMsg.message.Role, branchMsg.message.ID))
+			return lineageScan{}, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", branchMsg.message.Role, branchMsg.message.ID))
 		}
 
 		dir = filepath.Join(dir, comp)
 	}
-
-	return lineage, nil
 }
 
 func buildTypedMessagesFromLineageRefs(ctx context.Context, refs []lineageMessageRef) ([]core.TypedMessage, error) {
@@ -250,26 +267,38 @@ func buildTypedMessagesFromLineageRefs(ctx context.Context, refs []lineageMessag
 	toolNamesByID := make(map[string]string)
 
 	for _, ref := range refs {
-		msg := ref.message
-		toolInteraction, err := LoadToolInteraction(ref.path, msg.ID)
+		message, err := buildTypedMessageFromLineageRef(ref, toolNamesByID)
 		if err != nil {
-			return nil, errors.WrapError("load tool interaction for message "+msg.ID, err)
-		}
-
-		if blocks, ok, err := loadMessageBlocks(ref.path, msg.ID); err != nil {
 			return nil, err
-		} else if ok {
-			result = append(result, core.TypedMessage{
-				Role:   string(msg.Role),
-				Blocks: applyToolNameIndex(blocks, toolNamesByID),
-			})
-			continue
 		}
-
-		result = append(result, buildTypedMessage(msg, toolInteraction, toolNamesByID))
+		result = append(result, message)
 	}
 
 	return result, nil
+}
+
+// buildTypedMessageFromLineageRef reconstructs one committed message and folds
+// its tool names into the running index, which later messages read to name
+// results the writer left anonymous.
+func buildTypedMessageFromLineageRef(ref lineageMessageRef, toolNamesByID map[string]string) (core.TypedMessage, error) {
+	msg := ref.message
+	toolInteraction, err := LoadToolInteraction(ref.path, msg.ID)
+	if err != nil {
+		return core.TypedMessage{}, errors.WrapError("load tool interaction for message "+msg.ID, err)
+	}
+
+	blocks, ok, err := loadMessageBlocks(ref.path, msg.ID)
+	if err != nil {
+		return core.TypedMessage{}, err
+	}
+	if ok {
+		return core.TypedMessage{
+			Role:   string(msg.Role),
+			Blocks: applyToolNameIndex(blocks, toolNamesByID),
+		}, nil
+	}
+
+	return buildTypedMessage(msg, toolInteraction, toolNamesByID), nil
 }
 
 func pendingToolCallsFromLineageRefs(ctx context.Context, refs []lineageMessageRef) ([]core.ToolCall, error) {

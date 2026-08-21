@@ -241,5 +241,51 @@ func loadMessageBlocks(sessionPath, msgID string) ([]core.Block, bool, error) {
 			blocks = append(blocks, core.FileBlock{FileID: block.FileID})
 		}
 	}
-	return blocks, true, nil
+	return normalizeToolResultsBlockOrder(blocks), true, nil
+}
+
+// normalizeToolResultsBlockOrder puts a stored tool-results message back into
+// the canonical layout core.ToolResultsMessageBlocks defines: the tool_result
+// blocks in order, then the trailing truncation note. Binaries before that
+// constructor existed wrote the note first, and replaying `[text, tool_result]`
+// verbatim renders an ordinary user message between the assistant tool_calls
+// turn and the tool messages answering it — which validateOpenAIChatToolSequence
+// rejects outright and Anthropic will not accept either, so those sessions can
+// never be resumed. AGENTS.md names one constructor for this message; the read
+// path agrees with it here rather than growing a second ordering rule.
+//
+// Only a message that already looks like that one is touched: it must carry at
+// least one tool_result block, no tool_use block (that is the assistant turn),
+// and at least one text block ahead of its last result. Everything that is not
+// a text block keeps its position, so a leading reasoning sidecar stays leading.
+func normalizeToolResultsBlockOrder(blocks []core.Block) []core.Block {
+	firstText, lastResult := -1, -1
+	for i, block := range blocks {
+		switch block.(type) {
+		case core.ToolUseBlock:
+			return blocks
+		case core.ToolResultBlock:
+			lastResult = i
+		case core.TextBlock:
+			if firstText == -1 {
+				firstText = i
+			}
+		}
+	}
+	if firstText == -1 || lastResult == -1 || firstText > lastResult {
+		return blocks
+	}
+
+	ordered := make([]core.Block, 0, len(blocks))
+	for _, block := range blocks {
+		if _, isText := block.(core.TextBlock); !isText {
+			ordered = append(ordered, block)
+		}
+	}
+	for _, block := range blocks {
+		if _, isText := block.(core.TextBlock); isText {
+			ordered = append(ordered, block)
+		}
+	}
+	return ordered
 }
