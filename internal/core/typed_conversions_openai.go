@@ -230,6 +230,11 @@ func MarshalOpenAIMessagesForRequest(messages []OpenAIMessage) []interface{} {
 			msgMap["content"] = contentArray
 		} else if msg.Content.Text != nil && *msg.Content.Text != "" {
 			msgMap["content"] = *msg.Content.Text
+		} else if len(msg.ToolCalls) == 0 {
+			// OpenAI requires content on every message that carries no
+			// tool_calls, so a command that exits without output must still
+			// render its tool result as an empty string rather than no key.
+			msgMap["content"] = ""
 		}
 
 		if len(msg.ToolCalls) > 0 {

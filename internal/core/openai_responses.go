@@ -308,23 +308,16 @@ func openAIResponsesToolCallItem(block ToolUseBlock) map[string]interface{} {
 	return openAIResponsesFunctionCallItem(block)
 }
 
-func openAIResponsesFunctionCallOutputItem(block ToolResultBlock) map[string]interface{} {
+func openAIResponsesToolCallOutputItem(block ToolResultBlock) map[string]interface{} {
+	itemType := "function_call_output"
+	if block.Type == "custom" {
+		itemType = "custom_tool_call_output"
+	}
 	return map[string]interface{}{
-		"type":    "function_call_output",
+		"type":    itemType,
 		"call_id": block.ToolUseID,
 		"output":  block.Content,
 	}
-}
-
-func openAIResponsesToolCallOutputItem(block ToolResultBlock) map[string]interface{} {
-	if block.Type == "custom" {
-		return map[string]interface{}{
-			"type":    "custom_tool_call_output",
-			"call_id": block.ToolUseID,
-			"output":  block.Content,
-		}
-	}
-	return openAIResponsesFunctionCallOutputItem(block)
 }
 
 func openAIResponsesToolsFromOpenAITools(raw interface{}) []map[string]interface{} {
