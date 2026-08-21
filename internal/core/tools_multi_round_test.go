@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,81 @@ type savedMessage struct {
 	text      string
 	toolCalls []ToolCall
 	results   []ToolResult
+}
+
+// roundLimitExecutor builds the executor through NewExecutor so the round-limit
+// prompt is gated by the same approvalPolicy that gates command approval.
+func roundLimitExecutor(t *testing.T, nonInteractive bool, approver Approver) *Executor {
+	t.Helper()
+	executor, err := NewExecutor(RequestOptions{ToolNonInteractive: nonInteractive}, nil, approver)
+	if err != nil {
+		t.Fatalf("NewExecutor() error = %v", err)
+	}
+	return executor
+}
+
+func TestRequestToolRoundLimitReset(t *testing.T) {
+	t.Run("approved", func(t *testing.T) {
+		approver := &TestApprover{DefaultApproval: true, ResetResponses: []bool{true}}
+		approved, err := roundLimitExecutor(t, false, approver).requestToolRoundLimitReset(context.Background(), 7)
+		if err != nil {
+			t.Fatalf("requestToolRoundLimitReset() error = %v", err)
+		}
+		if !approved || len(approver.ResetCalls) != 1 || approver.ResetCalls[0] != 7 {
+			t.Fatalf("approved = %v, reset calls = %v", approved, approver.ResetCalls)
+		}
+	})
+
+	t.Run("denied", func(t *testing.T) {
+		approver := &TestApprover{DefaultApproval: true, ResetResponses: []bool{false}}
+		approved, err := roundLimitExecutor(t, false, approver).requestToolRoundLimitReset(context.Background(), 3)
+		if err != nil {
+			t.Fatalf("requestToolRoundLimitReset() error = %v", err)
+		}
+		if approved || len(approver.ResetCalls) != 1 {
+			t.Fatalf("approved = %v, reset calls = %v", approved, approver.ResetCalls)
+		}
+	})
+
+	t.Run("non-interactive", func(t *testing.T) {
+		approver := &TestApprover{DefaultApproval: true, ResetResponses: []bool{true}}
+		approved, err := roundLimitExecutor(t, true, approver).requestToolRoundLimitReset(context.Background(), 3)
+		if err != nil {
+			t.Fatalf("requestToolRoundLimitReset() error = %v", err)
+		}
+		if approved || len(approver.ResetCalls) != 0 {
+			t.Fatalf("approved = %v, reset calls = %v", approved, approver.ResetCalls)
+		}
+	})
+
+	t.Run("missing approver", func(t *testing.T) {
+		approved, err := roundLimitExecutor(t, false, nil).requestToolRoundLimitReset(context.Background(), 3)
+		if err != nil {
+			t.Fatalf("requestToolRoundLimitReset() error = %v", err)
+		}
+		if approved {
+			t.Fatal("requestToolRoundLimitReset() approved without an approver")
+		}
+	})
+
+	t.Run("cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		approver := &TestApprover{DefaultApproval: true, ResetResponses: []bool{true}}
+		approved, err := roundLimitExecutor(t, false, approver).requestToolRoundLimitReset(ctx, 3)
+		if approved || !errors.Is(err, context.Canceled) {
+			t.Fatalf("approved = %v, error = %v, want context.Canceled", approved, err)
+		}
+	})
+
+	t.Run("cancelled non-interactive", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		approved, err := roundLimitExecutor(t, true, nil).requestToolRoundLimitReset(ctx, 3)
+		if approved || !errors.Is(err, context.Canceled) {
+			t.Fatalf("approved = %v, error = %v, want context.Canceled", approved, err)
+		}
+	})
 }
 
 func (m *mockSessionStore) GetPath() string {
@@ -243,7 +319,11 @@ func TestPersistAssistantRoundPreservesResponseBlocks(t *testing.T) {
 	}
 }
 
-func TestBuildAndSendFollowupRequestPreservesLeadingSessionSystem(t *testing.T) {
+// newBodyCaptureServer starts a test provider that records each request body
+// into the returned pointer and answers every request with the fixed JSON
+// response.
+func newBodyCaptureServer(t *testing.T, response string) (*httptest.Server, *[]byte) {
+	t.Helper()
 	var requestBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -252,9 +332,14 @@ func TestBuildAndSendFollowupRequestPreservesLeadingSessionSystem(t *testing.T) 
 		}
 		requestBody = body
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"done"}]}`))
+		_, _ = w.Write([]byte(response))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
+	return server, &requestBody
+}
+
+func TestBuildAndSendFollowupRequestPreservesLeadingSessionSystem(t *testing.T) {
+	server, requestBody := newBodyCaptureServer(t, `{"content":[{"type":"text","text":"done"}]}`)
 
 	cfg := RequestOptions{
 		Provider:            "anthropic",
@@ -300,11 +385,11 @@ func TestBuildAndSendFollowupRequestPreservesLeadingSessionSystem(t *testing.T) 
 	}
 
 	var payload map[string]interface{}
-	if err := json.Unmarshal(requestBody, &payload); err != nil {
-		t.Fatalf("request JSON = %s, error = %v", string(requestBody), err)
+	if err := json.Unmarshal(*requestBody, &payload); err != nil {
+		t.Fatalf("request JSON = %s, error = %v", string(*requestBody), err)
 	}
 	if got := payload["system"]; got != "session system" {
-		t.Fatalf("system = %#v, want session system in %s", got, string(requestBody))
+		t.Fatalf("system = %#v, want session system in %s", got, string(*requestBody))
 	}
 	messages, ok := payload["messages"].([]interface{})
 	if !ok || len(messages) == 0 {
@@ -317,17 +402,7 @@ func TestBuildAndSendFollowupRequestPreservesLeadingSessionSystem(t *testing.T) 
 }
 
 func TestBuildAndSendFollowupRequestUsesConfigSystemWhenSessionHasNoSystem(t *testing.T) {
-	var requestBody []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll() error = %v", err)
-		}
-		requestBody = body
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"done"}]}`))
-	}))
-	defer server.Close()
+	server, requestBody := newBodyCaptureServer(t, `{"content":[{"type":"text","text":"done"}]}`)
 
 	cfg := RequestOptions{
 		Provider:            "anthropic",
@@ -353,11 +428,76 @@ func TestBuildAndSendFollowupRequestUsesConfigSystemWhenSessionHasNoSystem(t *te
 		t.Fatalf("BuildAndSendFollowupRequest() error = %v", err)
 	}
 	var payload map[string]interface{}
-	if err := json.Unmarshal(requestBody, &payload); err != nil {
-		t.Fatalf("request JSON = %s, error = %v", string(requestBody), err)
+	if err := json.Unmarshal(*requestBody, &payload); err != nil {
+		t.Fatalf("request JSON = %s, error = %v", string(*requestBody), err)
 	}
 	if got := payload["system"]; got != "config system" {
-		t.Fatalf("system = %#v, want config system in %s", got, string(requestBody))
+		t.Fatalf("system = %#v, want config system in %s", got, string(*requestBody))
+	}
+}
+
+// A silent command is the ordinary case this asserts against: the tool ran, the
+// result is empty, and the follow-up must still send a tool message OpenAI will
+// accept.
+func TestBuildAndSendFollowupRequestSendsEmptyToolResultContent(t *testing.T) {
+	server, requestBody := newBodyCaptureServer(t, `{"choices":[{"message":{"content":"done"}}]}`)
+
+	cfg := RequestOptions{
+		Provider:    "openai",
+		ProviderURL: server.URL,
+		Model:       "gpt-test",
+		ToolEnabled: true,
+	}
+	_, err := BuildAndSendFollowupRequest(
+		context.Background(),
+		cfg,
+		ToolExecutionConfig{Store: &mockSessionStore{path: "/test/session"}},
+		cfg.Model,
+		nil,
+		func(string) ([]TypedMessage, error) {
+			return []TypedMessage{
+				NewTextMessage("user", "run something quiet"),
+				{
+					Role: string(RoleAssistant),
+					Blocks: []Block{ToolUseBlock{
+						ID:    "call_1",
+						Name:  "universal_command",
+						Input: json.RawMessage(`{"command":["true"]}`),
+					}},
+				},
+				{
+					Role: string(RoleUser),
+					Blocks: []Block{ToolResultBlock{
+						ToolUseID: "call_1",
+						Content:   "",
+					}},
+				},
+			}, nil
+		},
+		NewTestLogger(false),
+	)
+	if err != nil {
+		t.Fatalf("BuildAndSendFollowupRequest() error = %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(*requestBody, &payload); err != nil {
+		t.Fatalf("request JSON = %s, error = %v", string(*requestBody), err)
+	}
+	messages, ok := payload["messages"].([]interface{})
+	if !ok || len(messages) != 3 {
+		t.Fatalf("messages = %#v, want 3 in %s", payload["messages"], string(*requestBody))
+	}
+	toolMsg, ok := messages[2].(map[string]interface{})
+	if !ok || toolMsg["role"] != "tool" {
+		t.Fatalf("last message = %#v, want the tool result", messages[2])
+	}
+	content, present := toolMsg["content"]
+	if !present {
+		t.Fatalf("tool message = %#v, want content present; OpenAI rejects it otherwise", toolMsg)
+	}
+	if content != "" {
+		t.Fatalf("content = %#v, want an empty string", content)
 	}
 }
 

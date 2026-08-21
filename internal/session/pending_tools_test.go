@@ -14,11 +14,12 @@ import (
 
 // MockApprover implements the core.Approver interface for testing
 type MockApprover struct {
+	core.DeclineToolRoundLimitReset
 	shouldApprove bool
 	approvalError error
 }
 
-func (m *MockApprover) Approve(ctx context.Context, command []string) (bool, error) {
+func (m *MockApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) (bool, error) {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -292,11 +293,10 @@ func TestExecutePendingTools(t *testing.T) {
 			cfg.ToolEnabled = true
 			cfg.ToolTimeout = 5 * time.Second
 			logger := &MockLogger{debugEnabled: true}
-			notifier := &pendingTestNotifier{}
 			approver := &MockApprover{shouldApprove: tt.approverBehavior}
 
 			// Execute pending tools
-			hasPending, err := ExecutePendingTools(ctx, sess, cfg, logger, notifier, approver)
+			hasPending, err := ExecutePendingTools(ctx, sess, cfg, logger, core.TestToolUI{}, approver)
 
 			// Check expectations
 			if hasPending != tt.expectHasPending {
@@ -346,7 +346,7 @@ func TestExecutePendingToolsRequiresToolFlag(t *testing.T) {
 
 	cfg := core.NewTestRequestConfig()
 	cfg.ToolEnabled = false
-	hasPending, err := ExecutePendingTools(context.Background(), sess, cfg, &MockLogger{}, &pendingTestNotifier{}, &MockApprover{shouldApprove: true})
+	hasPending, err := ExecutePendingTools(context.Background(), sess, cfg, &MockLogger{}, core.TestToolUI{}, &MockApprover{shouldApprove: true})
 	if !hasPending {
 		t.Fatal("expected pending tools to be reported")
 	}
@@ -501,25 +501,4 @@ func TestCheckForPendingToolCalls(t *testing.T) {
 			}
 		})
 	}
-}
-
-// pendingTestNotifier implements core.Notifier for testing
-type pendingTestNotifier struct {
-	messages []string
-}
-
-func (t *pendingTestNotifier) Infof(format string, args ...interface{}) {
-	t.messages = append(t.messages, fmt.Sprintf("INFO: "+format, args...))
-}
-
-func (t *pendingTestNotifier) Warnf(format string, args ...interface{}) {
-	t.messages = append(t.messages, fmt.Sprintf("WARN: "+format, args...))
-}
-
-func (t *pendingTestNotifier) Errorf(format string, args ...interface{}) {
-	t.messages = append(t.messages, fmt.Sprintf("ERROR: "+format, args...))
-}
-
-func (t *pendingTestNotifier) Promptf(format string, args ...interface{}) {
-	t.messages = append(t.messages, fmt.Sprintf("PROMPT: "+format, args...))
 }

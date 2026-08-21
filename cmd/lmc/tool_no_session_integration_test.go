@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,7 +42,8 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch requestNumber {
 		case 1:
-			writeOpenAIToolCallResponse(t, w)
+			writeOpenAIToolCallResponse(t, w, "call_memory",
+				"I will run the command.", `{"command":["echo","memory-loop-ok"]}`)
 		case 2:
 			assertOpenAIToolFollowupFromMemory(t, body)
 			writeOpenAITextResponse(t, w, "final saw memory-loop-ok")
@@ -53,15 +53,8 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 	}))
 	defer server.Close()
 
-	apiKeyFile := filepath.Join(tmpHome, "openai-key")
-	if err := os.WriteFile(apiKeyFile, []byte("test-openai-key"), constants.FilePerm); err != nil {
-		t.Fatalf("Failed to create API key file: %v", err)
-	}
-
-	whitelistFile := filepath.Join(tmpHome, "tool-whitelist.txt")
-	if err := os.WriteFile(whitelistFile, []byte("[\"echo\"]\n"), constants.FilePerm); err != nil {
-		t.Fatalf("Failed to create whitelist: %v", err)
-	}
+	apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
+	whitelistFile := writeToolListFile(t, tmpHome, "tool-whitelist.txt", "echo")
 
 	sessionsDir := filepath.Join(tmpHome, "sessions")
 	logDir := filepath.Join(tmpHome, "logs")
@@ -85,6 +78,28 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 	if !strings.Contains(stdout, "final saw memory-loop-ok") {
 		t.Fatalf("stdout missing final response: %q", stdout)
 	}
+	for _, unwanted := range []string{">>> Tools requested:", ">>> Running", ">>> Results:", "Completed in"} {
+		if strings.Contains(stdout, unwanted) {
+			t.Fatalf("stdout contains tool transcript marker %q: %q", unwanted, stdout)
+		}
+	}
+	for _, want := range []string{
+		">>> Tools requested: 1",
+		`[1/1] Command: ["echo","memory-loop-ok"]`,
+		">>> Running 1 command...",
+		">>> Results:",
+		"[1/1] Completed in ",
+		"      Output:\nmemory-loop-ok",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+	for _, unwanted := range []string{"Note: >>>", ">>> Tool:", "universal_command", "call_memory", "Allow execution?"} {
+		if strings.Contains(stderr, unwanted) {
+			t.Fatalf("stderr contains obsolete or internal text %q:\n%s", unwanted, stderr)
+		}
+	}
 
 	mu.Lock()
 	gotRequests := len(requestBodies)
@@ -97,7 +112,10 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 	assertNoSessionFiles(t, sessionsDir)
 }
 
-func writeOpenAIToolCallResponse(t *testing.T, w http.ResponseWriter) {
+// writeOpenAIToolCallResponse renders one universal_command call in the OpenAI
+// chat-completion shape. Every tool integration test in this package sends its
+// first response through here, so the wire shape has one definition to update.
+func writeOpenAIToolCallResponse(t *testing.T, w http.ResponseWriter, callID, assistantText, arguments string) {
 	t.Helper()
 	resp := map[string]interface{}{
 		"id":      "chatcmpl-tool",
@@ -109,14 +127,14 @@ func writeOpenAIToolCallResponse(t *testing.T, w http.ResponseWriter) {
 				"index": 0,
 				"message": map[string]interface{}{
 					"role":    "assistant",
-					"content": "I will run the command.",
+					"content": assistantText,
 					"tool_calls": []map[string]interface{}{
 						{
-							"id":   "call_memory",
+							"id":   callID,
 							"type": "function",
 							"function": map[string]interface{}{
 								"name":      "universal_command",
-								"arguments": `{"command":["echo","memory-loop-ok"]}`,
+								"arguments": arguments,
 							},
 						},
 					},
@@ -173,6 +191,15 @@ func assertOpenAIToolFollowupFromMemory(t *testing.T, body map[string]interface{
 	}
 	if !openAIRequestContainsRole(body, "tool", "memory-loop-ok") {
 		t.Fatalf("follow-up request missing in-memory tool result: %#v", body["messages"])
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal follow-up request: %v", err)
+	}
+	for _, uiText := range []string{"Completed in", ">>> Results:", "[1/1]", "Output:"} {
+		if strings.Contains(string(encoded), uiText) {
+			t.Fatalf("follow-up request leaked terminal UI text %q: %s", uiText, encoded)
+		}
 	}
 }
 

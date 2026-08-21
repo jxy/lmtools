@@ -20,16 +20,7 @@ import (
 
 // TestToolMessageSequencing verifies that tool-related messages are saved with proper IDs
 func TestToolMessageSequencing(t *testing.T) {
-	// Create a temporary sessions directory
-	tempDir, err := os.MkdirTemp("", "lmc-tool-session-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Set custom sessions directory
-	session.SetSessionsDir(tempDir)
-	session.SetSkipFlockCheck(true) // Skip flock check for tests
+	useTempSessionsDir(t, t.TempDir())
 
 	// Create a new session
 	sess, err := session.CreateSession("", core.NewTestLogger(false))
@@ -173,16 +164,7 @@ func TestToolMessageSequencing(t *testing.T) {
 
 // TestToolContinuationSequencing tests multiple rounds of tool calls
 func TestToolContinuationSequencing(t *testing.T) {
-	// Create a temporary sessions directory
-	tempDir, err := os.MkdirTemp("", "lmc-tool-continuation-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Set custom sessions directory
-	session.SetSessionsDir(tempDir)
-	session.SetSkipFlockCheck(true)
+	useTempSessionsDir(t, t.TempDir())
 
 	// Create a new session
 	sess, err := session.CreateSession("", core.NewTestLogger(false))
@@ -343,11 +325,7 @@ func TestToolContinuationSequencing(t *testing.T) {
 
 // TestResumePendingTools tests that pending tool calls are detected when resuming a session
 func TestResumePendingTools(t *testing.T) {
-	// Create a temporary sessions directory
-	tempDir := t.TempDir()
-	session.SetSessionsDir(tempDir)
-	defer session.SetSessionsDir("") // Reset
-	session.SetSkipFlockCheck(true)  // Skip flock check for tests
+	useTempSessionsDir(t, t.TempDir())
 
 	// Step 1: Create a session with an assistant message containing tool calls
 	sess, err := session.CreateSession("", core.NewTestLogger(false))
@@ -520,9 +498,7 @@ func TestPendingToolsIntegration(t *testing.T) {
 	serverURL := ms.Server.URL
 
 	// Set sessions directory for this test
-	session.SetSessionsDir(sessionsDir)
-	defer session.SetSessionsDir("")
-	session.SetSkipFlockCheck(true)
+	useTempSessionsDir(t, sessionsDir)
 
 	// Create a session with pending tools
 	sess, err := session.CreateSession("", core.NewTestLogger(false))
@@ -577,14 +553,15 @@ func TestPendingToolsIntegration(t *testing.T) {
 	t.Logf("stdout: %s", stdout)
 	t.Logf("stderr (first 500 chars): %.500s", stderr)
 
-	// Check for tool execution message
-	if !strings.Contains(stderr, "Executing 1 pending tool call(s) from previous session") {
-		t.Error("Expected to see pending tool execution message")
+	// Pending tools use the same ordered transcript as new tool rounds.
+	if !strings.Contains(stderr, ">>> Tools requested: 1") {
+		t.Error("Expected to see pending tool review header")
 	}
-
-	// Check for tool output
-	if !strings.Contains(stderr, ">>> Tool: universal_command") {
-		t.Error("Expected to see tool execution header")
+	if !strings.Contains(stderr, `[1/1] Command: ["echo","hello from tool"]`) {
+		t.Error("Expected to see pending command")
+	}
+	if !strings.Contains(stderr, ">>> Running 1 command...") || !strings.Contains(stderr, ">>> Results:") {
+		t.Error("Expected to see pending tool execution and results headers")
 	}
 
 	if !strings.Contains(stderr, "hello from tool") {

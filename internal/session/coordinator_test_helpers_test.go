@@ -28,8 +28,8 @@ func setupCoordinatorTestEnv(t *testing.T) context.Context {
 	return context.Background()
 }
 
-func prepareSessionForTest(ctx context.Context, coordinator *Coordinator, inputStr string, isRegeneration bool, approver core.Approver) (*Session, bool, error) {
-	plan, err := coordinator.PrepareRequest(ctx, inputStr, isRegeneration, approver, PendingToolExecute)
+func prepareSessionForTest(ctx context.Context, cfg core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, approver core.Approver) (*Session, bool, error) {
+	plan, err := PrepareRequest(ctx, cfg, notifier, core.TestToolUI{}, inputStr, isRegeneration, approver, PendingToolExecute)
 	if err != nil {
 		return nil, false, err
 	}

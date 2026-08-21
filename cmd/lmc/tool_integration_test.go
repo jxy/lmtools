@@ -36,6 +36,21 @@ func toolTestDirs(t *testing.T) (string, string, string) {
 	return tmpDir, sessionDir, logDir
 }
 
+// useTempSessionsDir points the process-global session state at dir for the
+// duration of the test. Redirecting the directory and skipping the flock check
+// are a pair, and so are their restores: a cleanup that forgets either half
+// leaks session state into whichever test runs next.
+func useTempSessionsDir(t *testing.T, dir string) {
+	t.Helper()
+	oldSessionsDir := session.GetSessionsDir()
+	session.SetSessionsDir(dir)
+	session.SetSkipFlockCheck(true)
+	t.Cleanup(func() {
+		session.SetSessionsDir(oldSessionsDir)
+		session.SetSkipFlockCheck(false)
+	})
+}
+
 func writeToolListFile(t *testing.T, dir, name string, commands ...string) string {
 	t.Helper()
 	if len(commands) == 0 {
@@ -140,13 +155,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 	log := logger.GetLogger()
 
 	// Set sessions directory and create session
-	oldSessionsDir := session.GetSessionsDir()
-	session.SetSessionsDir(cfg.SessionsDir)
-	session.SetSkipFlockCheck(true)
-	t.Cleanup(func() {
-		session.SetSessionsDir(oldSessionsDir)
-		session.SetSkipFlockCheck(false)
-	})
+	useTempSessionsDir(t, cfg.SessionsDir)
 	sess, err := session.CreateSession("", log)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -226,12 +235,12 @@ func TestToolIntegrationFlow(t *testing.T) {
 
 	// Create and execute tools
 	approver := core.NewTestApprover(true) // Auto-approve for tests
-	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
+	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
 
-	results := executor.ExecuteParallel(ctx, response.ToolCalls)
+	results := executor.ExecuteParallel(ctx, response.ToolCalls, nil)
 
 	// Verify tool execution
 	if len(results) != 1 {
@@ -377,7 +386,7 @@ func TestToolIntegrationFlow(t *testing.T) {
 	}
 }
 
-func TestMultiRoundToolExecution(t *testing.T) {
+func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 	// Create temp directories
 	tmpDir, sessionDir, logDir := toolTestDirs(t)
 
@@ -496,8 +505,8 @@ func TestMultiRoundToolExecution(t *testing.T) {
 		EnableTool:         true,
 		ToolWhitelist:      whitelistFile,
 		ToolAutoApprove:    true,
-		ToolNonInteractive: true,
-		MaxToolRounds:      5, // Allow multiple rounds
+		ToolNonInteractive: false,
+		MaxToolRounds:      1,
 		SessionsDir:        sessionDir,
 		LogDir:             logDir,
 		Timeout:            10 * time.Second,
@@ -508,13 +517,7 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	log := core.NewTestLogger(false)
 
 	// Create session
-	oldSessionsDir := session.GetSessionsDir()
-	session.SetSessionsDir(sessionDir)
-	session.SetSkipFlockCheck(true)
-	t.Cleanup(func() {
-		session.SetSessionsDir(oldSessionsDir)
-		session.SetSkipFlockCheck(false)
-	})
+	useTempSessionsDir(t, sessionDir)
 	sess, err := session.CreateSession("", log)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
@@ -573,13 +576,15 @@ func TestMultiRoundToolExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create tool context for execution
+	// Create tool context for execution. A one-round allowance requires two
+	// renewals to complete all three requested rounds.
+	approver := &core.TestApprover{DefaultApproval: true, ResetResponses: []bool{true, true}}
 	toolCtx := core.ToolContext{
 		Ctx:      ctx,
 		Cfg:      cfg.RequestOptions(),
 		Logger:   log,
 		Notifier: notifier,
-		Approver: core.NewTestApprover(true),
+		Approver: approver,
 		ExecCfg: core.ToolExecutionConfig{
 			Store:       session.NewStore(sess, log),
 			RetryClient: retryClient,
@@ -595,6 +600,9 @@ func TestMultiRoundToolExecution(t *testing.T) {
 	result := core.HandleToolExecution(toolCtx)
 	if result.Error != nil {
 		t.Fatalf("Tool execution failed: %v", result.Error)
+	}
+	if len(approver.ResetCalls) != 2 || approver.ResetCalls[0] != 1 || approver.ResetCalls[1] != 1 {
+		t.Fatalf("round-limit reset calls = %v, want [1 1]", approver.ResetCalls)
 	}
 
 	// Verify the tool loop reached the intended final response.
@@ -682,21 +690,33 @@ func validateAnthropicToolHistory(body map[string]interface{}, completedRounds i
 			}
 		}
 	}
-	if !foundUserPrompt {
+	expectedOutputs := []string{"First command", "Second command", "Third command"}
+	return verifyToolCallSequence(sequence, foundUserPrompt, completedRounds, resultContent,
+		func(round int) string { return fmt.Sprintf("call-%03d", round) },
+		func(round int) string { return expectedOutputs[round-1] })
+}
+
+// verifyToolCallSequence is the wire-format-independent tail shared by the
+// tool history validators: the original user prompt must be present, each
+// completed round must contribute its call/result pair in execution order,
+// and each result must carry that round's expected output. callID and
+// expectedOutput supply the per-wire call ID scheme and per-round output
+// marker; results maps call IDs to their recorded output.
+func verifyToolCallSequence(sequence []string, foundPrompt bool, completedRounds int, results map[string]string, callID, expectedOutput func(round int) string) error {
+	if !foundPrompt {
 		return fmt.Errorf("original user prompt missing")
 	}
 	if len(sequence) != completedRounds*2 {
 		return fmt.Errorf("tool sequence = %v, want %d entries", sequence, completedRounds*2)
 	}
-	expectedOutputs := []string{"First command", "Second command", "Third command"}
 	for round := 1; round <= completedRounds; round++ {
-		id := fmt.Sprintf("call-%03d", round)
+		id := callID(round)
 		callIndex := (round - 1) * 2
 		if sequence[callIndex] != "call:"+id || sequence[callIndex+1] != "result:"+id {
 			return fmt.Errorf("tool sequence = %v, want call/result pair for %s at round %d", sequence, id, round)
 		}
-		if !strings.Contains(resultContent[id], expectedOutputs[round-1]) {
-			return fmt.Errorf("result %s content = %q", id, resultContent[id])
+		if !strings.Contains(results[id], expectedOutput(round)) {
+			return fmt.Errorf("result %s content = %q", id, results[id])
 		}
 	}
 	return nil
@@ -715,9 +735,8 @@ func TestParallelToolExecution(t *testing.T) {
 		ToolAutoApprove: true,
 	}
 
-	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true) // Auto-approve for tests
-	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
+	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), approver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +762,7 @@ func TestParallelToolExecution(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	results := executor.ExecuteParallel(ctx, calls)
+	results := executor.ExecuteParallel(ctx, calls, nil)
 	elapsed := time.Since(start)
 
 	// Verify all completed
@@ -786,9 +805,8 @@ func TestToolOutputTruncation(t *testing.T) {
 		ToolAutoApprove: true,
 	}
 
-	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true) // Auto-approve for tests
-	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
+	executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), approver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -802,7 +820,7 @@ func TestToolOutputTruncation(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []core.ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []core.ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -885,9 +903,8 @@ func TestToolApprovalMechanisms(t *testing.T) {
 				ToolNonInteractive: true, // Prevent prompts in tests
 			}
 
-			notifier := core.NewTestNotifier()
 			approver := core.NewTestApprover(true) // Auto-approve for tests
-			executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), notifier, approver)
+			executor, err := core.NewExecutor(cfg.RequestOptions(), logger.GetLogger(), approver)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -903,7 +920,7 @@ func TestToolApprovalMechanisms(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			results := executor.ExecuteParallel(ctx, []core.ToolCall{call})
+			results := executor.ExecuteParallel(ctx, []core.ToolCall{call}, nil)
 
 			if len(results) != 1 {
 				t.Fatalf("Expected 1 result, got %d", len(results))

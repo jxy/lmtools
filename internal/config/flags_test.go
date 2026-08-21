@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"lmtools/internal/providerconfig"
 	"os"
 	"reflect"
@@ -8,6 +9,52 @@ import (
 	"testing"
 	"time"
 )
+
+func TestToolFlagHelpExplainsApprovalPolicy(t *testing.T) {
+	var cfg Config
+	fs := flag.NewFlagSet("lmc", flag.ContinueOnError)
+	registerFlags(fs, &cfg)
+
+	want := map[string][]string{
+		"tool":                 {"universal_command", "no shell"},
+		"tool-whitelist":       {"JSON command-rule whitelist", "redirected calls", "exact object"},
+		"tool-blacklist":       {"JSON command-rule blacklist", "always denied"},
+		"tool-auto-approve":    {"without prompting", "blacklist", "non-interactive whitelist"},
+		"tool-non-interactive": {"never prompt", "deny non-matching commands"},
+	}
+	for name, required := range want {
+		got := fs.Lookup(name)
+		if got == nil {
+			t.Fatalf("flag -%s is not registered", name)
+		}
+		for _, text := range required {
+			if !strings.Contains(got.Usage, text) {
+				t.Errorf("-%s help = %q, want it to mention %q", name, got.Usage, text)
+			}
+		}
+	}
+}
+
+func TestToolFlagDefaults(t *testing.T) {
+	var cfg Config
+	fs := flag.NewFlagSet("lmc", flag.ContinueOnError)
+	registerFlags(fs, &cfg)
+
+	want := map[string]string{
+		"tool-timeout":      "1m0s",
+		"max-tool-rounds":   "64",
+		"max-tool-parallel": "8",
+	}
+	for name, wantDefault := range want {
+		got := fs.Lookup(name)
+		if got == nil {
+			t.Fatalf("flag -%s is not registered", name)
+		}
+		if got.DefValue != wantDefault {
+			t.Errorf("-%s default = %q, want %q", name, got.DefValue, wantDefault)
+		}
+	}
+}
 
 func TestParseFlagsDefaults(t *testing.T) {
 	// Test with explicit user since it's now required if OS user is not available
@@ -124,9 +171,9 @@ func TestParseFlagsCustom(t *testing.T) {
 		SystemExplicitlySet: true, // -s flag was provided
 		Timeout:             10 * time.Minute,
 		Retries:             3,                // Default value
-		ToolTimeout:         30 * time.Second, // Default value
-		MaxToolRounds:       32,               // Default value
-		MaxToolParallel:     4,                // Default value
+		ToolTimeout:         60 * time.Second, // Default value
+		MaxToolRounds:       64,               // Default value
+		MaxToolParallel:     8,                // Default value
 		ToolMaxOutputBytes:  1048576,          // Default value (1MB)
 		LogLevel:            "INFO",           // Default value
 	}
@@ -152,17 +199,69 @@ func TestRequestOptionsAppliesCoreDefaults(t *testing.T) {
 	if opts.GetEffectiveSystem() == cfg.System {
 		t.Fatalf("effective system prompt was not switched for tool mode")
 	}
-	if got := opts.GetToolTimeout(); got != 30*time.Second {
-		t.Fatalf("GetToolTimeout() = %v, want 30s", got)
+	if got := opts.GetToolTimeout(); got != 60*time.Second {
+		t.Fatalf("GetToolTimeout() = %v, want 1m0s", got)
 	}
-	if got := opts.GetMaxToolRounds(); got != 32 {
-		t.Fatalf("GetMaxToolRounds() = %d, want 32", got)
+	if got := opts.GetMaxToolRounds(); got != 64 {
+		t.Fatalf("GetMaxToolRounds() = %d, want 64", got)
 	}
-	if got := opts.GetMaxToolParallel(); got != 4 {
-		t.Fatalf("GetMaxToolParallel() = %d, want 4", got)
+	if got := opts.GetMaxToolParallel(); got != 8 {
+		t.Fatalf("GetMaxToolParallel() = %d, want 8", got)
 	}
 	if got := opts.GetToolMaxOutputBytes(); got != 1024*1024 {
 		t.Fatalf("GetToolMaxOutputBytes() = %d, want 1MiB", got)
+	}
+}
+
+// -tool-max-output-bytes used to accept any number and then capture a
+// different one: RequestOptions.GetToolMaxOutputBytes rewrites a non-positive
+// value to the 1MiB default and clamps anything past 100MiB, and nothing said
+// so. An operator who asked for 500MB got 100MiB, and the truncation note the
+// model plans its next command against quoted the clamped figure while the
+// command line said otherwise.
+func TestParseFlagsRejectsToolMaxOutputBytesThatWouldNotBeHonored(t *testing.T) {
+	rejected := []struct {
+		name  string
+		value string
+	}{
+		{name: "negative", value: "-1"},
+		{name: "above the ceiling", value: "209715200"},
+	}
+	for _, tt := range rejected {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseFlags([]string{"-argo-user", "alice", "-tool", "-tool-max-output-bytes", tt.value})
+			if err == nil {
+				t.Fatalf("ParseFlags(-tool-max-output-bytes %s) succeeded, want a rejection", tt.value)
+			}
+			for _, want := range []string{"-tool-max-output-bytes", "104857600"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q does not name %q", err, want)
+				}
+			}
+		})
+	}
+
+	accepted := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		// Zero is how every other tool limit spells "use the default", and
+		// TestRequestOptionsAppliesCoreDefaults pins that meaning.
+		{name: "the default sentinel", value: "0", want: 1024 * 1024},
+		{name: "a smaller cap", value: "4096", want: 4096},
+		{name: "exactly the ceiling", value: "104857600", want: 104857600},
+	}
+	for _, tt := range accepted {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ParseFlags([]string{"-argo-user", "alice", "-tool", "-tool-max-output-bytes", tt.value})
+			if err != nil {
+				t.Fatalf("ParseFlags(-tool-max-output-bytes %s) = %v", tt.value, err)
+			}
+			if got := cfg.RequestOptions().GetToolMaxOutputBytes(); got != tt.want {
+				t.Fatalf("GetToolMaxOutputBytes() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

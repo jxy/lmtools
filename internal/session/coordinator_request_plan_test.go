@@ -18,9 +18,8 @@ func TestCoordinatorPrepareRequestNewSessionDefersWritesUntilCommit(t *testing.T
 
 	cfg := newTestCoordinatorConfig()
 	cfg.System = "plan system"
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "hello", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "hello", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -66,9 +65,8 @@ func TestCoordinatorPrepareRequestResumeAppendsInputWithoutWritingUntilCommit(t 
 	cfg := newTestCoordinatorConfig()
 	cfg.Resume = GetSessionID(sess.Path)
 	cfg.System = "session system"
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "preview question", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "preview question", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -106,9 +104,8 @@ func TestCoordinatorPrepareRequestPreviewPendingToolsUsesPlaceholderWithoutWriti
 	cfg.Resume = GetSessionID(sess.Path)
 	cfg.System = "session system"
 	cfg.ToolEnabled = true
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "", false, nil, PendingToolPreview)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", false, nil, PendingToolPreview)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -185,9 +182,8 @@ func TestCoordinatorPrepareRequestBranchAssistantDefersSiblingUntilCommit(t *tes
 	cfg := newTestCoordinatorConfig()
 	cfg.Branch = GetSessionID(sess.Path) + "/" + assistantID
 	cfg.System = "system prompt"
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "", true, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", true, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -220,9 +216,8 @@ func TestCoordinatorPrepareRequestBranchUserUsesPreviousAssistant(t *testing.T) 
 	cfg := newTestCoordinatorConfig()
 	cfg.Branch = GetSessionID(sess.Path) + "/" + userID
 	cfg.System = "system prompt"
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "alternate second user", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "alternate second user", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -257,9 +252,8 @@ func TestCoordinatorPrepareRequestNestedBranchBubblesToOriginalAnchor(t *testing
 	cfg := newTestCoordinatorConfig()
 	cfg.Branch = GetSessionID(sibling.Path) + "/" + alternateAssistantID
 	cfg.System = "system prompt"
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
 
-	plan, err := coordinator.PrepareRequest(ctx, "", true, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", true, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -276,8 +270,7 @@ func TestRequestPlanCommitRejectsSecondCommit(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	cfg := newTestCoordinatorConfig()
-	coordinator := NewCoordinator(cfg, core.NewTestNotifier())
-	plan, err := coordinator.PrepareRequest(ctx, "hello", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "hello", false, nil, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}

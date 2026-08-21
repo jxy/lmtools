@@ -47,11 +47,11 @@ type Config struct {
 
 	// Tool support
 	EnableTool         bool          // enable built-in universal_command tool
-	ToolTimeout        time.Duration // timeout for tool execution (default: 30s)
-	ToolWhitelist      string        // path to whitelist file (one command per line)
-	ToolBlacklist      string        // path to blacklist file (one command per line)
-	ToolAutoApprove    bool          // skip manual approval for whitelisted tools
-	ToolNonInteractive bool          // run in non-interactive mode (deny unapproved commands)
+	ToolTimeout        time.Duration // timeout for tool execution
+	ToolWhitelist      string        // JSON command rules that run without prompting
+	ToolBlacklist      string        // JSON command rules that are always denied
+	ToolAutoApprove    bool          // run unless denied by blacklist or restrictive whitelist
+	ToolNonInteractive bool          // never prompt; deny commands not approved by policy
 	ToolMaxOutputBytes int           // maximum output size per tool execution (default: 1MB)
 }
 
@@ -120,15 +120,15 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")
 
 	// Tool Options
-	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable built-in universal_command tool")
-	fs.DurationVar(&cfg.ToolTimeout, "tool-timeout", core.DefaultToolTimeout, "timeout for tool execution")
-	fs.StringVar(&cfg.ToolWhitelist, "tool-whitelist", "", "path to whitelist file (one command per line, or JSON arrays for multi-arg commands)")
-	fs.StringVar(&cfg.ToolBlacklist, "tool-blacklist", "", "path to blacklist file (one command per line)")
-	fs.BoolVar(&cfg.ToolAutoApprove, "tool-auto-approve", false, "skip manual approval for whitelisted tools")
-	fs.BoolVar(&cfg.ToolNonInteractive, "tool-non-interactive", false, "run in non-interactive mode (deny unapproved commands)")
-	fs.IntVar(&cfg.MaxToolRounds, "max-tool-rounds", core.DefaultMaxToolRounds, "maximum rounds of tool execution")
-	fs.IntVar(&cfg.MaxToolParallel, "max-tool-parallel", core.DefaultMaxToolParallel, "maximum parallel tool executions (default: 4)")
-	fs.IntVar(&cfg.ToolMaxOutputBytes, "tool-max-output-bytes", int(core.DefaultMaxOutputSize), "maximum output size per tool execution (default: 1MB)")
+	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable universal_command with direct execvpe-style execution (no shell)")
+	fs.DurationVar(&cfg.ToolTimeout, "tool-timeout", core.DefaultToolTimeout, "timeout per command")
+	fs.StringVar(&cfg.ToolWhitelist, "tool-whitelist", "", "path to JSON command-rule whitelist; redirected calls require exact object rules")
+	fs.StringVar(&cfg.ToolBlacklist, "tool-blacklist", "", "path to JSON command-rule blacklist; matches are always denied")
+	fs.BoolVar(&cfg.ToolAutoApprove, "tool-auto-approve", false, "run without prompting unless denied by blacklist or non-interactive whitelist")
+	fs.BoolVar(&cfg.ToolNonInteractive, "tool-non-interactive", false, "never prompt; with a whitelist, deny non-matching commands")
+	fs.IntVar(&cfg.MaxToolRounds, "max-tool-rounds", core.DefaultMaxToolRounds, "tool execution rounds per block before interactive confirmation")
+	fs.IntVar(&cfg.MaxToolParallel, "max-tool-parallel", core.DefaultMaxToolParallel, "maximum concurrent command executions")
+	fs.IntVar(&cfg.ToolMaxOutputBytes, "tool-max-output-bytes", int(core.DefaultMaxOutputSize), "maximum captured output bytes per command")
 
 	// Configuration
 	providerconfig.RegisterFlags(fs, &cfg.Options, providerconfig.Defaults{

@@ -33,10 +33,12 @@ func (m *mockLoggerFixes) IsDebugEnabled() bool {
 
 // TestCommandJSONFormat verifies that commands are displayed in JSON array format
 func TestCommandJSONFormat(t *testing.T) {
-	// Create temp whitelist file
+	// Create temp whitelist file. The call below sets GIT_DIR, and environ is
+	// authority, so a bare ["git"] rule does not grant it.
 	tmpDir := t.TempDir()
 	whitelistPath := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistPath, []byte(`["git"]`), constants.FilePerm); err != nil {
+	rule := `{"command":["git"],"environ":{"GIT_DIR":".git"},"workdir":"/tmp/test"}`
+	if err := os.WriteFile(whitelistPath, []byte(rule), constants.FilePerm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -47,9 +49,8 @@ func TestCommandJSONFormat(t *testing.T) {
 	}
 
 	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestCommandJSONFormat(t *testing.T) {
 
 	// Execute
 	ctx := context.Background()
-	_ = executor.ExecuteParallel(ctx, []ToolCall{call})
+	_ = executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	// Since we moved display logic to CLI layer, we should not expect these messages in the executor
 	// The executor now only returns results without displaying them
@@ -106,9 +107,8 @@ func TestOutputFormat(t *testing.T) {
 	}
 
 	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestOutputFormat(t *testing.T) {
 
 	// Execute
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	// Verify the command succeeded
 	if len(results) != 1 || results[0].Error != "" {
@@ -157,58 +157,6 @@ func TestOutputFormat(t *testing.T) {
 	}
 }
 
-// TestEmptyWhitelistWithAutoApprove verifies behavior with empty whitelist and auto-approve
-func TestEmptyWhitelistWithAutoApprove(t *testing.T) {
-	// Create empty whitelist file
-	tmpDir := t.TempDir()
-	whitelistPath := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistPath, []byte(``), constants.FilePerm); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := mockExecutorConfig{
-		toolWhitelist:   whitelistPath,
-		toolTimeout:     5 * time.Second,
-		toolAutoApprove: true, // With empty whitelist and auto-approve, commands are allowed
-	}
-
-	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
-	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
-	if err != nil {
-		t.Fatalf("Failed to create executor: %v", err)
-	}
-
-	// Create a tool call for a safe command
-	args, _ := json.Marshal(map[string]interface{}{
-		"command": []string{"echo", "test"},
-	})
-	call := ToolCall{
-		ID:   "test-1",
-		Name: "universal_command",
-		Args: args,
-	}
-
-	// Execute - should succeed because empty whitelist + auto-approve = allow
-	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
-
-	if len(results) != 1 {
-		t.Fatal("Expected 1 result")
-	}
-
-	// Should succeed with empty whitelist and auto-approve
-	if results[0].Error != "" {
-		t.Errorf("Expected command to succeed with empty whitelist and auto-approve, got error: %s", results[0].Error)
-	}
-
-	// Output should contain "test"
-	if !strings.Contains(results[0].Output, "test") {
-		t.Errorf("Expected output to contain 'test', got: %s", results[0].Output)
-	}
-}
-
 // TestTimeoutAfterApproval verifies timeout starts after approval, not before
 func TestTimeoutAfterApproval(t *testing.T) {
 	// This test verifies the code structure - timeout context is created
@@ -228,9 +176,8 @@ func TestTimeoutAfterApproval(t *testing.T) {
 	}
 
 	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -247,7 +194,7 @@ func TestTimeoutAfterApproval(t *testing.T) {
 
 	start := time.Now()
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 	elapsed := time.Since(start)
 
 	// The command should fail quickly due to approval denial, not timeout
@@ -282,9 +229,8 @@ func TestExecutionTimerStartsAfterApproval(t *testing.T) {
 	}
 
 	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -301,7 +247,7 @@ func TestExecutionTimerStartsAfterApproval(t *testing.T) {
 
 	// Execute
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	// Verify execution succeeded
 	if len(results) != 1 || results[0].Error != "" {
@@ -332,9 +278,8 @@ func TestBlacklistErrorMessage(t *testing.T) {
 	}
 
 	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -350,7 +295,7 @@ func TestBlacklistErrorMessage(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -378,9 +323,8 @@ func TestTruncationMessageFormat(t *testing.T) {
 	}
 
 	logger := &mockLoggerFixes{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -400,7 +344,7 @@ func TestTruncationMessageFormat(t *testing.T) {
 
 	// Execute
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	// Check that output was truncated
 	if len(results) != 1 || !results[0].Truncated {
@@ -412,6 +356,12 @@ func TestTruncationMessageFormat(t *testing.T) {
 	result := results[0]
 	if !result.Truncated {
 		t.Error("Expected result.Truncated to be true")
+	}
+
+	// The result carries the cap that applied; truncation notes and the CLI
+	// summary describe the writer's own limit rather than re-reading config.
+	if result.TruncatedTo != int(executor.maxOutputSize) {
+		t.Errorf("Expected TruncatedTo = %d, got %d", executor.maxOutputSize, result.TruncatedTo)
 	}
 
 	// Verify that the output was actually truncated to the expected size

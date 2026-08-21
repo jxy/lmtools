@@ -3,9 +3,7 @@ package core
 import (
 	"context"
 	"os"
-	"strings"
 	"sync"
-	"time"
 )
 
 type TestRequestConfig = RequestOptions
@@ -13,13 +11,14 @@ type TestRequestConfig = RequestOptions
 // NewTestRequestConfig creates a TestRequestConfig with default values
 func NewTestRequestConfig() RequestOptions {
 	return RequestOptions{
-		User:          "testuser",
-		Model:         "test-model",
-		System:        "You are a helpful assistant",
-		Env:           "test",
-		Provider:      "argo",
-		MaxToolRounds: 32,
-		ToolTimeout:   30 * time.Second,
+		User:            "testuser",
+		Model:           "test-model",
+		System:          "You are a helpful assistant",
+		Env:             "test",
+		Provider:        "argo",
+		MaxToolRounds:   DefaultMaxToolRounds,
+		MaxToolParallel: DefaultMaxToolParallel,
+		ToolTimeout:     DefaultToolTimeout,
 	}
 }
 
@@ -93,13 +92,16 @@ func NewTestLogger(debugEnabled bool) *TestLogger {
 
 // TestApprover is a mock that implements Approver interface for testing
 type TestApprover struct {
-	ApprovalResponses map[string]bool // Map of command JSON to approval response
-	DefaultApproval   bool
-	ApprovalCalls     [][]string // Track what commands were asked for approval
-	mu                sync.Mutex
+	DefaultApproval bool
+	ApprovalCalls   []UniversalCommandArgs
+	// ResetResponses answers round-limit reset prompts in order; an exhausted
+	// or empty queue declines. ResetCalls records the maxRounds of each prompt.
+	ResetResponses []bool
+	ResetCalls     []int
+	mu             sync.Mutex
 }
 
-func (a *TestApprover) Approve(ctx context.Context, command []string) (bool, error) {
+func (a *TestApprover) Approve(ctx context.Context, args UniversalCommandArgs) (bool, error) {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -110,25 +112,52 @@ func (a *TestApprover) Approve(ctx context.Context, command []string) (bool, err
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.ApprovalCalls = append(a.ApprovalCalls, command)
+	a.ApprovalCalls = append(a.ApprovalCalls, args)
+	return a.DefaultApproval, nil
+}
 
-	// Check if we have a specific response for this command
-	cmdKey := strings.Join(command, " ")
-	if approved, exists := a.ApprovalResponses[cmdKey]; exists {
-		return approved, nil
+func (a *TestApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 
-	return a.DefaultApproval, nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.ResetCalls = append(a.ResetCalls, maxRounds)
+	if len(a.ResetResponses) == 0 {
+		return false, nil
+	}
+	approved := a.ResetResponses[0]
+	a.ResetResponses = a.ResetResponses[1:]
+	return approved, nil
+}
+
+// DeclineToolRoundLimitReset is the round-limit half of Approver for test
+// doubles that only care about Approve. Embed it to decline every reset.
+type DeclineToolRoundLimitReset struct{}
+
+func (DeclineToolRoundLimitReset) ApproveToolRoundLimitReset(ctx context.Context, _ int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // NewTestApprover creates a TestApprover with default approval
 func NewTestApprover(defaultApproval bool) *TestApprover {
 	return &TestApprover{
-		ApprovalResponses: make(map[string]bool),
-		DefaultApproval:   defaultApproval,
-		ApprovalCalls:     [][]string{},
+		DefaultApproval: defaultApproval,
 	}
 }
+
+// TestToolUI is a no-op ToolUI for tests that need the reviewed-UI contract
+// satisfied without asserting on rendering.
+type TestToolUI struct{}
+
+func (TestToolUI) ShowCall(int, int, ToolCall, *UniversalCommandArgs) {}
+func (TestToolUI) BeforeRun(int, int, int)                            {}
+func (TestToolUI) AfterExecute([]ToolCall, []ToolResult)              {}
 
 // TestNotifier is a mock that implements Notifier interface for testing
 type TestNotifier struct {

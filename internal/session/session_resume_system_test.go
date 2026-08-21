@@ -52,8 +52,7 @@ func TestResumeSessionWithCustomSystemNoFork(t *testing.T) {
 		cfg.System = ""
 		notifier := core.NewTestNotifier()
 
-		coordinator := NewCoordinator(cfg, notifier)
-		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
@@ -78,8 +77,7 @@ func TestResumeSessionWithCustomSystemNoFork(t *testing.T) {
 		cfg.SystemExplicitlySet = true
 		notifier := core.NewTestNotifier()
 
-		coordinator := NewCoordinator(cfg, notifier)
-		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
@@ -105,8 +103,7 @@ func TestResumeSessionWithCustomSystemNoFork(t *testing.T) {
 		cfg.SystemExplicitlySet = true
 		notifier := core.NewTestNotifier()
 
-		coordinator := NewCoordinator(cfg, notifier)
-		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}
@@ -156,8 +153,7 @@ func TestResumeSessionWithDefaultSystem(t *testing.T) {
 		cfg.System = ""
 		notifier := core.NewTestNotifier()
 
-		coordinator := NewCoordinator(cfg, notifier)
-		sess, _, err := prepareSessionForTest(ctx, coordinator, "Continue", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "Continue", false, nil)
 		if err != nil {
 			t.Fatalf("Failed to prepare session: %v", err)
 		}

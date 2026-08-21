@@ -19,10 +19,8 @@ func TestCoordinatorPrepareRequestNewSession(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test creating new session
-	sess, executedPending, err := prepareSessionForTest(ctx, coordinator, "Hello, world!", false, approver)
+	sess, executedPending, err := prepareSessionForTest(ctx, cfg, notifier, "Hello, world!", false, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}
@@ -89,10 +87,8 @@ func TestCoordinatorPrepareRequestResume(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test resuming session
-	sess, executedPending, err := prepareSessionForTest(ctx, coordinator, "Second message", false, approver)
+	sess, executedPending, err := prepareSessionForTest(ctx, cfg, notifier, "Second message", false, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}
@@ -150,10 +146,8 @@ func TestCoordinatorPrepareRequestForkOnSystemChange(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test resuming with different system prompt
-	sess, _, err := prepareSessionForTest(ctx, coordinator, "Second message", false, approver)
+	sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "Second message", false, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}
@@ -224,10 +218,8 @@ func TestCoordinatorPrepareRequestBranch(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test branching from first message
-	sess, _, err := prepareSessionForTest(ctx, coordinator, "Alternative message 2", false, approver)
+	sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "Alternative message 2", false, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}
@@ -304,10 +296,8 @@ func TestCoordinatorPrepareRequestPendingTools(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test resuming with pending tools
-	sess, executedPending, err := prepareSessionForTest(ctx, coordinator, "", false, approver)
+	sess, executedPending, err := prepareSessionForTest(ctx, cfg, notifier, "", false, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}
@@ -350,10 +340,8 @@ func TestCoordinatorPrepareRequestRegeneration(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test regeneration (isRegeneration=true)
-	sess, _, err := prepareSessionForTest(ctx, coordinator, "This should not be saved", true, approver)
+	sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "This should not be saved", true, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}
@@ -382,10 +370,8 @@ func TestCoordinatorPrepareRequestEmptyInput(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	approver := core.NewTestApprover(true)
 
-	coordinator := NewCoordinator(cfg, notifier)
-
 	// Test with empty input
-	sess, _, err := prepareSessionForTest(ctx, coordinator, "", false, approver)
+	sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "", false, approver)
 	if err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
 	}

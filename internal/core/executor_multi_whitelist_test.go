@@ -47,9 +47,9 @@ func (c testExecutorConfigMulti) requestOptions() RequestOptions {
 		ToolBlacklist:      c.toolBlacklist,
 		ToolAutoApprove:    c.toolAutoApprove,
 		ToolNonInteractive: true,
-		MaxToolRounds:      32,
-		MaxToolParallel:    4,
-		ToolMaxOutputBytes: 1024 * 1024,
+		MaxToolRounds:      DefaultMaxToolRounds,
+		MaxToolParallel:    DefaultMaxToolParallel,
+		ToolMaxOutputBytes: int(DefaultMaxOutputSize),
 	}
 }
 
@@ -57,7 +57,7 @@ func (c testExecutorConfigMulti) toolDuration() time.Duration {
 	if c.toolTimeout > 0 {
 		return time.Duration(c.toolTimeout) * time.Second
 	}
-	return 30 * time.Second
+	return DefaultToolTimeout
 }
 
 func TestExecutorMultiArgumentWhitelist(t *testing.T) {
@@ -84,9 +84,8 @@ func TestExecutorMultiArgumentWhitelist(t *testing.T) {
 	}
 
 	logger := &mockLoggerMulti{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -118,15 +117,11 @@ func TestExecutorMultiArgumentWhitelist(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test with the ApprovalPolicy
-			policy := ApprovalPolicy{
-				Whitelist:   executor.whitelist,
-				Blacklist:   executor.blacklist,
-				AutoApprove: executor.autoApprove,
-				Interactive: false, // Non-interactive for testing
-			}
-			decision := policy.Decide(tt.command)
-			approved := decision == DecisionAllow
+			// Test with the configured approval policy; canPrompt is already
+			// false because the executor was built with ToolNonInteractive.
+			policy := executor.policy
+			decision := policy.decide(UniversalCommandArgs{Command: tt.command})
+			approved := decision == decisionAllow
 			if approved != tt.expected {
 				t.Errorf("Command %v: expected approved=%v, got %v", tt.command, tt.expected, approved)
 			}
@@ -153,9 +148,8 @@ func TestExecutorMultiArgumentWhitelistExecution(t *testing.T) {
 	}
 
 	logger := &mockLoggerMulti{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -184,18 +178,18 @@ func TestExecutorMultiArgumentWhitelistExecution(t *testing.T) {
 	ctx := context.Background()
 
 	// Execute whitelisted commands
-	result1 := executor.ExecuteParallel(ctx, []ToolCall{call1})[0]
+	result1 := executor.ExecuteParallel(ctx, []ToolCall{call1}, nil)[0]
 	if result1.Error != "" {
 		t.Errorf("Expected echo test to succeed, got error: %s", result1.Error)
 	}
 
-	result2 := executor.ExecuteParallel(ctx, []ToolCall{call2})[0]
+	result2 := executor.ExecuteParallel(ctx, []ToolCall{call2}, nil)[0]
 	if result2.Error != "" {
 		t.Errorf("Expected echo multi arg test to succeed, got error: %s", result2.Error)
 	}
 
 	// Execute non-whitelisted command (should fail)
-	result3 := executor.ExecuteParallel(ctx, []ToolCall{call3})[0]
+	result3 := executor.ExecuteParallel(ctx, []ToolCall{call3}, nil)[0]
 	if !strings.HasPrefix(result3.Error, "denied: not in whitelist") {
 		t.Errorf("Expected error to start with 'denied: not in whitelist', got: %s", result3.Error)
 	}

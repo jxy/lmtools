@@ -100,12 +100,36 @@ type ToolCall struct {
 
 // ToolResult represents the result of executing a tool
 type ToolResult struct {
-	ID        string `json:"tool_call_id"`
-	Output    string `json:"output"`
-	Error     string `json:"error,omitempty"`
-	Code      string `json:"code,omitempty"` // Error code for structured error handling
-	Elapsed   int64  `json:"elapsed_ms"`
-	Truncated bool   `json:"truncated,omitempty"`
+	ID      string `json:"tool_call_id"`
+	Output  string `json:"output"`
+	Error   string `json:"error,omitempty"`
+	Code    string `json:"code,omitempty"` // Error code for structured error handling
+	Elapsed int64  `json:"elapsed_ms"`
+	// NotRun records that no process was ever created for this call: a policy
+	// denial, a cancellation that arrived first, arguments that never parsed, a
+	// file the round refused to share, or a start os/exec would not perform.
+	//
+	// The executor is the only layer that knows this, and saying so is not the
+	// same as leaving it to be re-derived. The CLI used to infer it from a
+	// hand-maintained list of six error codes plus "Reason is set", with nothing
+	// keeping the list in step with the nine codes the executor can stamp — so a
+	// code added anywhere else rendered as a failure that took zero
+	// milliseconds, and so did every command os/exec refused to start, which has
+	// no denial code at all. Elapsed is meaningless when this is set.
+	//
+	// Additive and omitempty: a session written before the field existed still
+	// loads, and the field is only ever consulted for display.
+	NotRun bool `json:"not_run,omitempty"`
+	// Reason and Hints carry a denial's structure for operator display. Error
+	// remains the model-facing text, and denyResult composes all three from the
+	// same parts so the two audiences cannot be told different things.
+	Reason    string   `json:"reason,omitempty"`
+	Hints     []string `json:"hints,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+	// TruncatedTo is the output cap that actually applied when Truncated is
+	// set. The executor stamps it so consumers describe what the truncating
+	// writer did rather than re-deriving the limit from configuration.
+	TruncatedTo int `json:"truncated_to_bytes,omitempty"`
 }
 
 // ToolInteraction represents tool calls and results for session storage
@@ -151,54 +175,56 @@ type ToolExecutionResult struct {
 	Error         error  // Any error that occurred
 }
 
-// ToolUI provides hooks for displaying tool execution progress
+// ToolUI displays one append-only tool execution batch. It observes execution;
+// approval policy and decisions remain owned by Executor.
 type ToolUI interface {
-	// BeforeExecute is called before executing a batch of tool calls
-	BeforeExecute(calls []ToolCall)
-	// AfterExecute is called after executing a batch of tool calls
-	AfterExecute(results []ToolResult)
+	// ShowCall presents each complete call in index order before any required
+	// approval. args carries the executor's already-parsed arguments so the UI
+	// does not decode call.Args again; it is nil when the executor never parsed
+	// the call (unsupported tool, invalid arguments, or past the per-round cap).
+	ShowCall(index, total int, call ToolCall, args *UniversalCommandArgs)
+	// BeforeRun is called after every approval decision and before any command starts.
+	BeforeRun(total, runnable, parallel int)
+	// AfterExecute is called after the batch finishes, with calls and results in
+	// their original request order.
+	AfterExecute(calls []ToolCall, results []ToolResult)
 }
 
 // handleToolExecutionLoop implements the tool execution loop.
 func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 	maxRounds := tc.Cfg.GetMaxToolRounds()
-	if maxRounds <= 0 {
-		maxRounds = DefaultMaxToolRounds
-	}
 
-	executor, err := NewExecutor(tc.Cfg, tc.Logger, tc.Notifier, tc.Approver)
+	executor, err := NewExecutor(tc.Cfg, tc.Logger, tc.Approver)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create executor: %w", err)
 	}
 
-	rounds := 0
 	response := tc.InitialResponse
 	finalText := response.Text
 	finalStreamed := response.Streamed
 
-	for rounds < maxRounds && len(response.ToolCalls) > 0 {
-		rounds++
+	for round := 0; len(response.ToolCalls) > 0; round++ {
+		if round > 0 && round%maxRounds == 0 {
+			approved, err := executor.requestToolRoundLimitReset(tc.Ctx, maxRounds)
+			if err != nil {
+				return finalText, finalStreamed, err
+			}
+			if !approved {
+				return finalText, finalStreamed, fmt.Errorf("reached maximum tool execution rounds (%d)", maxRounds)
+			}
+		}
 
 		// Save assistant's response with tool calls only on first round
 		// Subsequent rounds already saved their tool calls at the end of the previous iteration
-		if rounds == 1 {
+		if round == 0 {
 			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
 				return finalText, finalStreamed, err
 			}
 		}
 
-		// Notify UI before executing tools
-		if tc.UI != nil {
-			tc.UI.BeforeExecute(response.ToolCalls)
-		}
-
-		// Execute tools in parallel
-		results := executor.ExecuteParallel(tc.Ctx, response.ToolCalls)
-
-		// Notify UI after executing tools
-		if tc.UI != nil {
-			tc.UI.AfterExecute(results)
-		}
+		// Review, approve, execute, and display the batch. Approval preflight is
+		// completed before any parallel worker starts.
+		results := executor.ExecuteParallel(tc.Ctx, response.ToolCalls, tc.UI)
 
 		// Save tool results
 		additionalText := BuildTruncationNotes(results, response.ToolCalls)
@@ -236,12 +262,27 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 		}
 	}
 
-	// Check if we hit the max rounds limit
-	if rounds >= maxRounds && len(response.ToolCalls) > 0 {
-		return finalText, finalStreamed, fmt.Errorf("reached maximum tool execution rounds (%d)", maxRounds)
+	return finalText, finalStreamed, nil
+}
+
+// requestToolRoundLimitReset asks whether the round counter may start another
+// block. Whether anyone can be asked at all is approvalPolicy.canPrompt's
+// question, and it is asked here rather than re-derived: a second copy of
+// "no flag and an approver" drifts the moment a new reason prompting becomes
+// impossible is added to the policy.
+func (e *Executor) requestToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !e.policy.canPrompt {
+		return false, nil
 	}
 
-	return finalText, finalStreamed, nil
+	approved, err := e.approver.ApproveToolRoundLimitReset(ctx, maxRounds)
+	if err != nil {
+		return false, fmt.Errorf("prompt for more tool-call rounds: %w", err)
+	}
+	return approved, nil
 }
 
 // HandleToolExecution manages the tool execution loop for a conversation.
@@ -255,7 +296,7 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 //
 // The function executes tools in a loop until either:
 // - No more tool calls are returned by the model
-// - The maximum number of rounds (maxRounds) is reached
+// - The maximum number of rounds is reached and no interactive reset is approved
 //
 // Performance optimization: The function builds a message index once at the start to avoid
 // O(n^2) behavior when rebuilding messages across multiple tool execution rounds.
@@ -301,13 +342,19 @@ func persistToolResultsRound(ctx context.Context, store SessionStore, results []
 	return nil
 }
 
-// BuildTruncationNotes creates additional text for truncated outputs
+// BuildTruncationNotes creates additional text for truncated outputs.
+//
+// TruncatedTo is the cap that actually applied, stamped by the executor. The
+// model plans its next command against this number — narrower filters, fewer
+// lines — so quoting the package default while the run used
+// -tool-max-output-bytes sends it back with a budget off by whatever the
+// operator configured.
 func BuildTruncationNotes(results []ToolResult, toolCalls []ToolCall) string {
 	var notes []string
 	for i, result := range results {
 		if result.Truncated {
-			note := fmt.Sprintf("Note: Output for tool '%s' was truncated to %dMB",
-				toolCalls[i].Name, DefaultMaxOutputSize/(1024*1024))
+			note := fmt.Sprintf("Note: Output for tool '%s' was truncated to %s",
+				toolCalls[i].Name, FormatByteCount(result.TruncatedTo))
 			notes = append(notes, note)
 		}
 	}

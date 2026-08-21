@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/session"
 	"net/http"
@@ -70,14 +69,8 @@ func TestOpenAIResponsesToolLoopAccumulatesInput(t *testing.T) {
 			}))
 			defer server.Close()
 
-			apiKeyFile := filepath.Join(tmpHome, "openai-key")
-			if err := os.WriteFile(apiKeyFile, []byte("test-openai-key"), constants.FilePerm); err != nil {
-				t.Fatalf("write API key: %v", err)
-			}
-			whitelistFile := filepath.Join(tmpHome, "tool-whitelist.txt")
-			if err := os.WriteFile(whitelistFile, []byte("[\"echo\"]\n"), constants.FilePerm); err != nil {
-				t.Fatalf("write tool whitelist: %v", err)
-			}
+			apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
+			whitelistFile := writeToolListFile(t, tmpHome, "tool-whitelist.txt", "echo")
 
 			sessionsDir := filepath.Join(tmpHome, "sessions")
 			logDir := filepath.Join(tmpHome, "logs")
@@ -159,23 +152,9 @@ func validateResponsesToolHistory(body map[string]interface{}, completedRounds, 
 			outputs[id] = fmt.Sprint(item["output"])
 		}
 	}
-	if !foundPrompt {
-		return fmt.Errorf("original user prompt missing from input")
-	}
-	if len(sequence) != completedRounds*2 {
-		return fmt.Errorf("tool sequence = %v, want %d entries", sequence, completedRounds*2)
-	}
-	for round := 1; round <= completedRounds; round++ {
-		id := fmt.Sprintf("response-call-%d", round)
-		index := (round - 1) * 2
-		if sequence[index] != "call:"+id || sequence[index+1] != "result:"+id {
-			return fmt.Errorf("tool sequence = %v, want pair for %s", sequence, id)
-		}
-		if !strings.Contains(outputs[id], fmt.Sprintf("responses-round-%d", round)) {
-			return fmt.Errorf("output for %s = %q", id, outputs[id])
-		}
-	}
-	return nil
+	return verifyToolCallSequence(sequence, foundPrompt, completedRounds, outputs,
+		func(round int) string { return fmt.Sprintf("response-call-%d", round) },
+		func(round int) string { return fmt.Sprintf("responses-round-%d", round) })
 }
 
 func writeResponsesToolCall(w http.ResponseWriter, round int) {

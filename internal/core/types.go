@@ -97,9 +97,8 @@ func (o RequestOptions) GetToolMaxOutputBytes() int {
 	if o.ToolMaxOutputBytes <= 0 {
 		return int(DefaultMaxOutputSize)
 	}
-	const maxAllowed = 100 * 1024 * 1024
-	if o.ToolMaxOutputBytes > maxAllowed {
-		return maxAllowed
+	if o.ToolMaxOutputBytes > MaxToolOutputBytes {
+		return MaxToolOutputBytes
 	}
 	return o.ToolMaxOutputBytes
 }
@@ -154,11 +153,10 @@ type Notifier interface {
 	Promptf(format string, args ...interface{})
 }
 
-// Approver interface for command approval
-// This interface allows different approval mechanisms (TTY, GUI, auto-approve)
+// Approver resolves interactive tool decisions. The executor owns command
+// validation, policy, display ordering, and execution.
 type Approver interface {
-	// Approve prompts for approval of a command
-	// Returns true if approved, false if denied
-	// The context allows cancellation of blocking approval prompts
-	Approve(ctx context.Context, command []string) (bool, error)
+	Approve(ctx context.Context, args UniversalCommandArgs) (bool, error)
+	// ApproveToolRoundLimitReset grants another block of maxRounds tool-call rounds.
+	ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error)
 }

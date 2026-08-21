@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"lmtools/internal/auth"
+	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providers"
 	"os"
@@ -165,5 +166,31 @@ func validateToolFlags(cfg Config) error {
 		return fmt.Errorf("tool-non-interactive requires either -tool-auto-approve or a -tool-whitelist file")
 	}
 
+	return validateToolMaxOutputBytes(cfg.ToolMaxOutputBytes)
+}
+
+// validateToolMaxOutputBytes refuses a capture limit the run would not use.
+// core.RequestOptions.GetToolMaxOutputBytes rewrites what it cannot honor — a
+// non-positive value becomes the default and anything above the ceiling is
+// clamped — so `-tool-max-output-bytes -1` captured 1MiB and
+// `-tool-max-output-bytes 500000000` captured 100MiB, each without a word about
+// it. A flag that reports a number back to nobody and then uses a different one
+// is a flag the operator cannot reason about, and the model plans its next
+// command against the limit that actually applied.
+//
+// The ceiling is core.MaxToolOutputBytes, the same constant
+// GetToolMaxOutputBytes clamps to, so the range checked here is the range the
+// run honors.
+func validateToolMaxOutputBytes(configured int) error {
+	// Zero is how every tool limit spells "use the package default", alongside
+	// -tool-timeout 0s, -max-tool-rounds 0, and -max-tool-parallel 0.
+	if configured == 0 {
+		return nil
+	}
+	if configured < 0 || configured > core.MaxToolOutputBytes {
+		return fmt.Errorf("-tool-max-output-bytes %d is out of range: use 0 for the %s default, or a value from 1 to %d (%s)",
+			configured, core.FormatByteCount(core.DefaultMaxOutputSize),
+			core.MaxToolOutputBytes, core.FormatByteCount(core.MaxToolOutputBytes))
+	}
 	return nil
 }

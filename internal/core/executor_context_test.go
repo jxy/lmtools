@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"lmtools/internal/errors"
 	"sync"
 	"testing"
 	"time"
@@ -19,13 +20,11 @@ func TestApproverContextCancellation(t *testing.T) {
 	// Create an executor with the blocking approver
 	cfg := NewTestRequestConfig()
 	log := NewTestLogger(true)
-	notifier := NewTestNotifier()
 
-	executor, err := NewExecutor(cfg, log, notifier, approver)
+	executor, err := NewExecutor(cfg, log, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
-
 	// Create a context that we'll cancel
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -36,7 +35,7 @@ func TestApproverContextCancellation(t *testing.T) {
 			ID:   "test-1",
 			Name: "universal_command",
 			Args: []byte(`{"command": ["echo", "test"]}`),
-		}})[0]
+		}}, TestToolUI{})[0]
 		resultChan <- result
 	}()
 
@@ -58,7 +57,7 @@ func TestApproverContextCancellation(t *testing.T) {
 		if result.Error == "" {
 			t.Error("Expected error due to context cancellation")
 		}
-		if result.Code != "CANCELLED" {
+		if result.Code != errors.ErrCodeCancelled {
 			t.Errorf("Expected CANCELLED code, got %s", result.Code)
 		}
 	case <-time.After(2 * time.Second):
@@ -75,9 +74,8 @@ func TestApproverContextAlreadyCancelled(t *testing.T) {
 
 	cfg := NewTestRequestConfig()
 	log := NewTestLogger(true)
-	notifier := NewTestNotifier()
 
-	executor, err := NewExecutor(cfg, log, notifier, approver)
+	executor, err := NewExecutor(cfg, log, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -91,13 +89,13 @@ func TestApproverContextAlreadyCancelled(t *testing.T) {
 		ID:   "test-1",
 		Name: "universal_command",
 		Args: []byte(`{"command": ["echo", "test"]}`),
-	}})[0]
+	}}, nil)[0]
 
 	// Should fail immediately
 	if result.Error == "" {
 		t.Error("Expected error due to cancelled context")
 	}
-	if result.Code != "CANCELLED" {
+	if result.Code != errors.ErrCodeCancelled {
 		t.Errorf("Expected CANCELLED code, got %s", result.Code)
 	}
 
@@ -109,12 +107,13 @@ func TestApproverContextAlreadyCancelled(t *testing.T) {
 
 // blockingApprover is a test approver that blocks until signaled
 type blockingApprover struct {
+	DeclineToolRoundLimitReset
 	blockChan chan struct{}
 	readyChan chan struct{}
 	mu        sync.Mutex
 }
 
-func (a *blockingApprover) Approve(ctx context.Context, command []string) (bool, error) {
+func (a *blockingApprover) Approve(ctx context.Context, _ UniversalCommandArgs) (bool, error) {
 	// Signal that we've reached the approval prompt
 	a.mu.Lock()
 	if a.readyChan != nil {

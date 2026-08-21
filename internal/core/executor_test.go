@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/constants"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -54,9 +55,9 @@ func (m mockExecutorConfig) requestOptions() RequestOptions {
 		ToolBlacklist:      m.toolBlacklist,
 		ToolAutoApprove:    m.toolAutoApprove,
 		ToolNonInteractive: true,
-		MaxToolRounds:      32,
-		MaxToolParallel:    4,
-		ToolMaxOutputBytes: 1024 * 1024,
+		MaxToolRounds:      DefaultMaxToolRounds,
+		MaxToolParallel:    DefaultMaxToolParallel,
+		ToolMaxOutputBytes: int(DefaultMaxOutputSize),
 	}
 }
 
@@ -76,9 +77,8 @@ func TestExecutorWhitelist(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestExecutorWhitelist(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -126,9 +126,8 @@ func TestExecutorBlacklist(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -145,7 +144,7 @@ func TestExecutorBlacklist(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -175,9 +174,8 @@ func TestExecutorTimeout(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -195,7 +193,7 @@ func TestExecutorTimeout(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 	elapsed := time.Since(start)
 
 	if len(results) != 1 {
@@ -231,9 +229,8 @@ func TestExecutorParallel(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -253,7 +250,7 @@ func TestExecutorParallel(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	results := executor.ExecuteParallel(ctx, calls)
+	results := executor.ExecuteParallel(ctx, calls, nil)
 	elapsed := time.Since(start)
 
 	if len(results) != 3 {
@@ -278,10 +275,12 @@ func TestExecutorParallel(t *testing.T) {
 }
 
 func TestExecutorEnvironment(t *testing.T) {
-	// Create temp whitelist file
+	// Create temp whitelist file. environ is authority, so the grant names the
+	// environment the call supplies; a bare ["sh"] rule does not cover it.
 	tmpDir := t.TempDir()
 	whitelistPath := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistPath, []byte(`["sh"]`), constants.FilePerm); err != nil {
+	rule := `{"command":["sh"],"environ":{"TEST_VAR":"custom_value"}}`
+	if err := os.WriteFile(whitelistPath, []byte(rule), constants.FilePerm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -292,9 +291,8 @@ func TestExecutorEnvironment(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -314,7 +312,7 @@ func TestExecutorEnvironment(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -330,10 +328,12 @@ func TestExecutorEnvironment(t *testing.T) {
 }
 
 func TestExecutorMultipleEnvironmentVariables(t *testing.T) {
-	// Create temp whitelist file
+	// Create temp whitelist file. A grant names the whole environment it
+	// authorizes, so all three variables appear in the rule.
 	tmpDir := t.TempDir()
 	whitelistPath := filepath.Join(tmpDir, "whitelist.txt")
-	if err := os.WriteFile(whitelistPath, []byte(`["sh"]`), constants.FilePerm); err != nil {
+	rule := `{"command":["sh"],"environ":{"VAR0":"first","VAR1":"second","VAR2":"third"}}`
+	if err := os.WriteFile(whitelistPath, []byte(rule), constants.FilePerm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -344,9 +344,8 @@ func TestExecutorMultipleEnvironmentVariables(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -367,7 +366,7 @@ func TestExecutorMultipleEnvironmentVariables(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -399,9 +398,8 @@ func TestExecutorWorkdir(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -419,7 +417,7 @@ func TestExecutorWorkdir(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -449,9 +447,8 @@ func TestExecutorOutputTruncation(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -471,7 +468,7 @@ func TestExecutorOutputTruncation(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -506,9 +503,8 @@ func TestExecutorInvalidCommand(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -551,7 +547,7 @@ func TestExecutorInvalidCommand(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			results := executor.ExecuteParallel(ctx, []ToolCall{call})
+			results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 			if len(results) != 1 {
 				t.Fatalf("Expected 1 result, got %d", len(results))
@@ -575,9 +571,8 @@ func TestExecutorUnsupportedTool(t *testing.T) {
 	}
 
 	logger := &mockLogger{debugEnabled: true}
-	notifier := NewTestNotifier()
 	approver := NewTestApprover(true) // Auto-approve for tests
-	executor, err := NewExecutor(cfg.requestOptions(), logger, notifier, approver)
+	executor, err := NewExecutor(cfg.requestOptions(), logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
@@ -589,7 +584,7 @@ func TestExecutorUnsupportedTool(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results := executor.ExecuteParallel(ctx, []ToolCall{call})
+	results := executor.ExecuteParallel(ctx, []ToolCall{call}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
@@ -604,211 +599,20 @@ func TestExecutorUnsupportedTool(t *testing.T) {
 	}
 }
 
-// TestApprovalPolicy tests the ApprovalPolicy.Decide method
-func TestApprovalPolicy(t *testing.T) {
-	tests := []struct {
-		name         string
-		policy       ApprovalPolicy
-		cmd          []string
-		wantApproved bool
-		wantReason   string
-	}{
-		{
-			name:         "empty command",
-			policy:       ApprovalPolicy{},
-			cmd:          []string{},
-			wantApproved: false,
-			wantReason:   "invalid command",
-		},
-		{
-			name: "blacklisted command",
-			policy: ApprovalPolicy{
-				Blacklist: [][]string{{"rm", "-rf"}},
-			},
-			cmd:          []string{"rm", "-rf", "/"},
-			wantApproved: false,
-			wantReason:   "denied: blacklisted",
-		},
-		{
-			name: "whitelisted command",
-			policy: ApprovalPolicy{
-				Whitelist: [][]string{{"ls"}, {"cat"}},
-			},
-			cmd:          []string{"ls", "-la"},
-			wantApproved: true,
-			wantReason:   "",
-		},
-		{
-			name: "command not in whitelist",
-			policy: ApprovalPolicy{
-				Whitelist:   [][]string{{"ls"}, {"cat"}},
-				Interactive: false,
-			},
-			cmd:          []string{"rm", "file.txt"},
-			wantApproved: false,
-			wantReason:   "denied: not in whitelist",
-		},
-		{
-			name: "auto-approve enabled",
-			policy: ApprovalPolicy{
-				AutoApprove: true,
-			},
-			cmd:          []string{"any", "command"},
-			wantApproved: true,
-			wantReason:   "",
-		},
-		{
-			name: "requires approval - interactive",
-			policy: ApprovalPolicy{
-				Interactive: true,
-			},
-			cmd:          []string{"some", "command"},
-			wantApproved: false,
-			wantReason:   "requires-approval",
-		},
-		{
-			name: "requires approval - non-interactive",
-			policy: ApprovalPolicy{
-				Interactive: false,
-			},
-			cmd:          []string{"some", "command"},
-			wantApproved: false,
-			wantReason:   "denied: non-interactive",
-		},
-		{
-			name: "blacklist takes precedence over whitelist",
-			policy: ApprovalPolicy{
-				Whitelist: [][]string{{"git"}},
-				Blacklist: [][]string{{"git", "push", "--force"}},
-			},
-			cmd:          []string{"git", "push", "--force"},
-			wantApproved: false,
-			wantReason:   "denied: blacklisted",
-		},
-		{
-			name: "partial whitelist match",
-			policy: ApprovalPolicy{
-				Whitelist: [][]string{{"docker", "ps"}},
-			},
-			cmd:          []string{"docker", "ps", "-a"},
-			wantApproved: true,
-			wantReason:   "",
-		},
-		{
-			name: "blacklist partial match",
-			policy: ApprovalPolicy{
-				Blacklist: [][]string{{"rm", "-rf"}},
-			},
-			cmd:          []string{"rm", "-rf", "local-file"},
-			wantApproved: false,
-			wantReason:   "denied: blacklisted",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			decision := tt.policy.Decide(tt.cmd)
-			approved := decision == DecisionAllow
-			if approved != tt.wantApproved {
-				t.Errorf("Decide() approved = %v, want %v", approved, tt.wantApproved)
-			}
-
-			// Check decision reason
-			if tt.wantReason == "" && decision != DecisionAllow {
-				t.Errorf("Decide() decision = %v, want DecisionAllow", decision)
-			} else if tt.wantReason == "requires-approval" && decision != DecisionRequireApproval {
-				t.Errorf("Decide() decision = %v, want DecisionRequireApproval", decision)
-			} else if tt.wantReason == "denied: blacklisted" && decision != DecisionDenyBlacklist {
-				t.Errorf("Decide() decision = %v, want DecisionDenyBlacklist", decision)
-			} else if tt.wantReason == "denied: not whitelisted" && decision != DecisionDenyNotWhitelisted {
-				t.Errorf("Decide() decision = %v, want DecisionDenyNotWhitelisted", decision)
-			} else if tt.wantReason == "denied: non-interactive" && decision != DecisionDenyNonInteractive {
-				t.Errorf("Decide() decision = %v, want DecisionDenyNonInteractive", decision)
-			}
-		})
-	}
-}
-
-// TestCommandHasPrefix tests the commandHasPrefix helper function
-func TestCommandHasPrefix(t *testing.T) {
-	tests := []struct {
-		name    string
-		cmd     []string
-		pattern []string
-		want    bool
-	}{
-		{
-			name:    "exact match",
-			cmd:     []string{"ls"},
-			pattern: []string{"ls"},
-			want:    true,
-		},
-		{
-			name:    "prefix match",
-			cmd:     []string{"ls", "-la", "/tmp"},
-			pattern: []string{"ls"},
-			want:    true,
-		},
-		{
-			name:    "multi-element prefix match",
-			cmd:     []string{"git", "push", "--force"},
-			pattern: []string{"git", "push"},
-			want:    true,
-		},
-		{
-			name:    "no match",
-			cmd:     []string{"cat", "file.txt"},
-			pattern: []string{"ls"},
-			want:    false,
-		},
-		{
-			name:    "pattern longer than command",
-			cmd:     []string{"ls"},
-			pattern: []string{"ls", "-la"},
-			want:    false,
-		},
-		{
-			name:    "empty pattern",
-			cmd:     []string{"ls"},
-			pattern: []string{},
-			want:    false,
-		},
-		{
-			name:    "empty command",
-			cmd:     []string{},
-			pattern: []string{"ls"},
-			want:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := commandHasPrefix(tt.cmd, tt.pattern); got != tt.want {
-				t.Errorf("commandHasPrefix() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestIsInteractive tests the isInteractive function
-func TestIsInteractive(t *testing.T) {
-	// This test will pass or fail based on whether it's run in a terminal
-	// We can at least verify it doesn't panic
-	_ = isInteractive()
-}
-
 type gateApprover struct {
+	DeclineToolRoundLimitReset
 	gate  string
-	calls [][]string
+	calls []string
 	mu    sync.Mutex
 }
 
-func (a *gateApprover) Approve(ctx context.Context, command []string) (bool, error) {
+func (a *gateApprover) Approve(ctx context.Context, args UniversalCommandArgs) (bool, error) {
 	a.mu.Lock()
-	a.calls = append(a.calls, append([]string(nil), command...))
+	call := args.Command[3]
+	a.calls = append(a.calls, call)
 	a.mu.Unlock()
 
-	if len(command) > 3 && command[3] == "second" {
+	if call == "second" {
 		timer := time.NewTimer(100 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -835,27 +639,31 @@ func TestExecutorParallelApprovesSequentiallyBeforeLaunch(t *testing.T) {
 		toolAutoApprove: false,
 	}
 	logger := &mockLogger{debugEnabled: true}
-	executor, err := NewExecutor(cfg.requestOptions(), logger, NewTestNotifier(), approver)
+	opts := cfg.requestOptions()
+	opts.ToolNonInteractive = false
+	executor, err := NewExecutor(opts, logger, approver)
 	if err != nil {
 		t.Fatalf("Failed to create executor: %v", err)
 	}
-	executor.policy.Interactive = true
-	executor.policy.AutoApprove = false
 
 	calls := []ToolCall{
 		{
 			ID:   "call_first",
 			Name: "universal_command",
-			Args: mustMarshalToolArgs(t, []string{"sh", "-c", `test -f "$1"`, "first", gate}),
+			Args: marshalCommandArgs(t, UniversalCommandArgs{
+				Command: []string{"sh", "-c", `test -f "$1"`, "first", gate},
+			}),
 		},
 		{
 			ID:   "call_second",
 			Name: "universal_command",
-			Args: mustMarshalToolArgs(t, []string{"sh", "-c", `test -f "$1"`, "second", gate}),
+			Args: marshalCommandArgs(t, UniversalCommandArgs{
+				Command: []string{"sh", "-c", `test -f "$1"`, "second", gate},
+			}),
 		},
 	}
 
-	results := executor.ExecuteParallel(context.Background(), calls)
+	results := executor.ExecuteParallel(context.Background(), calls, TestToolUI{})
 	if len(results) != 2 {
 		t.Fatalf("got %d results, want 2", len(results))
 	}
@@ -867,21 +675,7 @@ func TestExecutorParallelApprovesSequentiallyBeforeLaunch(t *testing.T) {
 
 	approver.mu.Lock()
 	defer approver.mu.Unlock()
-	if len(approver.calls) != 2 {
-		t.Fatalf("got %d approval calls, want 2", len(approver.calls))
+	if !slices.Equal(approver.calls, []string{"first", "second"}) {
+		t.Fatalf("approval calls = %v, want first then second", approver.calls)
 	}
-	if approver.calls[0][3] != "first" || approver.calls[1][3] != "second" {
-		t.Fatalf("approval order = %#v", approver.calls)
-	}
-}
-
-func mustMarshalToolArgs(t *testing.T, command []string) json.RawMessage {
-	t.Helper()
-	args, err := json.Marshal(map[string]interface{}{
-		"command": command,
-	})
-	if err != nil {
-		t.Fatalf("marshal tool args: %v", err)
-	}
-	return args
 }

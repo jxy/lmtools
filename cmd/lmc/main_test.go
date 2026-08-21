@@ -244,7 +244,7 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	}
 
 	opts := cfg.RequestOptions()
-	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, core.NewTestNotifier(), "preview question", false, session.PendingToolPreview)
+	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, core.NewTestNotifier(), core.TestToolUI{}, core.NewTestApprover(false), "preview question", false, session.PendingToolPreview)
 	if err != nil {
 		t.Fatalf("prepareSessionRequestPlan() error = %v", err)
 	}

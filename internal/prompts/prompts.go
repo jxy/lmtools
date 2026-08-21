@@ -1,12 +1,5 @@
-// Package prompts contains all system prompts and text constants used throughout lmtools.
-// This centralized location makes it easy to maintain and update all user-facing text.
-//
-// To modify any prompts or messages:
-// 1. Find the constant in this file
-// 2. Update the text as needed
-// 3. Rebuild with 'make build'
-//
-// All prompts, tool descriptions, error messages, and warnings are defined here.
+// Package prompts centralizes built-in system prompts, tool instructions, and
+// shared guidance text.
 package prompts
 
 // Default system prompts
@@ -15,45 +8,21 @@ const (
 	DefaultSystemPrompt = "You are a brilliant assistant."
 
 	// ToolSystemPrompt is the system prompt used when the universal_command tool is enabled
-	ToolSystemPrompt = `You are a brilliant assistant with access to system commands via the universal_command tool.
+	ToolSystemPrompt = `You are a helpful assistant with access to the universal_command tool.
 
-Important notes about command execution:
-- Commands are executed directly via execvpe, not through a shell
-- Executables are found using the PATH environment variable
-- No shell features are available: no pipes (|), no redirections (>, <), no globbing (*)
-- Always run executables directly by name (e.g., ["ls"], not ["/bin/ls"] or ["sh", "-c", "ls"])
+Rules for universal_command:
+- command is an argv array executed directly with execvpe-style semantics; no shell is implied.
+- PATH resolves bare executable names. Shell features such as pipes, redirection, globbing, &&, and cd are not interpreted.
+- Prefer direct argv. Invoke a shell explicitly only when shell behavior is required.
+- Use workdir to set the process working directory.
+- Set at most one of stdin and stdin_file.
+- Relative stdin_file, stdout_file, and stderr_file paths resolve against workdir when set. stdin_file must not be the same file as either output file.
+- stdout_file and stderr_file replace captured output for those streams. If they name the same file, both streams share it.
+- Any stream without a file is captured into the tool result; an uncaptured stdout and stderr are combined there and the total is cut off at a byte cap. There is no way to suppress output, so write a large stream to a scratch file and read back only the part you need.
+- Every redirection must name a regular file directly. Symlinks, FIFOs, and devices are rejected, so /dev/null does not work.
+- Two commands in the same round must not write to the same file; the round rejects both rather than interleaving them.
 
-You can use standard tools like:
-- cat, head, tail for reading files
-- ed for editing files
-- grep, find, sed, awk for searching and processing
-- ls, pwd for navigation
-- Note: cd changes directory only for that single command execution, not subsequent commands
-  Use the "workdir" parameter in the tool input to run commands in a specific directory
-
-Only as a last resort, if you absolutely need shell features like pipes or redirections:
-- Use ["bash", "-c", "command | pipe > redirect"]
-- Or use scripting languages like ["python", "-c", "code"]
-
-Always ensure commands are safe and appropriate for the user's request.`
-)
-
-// Tool descriptions
-const (
-	// UniversalCommandDescription describes the universal_command tool
-	UniversalCommandDescription = "Execute system commands with environment control, similar to execvpe"
-
-	// UniversalCommandParamDescription describes the command parameter
-	UniversalCommandParamDescription = "Command and arguments array [executable, arg1, arg2, ...] (e.g., via execvpe, such as [\"ls\",\"-al\"], [\"grep\",\"regex\",\"filepath\"], or [\"sed\",\"-n\",\"300,600p\",\"filepath\"])"
-
-	// UniversalCommandEnvDescription describes the environ parameter
-	UniversalCommandEnvDescription = "Additional environment variables to set (e.g., {\"PATH\": \"/custom/path\", \"DEBUG\": \"1\"})"
-
-	// UniversalCommandWorkdirDescription describes the workdir parameter
-	UniversalCommandWorkdirDescription = "Working directory for command execution"
-
-	// UniversalCommandTimeoutDescription describes the timeout parameter
-	UniversalCommandTimeoutDescription = "Maximum runtime in seconds (default: 30)"
+Run only safe, relevant commands and use their results to complete the request.`
 )
 
 // Error messages
@@ -66,19 +35,4 @@ const (
 
 	// ErrEmbedWithSession is shown when trying to use embed mode with session flags
 	ErrEmbedWithSession = "invalid flag combination: embed mode cannot be used with session flags (-resume, -branch)"
-)
-
-// Command approval messages
-const (
-	// NonInteractiveDenialGuidance provides guidance when a command is denied in non-interactive mode
-	NonInteractiveDenialGuidance = `Allow via one of:
-  - Run interactively (remove -tool-non-interactive)
-  - Use -tool-auto-approve
-  - Add to whitelist (-tool-whitelist <file>)`
-
-	// NotInWhitelistGuidance provides guidance when a command is not in the whitelist
-	NotInWhitelistGuidance = `To allow this command, either:
-  1. Add %s to your whitelist file and use -tool-whitelist <file>
-  2. Run interactively (without -tool-non-interactive)
-  3. Use -tool-auto-approve (allows all non-blacklisted commands)`
 )

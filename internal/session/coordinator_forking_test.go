@@ -40,8 +40,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg.SystemExplicitlySet = true
 			notifier := core.NewTestNotifier()
 
-			coordinator := NewCoordinator(cfg, notifier)
-			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,8 +91,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg.SystemExplicitlySet = true
 			notifier := core.NewTestNotifier()
 
-			coordinator := NewCoordinator(cfg, notifier)
-			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,8 +136,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg.EffectiveSystem = prompts.ToolSystemPrompt
 			notifier := core.NewTestNotifier()
 
-			coordinator := NewCoordinator(cfg, notifier)
-			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -188,8 +185,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg.System = prompts.DefaultSystemPrompt
 			notifier := core.NewTestNotifier()
 
-			coordinator := NewCoordinator(cfg, notifier)
-			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -240,8 +236,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					}
 					notifier := core.NewTestNotifier()
 
-					coordinator := NewCoordinator(cfg, notifier)
-					sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+					sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -295,8 +290,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 					}
 					notifier := core.NewTestNotifier()
 
-					coordinator := NewCoordinator(cfg, notifier)
-					sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+					sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -349,8 +343,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg.EffectiveSystem = prompts.ToolSystemPrompt
 			notifier := core.NewTestNotifier()
 
-			coordinator := NewCoordinator(cfg, notifier)
-			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -399,8 +392,7 @@ func TestCoordinatorForkingLogic(t *testing.T) {
 			cfg.System = prompts.DefaultSystemPrompt
 			notifier := core.NewTestNotifier()
 
-			coordinator := NewCoordinator(cfg, notifier)
-			sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+			sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -429,8 +421,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		cfg.SystemExplicitlySet = true
 		notifier := core.NewTestNotifier()
 
-		coordinator := NewCoordinator(cfg, notifier)
-		sess, _, err := prepareSessionForTest(ctx, coordinator, "test", false, nil)
+		sess, _, err := prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -466,8 +457,7 @@ func TestCoordinatorForkingEdgeCases(t *testing.T) {
 		cfg.EffectiveSystem = ""
 		notifier := core.NewTestNotifier()
 
-		coordinator := NewCoordinator(cfg, notifier)
-		sess, _, err = prepareSessionForTest(ctx, coordinator, "test", false, nil)
+		sess, _, err = prepareSessionForTest(ctx, cfg, notifier, "test", false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

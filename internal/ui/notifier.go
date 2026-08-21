@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-// StdNotifier implements the core.Notifier interface for standard output
+// StdNotifier implements core.Notifier on the CLI diagnostic stream.
 type StdNotifier struct {
 	out io.Writer
 }

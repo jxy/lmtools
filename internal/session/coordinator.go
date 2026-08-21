@@ -16,24 +16,15 @@ import (
 type requestPreparer struct {
 	cfg      core.RequestOptions
 	notifier core.Notifier
-}
-
-// Coordinator is kept as a compatibility alias for older tests and callers.
-// New code should call PrepareRequest directly.
-type Coordinator = requestPreparer
-
-// NewCoordinator creates a new session request preparer.
-// Deprecated: use PrepareRequest.
-func NewCoordinator(cfg core.RequestOptions, notifier core.Notifier) *Coordinator {
-	return &requestPreparer{
-		cfg:      cfg,
-		notifier: notifier,
-	}
+	// toolUI reviews and displays pending tool execution. It is injected from
+	// the edge; a nil UI is valid only when pending tools cannot require
+	// interactive approval.
+	toolUI core.ToolUI
 }
 
 // PrepareRequest builds request messages without committing new session state.
-func PrepareRequest(ctx context.Context, cfg core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, approver core.Approver, pendingTools PendingToolMode) (*RequestPlan, error) {
-	preparer := requestPreparer{cfg: cfg, notifier: notifier}
+func PrepareRequest(ctx context.Context, cfg core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, inputStr string, isRegeneration bool, approver core.Approver, pendingTools PendingToolMode) (*RequestPlan, error) {
+	preparer := requestPreparer{cfg: cfg, notifier: notifier, toolUI: toolUI}
 	return preparer.PrepareRequest(ctx, inputStr, isRegeneration, approver, pendingTools)
 }
 
@@ -281,7 +272,7 @@ func (c *requestPreparer) maybeResolvePendingTools(ctx context.Context, sess *Se
 	if sess == nil || c.cfg.Resume == "" || isRegeneration || mode == PendingToolSkip {
 		return pendingToolResolution{}, nil
 	}
-	return resolvePendingTools(ctx, sess, c.cfg, logger.From(ctx), c.notifier, approver, mode)
+	return resolvePendingTools(ctx, sess, c.cfg, logger.From(ctx), c.toolUI, approver, mode)
 }
 
 func (c *requestPreparer) maybeSaveUserInput(ctx context.Context, sess *Session, inputStr string, isRegeneration bool) error {

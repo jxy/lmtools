@@ -37,7 +37,7 @@ const (
 	exitInterrupted = 130 // Standard for SIGINT
 )
 
-func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir, inputStr string, plan *session.RequestPlan) error {
+func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, logDir, inputStr string, plan *session.RequestPlan) error {
 	ctx = logger.WithNewRequestCounter(ctx)
 
 	rb, err := buildHTTPRequest(ctx, cfg, opts, plan, inputStr)
@@ -69,23 +69,15 @@ func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOp
 	}
 
 	if len(response.ToolCalls) > 0 {
-		return handleToolCalls(ctx, cfg, opts, notifier, logDir, sess, &response, rb, inputStr)
+		logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
+		tc := newToolContext(ctx, cfg, opts, notifier, toolUI, approver, logDir, sess, &response, rb, inputStr)
+		return finishToolExecution(core.HandleToolExecution(tc))
 	}
 
 	return handleNormalResponse(ctx, cfg, notifier, &response, sess, rb.Model)
 }
 
-func handleToolCalls(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) error {
-	logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
-
-	tc := newToolContext(ctx, cfg, opts, notifier, logDir, sess, response, rb, inputStr)
-
-	result := core.HandleToolExecution(tc)
-
-	return finishToolExecution(result)
-}
-
-func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) core.ToolContext {
+func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) core.ToolContext {
 	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
 
 	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.From(ctx))
@@ -99,10 +91,6 @@ func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOp
 		ActualModel: rb.Model,
 	}
 
-	approver := &cliApprover{notifier: notifier}
-
-	ui := tools.NewCLIToolUI(notifier, opts)
-
 	return core.ToolContext{
 		Ctx:             ctx,
 		Cfg:             opts,
@@ -113,7 +101,7 @@ func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOp
 		Model:           rb.Model,
 		ToolDefs:        rb.ToolDefs,
 		MessagesFn:      messageBuilder,
-		UI:              ui,
+		UI:              toolUI,
 		InitialResponse: *response,
 	}
 }
@@ -220,7 +208,12 @@ func run(notifier core.Notifier) error {
 	if cfg.PrintCurl {
 		pendingToolMode = session.PendingToolPreview
 	}
-	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, notifier, inputStr, isRegeneration, pendingToolMode)
+	// The command review and the approval prompt share one operator-facing
+	// stream, decided once here; the executor and the pending-tools path both
+	// receive this same UI.
+	toolNotifier, approver := newOperatorToolSurface(notifier)
+	toolUI := tools.NewCLIToolUI(toolNotifier)
+	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, notifier, toolUI, approver, inputStr, isRegeneration, pendingToolMode)
 	if err != nil {
 		return err
 	}
@@ -238,7 +231,7 @@ func run(notifier core.Notifier) error {
 		return nil
 	}
 
-	return executeRequest(ctx, &cfg, opts, notifier, logDir, inputStr, plan)
+	return executeRequest(ctx, &cfg, opts, notifier, toolUI, approver, logDir, inputStr, plan)
 }
 
 // warnUnusedReasoningControls warns when reasoning.mode/context are set but the
@@ -255,12 +248,11 @@ func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
 	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API-only controls; ignoring them because the request does not use -openai-responses on a Responses-capable provider and model")
 }
 
-func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
+func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
 	if cfg.NoSession {
 		return nil, nil
 	}
-	approver := &cliApprover{notifier: notifier}
-	return session.PrepareRequest(ctx, opts, notifier, inputStr, isRegeneration, approver, pendingToolMode)
+	return session.PrepareRequest(ctx, opts, notifier, toolUI, inputStr, isRegeneration, approver, pendingToolMode)
 }
 
 // handleSpecialFlags handles flags that don't require the full request processing

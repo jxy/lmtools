@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
-	"lmtools/internal/ui/tools"
 )
 
 type PendingToolMode int
@@ -32,8 +31,8 @@ type pendingToolResolution struct {
 //
 // The hasPendingTools return value indicates whether pending tools existed, NOT whether they executed successfully.
 // This is used by callers to determine if empty input is acceptable (when continuing tool execution).
-func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, notifier core.Notifier, approver core.Approver) (hasPendingTools bool, err error) {
-	resolution, err := resolvePendingTools(ctx, sess, cfg, log, notifier, approver, PendingToolExecute)
+func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, ui core.ToolUI, approver core.Approver) (hasPendingTools bool, err error) {
+	resolution, err := resolvePendingTools(ctx, sess, cfg, log, ui, approver, PendingToolExecute)
 	if err != nil || !resolution.HasPending || len(resolution.PreviewResults) == 0 {
 		return resolution.HasPending, err
 	}
@@ -43,7 +42,7 @@ func ExecutePendingTools(ctx context.Context, sess *Session, cfg core.RequestOpt
 	return true, nil
 }
 
-func resolvePendingTools(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, notifier core.Notifier, approver core.Approver, mode PendingToolMode) (pendingToolResolution, error) {
+func resolvePendingTools(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, ui core.ToolUI, approver core.Approver, mode PendingToolMode) (pendingToolResolution, error) {
 	if sess == nil || mode == PendingToolSkip {
 		return pendingToolResolution{}, nil
 	}
@@ -76,31 +75,20 @@ func resolvePendingTools(ctx context.Context, sess *Session, cfg core.RequestOpt
 		}, nil
 	}
 
-	// Notify user about pending tool execution
-	if notifier != nil {
-		notifier.Infof("Executing %d pending tool call(s) from previous session", len(pendingTools))
-	}
 	if log != nil {
 		log.Debugf("Executing %d pending tool call(s) from previous session", len(pendingTools))
 	}
 
 	// Execute the pending tools
-	executor, err := core.NewExecutor(cfg, log, notifier, approver)
+	executor, err := core.NewExecutor(cfg, log, approver)
 	if err != nil {
 		return pendingToolResolution{HasPending: true}, errors.WrapError("create executor for pending tools", err)
 	}
 
-	// Create a CLI Tool UI implementation for display
-	ui := tools.NewCLIToolUI(notifier, cfg)
-
-	// Display tool calls before execution
-	ui.BeforeExecute(pendingTools)
-
-	// Execute tools in parallel
-	results := executor.ExecuteParallel(ctx, pendingTools)
-
-	// Display results
-	ui.AfterExecute(results)
+	// Review, approve, execute, and display pending calls through the same UI
+	// lifecycle used by new tool rounds. The UI is injected from the edge so
+	// this storage-layer package never decides where operator output goes.
+	results := executor.ExecuteParallel(ctx, pendingTools, ui)
 
 	// Check for truncation and prepare additional text
 	additionalText := core.BuildTruncationNotes(results, pendingTools)

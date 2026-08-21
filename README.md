@@ -95,12 +95,155 @@ provider credentials.
 
 ### Tool Use
 
-`-tool` enables the built-in `universal_command` tool, which runs the shell
-commands the model asks for. `lmc` checks each command against the blacklist
-first, then the whitelist and the approval settings. Without
-`-tool-non-interactive`, `lmc` prompts before it runs a command that is not
-already approved. `-tool-non-interactive` requires `-tool-auto-approve` or
-`-tool-whitelist`.
+`-tool` enables the built-in `universal_command` tool. It executes each requested
+argument vector directly with `execvpe`-style semantics, without a shell. A
+whitelist match is already an approval: the matching command runs without a
+prompt, and `-tool-auto-approve` is not needed.
+
+Commands can take standard input from a literal `stdin` string or a streamed
+`stdin_file`, and can redirect output to files with `stdout_file` and
+`stderr_file` instead of returning those streams in the tool result. Relative
+paths resolve against the call's `workdir`. Every redirection must name a
+regular file directly: symlinks, FIFOs, and devices are rejected, so the path
+shown at the approval prompt is the file that is written. Streams without a
+file are captured into the tool result, bounded per command by
+`-tool-max-output-bytes` (1 MiB by default); output past the bound is cut off
+and the result is marked truncated.
+
+File redirection is a separate approval boundary. A legacy array whitelist rule
+such as `["sort"]` approves `sort` only when `stdin_file`, `stdout_file`, and
+`stderr_file` are all absent. To approve a redirected call, use an object rule
+that names its exact file settings:
+
+```json
+{"command":["sort"],"stdin_file":"unsorted.txt","stdout_file":"sorted.txt"}
+```
+
+Literal `stdin` is authority too, so an array rule such as `["python3"]` also
+requires `stdin` to be absent. Feeding a program to an interpreter through
+`stdin` is arbitrary code execution, and a grant written before that channel
+existed cannot be read as consent to it. An object rule opts in with
+`"stdin": true`, which permits any literal stdin for that prefix:
+
+```json
+{"command":["python3"],"stdin":true}
+```
+
+`environ` is authority as well, and it reaches further than the others: it
+chooses the dynamic linker for every program the command starts (`LD_PRELOAD`,
+`DYLD_INSERT_LIBRARIES`), the module path an interpreter imports from, and the
+proxy a network tool trusts. An array rule therefore requires `environ` to be
+absent or empty, and an object rule grants one exact environment:
+
+```json
+{"command":["make"],"environ":{"CC":"clang"}}
+```
+
+An object rule accepts exactly these fields:
+
+- `command`: required, an array of strings, matched as an argv prefix.
+- `environ`: optional, an object of string values, naming the environment
+  variables the call may add.
+- `workdir`: optional, a string.
+- `stdin`: optional, a boolean naming the literal-stdin channel rather than the
+  bytes sent through it.
+- `stdin_file`, `stdout_file`, `stderr_file`: optional, each a string.
+
+Every object rule needs `command` plus at least one of `environ`, `stdin`,
+`stdin_file`, `stdout_file`, or `stderr_file`. A rule naming only `command` and
+`workdir` is rejected when the file loads, so `workdir` can only be pinned
+alongside one of those five. Empty file paths and unrecognized field names are
+rejected at load time as well, which is why a call's `timeout` cannot be written
+into a rule; it does not take part in matching, because it bounds how long an
+already-granted command runs rather than what that command can reach.
+
+In a whitelist, `workdir` and the three file fields must equal what the call
+supplied, and an omitted field matches only an absent field: a rule naming
+`stdout_file` does not grant a call that also sets `stderr_file`, and a rule
+without `"stdin": true` does not grant a call carrying literal stdin. `environ`
+must match as a whole map, same variables and same values, so a rule granting
+`{"CC":"clang"}` does not grant a call that also sets `LD_PRELOAD`, and a rule
+naming no `environ` grants only a call that adds no variables. Paths are
+compared as written, without normalization, so a relative redirection needs the
+same `workdir` in the rule and in the tool call.
+
+Denials are broader than grants, in both forms. An array blacklist rule blocks
+its argv prefix in every shape: any `workdir`, any environment, any literal
+stdin, any redirection. An object blacklist rule blocks every call carrying the
+fields it names and ignores the fields it does not, so
+`{"command":["tee"],"stdout_file":"/etc/hosts"}` still denies that call when it
+also sets `stderr_file`. `environ` follows the denial direction rather than the
+whitelist's: every variable a denial names must be present in the call, and the
+call may carry others, so
+`{"command":["python3"],"environ":{"LD_PRELOAD":"/tmp/evil.so"}}` cannot be
+evaded by setting an unrelated variable beside it.
+
+A denied command prints the exact rule that would have allowed it, in whichever
+form applies, ready to paste into a whitelist file.
+
+Adding `environ` to rule matching narrowed the array form: a line such as
+`["go","test"]` no longer covers a call that sets an environment variable. Those
+calls now ask for approval, or are denied when no prompt can be answered, and
+the denial prints the object rule that admits them.
+
+Approval policy is evaluated in this order:
+
+1. A blacklist match is denied.
+2. A whitelist match runs without prompting.
+3. If a whitelist is loaded and no prompt can be answered, a non-match is denied.
+4. `-tool-auto-approve` approves any command still undecided.
+5. A still-undecided command is denied when no prompt can be answered.
+6. Otherwise, `lmc` asks for approval.
+
+This ordering means a blacklist always wins. Steps 3 and 5 turn on whether a
+prompt can actually be answered, which is `-tool-non-interactive` **or** a stdin
+that is not a terminal — piping the prompt into `lmc` is the usual case. So
+combining a whitelist with `-tool-auto-approve` in a script keeps the whitelist
+restrictive: commands not in it are denied, because there is no one to ask.
+
+Step 3 turns on the flag, not on how many rules the file produced. A whitelist
+that is empty, entirely comments, or truncated to nothing is still a whitelist:
+passing `-tool-whitelist` is the statement that unlisted commands need review,
+so with no way to ask, every command is denied rather than falling through to
+`-tool-auto-approve`. Omit `-tool-whitelist` if you want auto-approve to run
+whatever the blacklist does not stop.
+
+Approval needs a terminal on stdin to read the answer, and there is no
+substitute for it. The command review and the question go to stderr, or
+together to `/dev/tty` when stderr is redirected, so `lmc -tool 2>lmc.log`
+still shows what it asks you to approve.
+
+Whitelist and blacklist files contain one JSON command rule per nonempty,
+non-comment line. Matching is exact per argument and treats `command` as a
+prefix. For example, `["git","status"]` matches
+`["git","status","--short"]`, while `["git"]` matches every command whose
+executable argument is `git`. Longer entries grant narrower permissions and are
+usually safer.
+
+Assistant text stays on stdout. Tool review, approval prompts, execution
+results, warnings, and errors go to stderr, so redirecting stdout captures only
+the assistant response. Tool commands are displayed as their exact JSON argv
+arrays:
+
+```text
+>>> Tools requested: 2
+
+[1/2] Command: ["git","status","--short"]
+      Allow execution? [y/N]: y
+
+[2/2] Command: ["go","test","./internal/core"]
+      Allow execution? [y/N]: y
+
+>>> Running 2 commands in parallel...
+
+>>> Results:
+
+[1/2] Completed in 24ms
+      Output:
+## main
+
+[2/2] Completed in 814ms (no captured output)
+```
 
 ```bash
 # Run whitelisted commands without prompting.
@@ -108,16 +251,30 @@ printf '["ls"]\n["pwd"]\n' > whitelist.txt
 echo "Show the working directory and files" | ./bin/lmc \
   -argo-user "$USER" \
   -tool \
-  -tool-whitelist whitelist.txt \
-  -tool-auto-approve
+  -tool-whitelist whitelist.txt
 
-# Deny everything unapproved instead of prompting, for scripts.
+# Grant one exact redirected shape. The plain ["sort"] rule would not grant it.
+printf '%s\n' '{"command":["sort"],"stdin_file":"in.txt","stdout_file":"out.txt"}' \
+  > redirected-whitelist.txt
+echo "Sort in.txt into out.txt" | ./bin/lmc \
+  -argo-user "$USER" \
+  -tool \
+  -tool-whitelist redirected-whitelist.txt
+
+# For scripts, run only whitelisted commands and deny every non-match.
 echo "Run the allowed checks" | ./bin/lmc \
   -argo-user "$USER" \
   -tool \
   -tool-non-interactive \
-  -tool-whitelist whitelist.txt \
-  -tool-auto-approve
+  -tool-whitelist whitelist.txt
+
+# Run every command not blocked by the blacklist, without prompting.
+printf '["rm"]\n["dd"]\n' > blacklist.txt
+echo "Inspect this repository" | ./bin/lmc \
+  -argo-user "$USER" \
+  -tool \
+  -tool-auto-approve \
+  -tool-blacklist blacklist.txt
 ```
 
 ### lmc Flags
@@ -169,15 +326,31 @@ Output controls:
 
 Tools:
 
-- `-tool`: Enable the built-in `universal_command` tool.
-- `-tool-timeout duration`: Per-command timeout.
-- `-tool-whitelist path`: Allowed commands, one command or JSON command array per line.
-- `-tool-blacklist path`: Blocked commands.
-- `-tool-auto-approve`: Skip prompts for whitelisted commands.
-- `-tool-non-interactive`: Deny unapproved commands instead of prompting.
-- `-max-tool-rounds int`: Maximum tool-call rounds.
-- `-max-tool-parallel int`: Maximum concurrent tool executions.
-- `-tool-max-output-bytes int`: Maximum captured output per tool execution.
+- `-tool`: Enable the built-in `universal_command` tool. Commands run directly
+  with `execvpe`-style semantics, without a shell.
+- `-tool-timeout duration`: Per-command timeout; default `1m`. A tool call may
+  set its own `timeout` in seconds instead; that value is clamped to 24 hours.
+- `-tool-whitelist path`: JSON command rules that run without prompting. File
+  redirection, literal `stdin`, and `environ` each require an object rule that
+  names them. When no prompt can be answered, non-matching commands are denied —
+  including when the file produced no rules at all.
+- `-tool-blacklist path`: JSON command rules that are always denied. Array rules
+  cover every shape of the prefix; object rules cover every call carrying the
+  fields they name.
+- `-tool-auto-approve`: Run without prompting unless denied by the blacklist, or
+  by a whitelist non-match when no prompt can be answered.
+- `-tool-non-interactive`: Never prompt. Commands not approved by the policy are
+  denied. Requires `-tool-whitelist` or `-tool-auto-approve`.
+- `-max-tool-rounds int`: Tool-call rounds allowed per block; default `64`. If
+  another tool call is pending at the limit, interactive `lmc` asks whether to
+  grant another full block. This confirmation is independent of command
+  approval; non-interactive use stops at the limit.
+- `-max-tool-parallel int`: Maximum concurrent tool executions; default `8`.
+- `-tool-max-output-bytes int`: Maximum captured, non-redirected output per
+  command; default `1048576` bytes (1 MiB). Zero uses the default; a negative
+  value, or one above the 100 MiB ceiling, is rejected at startup rather than
+  quietly replaced. Output past the limit is cut off and the model is told the
+  result was truncated.
 
 Sessions:
 
