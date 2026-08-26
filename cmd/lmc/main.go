@@ -50,10 +50,13 @@ func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOp
 	if err != nil {
 		return err
 	}
+	presenter := newResponsePresenter(os.Stdout, os.Stderr, cfg.ShowThinking)
+	defer presenter.Close()
 
 	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), notifier, core.ResponseParseOptions{
 		ArgoLegacy: opts.ArgoLegacy,
 		ToolDefs:   rb.ToolDefs,
+		Output:     presenter,
 	})
 	if err != nil {
 		return errors.WrapError("handle response", err)
@@ -70,14 +73,14 @@ func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOp
 
 	if len(response.ToolCalls) > 0 {
 		logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
-		tc := newToolContext(ctx, cfg, opts, notifier, toolUI, approver, logDir, sess, &response, rb, inputStr)
+		tc := newToolContext(ctx, cfg, opts, notifier, toolUI, approver, logDir, sess, &response, rb, inputStr, presenter)
 		return finishToolExecution(core.HandleToolExecution(tc))
 	}
 
 	return handleNormalResponse(ctx, cfg, notifier, &response, sess, rb.Model)
 }
 
-func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string) core.ToolContext {
+func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) core.ToolContext {
 	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
 
 	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.From(ctx))
@@ -102,6 +105,7 @@ func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOp
 		ToolDefs:        rb.ToolDefs,
 		MessagesFn:      messageBuilder,
 		UI:              toolUI,
+		Output:          output,
 		InitialResponse: *response,
 	}
 }
@@ -127,23 +131,11 @@ func createMessageBuilder(ctx context.Context, sess *session.Session) func(strin
 }
 
 func finishToolExecution(result core.ToolExecutionResult) error {
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.FinalText != "" && !result.FinalStreamed {
-		fmt.Print(result.FinalText)
-	}
-
-	return nil
+	return result.Error
 }
 
 func handleNormalResponse(ctx context.Context, cfg *config.Config, notifier core.Notifier, response *core.Response, sess *session.Session, model string) error {
 	persistAssistantOnly(ctx, *response, sess, cfg, notifier, model)
-
-	if response.Text != "" && !response.Streamed {
-		fmt.Print(response.Text)
-	}
 	return nil
 }
 
@@ -170,6 +162,7 @@ func run(notifier core.Notifier) error {
 	opts := cfg.RequestOptions()
 
 	warnUnusedReasoningControls(cfg, notifier)
+	warnShowThinkingWithoutEffort(cfg, notifier)
 
 	// Initialize logging
 	logDir, err := setupLogging(cfg, notifier)
@@ -246,6 +239,17 @@ func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
 		return
 	}
 	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API-only controls; ignoring them because the request does not use -openai-responses on a Responses-capable provider and model")
+}
+
+func warnShowThinkingWithoutEffort(cfg config.Config, notifier core.Notifier) {
+	if !cfg.ShowThinking {
+		return
+	}
+	effort := strings.ToLower(strings.TrimSpace(cfg.Effort))
+	if effort != "" && effort != "none" {
+		return
+	}
+	notifier.Warnf("-show-thinking displays provider-returned summaries but does not request reasoning; add -effort high (or another non-none effort) to request it")
 }
 
 func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {

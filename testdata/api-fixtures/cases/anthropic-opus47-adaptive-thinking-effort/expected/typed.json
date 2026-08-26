@@ -17,6 +17,7 @@
   "reasoning_effort": "xhigh",
   "stream": false,
   "thinking": {
+    "display": "summarized",
     "type": "adaptive"
   }
 }

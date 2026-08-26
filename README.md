@@ -36,6 +36,11 @@ echo "Tell me a story" | ./bin/lmc -argo-user "$USER"
 # Stream the answer.
 echo "Tell me a story" | ./bin/lmc -argo-user "$USER" -stream
 
+# Show provider-returned thinking summaries on stderr while keeping the answer on stdout.
+echo "Solve this carefully" | ./bin/lmc -argo-user "$USER" \
+  -effort high \
+  -show-thinking
+
 # Use OpenAI.
 echo "Explain quantum computing" | ./bin/lmc \
   -provider openai \
@@ -323,7 +328,20 @@ Output controls:
 
 - `-s string`: System prompt.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`,
-  `high`, `xhigh`, or `max`.
+  `high`, `xhigh`, or `max`. On Anthropic-wire requests, any supported
+  non-`none` effort also enables `thinking.type="adaptive"` with
+  `thinking.display="summarized"` so the returned thinking blocks contain the
+  visible summary rather than only an encrypted signature.
+- `-show-thinking`: Print provider-returned visible thinking summaries to
+  stderr. It is presentation-only: it does not enable reasoning or alter the
+  request. The assistant answer remains unchanged on stdout in both streaming
+  and non-streaming modes. Signatures, encrypted content, and opaque redacted
+  payloads are never printed; a returned Anthropic thinking block without
+  visible text is shown as `[omitted by provider]`. Each block is delimited by
+  `--- thinking ---` and `--- end thinking ---`; an unterminated stream uses
+  `--- end thinking (incomplete) ---`. If no visible block is returned, lmc
+  says so explicitly. Anthropic's `summarized` display is its readable thinking
+  mode; adaptive thinking may omit the block for a simple request.
 - `-reasoning-mode string`: Responses API reasoning mode: `standard` or `pro`
   (`pro` applies to GPT-5.6 only). `lmc` emits it only on an effective
   `-openai-responses` path and otherwise warns and ignores it.

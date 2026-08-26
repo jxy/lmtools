@@ -33,7 +33,7 @@ func NewCLIToolUI(notifier core.Notifier) *CLIToolUI {
 // as one past the per-round cap, arrive nil and are decoded here for display.
 func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.UniversalCommandArgs) {
 	if index == 0 {
-		ui.notifier.Promptf("\n>>> Tools requested: %d\n\n", total)
+		ui.notifier.Promptf("\n>>> Tools requested: %d\n", total)
 	}
 	if index > 0 {
 		ui.notifier.Promptf("\n")
@@ -105,7 +105,7 @@ func (ui *CLIToolUI) BeforeRun(total, runnable, parallel int) {
 // the end of every round is state to keep aligned for a decode that costs one
 // pass over arguments the round has already printed in full.
 func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResult) {
-	ui.notifier.Promptf("\n>>> Results:\n\n")
+	ui.notifier.Promptf("\n>>> Results:\n")
 	total := len(calls)
 
 	for i, result := range results {

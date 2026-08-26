@@ -38,6 +38,13 @@ type AnthropicThinking struct {
 	Display      string `json:"display,omitempty"`
 }
 
+func adaptiveSummarizedThinking() *AnthropicThinking {
+	return &AnthropicThinking{
+		Type:    "adaptive",
+		Display: "summarized",
+	}
+}
+
 // AnthropicOutputConfig represents Anthropic output configuration.
 type AnthropicOutputConfig struct {
 	Effort string      `json:"effort,omitempty"`

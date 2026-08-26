@@ -31,7 +31,7 @@ func ConvertAnthropicToOpenAI(ctx context.Context, req *AnthropicRequest) (*Open
 	}
 
 	// Handle thinking field for OpenAI models
-	if typed.ReasoningEffort == "" && req.Thinking != nil && req.Thinking.Type == "enabled" {
+	if typed.ReasoningEffort == "" && req.Thinking != nil && (req.Thinking.Type == "enabled" || req.Thinking.Type == "adaptive") {
 		if openAIModelUsesDeveloperRole(req.Model) || strings.HasPrefix(strings.ToLower(req.Model), "gpt") {
 			// For GPT and O3/O4 models, convert to reasoning_effort
 			typed.ReasoningEffort = "high"

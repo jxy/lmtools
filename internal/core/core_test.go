@@ -620,7 +620,7 @@ event: ping
 			ctx := context.Background()
 			var output strings.Builder
 			testNotifier := &testNotifier{}
-			_, _, err = RunStream(ctx, io.NopCloser(reader), logFile, &output, testNotifier, state, "test")
+			_, _, err = RunStream(ctx, io.NopCloser(reader), logFile, textResponseOutput{out: &output}, testNotifier, state, "test")
 			if err != nil {
 				t.Fatalf("RunStream failed: %v", err)
 			}

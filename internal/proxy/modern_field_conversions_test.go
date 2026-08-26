@@ -160,6 +160,9 @@ func TestOpenAIToAnthropicConvertsDeveloperEffortAndStructuredOutput(t *testing.
 	if got.OutputConfig == nil || got.OutputConfig.Effort != "xhigh" || got.OutputConfig.Format == nil {
 		t.Fatalf("OutputConfig = %+v, want effort and format", got.OutputConfig)
 	}
+	if got.Thinking == nil || got.Thinking.Type != "adaptive" || got.Thinking.Display != "summarized" {
+		t.Fatalf("Thinking = %+v, want adaptive summarized", got.Thinking)
+	}
 	format, ok := got.OutputConfig.Format.(map[string]interface{})
 	if !ok || format["name"] != nil || format["description"] != nil || format["strict"] != nil {
 		t.Fatalf("OutputConfig.Format = %+v, want only Anthropic-supported format fields", got.OutputConfig.Format)

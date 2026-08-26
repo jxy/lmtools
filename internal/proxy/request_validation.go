@@ -40,24 +40,11 @@ func validateParsedOpenAIResponsesRequest(req *OpenAIResponsesRequest) error {
 	return nil
 }
 
-func validateAnthropicRequestForProvider(req *AnthropicRequest, provider string) error {
-	return validateAnthropicOpus47Features(req, provider)
-}
-
-func validateAnthropicOpus47Features(req *AnthropicRequest, provider string) error {
+func validateAnthropicRequestForProvider(req *AnthropicRequest, _ string) error {
 	if req == nil {
 		return nil
 	}
-
-	if err := validateAnthropicFeatureSet(req.Thinking, req.OutputConfig); err != nil {
-		return err
-	}
-
-	normalized := constants.NormalizeProvider(provider)
-	if normalized != constants.ProviderAnthropic {
-		return nil
-	}
-	return validateAnthropicFeatureSupportForModel(req.Model, req.Thinking, req.OutputConfig)
+	return validateAnthropicFeatureSet(req.Thinking, req.OutputConfig)
 }
 
 func isAnthropicOpus47Model(model string) bool {
@@ -88,7 +75,7 @@ func validateOpenAIRequestForProvider(req *OpenAIRequest, provider, targetModel 
 	}
 	if normalized == constants.ProviderAnthropic {
 		outputConfig := mergeAnthropicOutputConfig(nil, req.ResponseFormat, req.ReasoningEffort)
-		return validateAnthropicFeatureSupportForModel(model, nil, outputConfig)
+		return validateAnthropicFeatureSet(nil, outputConfig)
 	}
 
 	return nil
@@ -96,36 +83,34 @@ func validateOpenAIRequestForProvider(req *OpenAIRequest, provider, targetModel 
 
 func validateAnthropicFeatureSet(thinking *AnthropicThinking, outputConfig *AnthropicOutputConfig) error {
 	usesAdaptiveThinking := thinking != nil && strings.EqualFold(thinking.Type, "adaptive")
-	usesThinkingDisplay := thinking != nil && thinking.Display != ""
-	usesOutputConfig := outputConfig != nil
-	if !usesAdaptiveThinking && !usesThinkingDisplay && !usesOutputConfig {
+	if thinking == nil && outputConfig == nil {
 		return nil
 	}
 
-	if usesAdaptiveThinking && thinking.BudgetTokens != 0 {
-		return fmt.Errorf("thinking.budget_tokens is not valid with thinking.type=%q", "adaptive")
+	if thinking != nil {
+		thinkingType := strings.ToLower(strings.TrimSpace(thinking.Type))
+		switch thinkingType {
+		case "enabled", "disabled", "adaptive":
+		case "":
+			return fmt.Errorf("thinking.type is required")
+		default:
+			return fmt.Errorf("thinking.type must be one of enabled, disabled, adaptive")
+		}
+		if usesAdaptiveThinking && thinking.BudgetTokens != 0 {
+			return fmt.Errorf("thinking.budget_tokens is not valid with thinking.type=%q", "adaptive")
+		}
+		if thinking.Display != "" {
+			display := strings.ToLower(strings.TrimSpace(thinking.Display))
+			if display != "summarized" && display != "omitted" {
+				return fmt.Errorf("thinking.display must be one of summarized, omitted")
+			}
+			if thinkingType == "disabled" {
+				return fmt.Errorf("thinking.display is not valid with thinking.type=%q", "disabled")
+			}
+		}
 	}
 	if outputConfig != nil && !isValidAnthropicEffort(outputConfig.Effort) {
 		return fmt.Errorf("output_config.effort must be one of low, medium, high, xhigh, max")
 	}
 	return nil
-}
-
-func validateAnthropicFeatureSupportForModel(model string, thinking *AnthropicThinking, outputConfig *AnthropicOutputConfig) error {
-	if err := validateAnthropicFeatureSet(thinking, outputConfig); err != nil {
-		return err
-	}
-	if !anthropicUsesOpus47Features(thinking, outputConfig) {
-		return nil
-	}
-	if !isAnthropicOpus47Model(model) {
-		return fmt.Errorf("anthropic Opus 4.7 thinking/output_config fields require model %q", "claude-opus-4-7")
-	}
-	return nil
-}
-
-func anthropicUsesOpus47Features(thinking *AnthropicThinking, outputConfig *AnthropicOutputConfig) bool {
-	usesAdaptiveThinking := thinking != nil && strings.EqualFold(thinking.Type, "adaptive")
-	usesThinkingDisplay := thinking != nil && thinking.Display != ""
-	return usesAdaptiveThinking || usesThinkingDisplay || outputConfig != nil
 }

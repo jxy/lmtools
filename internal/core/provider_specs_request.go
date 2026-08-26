@@ -85,6 +85,14 @@ func addAnthropicOutputFields(reqMap map[string]interface{}, payload PreparedReq
 	outputConfig := make(map[string]interface{})
 	if effort := anthropicOutputEffort(payload.Effort); effort != "" {
 		outputConfig["effort"] = effort
+		// Anthropic separates how much effort the model should use from whether
+		// adaptive thinking is enabled. Request summarized display explicitly:
+		// newer Claude models otherwise default to returning an empty thinking
+		// field with only the encrypted signature.
+		reqMap["thinking"] = map[string]interface{}{
+			"type":    "adaptive",
+			"display": "summarized",
+		}
 	}
 	if format := anthropicOutputFormat(payload); format != nil {
 		outputConfig["format"] = format

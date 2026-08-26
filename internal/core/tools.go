@@ -165,6 +165,7 @@ type ToolContext struct {
 	ToolDefs        []ToolDefinition
 	MessagesFn      func(string) ([]TypedMessage, error)
 	UI              ToolUI
+	Output          ResponseOutput
 	InitialResponse Response
 }
 
@@ -243,6 +244,7 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 		response, err = HandleResponseWithOptions(tc.Ctx, tc.Cfg, resp, tc.Logger, tc.Notifier, ResponseParseOptions{
 			ArgoLegacy: tc.Cfg.ArgoLegacy,
 			ToolDefs:   tc.ToolDefs,
+			Output:     tc.Output,
 		})
 		if err != nil {
 			return finalText, finalStreamed, fmt.Errorf("failed to handle tool result response: %w", err)

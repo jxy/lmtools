@@ -8,9 +8,9 @@ import (
 )
 
 // handleAnthropicStreamWithTools handles Anthropic's SSE format with tool support
-func handleAnthropicStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (Response, error) {
+func handleAnthropicStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, output ResponseOutput, notifier Notifier) (Response, error) {
 	state := &AnthropicStreamState{}
-	text, toolCalls, err := RunStream(ctx, body, logFile, out, notifier, state, constants.ProviderAnthropic)
+	text, toolCalls, err := RunStream(ctx, body, logFile, output, notifier, state, constants.ProviderAnthropic)
 	blocks := state.Blocks()
 	if len(blocks) == 0 {
 		blocks = responseBlocksFromParts(text, toolCalls, "")

@@ -79,6 +79,9 @@ func TestTokenUsageNoteOnPlainChat(t *testing.T) {
 	if !strings.Contains(stderr, wantNote) {
 		t.Fatalf("stderr missing %q:\n%s", wantNote, stderr)
 	}
+	if got, want := stderr, "\n\n"+wantNote+"\n"; got != want {
+		t.Fatalf("stderr layout = %q, want %q", got, want)
+	}
 }
 
 // TestTokenUsageNoteOnAnthropicStream covers the streaming path, where the
@@ -135,6 +138,9 @@ data: {"type":"message_stop"}`,
 	wantNote := "Note: Token usage: input 100, output 19, reasoning 12"
 	if !strings.Contains(stderr, wantNote) {
 		t.Fatalf("stderr missing %q:\n%s", wantNote, stderr)
+	}
+	if got, want := stderr, "\n\n"+wantNote+"\n"; got != want {
+		t.Fatalf("streaming stderr layout = %q, want %q", got, want)
 	}
 }
 
@@ -205,8 +211,8 @@ func TestTokenUsageNotePrecedesToolReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lmc failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "final answer") {
-		t.Fatalf("stdout missing final response: %q", stdout)
+	if stdout != "running the commandfinal answer" {
+		t.Fatalf("stdout = %q, want both assistant messages in response order", stdout)
 	}
 
 	firstNote := strings.Index(stderr, "Note: Token usage: input 120, output 30, total 150")
@@ -234,5 +240,13 @@ func TestTokenUsageNotePrecedesToolReview(t *testing.T) {
 	}
 	if secondNote < results {
 		t.Fatalf("follow-up usage note (%d) must follow the results banner (%d):\n%s", secondNote, results, stderr)
+	}
+	for _, looseHeader := range []string{
+		">>> Tools requested: 1\n\n[1/1]",
+		">>> Results:\n\n[1/1]",
+	} {
+		if strings.Contains(stderr, looseHeader) {
+			t.Fatalf("tool transcript retained unnecessary blank line %q:\n%s", looseHeader, stderr)
+		}
 	}
 }

@@ -15,7 +15,7 @@ import (
 type (
 	providerChatBuilder    func(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error)
 	providerEmbedBuilder   func(cfg RequestOptions, input string) (*http.Request, []byte, error)
-	providerStreamHandler  func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (Response, error)
+	providerStreamHandler  func(ctx context.Context, body io.ReadCloser, logFile *os.File, output ResponseOutput, notifier Notifier) (Response, error)
 	providerResponseParser func(data []byte, isEmbed bool) (Response, error)
 	providerToolConverter  func(tools []ToolDefinition, toolChoice *ToolChoice) ConvertedTools
 )
@@ -81,8 +81,8 @@ func initProviderSpecs() {
 				return buildArgoChatRequest(cfg, typedMessages, model, system, systemExplicit, toolDefs, toolChoice, stream)
 			},
 			BuildEmbed: buildArgoEmbedRequest,
-			HandleStream: func(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, _ Notifier) (Response, error) {
-				return handleArgoStream(ctx, body, logFile, out)
+			HandleStream: func(ctx context.Context, body io.ReadCloser, logFile *os.File, output ResponseOutput, _ Notifier) (Response, error) {
+				return handleArgoStream(ctx, body, logFile, output)
 			},
 			ParseResponse: parseArgoResponse,
 		},
@@ -143,7 +143,8 @@ func (spec providerSpec) parseResponseData(data []byte, isEmbed bool) (Response,
 	return spec.ParseResponse(data, isEmbed)
 }
 
-func (spec providerSpec) handleStreamResponse(ctx context.Context, body io.ReadCloser, logger Logger, notifier Notifier) (Response, error) {
+func (spec providerSpec) handleStreamResponse(ctx context.Context, body io.ReadCloser, logger Logger, notifier Notifier, output ResponseOutput) (Response, error) {
+	output = responseOutputOrDefault(output, os.Stdout)
 	f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to create log file: %w", err)
@@ -155,13 +156,13 @@ func (spec providerSpec) handleStreamResponse(ctx context.Context, body io.ReadC
 	}()
 
 	if spec.HandleStream != nil {
-		return spec.HandleStream(ctx, body, f, os.Stdout, notifier)
+		return spec.HandleStream(ctx, body, f, output, notifier)
 	}
 
 	var buf bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		_, err := io.Copy(io.MultiWriter(os.Stdout, f, &buf), body)
+		_, err := io.Copy(io.MultiWriter(responseOutputWriter{output: output}, f, &buf), body)
 		done <- err
 	}()
 

@@ -20,6 +20,7 @@ type Config struct {
 	Embed            bool   // whether to run in embed mode
 	StreamChat       bool   // whether to use streaming chat mode
 	PrintCurl        bool   // print the equivalent curl command instead of sending the request
+	ShowThinking     bool   // print visible provider-returned thinking summaries to stderr
 	Effort           string // reasoning effort hint
 	ReasoningMode    string // OpenAI Responses reasoning.mode (standard, pro)
 	ReasoningContext string // OpenAI Responses reasoning.context (auto, current_turn, all_turns)
@@ -111,6 +112,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
+	fs.BoolVar(&cfg.ShowThinking, "show-thinking", false, "print provider-returned thinking summaries to stderr (does not enable reasoning)")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
 	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "Responses API reasoning mode: standard, pro (requires -openai-responses; pro is GPT-5.6 only)")

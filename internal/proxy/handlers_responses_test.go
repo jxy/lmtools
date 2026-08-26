@@ -590,9 +590,10 @@ func TestOpenAIResponsesAnthropicPreservesStrictFunctionTool(t *testing.T) {
 	server := NewTestServerDirectWithClient(t, config, client)
 
 	code, body := requestJSONStatus(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
-		"model": "claude-opus-4-7",
-		"input": "use a tool",
-		"store": false,
+		"model":     "claude-opus-4-7",
+		"input":     "use a tool",
+		"store":     false,
+		"reasoning": map[string]interface{}{"effort": "high"},
 		"tools": []interface{}{map[string]interface{}{
 			"type":        "function",
 			"name":        "lookup",
@@ -616,6 +617,12 @@ func TestOpenAIResponsesAnthropicPreservesStrictFunctionTool(t *testing.T) {
 	}
 	if captured.Tools[0].Strict == nil || *captured.Tools[0].Strict != true {
 		t.Fatalf("captured Anthropic tool strict = %#v, want true", captured.Tools[0].Strict)
+	}
+	if captured.Thinking == nil || captured.Thinking.Type != "adaptive" || captured.Thinking.Display != "summarized" {
+		t.Fatalf("captured thinking = %+v, want adaptive summarized", captured.Thinking)
+	}
+	if captured.OutputConfig == nil || captured.OutputConfig.Effort != "high" {
+		t.Fatalf("captured output_config = %+v, want effort=high", captured.OutputConfig)
 	}
 }
 

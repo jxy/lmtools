@@ -273,7 +273,7 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	}
 }
 
-func TestHandleNormalResponsePersistsAndPrints(t *testing.T) {
+func TestHandleNormalResponsePersistsWithoutPrinting(t *testing.T) {
 	ctx := context.Background()
 	oldDir := session.GetSessionsDir()
 	session.SetSessionsDir(t.TempDir())
@@ -290,8 +290,8 @@ func TestHandleNormalResponsePersistsAndPrints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleNormalResponse() error = %v", err)
 	}
-	if out != "assistant answer" {
-		t.Fatalf("stdout = %q, want response text", out)
+	if out != "" {
+		t.Fatalf("stdout = %q, want presentation to remain owned by responsePresenter", out)
 	}
 	messages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
 	if err != nil {
@@ -302,15 +302,15 @@ func TestHandleNormalResponsePersistsAndPrints(t *testing.T) {
 	}
 }
 
-func TestFinishToolExecutionPrintsOnlyUnstreamedFinalText(t *testing.T) {
+func TestFinishToolExecutionReturnsErrorWithoutPrinting(t *testing.T) {
 	out, err := captureStdout(t, func() error {
 		return finishToolExecution(core.ToolExecutionResult{FinalText: "final answer"})
 	})
 	if err != nil {
 		t.Fatalf("finishToolExecution() error = %v", err)
 	}
-	if out != "final answer" {
-		t.Fatalf("stdout = %q, want final answer", out)
+	if out != "" {
+		t.Fatalf("stdout = %q, want final response to remain owned by responsePresenter", out)
 	}
 
 	out, err = captureStdout(t, func() error {
@@ -332,6 +332,28 @@ func TestFinishToolExecutionPrintsOnlyUnstreamedFinalText(t *testing.T) {
 	}
 	if out != "" {
 		t.Fatalf("stdout = %q, want no output on error", out)
+	}
+}
+
+func TestWarnShowThinkingWithoutEffort(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      config.Config
+		wantWarn bool
+	}{
+		{name: "display disabled"},
+		{name: "missing effort", cfg: config.Config{ShowThinking: true}, wantWarn: true},
+		{name: "none effort", cfg: config.Config{ShowThinking: true, Effort: "none"}, wantWarn: true},
+		{name: "high effort", cfg: config.Config{ShowThinking: true, Effort: "high"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			notifier := core.NewTestNotifier()
+			warnShowThinkingWithoutEffort(tt.cfg, notifier)
+			if got := len(notifier.WarnMessages) > 0; got != tt.wantWarn {
+				t.Fatalf("warning present = %t, want %t; messages = %q", got, tt.wantWarn, notifier.WarnMessages)
+			}
+		})
 	}
 }
 

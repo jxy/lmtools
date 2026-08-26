@@ -192,15 +192,17 @@ type Response struct {
 	Usage *Usage
 }
 
-// ResponseParseOptions controls provider-specific compatibility parsing.
+// ResponseParseOptions controls provider-specific compatibility parsing and
+// optional response presentation.
 type ResponseParseOptions struct {
 	ArgoLegacy bool
 	ToolDefs   []ToolDefinition
+	Output     ResponseOutput
 }
 
 // HandleResponse processes an HTTP response based on configuration.
 // For streaming responses, it has dual behavior:
-// 1. Prints the streamed content directly to os.Stdout in real-time
+// 1. Emits semantic output events in real time (answer text defaults to os.Stdout)
 // 2. Returns the full accumulated content as a string for session storage
 // The response body is closed by this function - callers should not close it.
 // Returns: (Response, error)
@@ -234,8 +236,10 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	// Handle streaming responses with provider-specific parsing. Legacy Argo may
 	// downgrade tool-enabled requests to non-streaming during request planning.
 	streamed := shouldHandleStreamingResponse(cfg, provider, resp)
+	output := opts.Output
 	if streamed {
-		response, err = handleStreamingResponse(ctx, cfg, resp, provider, logger, notifier)
+		output = responseOutputOrDefault(output, os.Stdout)
+		response, err = handleStreamingResponse(ctx, cfg, resp, provider, logger, notifier, output)
 	} else {
 		response, err = handleNonStreamingResponse(cfg, resp, provider, logger, notifier, opts)
 	}
@@ -245,6 +249,9 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	}
 
 	response.Streamed = streamed
+	if output != nil {
+		output.HandleResponseComplete(response)
+	}
 	notifyTokenUsage(notifier, response.Usage)
 	return response, nil
 }
@@ -297,7 +304,7 @@ func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *ht
 }
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
-func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier) (Response, error) {
+func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier, output ResponseOutput) (Response, error) {
 	if usesOpenAIResponsesWire(cfg, effectiveChatModel(cfg)) {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
@@ -309,7 +316,7 @@ func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http
 			}
 		}()
 		state := NewOpenAIResponsesStreamState()
-		text, toolCalls, err := RunStream(ctx, resp.Body, f, os.Stdout, notifier, state, constants.ProviderOpenAI)
+		text, toolCalls, err := RunStream(ctx, resp.Body, f, output, notifier, state, constants.ProviderOpenAI)
 		blocks := state.Blocks()
 		if len(blocks) == 0 {
 			blocks = responseBlocksFromParts(text, toolCalls, "")
@@ -321,7 +328,7 @@ func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http
 	if err != nil {
 		spec = unknownProviderSpec(provider)
 	}
-	return spec.handleStreamResponse(ctx, resp.Body, logger, notifier)
+	return spec.handleStreamResponse(ctx, resp.Body, logger, notifier, output)
 }
 
 // handleNonStreamingResponse handles non-streaming responses
@@ -435,8 +442,9 @@ func BuildToolResultRequest(cfg RequestOptions, model string, system string, too
 
 // RunStream processes streaming responses
 // using a provider-specific stream state that may return tool calls.
-func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier, state StreamState, provider string) (string, []ToolCall, error) {
+func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, output ResponseOutput, notifier Notifier, state StreamState, provider string) (string, []ToolCall, error) {
 	// Body is closed by HandleResponse, not here
+	output = responseOutputOrDefault(output, os.Stdout)
 
 	var accumulated strings.Builder
 	var allToolCalls []ToolCall
@@ -479,8 +487,10 @@ func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io
 			return false, nil
 		}
 
+		emitPendingResponseStreamEvents(state, output)
+
 		if content != "" {
-			fmt.Fprint(out, content)
+			output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: content})
 			accumulated.WriteString(content)
 		}
 
@@ -545,8 +555,9 @@ scanLoop:
 						}
 					}
 				}
+				emitPendingResponseStreamEvents(state, output)
 				if content != "" {
-					fmt.Fprint(out, content)
+					output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: content})
 					accumulated.WriteString(content)
 				}
 				// Accumulate tool calls if any
@@ -578,8 +589,9 @@ scanLoop:
 
 // handleArgoStream handles Argo's plain text streaming format
 // Note: Argo doesn't support tool calls in streaming mode
-func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer) (Response, error) {
+func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File, output ResponseOutput) (Response, error) {
 	// Body is closed by HandleResponse, not here
+	output = responseOutputOrDefault(output, os.Stdout)
 
 	var accumulated strings.Builder
 	buffer := make([]byte, 4096) // 4KB chunks for real-time streaming
@@ -592,7 +604,7 @@ func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File,
 			n, err := body.Read(buffer)
 			if n > 0 {
 				chunk := string(buffer[:n])
-				fmt.Fprint(out, chunk)
+				output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: chunk})
 				accumulated.WriteString(chunk)
 				_, _ = logFile.WriteString(chunk)
 			}

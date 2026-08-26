@@ -18,6 +18,7 @@ type ArgoChatRequest struct {
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	ServiceTier         string                 `json:"service_tier,omitempty"`
 	Thinking            *AnthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig        *AnthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 // ArgoMessage represents a message in Argo format.

@@ -361,18 +361,31 @@ func TestAnthropicIntegration(t *testing.T) {
 			t.Errorf("Failed to decode request: %v", err)
 			return
 		}
+		if req.Thinking == nil || req.Thinking.Type != "adaptive" || req.Thinking.Display != "summarized" {
+			t.Errorf("thinking = %+v, want adaptive summarized", req.Thinking)
+		}
 
 		if req.Stream {
 			// Handle streaming
 			setSSEHeaders(w)
 			fmt.Fprintf(w, "event: message_start\n")
-			fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-opus-20240229\"}}\n\n")
+			fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-opus-4-7\"}}\n\n")
 			fmt.Fprintf(w, "event: content_block_start\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\n")
 			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Streamed response\"}}\n\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Streamed summary\"}}\n\n")
+			fmt.Fprintf(w, "event: content_block_delta\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_stream\"}}\n\n")
 			fmt.Fprintf(w, "event: content_block_stop\n")
 			fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+			fmt.Fprintf(w, "event: content_block_start\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+			fmt.Fprintf(w, "event: content_block_delta\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Streamed response\"}}\n\n")
+			fmt.Fprintf(w, "event: content_block_stop\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
+			fmt.Fprintf(w, "event: message_delta\n")
+			fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":12}}\n\n")
 			fmt.Fprintf(w, "event: message_stop\n")
 			fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
 			if f, ok := w.(http.Flusher); ok {
@@ -385,6 +398,7 @@ func TestAnthropicIntegration(t *testing.T) {
 				Type: "message",
 				Role: "assistant",
 				Content: []AnthropicContentBlock{
+					{Type: "thinking", Thinking: "Non-streamed summary", Signature: "sig_json"},
 					{Type: "text", Text: "Non-streamed response"},
 				},
 				Usage: &AnthropicUsage{InputTokens: 5, OutputTokens: 3},
@@ -411,7 +425,7 @@ func TestAnthropicIntegration(t *testing.T) {
 
 	// Test non-streaming request
 	t.Run("non-streaming", func(t *testing.T) {
-		reqBody := `{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"Hello"}],"max_tokens":100}`
+		reqBody := `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"Hello"}],"max_tokens":100,"thinking":{"type":"adaptive","display":"summarized"}}`
 		req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -426,14 +440,14 @@ func TestAnthropicIntegration(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Errorf("Failed to decode response: %v", err)
 		}
-		if len(resp.Content) != 1 || resp.Content[0].Text != "Non-streamed response" {
+		if len(resp.Content) != 2 || resp.Content[0].Type != "thinking" || resp.Content[0].Thinking != "Non-streamed summary" || resp.Content[0].Signature != "sig_json" || resp.Content[1].Text != "Non-streamed response" {
 			t.Errorf("Unexpected response: %+v", resp)
 		}
 	})
 
 	// Test streaming request
 	t.Run("streaming", func(t *testing.T) {
-		reqBody := `{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"Hello"}],"max_tokens":100,"stream":true}`
+		reqBody := `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"Hello"}],"max_tokens":100,"stream":true,"thinking":{"type":"adaptive","display":"summarized"}}`
 		req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -451,6 +465,12 @@ func TestAnthropicIntegration(t *testing.T) {
 		}
 		if !strings.Contains(body, "Streamed response") {
 			t.Errorf("Missing streamed text in response")
+		}
+		if !strings.Contains(body, `"type":"thinking_delta","thinking":"Streamed summary"`) {
+			t.Errorf("Missing streamed thinking summary in response: %s", body)
+		}
+		if !strings.Contains(body, `"type":"signature_delta","signature":"sig_stream"`) {
+			t.Errorf("Missing streamed thinking signature in response: %s", body)
 		}
 	})
 }

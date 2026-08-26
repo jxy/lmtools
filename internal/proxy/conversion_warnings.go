@@ -342,6 +342,9 @@ func warnAnthropicRequestDropsForOpenAI(ctx context.Context, req *AnthropicReque
 	if len(req.MCPServers) > 0 {
 		warnDroppedField(ctx, "Anthropic", "OpenAI", "mcp_servers", "")
 	}
+	if req.Thinking != nil && req.Thinking.Display != "" {
+		warnDroppedField(ctx, "Anthropic", "OpenAI", "thinking.display", "OpenAI Chat Completions has no thinking-display control")
+	}
 	if req.OutputConfig != nil && req.OutputConfig.Format != nil && anthropicOutputConfigToOpenAIResponseFormat(req.OutputConfig) == nil {
 		warnDroppedField(ctx, "Anthropic", "OpenAI", "output_config.format", "unsupported output format shape")
 	}
@@ -383,6 +386,9 @@ func warnAnthropicRequestDropsForGoogle(ctx context.Context, req *AnthropicReque
 	}
 	if len(req.MCPServers) > 0 {
 		warnDroppedField(ctx, "Anthropic", "Google", "mcp_servers", "")
+	}
+	if req.Thinking != nil && req.Thinking.Display != "" {
+		warnDroppedField(ctx, "Anthropic", "Google", "thinking.display", "Gemini has no thinking-display control")
 	}
 	if req.OutputConfig != nil && req.OutputConfig.Format != nil {
 		warnConvertedFieldLoss(ctx, "Anthropic", "Google", "output_config.format", "schema shape is mapped to Google JSON response configuration when possible")

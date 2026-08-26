@@ -27,6 +27,20 @@ type StreamState interface {
 	ParseLine(line string) (content string, calls []ToolCall, done bool, err error)
 }
 
+type responseStreamEventSource interface {
+	drainResponseStreamEvents() []ResponseStreamEvent
+}
+
+func emitPendingResponseStreamEvents(state StreamState, output ResponseOutput) {
+	source, ok := state.(responseStreamEventSource)
+	if !ok {
+		return
+	}
+	for _, event := range source.drainResponseStreamEvents() {
+		output.HandleStreamEvent(event)
+	}
+}
+
 // AnthropicStreamState tracks event type and tool accumulation for Anthropic streams
 type AnthropicStreamState struct {
 	currentEvent     string
@@ -39,6 +53,7 @@ type AnthropicStreamState struct {
 	currentData      string
 	partialInput     string
 	blocks           []Block
+	streamEvents     []ResponseStreamEvent
 	usage            *Usage
 }
 
@@ -83,6 +98,19 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 					s.currentToolName = blockStart.ContentBlock.Name
 					s.partialInput = ""
 				}
+				if blockStart.ContentBlock.Type == "thinking" || blockStart.ContentBlock.Type == "redacted_thinking" {
+					s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
+						Type:          ResponseStreamReasoningStart,
+						ReasoningType: blockStart.ContentBlock.Type,
+					})
+					if blockStart.ContentBlock.Thinking != "" {
+						s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
+							Type:          ResponseStreamReasoningDelta,
+							Text:          blockStart.ContentBlock.Thinking,
+							ReasoningType: blockStart.ContentBlock.Type,
+						})
+					}
+				}
 			}
 
 		case "content_block_delta":
@@ -110,6 +138,13 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 					switch delta.Delta.Type {
 					case "thinking_delta":
 						s.currentThinking += delta.Delta.Thinking
+						if delta.Delta.Thinking != "" {
+							s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
+								Type:          ResponseStreamReasoningDelta,
+								Text:          delta.Delta.Thinking,
+								ReasoningType: s.currentBlockType,
+							})
+						}
 					case "signature_delta":
 						s.currentSignature += delta.Delta.Signature
 					}
@@ -127,6 +162,7 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 			}
 
 		case "content_block_stop":
+			stoppedBlockType := s.currentBlockType
 			switch s.currentBlockType {
 			case "text":
 				if s.currentText != "" {
@@ -178,6 +214,12 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 				s.resetCurrentBlock()
 				return "", []ToolCall{toolCall}, false, nil
 			}
+			if stoppedBlockType == "thinking" || stoppedBlockType == "redacted_thinking" {
+				s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
+					Type:          ResponseStreamReasoningEnd,
+					ReasoningType: stoppedBlockType,
+				})
+			}
 			s.resetCurrentBlock()
 
 		case "message_stop":
@@ -205,6 +247,15 @@ func (s *AnthropicStreamState) Blocks() []Block {
 		return nil
 	}
 	return append([]Block(nil), s.blocks...)
+}
+
+func (s *AnthropicStreamState) drainResponseStreamEvents() []ResponseStreamEvent {
+	if len(s.streamEvents) == 0 {
+		return nil
+	}
+	events := append([]ResponseStreamEvent(nil), s.streamEvents...)
+	s.streamEvents = s.streamEvents[:0]
+	return events
 }
 
 // Usage returns the token counts accumulated from the stream, nil when the

@@ -56,7 +56,6 @@ func TestCLIToolUIFormatsReviewedParallelBatch(t *testing.T) {
 
 	want := `
 >>> Tools requested: 3
-
 [1/3] Command: ["git","status","--short","--branch"]
 
 [2/3] Command: ["git","show","--stat","--oneline","--summary","HEAD"]
@@ -69,7 +68,6 @@ func TestCLIToolUIFormatsReviewedParallelBatch(t *testing.T) {
 >>> Running 2 of 3 commands in parallel...
 
 >>> Results:
-
 [1/3] Completed in 58ms
       Output:
 ## main...origin/main [ahead 1]
@@ -106,7 +104,6 @@ func TestCLIToolUIShowCallUsesCompactJSONArgv(t *testing.T) {
 
 	want := `
 >>> Tools requested: 1
-
 [1/1] Command: ["printf","a b","line\nnext","quote\"","back\\slash"]
 `
 	if got := notifier.out.String(); got != want {
@@ -126,7 +123,6 @@ func TestCLIToolUIShowCallDisplaysStdioSettings(t *testing.T) {
 
 	want := `
 >>> Tools requested: 1
-
 [1/1] Command: ["sort"]
       Stdin: "beta\nalpha\n"
       Stdout file: "sorted.txt"
@@ -148,7 +144,6 @@ func TestCLIToolUIShowCallDisplaysStdinFile(t *testing.T) {
 
 	want := `
 >>> Tools requested: 1
-
 [1/1] Command: ["sort"]
       Workdir: "/workspace"
       Stdin file: "inputs/data.txt"
@@ -392,13 +387,11 @@ func TestExecutorOutcomesRenderTheSameThroughTheCLI(t *testing.T) {
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/echo","hi"]
 
 >>> Running 1 command...
 
 >>> Results:
-
 [1/1] Completed in NNms
       Output:
 hi
@@ -412,13 +405,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/sh","-c","exit 3"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/sh","-c","exit 3"]
 
 >>> Running 1 command...
 
 >>> Results:
-
 [1/1] Failed in NNms: exit status 3
 
 `,
@@ -430,14 +421,12 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/sleep","5"],"timeout":1}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/sleep","5"]
       Timeout: 1s
 
 >>> Running 1 command...
 
 >>> Results:
-
 [1/1] Timed out in NNms
 
 `,
@@ -449,13 +438,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/rm","-rf","/"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/rm","-rf","/"]
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: blacklisted
 
 `,
@@ -467,14 +454,12 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/cat"],"stdin":"x"}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/cat"]
       Stdin: "x"
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: not in whitelist (stdin provided)
       Hint: Whitelist file: <TMP>/wl.txt
       Hint: To allow this command, either:
@@ -490,13 +475,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/echo","hi"]
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: no terminal available for approval
       Hint: Allow via one of:
               - Run from a terminal so commands can be approved
@@ -512,13 +495,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/echo","hi"]
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: approval disabled by -tool-non-interactive
       Hint: Allow via one of:
               - Run interactively without -tool-non-interactive
@@ -534,13 +515,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/echo","hi"]
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: user denied permission
 
 `,
@@ -552,13 +531,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/echo","hi"]
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: approval failed: read response: input/output error
 
 `,
@@ -570,14 +547,12 @@ hi
 			calls:    []core.ToolCall{{ID: "a", Name: "other_tool", Args: json.RawMessage(`{}`)}},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Tool: other_tool
       Arguments: {}
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: unsupported tool: other_tool
 
 `,
@@ -589,14 +564,12 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":[]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Tool: universal_command
       Arguments: {"command":[]}
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: command array cannot be empty
 
 `,
@@ -611,7 +584,6 @@ hi
 			},
 			want: `
 >>> Tools requested: 2
-
 [1/2] Command: ["/bin/echo","a"]
       Stdout file: "<TMP>/shared.log"
 
@@ -621,7 +593,6 @@ hi
 >>> No commands will be run.
 
 >>> Results:
-
 [1/2] Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
 
 [2/2] Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
@@ -636,13 +607,11 @@ hi
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
 >>> Tools requested: 1
-
 [1/1] Command: ["/bin/echo","hi"]
 
 >>> No commands will be run.
 
 >>> Results:
-
 [1/1] Not run: execution cancelled
 
 `,

@@ -8,6 +8,10 @@
     }
   ],
   "system": "Answer only with JSON matching the schema.\nUse short values and do not include extra keys.",
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+  },
   "output_config": {
     "effort": "xhigh",
     "format": {

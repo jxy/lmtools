@@ -40,6 +40,10 @@ func TestAnthropicRequestOutputOptions(t *testing.T) {
 	if outputConfig["effort"] != "low" {
 		t.Fatalf("output_config.effort = %v, want low", outputConfig["effort"])
 	}
+	thinking, ok := payload["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "adaptive" || thinking["display"] != "summarized" {
+		t.Fatalf("thinking = %#v, want adaptive summarized", payload["thinking"])
+	}
 	format, ok := outputConfig["format"].(map[string]interface{})
 	if !ok || format["type"] != "json_schema" {
 		t.Fatalf("output_config.format = %#v, want json_schema", outputConfig["format"])
@@ -47,6 +51,19 @@ func TestAnthropicRequestOutputOptions(t *testing.T) {
 	schema, ok := format["schema"].(map[string]interface{})
 	if !ok || schema["type"] != "object" {
 		t.Fatalf("output_config.format.schema = %#v, want object schema", format["schema"])
+	}
+}
+
+func TestAnthropicRequestWithoutEffortDoesNotEnableThinking(t *testing.T) {
+	cfg := newProviderSpecTestConfig("anthropic", "claude-opus-4-7", "https://api.anthropic.com/v1")
+
+	_, body, err := BuildChatRequest(cfg, []TypedMessage{NewTextMessage("user", "hi")}, ChatBuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildChatRequest() error = %v", err)
+	}
+	payload := decodeRequestBody(t, body)
+	if thinking, ok := payload["thinking"]; ok {
+		t.Fatalf("thinking = %#v, want field omitted without -effort", thinking)
 	}
 }
 
@@ -94,5 +111,36 @@ func TestArgoRequestOutputOptions(t *testing.T) {
 	format, ok := payload["response_format"].(map[string]interface{})
 	if !ok || format["type"] != "json_object" {
 		t.Fatalf("response_format = %#v, want json_object", payload["response_format"])
+	}
+}
+
+func TestArgoClaudeRequestOutputOptions(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "native"
+		if legacy {
+			name = "legacy"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg := newProviderSpecTestConfig("argo", "claude-opus-4-7", "https://argo.example.test")
+			cfg.ArgoLegacy = legacy
+			cfg.Effort = "high"
+
+			_, body, err := BuildChatRequest(cfg, []TypedMessage{NewTextMessage("user", "hi")}, ChatBuildOptions{})
+			if err != nil {
+				t.Fatalf("BuildChatRequest() error = %v", err)
+			}
+			payload := decodeRequestBody(t, body)
+			thinking, ok := payload["thinking"].(map[string]interface{})
+			if !ok || thinking["type"] != "adaptive" || thinking["display"] != "summarized" {
+				t.Fatalf("thinking = %#v, want adaptive summarized", payload["thinking"])
+			}
+			outputConfig, ok := payload["output_config"].(map[string]interface{})
+			if !ok || outputConfig["effort"] != "high" {
+				t.Fatalf("output_config = %#v, want effort=high", payload["output_config"])
+			}
+			if _, ok := payload["reasoning_effort"]; ok {
+				t.Fatalf("reasoning_effort = %#v, want Anthropic output_config only", payload["reasoning_effort"])
+			}
+		})
 	}
 }

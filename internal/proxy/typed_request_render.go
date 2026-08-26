@@ -112,6 +112,10 @@ func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (
 	}
 
 	outputConfig := mergeAnthropicOutputConfig(typed.OutputConfig, typed.ResponseFormat, typed.ReasoningEffort)
+	thinking := typed.Thinking
+	if thinking == nil && outputConfig != nil && outputConfig.Effort != "" {
+		thinking = adaptiveSummarizedThinking()
+	}
 	temperature := typed.Temperature
 	if anthropicModelRejectsTemperature(ctx.Model) {
 		temperature = nil
@@ -122,7 +126,7 @@ func renderTypedToAnthropicRequest(typed TypedRequest, ctx typedRenderContext) (
 		StopSequences: typed.Stop,
 		Temperature:   temperature,
 		Tools:         proxyAnthropicToolsFromCore(prepared.Tools),
-		Thinking:      typed.Thinking,
+		Thinking:      thinking,
 		OutputConfig:  outputConfig,
 		Metadata:      cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:   serviceTierForAnthropic(typed.ServiceTier),
@@ -211,18 +215,25 @@ func renderTypedToArgoRequest(typed TypedRequest, ctx typedRenderContext) (*Argo
 	argoProvider := providers.DetermineArgoModelProvider(ctx.Model)
 
 	argoReq := &ArgoChatRequest{
-		User:            ctx.User,
-		Model:           ctx.Model,
-		Temperature:     typed.Temperature,
-		TopP:            typed.TopP,
-		Stop:            typed.Stop,
-		ReasoningEffort: typed.ReasoningEffort,
-		ResponseFormat:  typed.ResponseFormat,
-		Metadata:        cloneStringInterfaceMap(typed.Metadata),
-		ServiceTier:     typed.ServiceTier,
+		User:        ctx.User,
+		Model:       ctx.Model,
+		Temperature: typed.Temperature,
+		TopP:        typed.TopP,
+		Stop:        typed.Stop,
+		Metadata:    cloneStringInterfaceMap(typed.Metadata),
+		ServiceTier: typed.ServiceTier,
 	}
-	if argoProvider == constants.ProviderOpenAI {
+	switch argoProvider {
+	case constants.ProviderOpenAI:
+		argoReq.ReasoningEffort = typed.ReasoningEffort
 		argoReq.Verbosity = typed.Verbosity
+		argoReq.ResponseFormat = typed.ResponseFormat
+	case constants.ProviderAnthropic:
+		argoReq.Thinking = typed.Thinking
+		argoReq.OutputConfig = mergeAnthropicOutputConfig(typed.OutputConfig, typed.ResponseFormat, typed.ReasoningEffort)
+		if argoReq.Thinking == nil && argoReq.OutputConfig != nil && argoReq.OutputConfig.Effort != "" {
+			argoReq.Thinking = adaptiveSummarizedThinking()
+		}
 	}
 	var typedMessages []core.TypedMessage
 	if argoProvider == constants.ProviderOpenAI {

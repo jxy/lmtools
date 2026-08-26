@@ -579,33 +579,20 @@ func TestUnknownProviderSpecHandleStreamFallback(t *testing.T) {
 	notifier := NewTestNotifier()
 	spec := unknownProviderSpec("unknown-provider")
 
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe() error = %v", err)
-	}
-	defer reader.Close()
-
-	oldStdout := os.Stdout
-	os.Stdout = writer
-	defer func() {
-		os.Stdout = oldStdout
-	}()
-
-	printedCh := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(reader)
-		printedCh <- string(data)
-	}()
-
-	resp, err := spec.handleStreamResponse(context.Background(), io.NopCloser(strings.NewReader("fallback stream")), logger, notifier)
-	writer.Close()
+	var printed strings.Builder
+	resp, err := spec.handleStreamResponse(
+		context.Background(),
+		io.NopCloser(strings.NewReader("fallback stream")),
+		logger,
+		notifier,
+		textResponseOutput{out: &printed},
+	)
 	if err != nil {
 		t.Fatalf("handleStreamResponse() error = %v", err)
 	}
 
-	printed := <-printedCh
-	if printed != "fallback stream" {
-		t.Fatalf("printed output = %q, want %q", printed, "fallback stream")
+	if printed.String() != "fallback stream" {
+		t.Fatalf("printed output = %q, want %q", printed.String(), "fallback stream")
 	}
 	if resp.Text != "fallback stream" {
 		t.Fatalf("Response.Text = %q, want %q", resp.Text, "fallback stream")

@@ -11,6 +11,10 @@
   "metadata": {
     "fixture": "openai-modern-json-schema-developer"
   },
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+  },
   "output_config": {
     "effort": "xhigh",
     "format": {

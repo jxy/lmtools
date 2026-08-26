@@ -25,6 +25,10 @@
     }
   ],
   "service_tier": "auto",
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+  },
   "output_config": {
     "effort": "max",
     "format": {

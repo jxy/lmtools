@@ -13,9 +13,9 @@ import (
 // This file implements Google-format streaming tool support.
 
 // handleGoogleStreamWithTools handles Google's SSE format with tool support
-func handleGoogleStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, out io.Writer, notifier Notifier) (Response, error) {
+func handleGoogleStreamWithTools(ctx context.Context, body io.ReadCloser, logFile *os.File, output ResponseOutput, notifier Notifier) (Response, error) {
 	state := &GoogleStreamState{}
-	text, toolCalls, err := RunStream(ctx, body, logFile, out, notifier, state, constants.ProviderGoogle)
+	text, toolCalls, err := RunStream(ctx, body, logFile, output, notifier, state, constants.ProviderGoogle)
 	blocks := responseBlocksFromParts(text, toolCalls, state.lastTextThoughtSignature)
 	return Response{
 		Text:             text,

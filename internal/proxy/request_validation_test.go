@@ -138,7 +138,7 @@ func TestValidateParsedOpenAIResponsesRequestInputSources(t *testing.T) {
 	}
 }
 
-func TestValidateOpenAIRejectsAnthropicOutputConfigFeaturesOnNonOpusTarget(t *testing.T) {
+func TestValidateOpenAIAllowsAnthropicOutputConfigFeaturesOnOtherSupportedModels(t *testing.T) {
 	req := &OpenAIRequest{
 		Model:           "claude-test",
 		Messages:        []OpenAIMessage{{Role: "user", Content: "hi"}},
@@ -147,12 +147,8 @@ func TestValidateOpenAIRejectsAnthropicOutputConfigFeaturesOnNonOpusTarget(t *te
 		StreamOptions:   &OpenAIStreamOptions{IncludeUsage: true},
 	}
 
-	err := validateOpenAIRequestForProvider(req, constants.ProviderAnthropic, "claude-sonnet-4-5")
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-	if got := err.Error(); got != `anthropic Opus 4.7 thinking/output_config fields require model "claude-opus-4-7"` {
-		t.Fatalf("error = %q, want opus 4.7 validation", got)
+	if err := validateOpenAIRequestForProvider(req, constants.ProviderAnthropic, "claude-sonnet-4-6"); err != nil {
+		t.Fatalf("validateOpenAIRequestForProvider() error = %v", err)
 	}
 }
 
@@ -169,7 +165,7 @@ func TestValidateOpenAIAllowsAnthropicOutputConfigFeaturesOnOpusTarget(t *testin
 	}
 }
 
-func TestValidateAnthropicOpus47Features(t *testing.T) {
+func TestValidateAnthropicThinkingFeatures(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      AnthropicRequest
@@ -200,14 +196,14 @@ func TestValidateAnthropicOpus47Features(t *testing.T) {
 			},
 		},
 		{
-			name:     "rejects opus 4.7 fields on non opus model",
+			name:     "allows adaptive fields on another supported model",
 			provider: constants.ProviderAnthropic,
 			req: AnthropicRequest{
-				Model:        "claude-sonnet-4-5",
+				Model:        "claude-sonnet-4-6",
 				Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				Thinking:     &AnthropicThinking{Type: "adaptive", Display: "summarized"},
 				OutputConfig: &AnthropicOutputConfig{Effort: "high"},
 			},
-			wantErr: `anthropic Opus 4.7 thinking/output_config fields require model "claude-opus-4-7"`,
 		},
 		{
 			name:     "rejects budget tokens with adaptive thinking",
@@ -231,6 +227,26 @@ func TestValidateAnthropicOpus47Features(t *testing.T) {
 				OutputConfig: &AnthropicOutputConfig{Effort: "extreme"},
 			},
 			wantErr: "output_config.effort must be one of low, medium, high, xhigh, max",
+		},
+		{
+			name:     "rejects unknown thinking display",
+			provider: constants.ProviderAnthropic,
+			req: AnthropicRequest{
+				Model:    "claude-opus-4-7",
+				Messages: []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				Thinking: &AnthropicThinking{Type: "adaptive", Display: "full"},
+			},
+			wantErr: "thinking.display must be one of summarized, omitted",
+		},
+		{
+			name:     "rejects display with disabled thinking",
+			provider: constants.ProviderAnthropic,
+			req: AnthropicRequest{
+				Model:    "claude-opus-4-7",
+				Messages: []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				Thinking: &AnthropicThinking{Type: "disabled", Display: "summarized"},
+			},
+			wantErr: `thinking.display is not valid with thinking.type="disabled"`,
 		},
 	}
 

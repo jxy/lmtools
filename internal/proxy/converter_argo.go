@@ -102,7 +102,7 @@ func logOmittedFields(ctx context.Context, req *AnthropicRequest) {
 
 // applyThinkingConfig applies thinking configuration based on model type
 func applyThinkingConfig(ctx context.Context, req *AnthropicRequest, argoReq *ArgoChatRequest) {
-	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+	if req.Thinking != nil && (req.Thinking.Type == "enabled" || req.Thinking.Type == "adaptive") {
 		modelLower := strings.ToLower(req.Model)
 		if strings.HasPrefix(modelLower, "gpt") || strings.HasPrefix(modelLower, "o3") || strings.HasPrefix(modelLower, "o4") {
 			// For GPT and O3/O4 models, convert to reasoning_effort

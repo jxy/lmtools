@@ -1,6 +1,6 @@
 {
   "id": "anthropic-opus47-adaptive-thinking-effort",
-  "description": "Anthropic Opus 4.7 adaptive thinking with output_config effort",
+  "description": "Anthropic Opus 4.7 adaptive summarized thinking with output_config effort",
   "kinds": [
     "request"
   ],

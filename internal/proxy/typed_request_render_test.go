@@ -129,6 +129,23 @@ func TestTypedToAnthropicRequestPreservesOpus47ThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestTypedToAnthropicRequestPreservesExplicitThinkingDisplay(t *testing.T) {
+	req, err := TypedToAnthropicRequest(TypedRequest{
+		Messages: []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "solve carefully")},
+		Thinking: &AnthropicThinking{
+			Type:    "adaptive",
+			Display: "omitted",
+		},
+		ReasoningEffort: "high",
+	}, "claude-opus-4-7")
+	if err != nil {
+		t.Fatalf("TypedToAnthropicRequest() error = %v", err)
+	}
+	if req.Thinking == nil || req.Thinking.Type != "adaptive" || req.Thinking.Display != "omitted" {
+		t.Fatalf("Thinking = %+v, want caller's explicit omitted display", req.Thinking)
+	}
+}
+
 func TestTypedToAnthropicRequestAllowsOutputConfigForIntermediateNonAnthropicModels(t *testing.T) {
 	req, err := TypedToAnthropicRequest(TypedRequest{
 		MaxTokens: intPtr(64),
@@ -148,6 +165,29 @@ func TestTypedToAnthropicRequestAllowsOutputConfigForIntermediateNonAnthropicMod
 	}
 	if req.OutputConfig == nil || req.OutputConfig.Format == nil || req.OutputConfig.Effort != "high" {
 		t.Fatalf("OutputConfig = %+v, want preserved intermediate output_config", req.OutputConfig)
+	}
+	if req.Thinking == nil || req.Thinking.Type != "adaptive" || req.Thinking.Display != "summarized" {
+		t.Fatalf("Thinking = %+v, want adaptive summarized for converted reasoning effort", req.Thinking)
+	}
+}
+
+func TestTypedToArgoClaudeRequestUsesAnthropicThinkingFields(t *testing.T) {
+	req, err := TypedToArgoRequest(TypedRequest{
+		MaxTokens:       intPtr(128),
+		Messages:        []core.TypedMessage{core.NewTextMessage(string(core.RoleUser), "solve carefully")},
+		ReasoningEffort: "xhigh",
+	}, "claude-opus-4-7", "fixture-user")
+	if err != nil {
+		t.Fatalf("TypedToArgoRequest() error = %v", err)
+	}
+	if req.Thinking == nil || req.Thinking.Type != "adaptive" || req.Thinking.Display != "summarized" {
+		t.Fatalf("Thinking = %+v, want adaptive summarized", req.Thinking)
+	}
+	if req.OutputConfig == nil || req.OutputConfig.Effort != "xhigh" {
+		t.Fatalf("OutputConfig = %+v, want effort=xhigh", req.OutputConfig)
+	}
+	if req.ReasoningEffort != "" {
+		t.Fatalf("ReasoningEffort = %q, want Anthropic output_config only", req.ReasoningEffort)
 	}
 }
 

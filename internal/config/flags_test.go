@@ -295,6 +295,26 @@ func TestParseFlagsOutputOptions(t *testing.T) {
 	}
 }
 
+func TestParseFlagsShowThinkingIsPresentationOnly(t *testing.T) {
+	base, err := ParseFlags([]string{"-argo-user", "alice"})
+	if err != nil {
+		t.Fatalf("ParseFlags(base) failed: %v", err)
+	}
+	shown, err := ParseFlags([]string{"-argo-user", "alice", "-show-thinking"})
+	if err != nil {
+		t.Fatalf("ParseFlags(-show-thinking) failed: %v", err)
+	}
+	if base.ShowThinking {
+		t.Fatal("ShowThinking defaults to true, want false")
+	}
+	if !shown.ShowThinking {
+		t.Fatal("ShowThinking = false after -show-thinking")
+	}
+	if !reflect.DeepEqual(base.RequestOptions(), shown.RequestOptions()) {
+		t.Fatalf("-show-thinking changed provider RequestOptions:\nbase:  %+v\nshown: %+v", base.RequestOptions(), shown.RequestOptions())
+	}
+}
+
 func TestParseFlagsPrintCurl(t *testing.T) {
 	cfg, err := ParseFlags([]string{"-argo-user", "alice", "-print-curl"})
 	if err != nil {

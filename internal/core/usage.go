@@ -227,9 +227,8 @@ func (u *Usage) Summary() string {
 }
 
 // notifyTokenUsage reports a response's token counts on the diagnostic
-// stream. It runs as soon as the response is handled, which places the note
-// ahead of any tool approval prompt or execution the response goes on to
-// trigger.
+// stream. It runs after response presentation is finalized and before any tool
+// approval prompt or execution the response goes on to trigger.
 func notifyTokenUsage(notifier Notifier, usage *Usage) {
 	if notifier == nil || usage == nil {
 		return
