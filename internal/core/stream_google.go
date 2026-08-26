@@ -22,6 +22,7 @@ func handleGoogleStreamWithTools(ctx context.Context, body io.ReadCloser, logFil
 		ToolCalls:        toolCalls,
 		Blocks:           blocks,
 		ThoughtSignature: state.lastTextThoughtSignature,
+		Usage:            state.Usage(),
 	}, err
 }
 

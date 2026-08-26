@@ -15,5 +15,5 @@ func handleAnthropicStreamWithTools(ctx context.Context, body io.ReadCloser, log
 	if len(blocks) == 0 {
 		blocks = responseBlocksFromParts(text, toolCalls, "")
 	}
-	return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks}, err
+	return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks, Usage: state.Usage()}, err
 }

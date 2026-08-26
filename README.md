@@ -64,6 +64,19 @@ echo "Explain quantum computing" | ./bin/lmc \
 echo "Hello world" | ./bin/lmc -argo-user "$USER" -e
 ```
 
+When a response reports token counts, `lmc` prints them to stderr as soon as
+the response is handled — in tool mode that is before any approval prompt or
+command execution, and again after each follow-up round:
+
+```text
+Note: Token usage: input 100, output 19
+```
+
+Cache and reasoning counts appear when the provider reports a non-zero value;
+total counts appear whenever reported. Responses that carry no counts (legacy
+Argo, OpenAI streaming without usage enabled) print nothing. Stdout stays the
+model output alone, so piped output is unaffected.
+
 ### Sessions
 
 `lmc` stores each exchange in a session tree under `~/.lmc/sessions`. A path

@@ -596,6 +596,7 @@ type OpenAIResponsesStreamState struct {
 	argumentBuffers  map[int]*bytes.Buffer
 	outputItems      map[int]json.RawMessage
 	outputOrder      []int
+	usage            *Usage
 }
 
 func NewOpenAIResponsesStreamState() *OpenAIResponsesStreamState {
@@ -660,6 +661,9 @@ func (s *OpenAIResponsesStreamState) ParseLine(line string) (string, []ToolCall,
 			}
 		}
 	case "response.completed", "response.incomplete":
+		// The terminal events carry the full response snapshot, including
+		// response.usage; earlier events carry it as null.
+		s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
 		calls, done, err := s.finalizeToolCalls()
 		return "", calls, done, err
 	case "response.failed":
@@ -759,6 +763,12 @@ func (s *OpenAIResponsesStreamState) finalizeToolCalls() ([]ToolCall, bool, erro
 	s.partialToolCalls = map[int]*ToolCall{}
 	s.argumentBuffers = map[int]*bytes.Buffer{}
 	return calls, true, nil
+}
+
+// Usage returns the token counts accumulated from the stream, nil when the
+// stream reported none.
+func (s *OpenAIResponsesStreamState) Usage() *Usage {
+	return s.usage
 }
 
 func (s *OpenAIResponsesStreamState) Blocks() []Block {

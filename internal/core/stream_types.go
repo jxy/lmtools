@@ -39,6 +39,7 @@ type AnthropicStreamState struct {
 	currentData      string
 	partialInput     string
 	blocks           []Block
+	usage            *Usage
 }
 
 // ParseLine implements StreamState for Anthropic SSE format
@@ -52,6 +53,13 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 	// Handle data lines
 	if data, ok := streamFieldValue(line, "data"); ok {
 		switch s.currentEvent {
+		case "message_start", "message_delta":
+			// message_start reports input tokens under message.usage;
+			// message_delta reports the final output tokens (and, on newer
+			// backends, restates the input) under a top-level usage. Merge so
+			// each event contributes the counts it carries.
+			s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
+
 		case "content_block_start":
 			var blockStart struct {
 				ContentBlock struct {
@@ -199,6 +207,12 @@ func (s *AnthropicStreamState) Blocks() []Block {
 	return append([]Block(nil), s.blocks...)
 }
 
+// Usage returns the token counts accumulated from the stream, nil when the
+// stream reported none.
+func (s *AnthropicStreamState) Usage() *Usage {
+	return s.usage
+}
+
 type openAIStreamToolCallKey struct {
 	choiceIndex int
 	toolIndex   int
@@ -207,6 +221,7 @@ type openAIStreamToolCallKey struct {
 // OpenAIStreamState tracks streaming state with tool support for OpenAI
 type OpenAIStreamState struct {
 	partialToolCalls map[openAIStreamToolCallKey]*ToolCall
+	usage            *Usage
 }
 
 // NewOpenAIStreamState creates a new OpenAI stream state
@@ -256,6 +271,13 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			return "", nil, false, err
 		}
 
+		// ParsedStreamUsage says whether this chunk carried usage but not the
+		// detail counts, so the at-most-one chunk that did is decoded again in
+		// full.
+		if parsed.Usage.InputTokens != nil || parsed.Usage.OutputTokens != nil || parsed.Usage.TotalTokens != nil {
+			s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
+		}
+
 		textContent := ""
 		for _, choice := range parsed.Choices {
 			textContent += choice.Content
@@ -293,10 +315,17 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 	return "", nil, false, nil
 }
 
+// Usage returns the token counts accumulated from the stream, nil when the
+// stream reported none.
+func (s *OpenAIStreamState) Usage() *Usage {
+	return s.usage
+}
+
 // GoogleStreamState tracks current part and tool calls for Google streaming
 type GoogleStreamState struct {
 	nextID                   uint64
 	lastTextThoughtSignature string
+	usage                    *Usage
 }
 
 // ParseLine implements StreamState for Google SSE format
@@ -309,6 +338,14 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 		if err != nil {
 			// Return error to be logged
 			return "", nil, false, err
+		}
+
+		// Google restates usageMetadata on each chunk with running totals; the
+		// merge keeps the last reported value of every count. The full decode
+		// runs only on chunks that carried usage, for the detail counts
+		// ParsedStreamUsage does not surface.
+		if parsed.Usage.InputTokens != nil || parsed.Usage.OutputTokens != nil || parsed.Usage.TotalTokens != nil {
+			s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
 		}
 
 		var textContent string
@@ -344,4 +381,10 @@ func (s *GoogleStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 func (s *GoogleStreamState) generateToolCallID() string {
 	s.nextID++
 	return fmt.Sprintf("call_%d", s.nextID)
+}
+
+// Usage returns the token counts accumulated from the stream, nil when the
+// stream reported none.
+func (s *GoogleStreamState) Usage() *Usage {
+	return s.usage
 }

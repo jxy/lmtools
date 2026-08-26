@@ -186,6 +186,10 @@ type Response struct {
 	Blocks           []Block
 	ThoughtSignature string
 	Streamed         bool
+	// Usage carries the token counts the provider reported, nil when it
+	// reported none. Display-only: session stores decompose Response
+	// field-by-field and never persist it.
+	Usage *Usage
 }
 
 // ResponseParseOptions controls provider-specific compatibility parsing.
@@ -241,6 +245,7 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	}
 
 	response.Streamed = streamed
+	notifyTokenUsage(notifier, response.Usage)
 	return response, nil
 }
 
@@ -309,7 +314,7 @@ func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http
 		if len(blocks) == 0 {
 			blocks = responseBlocksFromParts(text, toolCalls, "")
 		}
-		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks}, err
+		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks, Usage: state.Usage()}, err
 	}
 
 	spec, err := providerSpecForName(provider)
@@ -339,7 +344,16 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 		notifier.Warnf("Failed to log response: %v", err)
 	}
 
-	// Parse response based on provider
+	// Parse response based on provider. Token counts are lifted from the same
+	// bytes here, the one point every non-streaming provider body passes
+	// through, rather than in each provider parser.
+	attachUsage := func(response Response, err error) (Response, error) {
+		if err != nil {
+			return response, err
+		}
+		response.Usage = UsageFromPayload(data)
+		return response, nil
+	}
 	spec, err := providerSpecForName(provider)
 	if err != nil {
 		return Response{}, err
@@ -349,12 +363,12 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 			ExtractEmbeddedTools: true,
 			ToolDefs:             opts.ToolDefs,
 		})
-		return Response{Text: text, ToolCalls: toolCalls}, err
+		return attachUsage(Response{Text: text, ToolCalls: toolCalls}, err)
 	}
 	if usesOpenAIResponsesWire(cfg, effectiveChatModel(cfg)) {
-		return parseOpenAIResponses(data, cfg.Embed)
+		return attachUsage(parseOpenAIResponses(data, cfg.Embed))
 	}
-	return spec.parseResponseData(data, cfg.Embed)
+	return attachUsage(spec.parseResponseData(data, cfg.Embed))
 }
 
 // ConvertedTools represents the result of converting tools for a specific provider
