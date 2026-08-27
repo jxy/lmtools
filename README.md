@@ -452,10 +452,12 @@ chmod 600 ~/.google-key
   over the proxy's own limit get `413 request_too_large`; when `Content-Length`
   is known, the message includes the observed size and exact whole-MB setting.
 - `-strip-encrypted-reasoning`: Recovery mode for direct Responses backends.
-  Before forwarding a request, remove `encrypted_content` from reasoning input
-  items and remove encrypted compaction input items. This discards opaque model
-  context, so use it only when a backend can no longer decrypt a resumed
-  session. It is off by default and logs each request it changes.
+  Before forwarding a request, drop every reasoning and compaction input item
+  that carries `encrypted_content`. The item goes whole: what would be left of a
+  reasoning item is an `rs_...` id, and that id is a handle on the same state
+  the backend could not resolve. This discards opaque model context, so use it
+  only when a backend can no longer decrypt a resumed session. It is off by
+  default and logs each request it changes.
 - `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
 - `-log-format string`: `text` or `json`.
 
@@ -658,9 +660,10 @@ to OpenAI's own Responses API. In this mode it:
 
 - Preserves OpenAI Responses request bodies, including valid OpenAI fields the compatibility layer does not understand.
 - With `-strip-encrypted-reasoning`, makes an explicit exception to raw
-  preservation to recover otherwise unusable replayed state. Non-encrypted
-  reasoning fields and all unrelated request fields are retained; encrypted
-  compaction items are removed because their encrypted payload is required.
+  preservation to recover otherwise unusable replayed state. Reasoning and
+  compaction input items carrying `encrypted_content` are removed entirely;
+  every other input item and every unrelated request field is retained,
+  including reasoning items that carry no encrypted content.
 - Returns non-stream and stream responses in OpenAI Responses format.
 - Forwards Responses lifecycle and Conversations API calls upstream.
 - Rewrites returned model names only where it holds enough request context to restore the client-visible alias.
@@ -826,8 +829,8 @@ things can go wrong, and each reports itself differently:
   terminal event. If it says a resumed reasoning or `cmp_...` compaction item
   can no longer be decrypted, restart the proxy with
   `-strip-encrypted-reasoning` and retry the session. Recovery preserves the
-  visible transcript but intentionally loses the affected opaque reasoning or
-  compacted model context.
+  visible transcript but intentionally drops the affected reasoning and
+  compaction items, losing their opaque model context.
 
 Every path buffers the request body, and converted or stored paths create
 additional representations of it. Peak memory depends on payload shape and

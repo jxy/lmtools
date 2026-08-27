@@ -7,18 +7,20 @@ import (
 	"lmtools/internal/logger"
 )
 
-// responsesEncryptedStateRemoval records the two schema-distinct forms of
-// encrypted state removed by recovery mode. A reasoning item's
-// encrypted_content is optional, so the rest of that item remains useful input.
-// A compaction item's encrypted_content is required and is the compacted state,
-// so the whole item has to go.
+// responsesEncryptedStateRemoval records the two kinds of input item recovery
+// mode drops. Both go whole. encrypted_content is optional on a reasoning item
+// and required on a compaction item, but in both it is the entire model-visible
+// content; what would be left of a reasoning item is its `rs_...` id, and an id
+// is a handle on state the backend could not resolve in the first place — which
+// is why the session needed recovery. Reasoning input is optional, so dropping
+// the item replays the visible transcript without it.
 type responsesEncryptedStateRemoval struct {
-	ReasoningFields int
+	ReasoningItems  int
 	CompactionItems int
 }
 
 func (r responsesEncryptedStateRemoval) total() int {
-	return r.ReasoningFields + r.CompactionItems
+	return r.ReasoningItems + r.CompactionItems
 }
 
 // prepareResponsesPassthroughRequestBody applies the two opt-in/request-specific
@@ -69,7 +71,7 @@ func (s *Server) prepareResponsesPassthroughRequestBody(ctx context.Context, bod
 		return nil, fmt.Errorf("encode Responses passthrough request: %w", err)
 	}
 	if removed.total() > 0 {
-		logger.From(ctx).Warnf("-strip-encrypted-reasoning removed encrypted_content from %d reasoning item(s) and dropped %d encrypted compaction item(s) before direct Responses passthrough; prior opaque reasoning context is unavailable", removed.ReasoningFields, removed.CompactionItems)
+		logger.From(ctx).Warnf("-strip-encrypted-reasoning dropped %d encrypted reasoning item(s) and %d encrypted compaction item(s) before direct Responses passthrough; prior opaque reasoning context is unavailable", removed.ReasoningItems, removed.CompactionItems)
 	}
 	return updated, nil
 }
@@ -102,13 +104,7 @@ func stripEncryptedResponsesInput(input json.RawMessage) (json.RawMessage, respo
 
 		switch itemType {
 		case "reasoning":
-			delete(item, "encrypted_content")
-			updated, err := json.Marshal(item)
-			if err != nil {
-				return nil, removed, err
-			}
-			stripped = append(stripped, updated)
-			removed.ReasoningFields++
+			removed.ReasoningItems++
 		case "compaction":
 			removed.CompactionItems++
 		default:

@@ -131,10 +131,12 @@ func TestResponsesPassthroughStripEncryptedReasoningRecovery(t *testing.T) {
 
 	rawBody := `{
 		"model":"gpt-test",
+		"store":false,
 		"input":[
-			{"type":"reasoning","id":"rs_old","status":"completed","summary":[{"type":"summary_text","text":"keep this"}],"encrypted_content":"enc_reasoning"},
+			{"type":"reasoning","id":"rs_old","status":"completed","summary":[{"type":"summary_text","text":"drop this"}],"encrypted_content":"enc_reasoning"},
 			{"type":"compaction","id":"cmp_old","encrypted_content":"enc_compaction"},
 			{"type":"message","role":"user","content":"continue"},
+			{"type":"reasoning","id":"rs_plain","summary":[]},
 			{"type":"vendor_state","encrypted_content":"keep_vendor_value"}
 		],
 		"include":["reasoning.encrypted_content"],
@@ -161,22 +163,24 @@ func TestResponsesPassthroughStripEncryptedReasoningRecovery(t *testing.T) {
 		t.Fatalf("upstream model = %q, want mapped model", forwarded.Model)
 	}
 	if len(forwarded.Input) != 3 {
-		t.Fatalf("upstream input = %#v, want reasoning, message, and vendor items after dropping compaction", forwarded.Input)
+		t.Fatalf("upstream input = %#v, want message, unencrypted reasoning, and vendor items after dropping encrypted state", forwarded.Input)
 	}
-	reasoning := forwarded.Input[0]
-	if reasoning["type"] != "reasoning" || reasoning["id"] != "rs_old" || reasoning["status"] != "completed" {
-		t.Fatalf("reasoning item lost non-encrypted fields: %#v", reasoning)
-	}
-	if _, ok := reasoning["encrypted_content"]; ok {
-		t.Fatalf("reasoning item retained encrypted_content: %#v", reasoning)
-	}
-	if summary, ok := reasoning["summary"].([]interface{}); !ok || len(summary) != 1 {
-		t.Fatalf("reasoning summary = %#v, want it preserved", reasoning["summary"])
+	// An emptied reasoning item is not recovered state, it is a bare `rs_...`
+	// handle on state the backend already failed to resolve, so nothing may
+	// carry the dropped item's id forward.
+	if strings.Contains(captured.Body, "rs_old") || strings.Contains(captured.Body, "enc_reasoning") {
+		t.Fatalf("upstream body = %s, want the encrypted reasoning item dropped whole", captured.Body)
 	}
 	for _, item := range forwarded.Input {
 		if item["type"] == "compaction" {
 			t.Fatalf("encrypted compaction item was forwarded: %#v", item)
 		}
+	}
+	if got := forwarded.Input[0]["role"]; got != "user" {
+		t.Fatalf("upstream input[0] = %#v, want the user message preserved", forwarded.Input[0])
+	}
+	if got := forwarded.Input[1]["id"]; got != "rs_plain" {
+		t.Fatalf("upstream input[1] = %#v, want a reasoning item without encrypted_content untouched", forwarded.Input[1])
 	}
 	if got := forwarded.Input[2]["encrypted_content"]; got != "keep_vendor_value" {
 		t.Fatalf("unrelated encrypted_content = %#v, want preserved", got)
