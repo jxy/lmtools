@@ -30,6 +30,10 @@ type Config struct {
 	// instead of converting it. Valid for openai and native argo only.
 	OpenAIResponses bool
 
+	// StripEncryptedReasoning removes opaque encrypted reasoning state from
+	// direct Responses requests as an opt-in recovery measure.
+	StripEncryptedReasoning bool
+
 	// Security Configuration
 	MaxRequestBodySize  int64 // Maximum request body size in bytes
 	MaxResponseBodySize int64 // Maximum response body size in bytes

@@ -168,6 +168,16 @@ func (r sseRecord) data() string {
 	return strings.Join(r.DataLines, "\n")
 }
 
+func (r sseRecord) event() string {
+	var event string
+	for _, line := range r.Lines {
+		if value, ok := sseFieldValue(line, "event"); ok {
+			event = value
+		}
+	}
+	return event
+}
+
 func (r sseRecord) withData(data string) string {
 	var payload strings.Builder
 	dataWritten := false

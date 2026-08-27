@@ -673,7 +673,10 @@ func TestResponsesPassthroughStopsAfterTerminalResponseEvent(t *testing.T) {
 func TestResponsesPassthroughStopsAfterUpstreamErrorEvent(t *testing.T) {
 	upstream := strings.Join([]string{
 		"event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-test\"}}\n\n",
-		"event: error\ndata: {\"type\":\"error\",\"sequence_number\":1,\"error\":{\"type\":\"server_error\",\"message\":\"backend failed\"}}\n\n",
+		// Some Responses-compatible backends put the event type only in the
+		// SSE field. The JSON body is still the provider's error and must end
+		// the stream without a synthetic response.failed after it.
+		"event: error\ndata: {\"error\":{\"type\":\"invalid_request_error\",\"message\":\"backend failed\"}}\n\n",
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"delta\":\"kept-going\"}\n\n",
 	}, "")
 	body := newBlockingAfterPayloadStreamBody(upstream)

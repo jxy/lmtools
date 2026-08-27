@@ -104,6 +104,91 @@ func TestResponsesPassthroughForwardsBodyVerbatim(t *testing.T) {
 	}
 }
 
+func TestResponsesPassthroughPreservesEncryptedReasoningByDefault(t *testing.T) {
+	server, captured := newResponsesPassthroughTestServer(t, func(*http.Request) (*http.Response, error) {
+		return jsonRoundTripResponse(http.StatusOK, map[string]interface{}{
+			"id": "resp_upstream", "object": "response", "status": "completed", "model": "gpt-test",
+		}), nil
+	})
+
+	rawBody := `{"model":"gpt-test","input":[{"type":"reasoning","id":"rs_old","summary":[],"encrypted_content":"enc_old"}]}`
+	status, body := postRawResponses(t, server, rawBody)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", status, body)
+	}
+	if captured.Body != rawBody {
+		t.Fatalf("upstream body = %s, want encrypted reasoning preserved verbatim by default: %s", captured.Body, rawBody)
+	}
+}
+
+func TestResponsesPassthroughStripEncryptedReasoningRecovery(t *testing.T) {
+	server, captured := newResponsesPassthroughTestServer(t, func(*http.Request) (*http.Response, error) {
+		return jsonRoundTripResponse(http.StatusOK, map[string]interface{}{
+			"id": "resp_upstream", "object": "response", "status": "completed", "model": "gpt-upstream",
+		}), nil
+	}, `^gpt-test$=gpt-upstream`)
+	server.config.StripEncryptedReasoning = true
+
+	rawBody := `{
+		"model":"gpt-test",
+		"input":[
+			{"type":"reasoning","id":"rs_old","status":"completed","summary":[{"type":"summary_text","text":"keep this"}],"encrypted_content":"enc_reasoning"},
+			{"type":"compaction","id":"cmp_old","encrypted_content":"enc_compaction"},
+			{"type":"message","role":"user","content":"continue"},
+			{"type":"vendor_state","encrypted_content":"keep_vendor_value"}
+		],
+		"include":["reasoning.encrypted_content"],
+		"vendor_only":{"encrypted_content":"keep_top_level_value"}
+	}`
+	status, body := postRawResponses(t, server, rawBody)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", status, body)
+	}
+
+	var forwarded struct {
+		Model      string                   `json:"model"`
+		Input      []map[string]interface{} `json:"input"`
+		Include    []string                 `json:"include"`
+		VendorOnly map[string]interface{}   `json:"vendor_only"`
+	}
+	if err := json.Unmarshal([]byte(captured.Body), &forwarded); err != nil {
+		t.Fatalf("json.Unmarshal(upstream body) error = %v; body = %s", err, captured.Body)
+	}
+	if captured.ContentLength != int64(len(captured.Body)) {
+		t.Fatalf("upstream Content-Length = %d, want sanitized body length %d", captured.ContentLength, len(captured.Body))
+	}
+	if forwarded.Model != "gpt-upstream" {
+		t.Fatalf("upstream model = %q, want mapped model", forwarded.Model)
+	}
+	if len(forwarded.Input) != 3 {
+		t.Fatalf("upstream input = %#v, want reasoning, message, and vendor items after dropping compaction", forwarded.Input)
+	}
+	reasoning := forwarded.Input[0]
+	if reasoning["type"] != "reasoning" || reasoning["id"] != "rs_old" || reasoning["status"] != "completed" {
+		t.Fatalf("reasoning item lost non-encrypted fields: %#v", reasoning)
+	}
+	if _, ok := reasoning["encrypted_content"]; ok {
+		t.Fatalf("reasoning item retained encrypted_content: %#v", reasoning)
+	}
+	if summary, ok := reasoning["summary"].([]interface{}); !ok || len(summary) != 1 {
+		t.Fatalf("reasoning summary = %#v, want it preserved", reasoning["summary"])
+	}
+	for _, item := range forwarded.Input {
+		if item["type"] == "compaction" {
+			t.Fatalf("encrypted compaction item was forwarded: %#v", item)
+		}
+	}
+	if got := forwarded.Input[2]["encrypted_content"]; got != "keep_vendor_value" {
+		t.Fatalf("unrelated encrypted_content = %#v, want preserved", got)
+	}
+	if len(forwarded.Include) != 1 || forwarded.Include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v, want preserved", forwarded.Include)
+	}
+	if got := forwarded.VendorOnly["encrypted_content"]; got != "keep_top_level_value" {
+		t.Fatalf("unknown top-level field = %#v, want preserved", forwarded.VendorOnly)
+	}
+}
+
 // A -model-map rule rewrites the model in the forwarded body.
 func TestResponsesPassthroughRewritesMappedModel(t *testing.T) {
 	server, captured := newResponsesPassthroughTestServer(t, func(*http.Request) (*http.Response, error) {
@@ -202,6 +287,25 @@ func TestResponsesPassthroughRewritesResponseModel(t *testing.T) {
 			t.Fatalf("client stream = %s, want every event to name %q", body, clientModel)
 		}
 	})
+}
+
+func TestResponsesPassthroughPreservesEventNameOnlyErrorAsSoleEvent(t *testing.T) {
+	const upstream = "event: error\n" +
+		"data: {\"error\":{\"message\":\"Encrypted content could not be decrypted or parsed.\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\"}}\n\n"
+	server, _ := newResponsesPassthroughTestServer(t, func(*http.Request) (*http.Response, error) {
+		return responsesSSEResponse(upstream), nil
+	})
+
+	status, body := postRawResponses(t, server, `{"model":"gpt-test","stream":true,"input":"continue"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", status, body)
+	}
+	if body != upstream {
+		t.Fatalf("client stream = %q, want the provider error unchanged: %q", body, upstream)
+	}
+	if strings.Contains(body, "response.failed") {
+		t.Fatalf("client stream = %s, want no synthetic response.failed after event: error", body)
+	}
 }
 
 // The proxy must not mask the provider's own limits: an upstream rejection is

@@ -117,6 +117,14 @@ func TestUsageAdvertisesRequestBodyDefault(t *testing.T) {
 	}
 }
 
+func TestUsageAdvertisesEncryptedReasoningRecovery(t *testing.T) {
+	var usage bytes.Buffer
+	printUsage(&usage)
+	if !strings.Contains(usage.String(), "-strip-encrypted-reasoning") {
+		t.Fatalf("usage does not mention encrypted reasoning recovery:\n%s", usage.String())
+	}
+}
+
 func TestRequestBodyLimitBytes(t *testing.T) {
 	maxWholeMB := int64(math.MaxInt64) / bytesPerMB
 	for _, tc := range []struct {

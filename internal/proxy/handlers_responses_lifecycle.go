@@ -42,7 +42,13 @@ func (s *Server) handleOpenAIResponsesInputTokens(w http.ResponseWriter, r *http
 	}
 	if s.useDirectResponsesForModel(route.MappedModel) {
 		req.Model = route.MappedModel
-		s.forwardOpenAIRawLifecycleWithBody(w, r, "responses", rewriteResponsesRequestModel(rawBody, route.MappedModel))
+		rawBody, err := s.prepareResponsesPassthroughRequestBody(ctx, rawBody, route.MappedModel, true)
+		if err != nil {
+			logger.From(ctx).Errorf("Failed to prepare Responses input_tokens passthrough request: %v", err)
+			s.sendOpenAIError(w, ErrTypeServer, "Failed to prepare upstream request", "upstream_request_error", http.StatusInternalServerError)
+			return
+		}
+		s.forwardOpenAIRawLifecycleWithBody(w, r, "responses", rawBody)
 		return
 	}
 	req.Model = route.MappedModel
@@ -135,7 +141,13 @@ func (s *Server) handleOpenAIResponsesCompact(w http.ResponseWriter, r *http.Req
 	}
 	if s.useDirectResponsesForModel(route.MappedModel) {
 		req.Model = route.MappedModel
-		s.forwardOpenAIRawLifecycleWithBody(w, r, "responses", rewriteResponsesRequestModel(rawBody, route.MappedModel))
+		rawBody, err := s.prepareResponsesPassthroughRequestBody(ctx, rawBody, route.MappedModel, true)
+		if err != nil {
+			logger.From(ctx).Errorf("Failed to prepare Responses compact passthrough request: %v", err)
+			s.sendOpenAIError(w, ErrTypeServer, "Failed to prepare upstream request", "upstream_request_error", http.StatusInternalServerError)
+			return
+		}
+		s.forwardOpenAIRawLifecycleWithBody(w, r, "responses", rawBody)
 		return
 	}
 	req.Model = route.MappedModel

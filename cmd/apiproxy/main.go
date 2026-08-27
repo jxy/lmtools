@@ -80,6 +80,9 @@ Model Options:
 
 Request Options:
   -max-request-body-size int Maximum request body size in MB (default: %d)
+  -strip-encrypted-reasoning
+                            Strip unusable encrypted reasoning state from direct
+                            Responses requests (recovery mode)
 
 Logging Options:
   -log-level string          Log level: DEBUG, INFO, WARN, ERROR (default: "INFO")
@@ -119,10 +122,11 @@ func main() {
 		port int
 
 		// Configuration
-		providerOpts       providerconfig.Options
-		modelMapSpecs      repeatableStringFlag
-		maxRequestBodySize int64
-		sessionsDir        string
+		providerOpts            providerconfig.Options
+		modelMapSpecs           repeatableStringFlag
+		maxRequestBodySize      int64
+		sessionsDir             string
+		stripEncryptedReasoning bool
 
 		// Logging
 		logLevel  string
@@ -139,6 +143,7 @@ func main() {
 	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", defaultMaxRequestBodySizeMB,
 		fmt.Sprintf("Maximum request body size in MB (matches OpenAI's %dMB payload limit)", defaultMaxRequestBodySizeMB))
 	flag.StringVar(&sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
+	flag.BoolVar(&stripEncryptedReasoning, "strip-encrypted-reasoning", false, "Strip unusable encrypted reasoning state from direct Responses requests (recovery mode)")
 
 	// Logging flags
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (DEBUG, INFO, WARN, ERROR)")
@@ -178,18 +183,19 @@ func main() {
 
 	// Create configuration from flags
 	config := &proxy.Config{
-		ProviderKeySet:     providerKeys,
-		ArgoUser:           providerOpts.ArgoUser,
-		ArgoDev:            providerOpts.ArgoDev,
-		ArgoTest:           providerOpts.ArgoTest,
-		ArgoLegacy:         providerOpts.ArgoLegacy,
-		ArgoEnv:            providerOpts.ArgoEnv,
-		Provider:           providerOpts.Provider,
-		ProviderURL:        providerOpts.ProviderURL,
-		OpenAIResponses:    providerOpts.OpenAIResponses,
-		ModelMapRules:      modelMapRules,
-		MaxRequestBodySize: maxRequestBodySizeBytes,
-		SessionsDir:        sessionsDir,
+		ProviderKeySet:          providerKeys,
+		ArgoUser:                providerOpts.ArgoUser,
+		ArgoDev:                 providerOpts.ArgoDev,
+		ArgoTest:                providerOpts.ArgoTest,
+		ArgoLegacy:              providerOpts.ArgoLegacy,
+		ArgoEnv:                 providerOpts.ArgoEnv,
+		Provider:                providerOpts.Provider,
+		ProviderURL:             providerOpts.ProviderURL,
+		OpenAIResponses:         providerOpts.OpenAIResponses,
+		StripEncryptedReasoning: stripEncryptedReasoning,
+		ModelMapRules:           modelMapRules,
+		MaxRequestBodySize:      maxRequestBodySizeBytes,
+		SessionsDir:             sessionsDir,
 	}
 
 	// Validate configuration

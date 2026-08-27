@@ -69,7 +69,7 @@ func (r *responsesSSERelay) run(body io.Reader) error {
 		// path the transform rewrites the model back to the client's name, and a
 		// synthetic failure event has to quote that same name rather than leak the
 		// upstream one.
-		stopAfterWrite := r.observe(data)
+		stopAfterWrite := r.observe(record.event(), data)
 		done := strings.TrimSpace(data) == OpenAIDoneMarker
 		// Clients using the shared OpenAI SSE decoder stop at [DONE]. If the
 		// upstream skipped the Responses terminal event, emit the failure while it
@@ -101,10 +101,14 @@ func (r *responsesSSERelay) run(body io.Reader) error {
 // observe records the response identity, the numbering the client is reading,
 // and whether a terminal event went by. It reports terminal events so the
 // caller can stop consuming immediately after forwarding that record.
-func (r *responsesSSERelay) observe(data string) bool {
+func (r *responsesSSERelay) observe(sseEvent, data string) bool {
+	sseTerminal := sseEvent == "error"
+	if sseTerminal {
+		r.sawTerminal = true
+	}
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" || trimmed == OpenAIDoneMarker {
-		return false
+		return sseTerminal
 	}
 	var event struct {
 		Type           string `json:"type"`
@@ -115,8 +119,8 @@ func (r *responsesSSERelay) observe(data string) bool {
 			CreatedAt int64  `json:"created_at"`
 		} `json:"response"`
 	}
-	if err := json.Unmarshal([]byte(trimmed), &event); err != nil || event.Type == "" {
-		return false
+	if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+		return sseTerminal
 	}
 	r.advanceSequence(event.SequenceNumber)
 	if event.Response != nil {
@@ -135,7 +139,7 @@ func (r *responsesSSERelay) observe(data string) bool {
 		r.sawTerminal = true
 		return true
 	}
-	return false
+	return sseTerminal
 }
 
 // advanceSequence moves the counter past an event the client has now seen. The

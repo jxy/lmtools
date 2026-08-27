@@ -60,8 +60,11 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	responsesReq.Model = route.MappedModel
 
 	if s.useDirectResponsesForModel(route.MappedModel) {
-		if route.MappedModel != route.OriginalModel {
-			responsesRawBody = rewriteResponsesRequestModel(responsesRawBody, route.MappedModel)
+		responsesRawBody, err = s.prepareResponsesPassthroughRequestBody(ctx, responsesRawBody, route.MappedModel, route.MappedModel != route.OriginalModel)
+		if err != nil {
+			log.Errorf("Failed to prepare Responses passthrough request: %v", err)
+			s.sendOpenAIError(w, ErrTypeServer, "Failed to prepare upstream request", "upstream_request_error", http.StatusInternalServerError)
+			return
 		}
 		s.forwardOpenAIResponsesDirectly(w, r, responsesReq, responsesRawBody, route.OriginalModel)
 		return
@@ -267,13 +270,6 @@ func rewriteResponsesBodyModel(body []byte, originalModel string) []byte {
 		return body
 	}
 	return rewriteResponsesTopLevelModel(body, originalModel, false)
-}
-
-func rewriteResponsesRequestModel(body []byte, mappedModel string) []byte {
-	if mappedModel == "" {
-		return body
-	}
-	return rewriteResponsesTopLevelModel(body, mappedModel, true)
 }
 
 func rewriteResponsesTopLevelModel(body []byte, model string, addIfMissing bool) []byte {
