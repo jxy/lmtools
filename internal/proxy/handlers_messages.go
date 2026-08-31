@@ -150,6 +150,10 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	// For now, provide a simple estimation.
 	// This could be enhanced with provider-specific token counting.
+	if anyDeferredTool(req.Tools) {
+		// Not warnDroppedField: nothing is converted here, so there is no target to name.
+		log.Warnf(`Ignoring Anthropic field "tools[].defer_loading" in the local token estimate: deferred tools are counted as if loaded`)
+	}
 	inputTokens := EstimateRequestTokens(&AnthropicRequest{
 		Model:    req.Model,
 		System:   req.System,
@@ -262,12 +266,16 @@ func (s *Server) forwardAnthropicCountTokens(ctx context.Context, req *Anthropic
 }
 
 func (s *Server) forwardGoogleTokenCount(ctx context.Context, req *AnthropicTokenCountRequest, model string) (*AnthropicTokenCountResponse, error) {
-	typed := AnthropicRequestToTyped(&AnthropicRequest{
+	// This route renders to Google without going through ConvertAnthropicToGoogle,
+	// so it has to ask for the drop warnings itself or silently lose every one.
+	anthReq := &AnthropicRequest{
 		Model:    model,
 		System:   req.System,
 		Messages: req.Messages,
 		Tools:    req.Tools,
-	})
+	}
+	warnAnthropicRequestDropsForGoogle(ctx, anthReq)
+	typed := AnthropicRequestToTyped(anthReq)
 	typed.MaxTokens = nil
 
 	googleReq, err := TypedToGoogleRequest(typed, model, nil)

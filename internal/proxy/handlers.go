@@ -20,6 +20,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/":
 		log.Infof("%s %s | Root endpoint accessed", r.Method, r.URL.Path)
 		s.handleRoot(w, r)
+	case "/api/hello":
+		log.Infof("%s %s | Liveness endpoint accessed", r.Method, r.URL.Path)
+		s.handleHello(w, r)
 	case "/v1/messages":
 		s.handleMessages(w, r)
 	case "/v1/messages/count_tokens":
@@ -46,10 +49,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleRoot serves a simple health check response
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
 	_ = s.sendJSONResponse(r.Context(), w, map[string]string{
 		"status": "ok",
 		"name":   "lmtools-proxy",
+	})
+}
+
+// handleHello serves the Anthropic API's unauthenticated liveness endpoint.
+// Clients probing `<base-url>/api/hello` expect upstream's `{"message":"hello"}`,
+// not the proxy's own `/` identity payload, and at least one of them treats a
+// non-200 as a failed connectivity check.
+func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
+	_ = s.sendJSONResponse(r.Context(), w, map[string]string{
+		"message": "hello",
 	})
 }
 

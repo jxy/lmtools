@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/providers"
+	"slices"
 	"strings"
 )
 
@@ -19,6 +20,24 @@ func warnDroppedField(ctx context.Context, source, target, field, reason string)
 
 func warnConvertedFieldLoss(ctx context.Context, source, target, field, reason string) {
 	logger.From(ctx).Warnf("Converting %s field %q to %s with limited fidelity: %s", source, field, target, reason)
+}
+
+// anyDeferredTool reports whether any tool is held out of the model's context
+// until a tool-search tool surfaces it. An explicit false is the API default and
+// costs the request nothing, so it is not a deferral.
+func anyDeferredTool(tools []AnthropicTool) bool {
+	return slices.ContainsFunc(tools, func(tool AnthropicTool) bool {
+		return tool.DeferLoading != nil && *tool.DeferLoading
+	})
+}
+
+// warnAnthropicDeferLoadingDrop warns once per request, not once per tool like
+// the sibling tools[] warnings: what the target cannot express is the whole
+// tool-search arrangement, not one tool at a time.
+func warnAnthropicDeferLoadingDrop(ctx context.Context, target string, tools []AnthropicTool) {
+	if anyDeferredTool(tools) {
+		warnDroppedField(ctx, "Anthropic", target, "tools[].defer_loading", "deferred tool loading is an Anthropic tool-search control")
+	}
 }
 
 func warnDroppedResponsesTool(ctx context.Context, index int, toolType string) {
@@ -356,6 +375,7 @@ func warnAnthropicRequestDropsForOpenAI(ctx context.Context, req *AnthropicReque
 			warnDroppedField(ctx, "Anthropic", "OpenAI", "tools[].cache_control", "")
 		}
 	}
+	warnAnthropicDeferLoadingDrop(ctx, "OpenAI", req.Tools)
 	warnUnsupportedAnthropicBlocks(ctx, "OpenAI", req.Messages)
 }
 
@@ -401,6 +421,7 @@ func warnAnthropicRequestDropsForGoogle(ctx context.Context, req *AnthropicReque
 			warnDroppedField(ctx, "Anthropic", "Google", "tools[].cache_control", "")
 		}
 	}
+	warnAnthropicDeferLoadingDrop(ctx, "Google", req.Tools)
 	warnUnsupportedAnthropicBlocks(ctx, "Google", req.Messages)
 }
 

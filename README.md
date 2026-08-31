@@ -491,6 +491,9 @@ OpenAI-compatible:
 Health check:
 
 - `GET /` returns `{"status":"ok","name":"lmtools-proxy"}`.
+- `GET /api/hello` returns `{"message":"hello"}`, mirroring the Anthropic API's
+  liveness endpoint so clients that probe `<base-url>/api/hello` for reachability
+  get the response they expect. Neither endpoint requires credentials.
 
 Streaming `/v1/messages` responses emit Anthropic-format SSE. Once the upstream
 streaming request returns HTTP 200, `apiproxy` sends an `event: ping` keepalive

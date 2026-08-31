@@ -214,12 +214,19 @@ func addAnthropicContentBlockExtras(m map[string]interface{}, b AnthropicContent
 }
 
 // AnthropicTool represents a tool definition.
+//
+// DeferLoading is the tool-search control: a deferred tool is declared to the
+// request but kept out of the model's context until a tool-search server tool
+// surfaces it. Anthropic-wire routes marshal this struct straight to the
+// upstream, so dropping the flag here while still forwarding the search tool
+// would leave the upstream with nothing to search for.
 type AnthropicTool struct {
 	Type         string                 `json:"type,omitempty"`
 	Name         string                 `json:"name,omitempty"`
 	Description  string                 `json:"description,omitempty"`
 	InputSchema  interface{}            `json:"input_schema,omitempty"`
 	Strict       *bool                  `json:"strict,omitempty"`
+	DeferLoading *bool                  `json:"defer_loading,omitempty"`
 	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 }
 

@@ -452,6 +452,11 @@ func TestAllEndpointsLogging(t *testing.T) {
 			expectedLog: "GET / | Root endpoint accessed",
 		},
 		{
+			method:      "GET",
+			path:        "/api/hello",
+			expectedLog: "GET /api/hello | Liveness endpoint accessed",
+		},
+		{
 			method:      "POST",
 			path:        "/v1/messages",
 			expectedLog: "POST /v1/messages | Anthropic messages endpoint",
