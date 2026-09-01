@@ -122,11 +122,24 @@ Commands can take standard input from a literal `stdin` string or a streamed
 `stdin_file`, and can redirect output to files with `stdout_file` and
 `stderr_file` instead of returning those streams in the tool result. Relative
 paths resolve against the call's `workdir`. Every redirection must name a
-regular file directly: symlinks, FIFOs, and devices are rejected, so the path
-shown at the approval prompt is the file that is written. Streams without a
-file are captured into the tool result, bounded per command by
-`-tool-max-output-bytes` (1 MiB by default); output past the bound is cut off
-and the result is marked truncated.
+regular file directly: symlinks and FIFOs are rejected, so the path shown at
+the approval prompt is the file that is written. Streams without a file are
+captured into the tool result, bounded per command by `-tool-max-output-bytes`
+(1 MiB by default); output past the bound is cut off and the result is marked
+truncated.
+
+Existing output files are emptied only after every redirection opens. If setup
+creates an output but no process starts, `lmc` removes it and reports any
+cleanup failure; pre-existing files are never removed.
+
+A closed set of pseudo-devices is accepted alongside regular files:
+`/dev/null`, `/dev/zero`, `/dev/full`, `/dev/random`, and `/dev/urandom`.
+Writing to `/dev/null` is the way to throw a stream away rather than pay for it
+in the tool result. Any other device is refused, including `/dev/tty`, and the
+file found at one of those names must really be a character device. They are
+not truncated, they are not an approval shortcut, and unlike a regular file
+they may be shared: several commands in one round may write to `/dev/null`, and
+one command may read and write it at once.
 
 File redirection is a separate approval boundary. A legacy array whitelist rule
 such as `["sort"]` approves `sort` only when `stdin_file`, `stdout_file`, and

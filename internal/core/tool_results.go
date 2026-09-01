@@ -35,9 +35,17 @@ func ToolResultBlockFromResult(result ToolResult, name string) ToolResultBlock {
 	return block
 }
 
+// notRunStatement is added here so every pre-execution failure tells the model
+// that no command ran without duplicating that wording at each failure site.
+const notRunStatement = "Command was not executed."
+
 func formatFailedToolResultContent(result ToolResult) string {
-	if result.Output == "" {
-		return result.Error
+	message := result.Error
+	if result.NotRun {
+		message = notRunStatement + "\n" + message
 	}
-	return fmt.Sprintf("Output:\n%s\n\nError:\n%s", result.Output, result.Error)
+	if result.Output == "" {
+		return message
+	}
+	return fmt.Sprintf("Output:\n%s\n\nError:\n%s", result.Output, message)
 }

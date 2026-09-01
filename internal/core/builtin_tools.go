@@ -1,5 +1,7 @@
 package core
 
+import "lmtools/internal/constants"
+
 // UniversalCommandToolName is the name of the built-in command tool. The
 // executor dispatches on it and the CLI renders on it, so a typo degrades
 // silently to a generic result rather than failing.
@@ -8,7 +10,11 @@ const UniversalCommandToolName = "universal_command"
 // outputRedirectDescription is the shared tail of the stdout_file and
 // stderr_file schema descriptions: one spelling of the output-redirection
 // contract, so the two streams cannot drift apart.
-const outputRedirectDescription = " to this file instead of returning it; created or truncated; relative to workdir. Must name a regular file directly, not a symlink, FIFO, or device; /dev/null is rejected. Leaving this unset does not discard the stream: it is captured into the tool result, up to a byte cap, so send a large one to a scratch file and read back the part you need"
+const outputRedirectDescription = " to this file instead of returning it; created or truncated; relative to workdir." +
+	" Must name a regular file directly, not a symlink or FIFO. The only non-regular targets accepted are " +
+	constants.PermittedCommandDevicesText + "; write to /dev/null to discard the stream." +
+	" Leaving this unset does not discard it: it is captured into the tool result, up to a byte cap," +
+	" so send a large one to a scratch file and read back the part you need"
 
 // UniversalCommandArgs is the canonical JSON input accepted by
 // universal_command and displayed by its UI.
@@ -55,8 +61,10 @@ func GetBuiltinUniversalCommandTool() []ToolDefinition {
 						"description": "Literal standard input; do not combine with stdin_file",
 					},
 					"stdin_file": map[string]interface{}{
-						"type":        "string",
-						"description": "File streamed to standard input; relative to workdir; do not combine with stdin or reuse as an output file. Must name an existing regular file directly, not a symlink, FIFO, or device such as /dev/stdin",
+						"type": "string",
+						"description": "File streamed to standard input; relative to workdir; do not combine with stdin, and do not name the same regular file as an output." +
+							" Must name an existing regular file directly, not a symlink or FIFO. The only non-regular sources accepted are " +
+							constants.PermittedCommandDevicesText + "; /dev/stdin and the like are rejected",
 					},
 					"stdout_file": map[string]interface{}{
 						"type":        "string",

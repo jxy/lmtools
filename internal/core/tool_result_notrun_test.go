@@ -60,13 +60,18 @@ func TestToolResultNotRunSurvivesTheSessionRoundTrip(t *testing.T) {
 	}
 }
 
-// NotRun is for the operator's transcript. The model reads Error, and adding a
-// display field must not change the block the provider is sent.
-func TestNotRunDoesNotChangeTheModelVisibleBlock(t *testing.T) {
+// NotRun is model-visible because the diagnostic alone does not establish
+// whether a process started.
+func TestNotRunTellsTheModelTheCommandNeverRan(t *testing.T) {
 	result := ToolResult{ID: "call-1", Error: "denied: blacklisted", Code: "DENIED_BLACKLIST"}
 	ran := ToolResultBlockFromResult(result, "universal_command")
+	if ran.Content != "denied: blacklisted" {
+		t.Fatalf("block for a command that ran = %q, want the error alone", ran.Content)
+	}
+
 	result.NotRun = true
-	if notRun := ToolResultBlockFromResult(result, "universal_command"); !reflect.DeepEqual(notRun, ran) {
-		t.Fatalf("model-visible block changed with NotRun: %#v, want %#v", notRun, ran)
+	notRun := ToolResultBlockFromResult(result, "universal_command")
+	if !notRun.IsError || notRun.Content != "Command was not executed.\ndenied: blacklisted" {
+		t.Fatalf("model-visible block = %#v, want the not-run statement above the error", notRun)
 	}
 }

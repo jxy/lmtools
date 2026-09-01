@@ -39,7 +39,7 @@ func TestExecutorRejectsNamedPipeStdioWithoutPeer(t *testing.T) {
 				t.Fatalf("error code = %q, want EXEC_ERROR", result.Code)
 			}
 			if !strings.Contains(result.Error, "open "+stream.name+" file") ||
-				!strings.Contains(result.Error, "not a regular file") {
+				!strings.Contains(result.Error, "neither a regular file nor one of") {
 				t.Fatalf("error = %q, want non-regular %s file error", result.Error, stream.name)
 			}
 		})
@@ -48,28 +48,28 @@ func TestExecutorRejectsNamedPipeStdioWithoutPeer(t *testing.T) {
 
 // The test above rejects its FIFO at the pre-open Lstat, so it cannot tell
 // whether the post-open recheck still exists. Reaching that branch through
-// openRegularCommandFile needs the path to change between the check and the
+// openCommandFile needs the path to change between the check and the
 // open, which is a race no test can win reliably — so the check is exercised
 // directly, on a descriptor that really is a pipe.
-func TestVerifyOpenedRegularCommandFileRejectsNonRegularDescriptor(t *testing.T) {
+func TestVerifyOpenedCommandFileRejectsNonRegularDescriptor(t *testing.T) {
 	fifoPath := filepath.Join(t.TempDir(), "recheck.fifo")
 	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
 		t.Skipf("create FIFO: %v", err)
 	}
 
 	// O_NONBLOCK is what lets a read-side open of a peerless FIFO return at
-	// all; it is the same flag openRegularCommandFile uses.
+	// all; it is the same flag openCommandFile uses.
 	file, err := os.OpenFile(fifoPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		t.Fatalf("open FIFO: %v", err)
 	}
 	defer file.Close()
 
-	_, err = verifyOpenedRegularCommandFile(file, fifoPath)
+	_, err = verifyOpenedCommandFile(file, fifoPath)
 	if err == nil {
-		t.Fatal("verifyOpenedRegularCommandFile() = nil, want a non-regular rejection")
+		t.Fatal("verifyOpenedCommandFile() = nil, want a non-regular rejection")
 	}
-	if !strings.Contains(err.Error(), "not a regular file") {
+	if !strings.Contains(err.Error(), "neither a regular file nor one of") {
 		t.Fatalf("error = %q, want a non-regular file rejection", err)
 	}
 
@@ -82,8 +82,8 @@ func TestVerifyOpenedRegularCommandFileRejectsNonRegularDescriptor(t *testing.T)
 		t.Fatal(err)
 	}
 	defer plain.Close()
-	if _, err := verifyOpenedRegularCommandFile(plain, regular); err != nil {
-		t.Fatalf("verifyOpenedRegularCommandFile() on a regular file = %v, want nil", err)
+	if _, err := verifyOpenedCommandFile(plain, regular); err != nil {
+		t.Fatalf("verifyOpenedCommandFile() on a regular file = %v, want nil", err)
 	}
 }
 

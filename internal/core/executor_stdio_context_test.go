@@ -74,7 +74,7 @@ func TestConfigureCommandFilesHonorsDoneContextBeforeTruncation(t *testing.T) {
 	}
 }
 
-// openRegularCommandFile keeps exactly one cancellation check, at entry, and
+// openCommandFile keeps exactly one cancellation check, at entry, and
 // this is the test that fails when it is deleted: O_CREATE makes the open
 // itself the observable side effect, so a guard that does not run leaves a file
 // behind. It is also what satisfies the between-opens requirement —
@@ -87,15 +87,15 @@ func TestOpenRegularCommandFileHonorsDoneContextBeforeOpening(t *testing.T) {
 
 			ctx, cancel := tt.context()
 			defer cancel()
-			file, info, err := openRegularCommandFile(ctx, path, os.O_CREATE|os.O_WRONLY, constants.FilePerm)
-			if file != nil {
-				_ = file.Close()
+			opened, err := openCommandFile(ctx, path, os.O_CREATE|os.O_WRONLY, constants.FilePerm)
+			if opened.file != nil {
+				_ = opened.file.Close()
 			}
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("openRegularCommandFile() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("openCommandFile() error = %v, want %v", err, tt.wantErr)
 			}
-			if file != nil || info != nil {
-				t.Fatalf("openRegularCommandFile() = (%v, %v), want no descriptor", file, info)
+			if opened.file != nil || opened.info != nil {
+				t.Fatalf("openCommandFile() = %#v, want no descriptor", opened)
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Fatalf("stat %s = %v, want the file never to have been created", path, err)

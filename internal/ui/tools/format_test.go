@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	cliui "lmtools/internal/ui"
@@ -45,7 +46,11 @@ func TestCLIToolUIFormatsReviewedParallelBatch(t *testing.T) {
 	results := []core.ToolResult{
 		{ID: "call-status", Output: "## main...origin/main [ahead 1]\n?? docs/\n", Elapsed: 58},
 		{ID: "call-show", Output: "failing output\n", Error: "exit status 1", Code: errors.ErrCodeExecError, Elapsed: 44},
-		{ID: "call-diff", Error: "Command was not executed: user denied permission.", Reason: "user denied permission", Code: errors.ErrCodeNotApproved, NotRun: true},
+		// The shape resolveApproval records: the reason alone in both fields.
+		// That the command never ran is stated by NotRun, which this transcript
+		// renders as "Not run:" and the model-visible block renders as
+		// notRunStatement; neither audience reads it out of Error.
+		{ID: "call-diff", Error: "user denied permission", Reason: "user denied permission", Code: errors.ErrCodeNotApproved, NotRun: true},
 	}
 
 	for i, call := range calls {
@@ -660,7 +665,7 @@ func TestCommandThatNeverStartedIsNotRenderedAsAFailure(t *testing.T) {
 		{
 			name:  "redirection that cannot be opened",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["/bin/echo","hi"],"stdout_file":%q}`, notARegularFile))},
-			want:  `[1/1] Not run: open stdout file "<TMP>/adirectory": "<TMP>/adirectory" is not a regular file (stdout file "<TMP>/adirectory")`,
+			want:  `[1/1] Not run: open stdout file "<TMP>/adirectory": "<TMP>/adirectory" is neither a regular file nor one of ` + constants.PermittedCommandDevicesText + ` (stdout file "<TMP>/adirectory")`,
 		},
 	}
 

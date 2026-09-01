@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
+	"lmtools/internal/constants"
 	"lmtools/internal/errors"
 	"os"
 	"os/exec"
@@ -293,8 +294,11 @@ func (e *Executor) resolveApproval(ctx context.Context, args UniversalCommandArg
 		result.Code = errors.ErrCodeApprovalError
 		return false
 	case !approved:
+		// Reason alone. That the command never ran is stated once, by
+		// notRunStatement, for every refusal rather than by this one in wording
+		// of its own.
 		result.Reason = "user denied permission"
-		result.Error = "Command was not executed: " + result.Reason + "."
+		result.Error = result.Reason
 		result.Code = errors.ErrCodeNotApproved
 		return false
 	}
@@ -323,8 +327,8 @@ func markCancelledBeforeRun(result *ToolResult) {
 // is one function that writes both.
 //
 // The two neighbouring refusals stay out. A cancellation denied nothing, and a
-// user denial is a person's answer rather than a policy's, with wording of its
-// own that TestDeniedApprovalBecomesExplicitModelVisibleToolError pins.
+// user denial is a person's answer rather than a policy's, carrying neither the
+// "denied:" prefix nor advice on how to widen a rule.
 func denyResult(result *ToolResult, code, reason string, hints ...string) {
 	result.NotRun = true
 	result.Code = code
@@ -415,6 +419,10 @@ func rejectSharedOutputFiles(prepared []preparedExecution, results []ToolResult)
 
 	for _, exec := range prepared {
 		for _, claimed := range commandFileClaims(exec.args) {
+			// Permitted devices carry no shared file contents to protect.
+			if files.shareable(claimed.path) {
+				continue
+			}
 			for _, existing := range claims {
 				if existing.index == exec.index || (!existing.writes && !claimed.writes) {
 					continue
@@ -508,6 +516,16 @@ func (c commandFileIdentities) identity(path string) commandFileIdentity {
 	return entry
 }
 
+// shareable recognizes a permitted device using the identity cache. The cheap
+// name check avoids statting every ordinary path.
+func (c commandFileIdentities) shareable(path string) bool {
+	if !constants.IsPermittedCommandDeviceName(path) {
+		return false
+	}
+	info := c.identity(path).info
+	return info != nil && isPermittedCommandDevice(info.Mode(), path)
+}
+
 // same compares already-resolved paths. Identical text is the common case; a
 // normalized comparison catches the aliases that differ only in spelling, and
 // os.SameFile catches the rest, but only for files that exist — so two calls
@@ -583,6 +601,11 @@ func validateCommandIOArgs(args *UniversalCommandArgs) error {
 
 	files := commandFileIdentities{}
 	stdinPath := resolveCommandFilePath(args.StdinFile, args.Workdir)
+	// A permitted input device cannot be overwritten through an output stream.
+	if files.shareable(stdinPath) {
+		return nil
+	}
+
 	for _, output := range []struct{ stream, path string }{
 		{stream: "stdout", path: args.StdoutFile},
 		{stream: "stderr", path: args.StderrFile},
@@ -590,7 +613,8 @@ func validateCommandIOArgs(args *UniversalCommandArgs) error {
 		if output.path == "" {
 			continue
 		}
-		if files.same(stdinPath, resolveCommandFilePath(output.path, args.Workdir)) {
+		outputPath := resolveCommandFilePath(output.path, args.Workdir)
+		if files.same(stdinPath, outputPath) {
 			return errStdinAliasesOutput(output.stream)
 		}
 	}

@@ -42,11 +42,12 @@ type commandFile struct {
 	stream string
 	path   string
 	file   *os.File
-	// truncate marks a file opened for writing. Truncation keys on this, set
-	// from the open mode that created the entry, rather than on the stream
-	// label — a relabeled or newly added input must never become a truncation
-	// target.
+	// info is the descriptor identity used for alias checks and safe cleanup.
+	info os.FileInfo
+	// truncate is true only for regular files opened for writing.
 	truncate bool
+	// created is the O_CREATE|O_EXCL result, not a pre-open path observation.
+	created bool
 }
 
 // runCommandWithIO runs a command, captures non-redirected output up to
@@ -81,9 +82,15 @@ func runCommandWithIO(ctx context.Context, cmd *exec.Cmd, args *UniversalCommand
 			"command exited but a descendant held its output stream open past %v; captured output may be incomplete: %w",
 			CommandWaitDelay, runErr)
 	}
-	closeErr := closeCommandFiles(commandFiles)
-	if runErr == nil && closeErr != nil {
-		runErr = closeErr
+	started := cmd.Process != nil
+	releaseErr := releaseCommandFiles(commandFiles, started)
+	if releaseErr != nil {
+		switch {
+		case runErr == nil:
+			runErr = releaseErr
+		case !started:
+			runErr = stdErrors.Join(runErr, fmt.Errorf("cleanup failed: %w", releaseErr))
+		}
 	}
 
 	return cw.buf.String(), cw.truncated, runErr
@@ -265,62 +272,54 @@ func unwrapPathError(err error) error {
 func configureCommandFiles(ctx context.Context, cmd *exec.Cmd, args *UniversalCommandArgs) ([]commandFile, error) {
 	opened := make([]commandFile, 0, 3)
 	fail := func(err error) ([]commandFile, error) {
-		_ = closeCommandFiles(opened)
+		if cleanupErr := releaseCommandFiles(opened, false); cleanupErr != nil {
+			err = stdErrors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
+		}
 		return nil, err
 	}
 
-	// The input is opened before either output so that an input-open failure
-	// cannot leave an output file already created.
-	open := func(stream, name string, flag int, perm os.FileMode) (*os.File, os.FileInfo, error) {
+	// Open input first so its failure cannot create an output that then needs
+	// race-prone cleanup.
+	open := func(stream, name string, flag int, perm os.FileMode) (commandFile, error) {
 		if name == "" {
-			return nil, nil, nil
+			return commandFile{}, nil
 		}
 		path := resolveCommandFilePath(name, args.Workdir)
-		file, info, err := openRegularCommandFile(ctx, path, flag, perm)
+		opening, err := openCommandFile(ctx, path, flag, perm)
 		if err != nil {
-			return nil, nil, fmt.Errorf("open %s file %q: %w", stream, path, err)
+			return commandFile{}, fmt.Errorf("open %s file %q: %w", stream, path, err)
 		}
-		opened = append(opened, commandFile{
-			stream:   stream,
-			path:     path,
-			file:     file,
-			truncate: flag&os.O_WRONLY != 0,
-		})
-		return file, info, nil
+		opening.stream = stream
+		opened = append(opened, opening)
+		return opening, nil
 	}
 
-	stdinFile, stdinInfo, err := open("stdin", args.StdinFile, os.O_RDONLY, 0)
+	stdinFile, err := open("stdin", args.StdinFile, os.O_RDONLY, 0)
 	if err != nil {
 		return fail(err)
 	}
-	stdoutFile, stdoutInfo, err := open("stdout", args.StdoutFile, os.O_CREATE|os.O_WRONLY, constants.FilePerm)
+	stdoutFile, err := open("stdout", args.StdoutFile, os.O_CREATE|os.O_WRONLY, constants.FilePerm)
 	if err != nil {
 		return fail(err)
 	}
-	stderrFile, stderrInfo, err := open("stderr", args.StderrFile, os.O_CREATE|os.O_WRONLY, constants.FilePerm)
+	stderrFile, err := open("stderr", args.StderrFile, os.O_CREATE|os.O_WRONLY, constants.FilePerm)
 	if err != nil {
 		return fail(err)
 	}
 
-	// Same-file checks compare the FileInfo each open already verified: the
-	// identity of an open descriptor cannot change, so statting it again would
-	// answer nothing new.
-	if stdinFile != nil {
-		for _, output := range []struct {
-			stream string
-			info   os.FileInfo
-		}{
-			{stream: "stdout", info: stdoutInfo},
-			{stream: "stderr", info: stderrInfo},
-		} {
-			if output.info != nil && os.SameFile(stdinInfo, output.info) {
+	// Compare the verified descriptors. Permitted devices are shareable because
+	// their input and output streams cannot overwrite one another.
+	if stdinFile.file != nil && !isPermittedCommandDevice(stdinFile.info.Mode(), stdinFile.path) {
+		for _, output := range []commandFile{stdoutFile, stderrFile} {
+			if output.file != nil && os.SameFile(stdinFile.info, output.info) {
 				return fail(errStdinAliasesOutput(output.stream))
 			}
 		}
 	}
 
-	if stdoutFile != nil && stderrFile != nil && os.SameFile(stdoutInfo, stderrInfo) {
-		if err := stderrFile.Close(); err != nil {
+	// The duplicate open cannot be the creator: stdout already held this inode.
+	if stdoutFile.file != nil && stderrFile.file != nil && os.SameFile(stdoutFile.info, stderrFile.info) {
+		if err := stderrFile.file.Close(); err != nil {
 			return fail(fmt.Errorf("close duplicate stderr file: %w", err))
 		}
 		opened = opened[:len(opened)-1]
@@ -331,14 +330,14 @@ func configureCommandFiles(ctx context.Context, cmd *exec.Cmd, args *UniversalCo
 		return fail(err)
 	}
 
-	if stdinFile != nil {
-		cmd.Stdin = stdinFile
+	if stdinFile.file != nil {
+		cmd.Stdin = stdinFile.file
 	}
-	if stdoutFile != nil {
-		cmd.Stdout = stdoutFile
+	if stdoutFile.file != nil {
+		cmd.Stdout = stdoutFile.file
 	}
-	if stderrFile != nil {
-		cmd.Stderr = stderrFile
+	if stderrFile.file != nil {
+		cmd.Stderr = stderrFile.file
 	}
 	return opened, nil
 }
@@ -362,75 +361,158 @@ func truncateCommandOutputs(ctx context.Context, opened []commandFile) error {
 	return nil
 }
 
-// openRegularCommandFile restricts command redirections to regular files named
-// directly, never through a symlink. The approval prompt shows the path the
-// model asked for, so a final component that resolves elsewhere would write
-// somewhere the operator never saw. Lstat rejects a link that is already there
-// and O_NOFOLLOW rejects one planted between the check and the open; both cover
-// the final component only, which is as far as an ordinary open can be
-// constrained without openat2. Opens also carry O_NONBLOCK so a path replaced
-// with a FIFO cannot stall setup beyond the command deadline.
-//
-// One cancellation check, at entry. It is what satisfies the between-opens
-// requirement, since configureCommandFiles calls this once per redirection and
-// the destructive step rechecks for itself in truncateCommandOutputs. Checks
-// placed later in this function were reachable only by a context going done
-// inside it: a poll cannot interrupt a syscall, O_NONBLOCK is what bounds the
-// one open that could block, and nothing between the entry check and the return
-// destroys anything. A guard that no test can fail is not a guard.
-func openRegularCommandFile(ctx context.Context, path string, flag int, perm os.FileMode) (*os.File, os.FileInfo, error) {
+// discardCreatedCommandFiles unlinks files created by this setup when their
+// paths still identify the opened files. Entries must have been verified and
+// therefore carry info. Unlink is deliberately file-only; os.Remove could
+// remove an empty directory swapped into the path after the identity check.
+func discardCreatedCommandFiles(files []commandFile) error {
+	var cleanupErr error
+	for _, output := range files {
+		if !output.created {
+			continue
+		}
+		if output.info == nil {
+			cleanupErr = stdErrors.Join(cleanupErr, fmt.Errorf(
+				"remove created %s file %q: missing opened-file identity", output.stream, output.path))
+			continue
+		}
+		current, err := os.Lstat(output.path)
+		if stdErrors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			cleanupErr = stdErrors.Join(cleanupErr,
+				fmt.Errorf("inspect created %s file %q: %w", output.stream, output.path, err))
+			continue
+		}
+		if !os.SameFile(current, output.info) {
+			continue
+		}
+		if err := unlinkCreatedCommandFile(output.path); err != nil {
+			cleanupErr = stdErrors.Join(cleanupErr,
+				fmt.Errorf("remove created %s file %q: %w", output.stream, output.path, err))
+		}
+	}
+	return cleanupErr
+}
+
+// openCommandFile accepts regular files and explicitly permitted devices, never
+// a final-component symlink. Lstat gives an early rejection, O_NOFOLLOW closes
+// the check/open race, Fstat verifies the descriptor, and O_NONBLOCK prevents a
+// raced-in FIFO from stalling setup.
+func openCommandFile(ctx context.Context, path string, flag int, perm os.FileMode) (commandFile, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return commandFile{}, err
 	}
 
 	if info, err := os.Lstat(path); err == nil {
-		if err := verifyRegularCommandFileMode(info.Mode(), path); err != nil {
-			return nil, nil, err
+		if err := verifyCommandFileMode(info.Mode(), path); err != nil {
+			return commandFile{}, err
 		}
 	} else if !os.IsNotExist(err) {
-		return nil, nil, err
+		return commandFile{}, err
 	}
 
-	file, err := os.OpenFile(path, flag|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, perm)
+	file, created, err := createOrOpenCommandFile(path, flag|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, perm)
 	if err != nil {
-		return nil, nil, err
+		return commandFile{}, err
 	}
-
-	info, err := verifyOpenedRegularCommandFile(file, path)
-	if err != nil {
-		_ = file.Close()
-		return nil, nil, err
-	}
-	return file, info, nil
+	return finishCommandFileOpen(commandFile{path: path, file: file, created: created}, flag)
 }
 
-// verifyRegularCommandFileMode is the single place that decides whether a mode
-// is acceptable for a redirection, so the pre-open and post-open checks cannot
-// drift apart.
-func verifyRegularCommandFileMode(mode os.FileMode, path string) error {
+// finishCommandFileOpen verifies the opened descriptor and completes its
+// lifecycle record. It is separate so the post-open failure path is testable.
+func finishCommandFileOpen(opening commandFile, flag int) (commandFile, error) {
+	info, err := verifyOpenedCommandFile(opening.file, opening.path)
+	if err != nil {
+		closeErr := opening.file.Close()
+		if closeErr != nil {
+			closeErr = fmt.Errorf("close command file %q: %w", opening.path, closeErr)
+		}
+		var removeErr error
+		if opening.created {
+			if unlinkErr := unlinkCreatedCommandFile(opening.path); unlinkErr != nil {
+				removeErr = fmt.Errorf("remove created command file %q: %w", opening.path, unlinkErr)
+			}
+		}
+		return commandFile{}, stdErrors.Join(err, closeErr, removeErr)
+	}
+	opening.info = info
+	opening.truncate = flag&os.O_WRONLY != 0 && info.Mode().IsRegular()
+	return opening, nil
+}
+
+// unlinkCreatedCommandFile removes a file without os.Remove's directory
+// fallback. A path already removed by another actor needs no cleanup.
+func unlinkCreatedCommandFile(path string) error {
+	err := syscall.Unlink(path)
+	if stdErrors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// commandFileOpenAttempts bounds retries against a concurrently changing path.
+const commandFileOpenAttempts = 3
+
+// createOrOpenCommandFile reports whether O_CREATE created the path. Existing
+// outputs use a second open; a path removed between those calls is retried.
+func createOrOpenCommandFile(path string, flag int, perm os.FileMode) (*os.File, bool, error) {
+	if flag&os.O_CREATE == 0 {
+		file, err := os.OpenFile(path, flag, perm)
+		return file, false, err
+	}
+
+	for attempt := 0; ; attempt++ {
+		file, created, retry, err := createOrOpenCommandFileOnce(path, flag, perm)
+		if !retry || attempt == commandFileOpenAttempts-1 {
+			return file, created, err
+		}
+	}
+}
+
+// createOrOpenCommandFileOnce isolates the retry decision for testing. EEXIST
+// followed by ENOENT means the path disappeared between the two opens.
+func createOrOpenCommandFileOnce(path string, flag int, perm os.FileMode) (file *os.File, created, retry bool, err error) {
+	if file, err = os.OpenFile(path, flag|os.O_EXCL, perm); err == nil {
+		return file, true, false, nil
+	}
+	if !stdErrors.Is(err, fs.ErrExist) {
+		return nil, false, false, err
+	}
+	if file, err = os.OpenFile(path, flag&^os.O_CREATE, perm); err == nil {
+		return file, false, false, nil
+	}
+	return nil, false, stdErrors.Is(err, fs.ErrNotExist), err
+}
+
+// verifyCommandFileMode is shared by the pre-open and post-open checks. A device
+// needs both an allowed name and character-device mode.
+func verifyCommandFileMode(mode os.FileMode, path string) error {
 	if mode&os.ModeSymlink != 0 {
 		return fmt.Errorf("%q is a symbolic link", path)
 	}
-	if !mode.IsRegular() {
-		return fmt.Errorf("%q is not a regular file", path)
+	if mode.IsRegular() || isPermittedCommandDevice(mode, path) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("%q is neither a regular file nor one of %s",
+		path, constants.PermittedCommandDevicesText)
 }
 
-// verifyOpenedRegularCommandFile rechecks the descriptor actually obtained.
-// O_NOFOLLOW and the Lstat above race with anything that can rename the path,
-// and this is the check that answers for what was opened rather than for what
-// was looked at. It returns the FileInfo it already paid for, which callers
-// reuse for same-file comparisons.
-func verifyOpenedRegularCommandFile(file *os.File, path string) (os.FileInfo, error) {
+// isPermittedCommandDevice is the complete name-and-mode decision.
+func isPermittedCommandDevice(mode os.FileMode, path string) bool {
+	return mode&os.ModeCharDevice != 0 && constants.IsPermittedCommandDeviceName(path)
+}
+
+// verifyOpenedCommandFile validates the descriptor obtained after the path
+// check and returns its identity for alias checks and cleanup.
+func verifyOpenedCommandFile(file *os.File, path string) (os.FileInfo, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
-	// Fstat never reports a symlink: opening one either failed under O_NOFOLLOW
-	// or resolved past it. Only the regular-file half is meaningful here.
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%q is not a regular file", path)
+	if err := verifyCommandFileMode(info.Mode(), path); err != nil {
+		return nil, err
 	}
 	return info, nil
 }
@@ -457,4 +539,14 @@ func closeCommandFiles(files []commandFile) error {
 		}
 	}
 	return firstErr
+}
+
+// releaseCommandFiles closes every descriptor and, if no process started,
+// removes the regular files this setup created.
+func releaseCommandFiles(files []commandFile, started bool) error {
+	closeErr := closeCommandFiles(files)
+	if !started {
+		return stdErrors.Join(closeErr, discardCreatedCommandFiles(files))
+	}
+	return closeErr
 }

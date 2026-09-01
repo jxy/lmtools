@@ -105,20 +105,9 @@ type ToolResult struct {
 	Error   string `json:"error,omitempty"`
 	Code    string `json:"code,omitempty"` // Error code for structured error handling
 	Elapsed int64  `json:"elapsed_ms"`
-	// NotRun records that no process was ever created for this call: a policy
-	// denial, a cancellation that arrived first, arguments that never parsed, a
-	// file the round refused to share, or a start os/exec would not perform.
-	//
-	// The executor is the only layer that knows this, and saying so is not the
-	// same as leaving it to be re-derived. The CLI used to infer it from a
-	// hand-maintained list of six error codes plus "Reason is set", with nothing
-	// keeping the list in step with the nine codes the executor can stamp — so a
-	// code added anywhere else rendered as a failure that took zero
-	// milliseconds, and so did every command os/exec refused to start, which has
-	// no denial code at all. Elapsed is meaningless when this is set.
-	//
-	// Additive and omitempty: a session written before the field existed still
-	// loads, and the field is only ever consulted for display.
+	// NotRun records that no process was created. The executor sets it rather
+	// than making renderers infer lifecycle state from error codes; elapsed time
+	// is meaningless when it is true. Omitempty preserves older session JSON.
 	NotRun bool `json:"not_run,omitempty"`
 	// Reason and Hints carry a denial's structure for operator display. Error
 	// remains the model-facing text, and denyResult composes all three from the

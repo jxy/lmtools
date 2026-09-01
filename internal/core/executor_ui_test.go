@@ -211,13 +211,16 @@ func TestDeniedApprovalBecomesExplicitModelVisibleToolError(t *testing.T) {
 		Name: "universal_command",
 		Args: []byte(`{"command":["echo","no"],"stdout_file":"out.txt"}`),
 	}}, TestToolUI{})[0]
-	const denial = "Command was not executed: user denied permission."
+	const denial = "user denied permission"
 	if result.Code != errors.ErrCodeNotApproved || result.Error != denial {
 		t.Fatalf("denied result = %#v, want code %s and error %q", result, errors.ErrCodeNotApproved, denial)
 	}
+	// The refusal reaches the model as a refusal, and the sentence saying so is
+	// notRunStatement's rather than this arm's: it used to be composed here, and
+	// was the only one of the executor's refusals that said it at all.
 	block := ToolResultBlockFromResult(result, "universal_command")
-	if !block.IsError || block.Content != denial {
-		t.Fatalf("model-visible block = %#v, want error content %q", block, denial)
+	if !block.IsError || block.Content != "Command was not executed.\n"+denial {
+		t.Fatalf("model-visible block = %#v, want the not-run statement above %q", block, denial)
 	}
 }
 
