@@ -115,7 +115,7 @@ func createToolStoreAndMessageBuilder(ctx context.Context, opts core.RequestOpti
 		return session.NewStore(sess, logger.From(ctx)), createMessageBuilder(ctx, sess)
 	}
 
-	store := core.NewMemorySessionStore(opts.GetEffectiveSystem(), inputStr)
+	store := core.NewMemorySessionStoreWithUserBlocks(opts.GetEffectiveSystem(), core.UserMessageBlocks(inputStr, opts.Images))
 	return store, store.Messages
 }
 
@@ -190,6 +190,9 @@ func run(notifier core.Notifier) error {
 		}
 		isRegeneration = isAssistant
 	}
+	if err := validateImageTurn(isRegeneration, opts.Images); err != nil {
+		return err
+	}
 
 	// Read and validate input
 	inputStr, err := readAndValidateInput(isRegeneration)
@@ -211,7 +214,7 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 	hasPendingTools := plan != nil && plan.HasPendingTools
-	if !isRegeneration && inputStr == "" && !hasPendingTools {
+	if !isRegeneration && inputStr == "" && len(opts.Images) == 0 && !hasPendingTools {
 		return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
 	}
 
@@ -339,6 +342,17 @@ func setupSessionsConfig(ctx context.Context, cfg config.Config) error {
 	session.ConfigureDefaultManager(managerCfg)
 
 	return nil
+}
+
+// validateImageTurn refuses -image when the run has no user turn to attach it
+// to. -branch from an assistant message regenerates that answer and sends no
+// new user message, so the images would be read and then dropped without a
+// word; an error names the mismatch instead.
+func validateImageTurn(isRegeneration bool, images []core.ImageBlock) error {
+	if !isRegeneration || len(images) == 0 {
+		return nil
+	}
+	return errors.WrapError("validate input", stdErrors.New("-image needs a user turn; -branch from an assistant message regenerates its answer without one"))
 }
 
 // readAndValidateInput reads input from stdin and validates it

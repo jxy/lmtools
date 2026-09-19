@@ -86,9 +86,9 @@ func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, erro
 		messages = append(messages, NewTextMessage("system", system))
 	}
 
-	// Add user message
-	if input != "" {
-		messages = append(messages, NewTextMessage("user", input))
+	// Add user message: the prompt and any -image attachments.
+	if input != "" || len(cfg.Images) > 0 {
+		messages = append(messages, NewUserMessage(input, cfg.Images))
 	}
 
 	// Prepare options

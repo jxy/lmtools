@@ -42,6 +42,10 @@ echo "Solve this carefully" | ./bin/lmc -argo-user "$USER" \
   -effort high \
   -show-thinking
 
+# Ask about an image. Repeat -image to attach several; the prompt may be empty.
+echo "What is wrong in this screenshot?" | ./bin/lmc -argo-user "$USER" \
+  -image screenshot.png
+
 # Use OpenAI.
 echo "Explain quantum computing" | ./bin/lmc \
   -provider openai \
@@ -111,6 +115,11 @@ echo "One-off question" | ./bin/lmc -argo-user "$USER" -no-session
 
 `-show-sessions`, `-show`, and `-delete` touch only local files, so they need no
 provider credentials.
+
+An image attached with `-image` is saved inline in the session, so resuming or
+branching the session sends it to the provider again. `-show` lists each one
+as `[image: name (media type, size)]` after the message text and never prints
+the image bytes.
 
 ### Tool Use
 
@@ -368,6 +377,20 @@ Output controls:
   Claude models.
 - `-json`: Request JSON object output.
 - `-json-schema path`: Request schema-constrained JSON output. Does not combine with `-json`.
+
+Images:
+
+- `-image path`: Attach an image file to the prompt. Repeat the flag to attach
+  several; they are sent in the order given, ahead of the prompt text. The
+  type is sniffed from the content and must be PNG, JPEG, GIF, or WebP; each
+  file may be at most 20 MiB, and the provider's own limits still apply.
+  The image is read when the flags are parsed, base64-encoded into the
+  request, and saved inline in the session. Empty stdin is accepted when an
+  image is attached. Not available in embed mode, with `-argo-legacy`, or
+  with `-branch` from an assistant message, which regenerates that answer
+  without a new user turn.
+- `-image-detail string`: OpenAI detail hint for every attached image: `auto`,
+  `low`, or `high`. Other providers ignore it.
 
 Tools:
 

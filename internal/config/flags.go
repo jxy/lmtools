@@ -28,6 +28,9 @@ type Config struct {
 	JSONMode         bool   // request JSON object output
 	JSONSchemaPath   string // path to JSON schema for structured output
 	JSONSchema       json.RawMessage
+	ImagePaths       []string          // -image arguments in command-line order
+	ImageDetail      string            // OpenAI detail hint applied to every -image
+	Images           []core.ImageBlock // -image files loaded at parse time as data URLs
 	providerconfig.Options
 	System              string        // system prompt for chat
 	SystemExplicitlySet bool          // whether -s flag was explicitly provided
@@ -88,6 +91,10 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, err
 	}
 
+	if err := validateImageFlags(&cfg); err != nil {
+		return cfg, err
+	}
+
 	if err := cfg.Normalize(); err != nil {
 		return cfg, err
 	}
@@ -120,6 +127,8 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "maximum output tokens (0 uses provider default; Claude defaults to 128000 for Opus, 64000 otherwise)")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
 	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")
+	fs.Var(imagePathsFlag{paths: &cfg.ImagePaths}, "image", "attach an image file ("+core.SupportedImageMediaTypesText+") to the prompt; repeatable")
+	fs.StringVar(&cfg.ImageDetail, "image-detail", "", "OpenAI detail hint for every -image: auto, low, high")
 
 	// Tool Options
 	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable universal_command with direct execvpe-style execution (no shell)")
@@ -191,13 +200,16 @@ Examples:
   # Stream chat response
   echo "Tell me a story" | %s -argo-user myuser -stream
 
+  # Ask about an image (repeat -image to attach several)
+  echo "What is in this picture?" | %s -argo-user myuser -image photo.png
+
   # Resume a session
   echo "Continue from where we left off" | %s -argo-user myuser -resume 001a
 
   # Show all conversation trees
   %s -argo-user myuser -show-sessions
 `,
-		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 // RequestOptions converts parsed CLI flags into the concrete value consumed by
@@ -244,5 +256,6 @@ func (c Config) RequestOptions() core.RequestOptions {
 		ToolMaxOutputBytes:  c.ToolMaxOutputBytes,
 		Resume:              c.Resume,
 		Branch:              c.Branch,
+		Images:              append([]core.ImageBlock(nil), c.Images...),
 	}
 }

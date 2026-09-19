@@ -79,7 +79,7 @@ func (c *requestPreparer) prepareNewRequest(inputStr string, isRegeneration bool
 	if system := c.cfg.GetEffectiveSystem(); system != "" {
 		messages = append(messages, core.NewTextMessage(string(core.RoleSystem), system))
 	}
-	messages = appendPlannedUserMessage(messages, inputStr, isRegeneration)
+	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
@@ -119,7 +119,7 @@ func (c *requestPreparer) prepareSessionResumeRequest(ctx context.Context, resum
 	}
 	messages = applyPlannedSystemDecision(messages, decision)
 	messages = appendPendingToolPreviewResults(messages, pending)
-	messages = appendPlannedUserMessage(messages, inputStr, isRegeneration)
+	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages:        messages,
@@ -148,7 +148,7 @@ func (c *requestPreparer) prepareMessageResumeRequest(ctx context.Context, resum
 
 	decision := DecideResumeFork(nil, c.cfg)
 	messages = applyPlannedSystemDecision(messages, decision)
-	messages = appendPlannedUserMessage(messages, inputStr, isRegeneration)
+	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
@@ -175,7 +175,7 @@ func (c *requestPreparer) prepareBranchRequest(ctx context.Context, branchRef, i
 	if err != nil {
 		return nil, err
 	}
-	messages = appendPlannedUserMessage(messages, inputStr, isRegeneration)
+	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
@@ -216,15 +216,21 @@ func (c *requestPreparer) commitResumeSystemDecision(ctx context.Context, sess *
 	return forkedSess, nil
 }
 
-func appendPlannedUserMessage(messages []core.TypedMessage, inputStr string, isRegeneration bool) []core.TypedMessage {
-	if !shouldAppendUserInput(inputStr, isRegeneration) {
+// appendPlannedUserMessage stages the user turn the provider will answer. It
+// is built by core.UserMessageBlocks, the same constructor saveUserMessage
+// commits, so the staged request and the persisted message cannot differ.
+func appendPlannedUserMessage(messages []core.TypedMessage, inputStr string, images []core.ImageBlock, isRegeneration bool) []core.TypedMessage {
+	if !shouldAppendUserInput(inputStr, images, isRegeneration) {
 		return messages
 	}
-	return append(messages, core.NewTextMessage(string(core.RoleUser), inputStr))
+	return append(messages, core.NewUserMessage(inputStr, images))
 }
 
-func shouldAppendUserInput(inputStr string, isRegeneration bool) bool {
-	return !isRegeneration && inputStr != ""
+// shouldAppendUserInput is true when the run contributes a user turn: a
+// regeneration re-asks for the previous answer and sends none, and otherwise
+// either a prompt or an attached image is enough to make one.
+func shouldAppendUserInput(inputStr string, images []core.ImageBlock, isRegeneration bool) bool {
+	return !isRegeneration && (inputStr != "" || len(images) > 0)
 }
 
 func applyPlannedSystemDecision(messages []core.TypedMessage, decision ResumeForkDecision) []core.TypedMessage {
@@ -276,7 +282,7 @@ func (c *requestPreparer) maybeResolvePendingTools(ctx context.Context, sess *Se
 }
 
 func (c *requestPreparer) maybeSaveUserInput(ctx context.Context, sess *Session, inputStr string, isRegeneration bool) error {
-	if !shouldAppendUserInput(inputStr, isRegeneration) {
+	if !shouldAppendUserInput(inputStr, c.cfg.Images, isRegeneration) {
 		return nil
 	}
 	return c.saveUserMessage(ctx, sess, inputStr)
@@ -319,9 +325,14 @@ func loadSessionWithRetry(sessionID string) (*Session, error) {
 	return nil, loadErr
 }
 
-// saveUserMessage saves the user input to the session
+// saveUserMessage saves the user turn to the session. The prompt goes to the
+// message's .txt as before; the explicit blocks go to its .blocks.json, which
+// is where an attached image lives. The image is stored inline, as the data
+// URL the request carried, because the session is what replays the turn on
+// resume and no provider keeps image bytes between requests.
 func (c *requestPreparer) saveUserMessage(ctx context.Context, sess *Session, inputStr string) error {
-	if inputStr == "" {
+	blocks := core.UserMessageBlocks(inputStr, c.cfg.Images)
+	if len(blocks) == 0 {
 		return nil
 	}
 
@@ -331,7 +342,7 @@ func (c *requestPreparer) saveUserMessage(ctx context.Context, sess *Session, in
 		Timestamp: time.Now(),
 	}
 
-	result, err := AppendMessageWithToolInteraction(ctx, sess, userMsg, nil, nil)
+	result, err := AppendMessageWithBlocks(ctx, sess, userMsg, nil, nil, blocks)
 	if err != nil {
 		return errors.WrapError("save user message", err)
 	}

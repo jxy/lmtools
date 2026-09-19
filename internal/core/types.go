@@ -53,6 +53,10 @@ type RequestOptions struct {
 	ToolMaxOutputBytes  int
 	Resume              string
 	Branch              string
+	// Images are the -image attachments for this run's user turn, already
+	// loaded as data URLs. They join the stdin prompt through
+	// UserMessageBlocks.
+	Images []ImageBlock
 }
 
 func (o RequestOptions) GetEffectiveSystem() string {

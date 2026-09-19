@@ -50,6 +50,12 @@ const (
 	// MaxCLIInputSize is the maximum input size for CLI operations
 	MaxCLIInputSize = 10 * 1024 * 1024 // 10MB
 
+	// MaxCLIImageBytes caps one -image file. It bounds what lmc reads into
+	// memory and base64-encodes; it does not police the provider. Anthropic
+	// rejects images over 5MB and OpenAI over 20MB, and those rejections are
+	// reported as they arrive rather than second-guessed here.
+	MaxCLIImageBytes = 20 * 1024 * 1024 // 20MB
+
 	// MaxCLIResponseSize is the maximum response size for CLI operations
 	MaxCLIResponseSize = 10 * 1024 * 1024 // 10MB
 

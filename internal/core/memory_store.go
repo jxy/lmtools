@@ -20,6 +20,13 @@ type MemorySessionStore struct {
 
 // NewMemorySessionStore creates an in-memory store seeded with the request context.
 func NewMemorySessionStore(system, userInput string) *MemorySessionStore {
+	return NewMemorySessionStoreWithUserBlocks(system, UserMessageBlocks(userInput, nil))
+}
+
+// NewMemorySessionStoreWithUserBlocks seeds the store with a system prompt and
+// a user turn given as blocks, so a -no-session run carries -image attachments
+// through the tool loop exactly as a saved session would.
+func NewMemorySessionStoreWithUserBlocks(system string, userBlocks []Block) *MemorySessionStore {
 	store := &MemorySessionStore{
 		path:     memorySessionPath,
 		toolName: make(map[string]string),
@@ -27,8 +34,11 @@ func NewMemorySessionStore(system, userInput string) *MemorySessionStore {
 	if system != "" {
 		store.messages = append(store.messages, NewTextMessage(string(RoleSystem), system))
 	}
-	if userInput != "" {
-		store.messages = append(store.messages, NewTextMessage(string(RoleUser), userInput))
+	if len(userBlocks) > 0 {
+		store.messages = append(store.messages, TypedMessage{
+			Role:   string(RoleUser),
+			Blocks: cloneBlocks(userBlocks),
+		})
 	}
 	return store
 }

@@ -50,6 +50,7 @@ func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.
 	if msg.Content != "" {
 		fmt.Printf("\n%s\n", msg.Content)
 	}
+	printImageBlocks(dir, msgID, notifier)
 
 	// Load and display tool interactions if present
 	toolInteraction, err := LoadToolInteraction(dir, msgID)
@@ -135,19 +136,15 @@ func ShowDispatcherWithManager(manager *Manager, showArg string, notifier core.N
 		return ShowConversation(absPath, notifier)
 	}
 
-	// Check if it's a message (check for .txt and .json files)
+	// Check if it's a message. A message exists if and only if its .json
+	// metadata exists; the .txt is absent for a turn with no text, such as an
+	// image-only user message or an assistant message that only called tools.
 	dir := filepath.Dir(absPath)
 	msgID := filepath.Base(absPath)
 
-	// Check if the message files exist
-	contentPath := filepath.Join(dir, msgID+".txt")
-	metaPath := filepath.Join(dir, msgID+".json")
-
 	// Try without extension first (user provided just the ID)
-	if _, err := os.Stat(contentPath); err == nil {
-		if _, err := os.Stat(metaPath); err == nil {
-			return ShowMessageWithManager(manager, absPath, notifier)
-		}
+	if fileExists(buildMessageFilePaths(dir, msgID).JSONPath) {
+		return ShowMessageWithManager(manager, absPath, notifier)
 	}
 
 	// Try with the path as-is (might have extension)
@@ -155,18 +152,34 @@ func ShowDispatcherWithManager(manager *Manager, showArg string, notifier core.N
 	ext := filepath.Ext(msgID)
 	if ext == ".txt" || ext == ".json" {
 		msgID = strings.TrimSuffix(msgID, ext)
-		contentPath = filepath.Join(dir, msgID+".txt")
-		metaPath = filepath.Join(dir, msgID+".json")
-
-		if _, err := os.Stat(contentPath); err == nil {
-			if _, err := os.Stat(metaPath); err == nil {
-				msgPath := filepath.Join(dir, msgID)
-				return ShowMessageWithManager(manager, msgPath, notifier)
-			}
+		if fileExists(buildMessageFilePaths(dir, msgID).JSONPath) {
+			msgPath := filepath.Join(dir, msgID)
+			return ShowMessageWithManager(manager, msgPath, notifier)
 		}
 	}
 
 	return errors.WrapError("find path", stdErrors.New("path not found: "+showArg))
+}
+
+// printImageBlocks lists the images a message carries, one line each. Images
+// live only in the blocks file — the text file holds the prompt alone — so
+// this is the one place -show learns about them. The bytes are never printed.
+func printImageBlocks(msgDir, msgID string, notifier core.Notifier) {
+	blocks, ok, err := loadMessageBlocks(msgDir, msgID)
+	if err != nil {
+		if notifier != nil {
+			notifier.Warnf("Failed to load message blocks: %v", err)
+		}
+		return
+	}
+	if !ok {
+		return
+	}
+	for _, block := range blocks {
+		if image, isImage := block.(core.ImageBlock); isImage {
+			fmt.Printf("[image: %s]\n", core.DescribeImageBlock(image))
+		}
+	}
 }
 
 // ShowConversation shows a full conversation or branch
@@ -200,7 +213,7 @@ func ShowConversation(sessionPath string, notifier core.Notifier) error {
 		}
 
 		// Display the message with tool interactions
-		if err := displayMessageWithTools(sessionPath, msg, messageIndex); err != nil {
+		if err := displayMessageWithTools(sessionPath, msg, messageIndex, notifier); err != nil {
 			// Fall back to simple display on error
 			roleDisplay := FormatRole(string(msg.Role), msg.Model)
 			fmt.Printf("[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
@@ -212,7 +225,7 @@ func ShowConversation(sessionPath string, notifier core.Notifier) error {
 }
 
 // displayMessageWithTools displays a message with any associated tool interactions
-func displayMessageWithTools(sessionPath string, msg Message, messageIndex map[string]string) error {
+func displayMessageWithTools(sessionPath string, msg Message, messageIndex map[string]string, notifier core.Notifier) error {
 	// Print message header
 	roleDisplay := FormatRole(string(msg.Role), msg.Model)
 	fmt.Printf("[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
@@ -228,6 +241,7 @@ func displayMessageWithTools(sessionPath string, msg Message, messageIndex map[s
 		// Fallback to session path if not found in index
 		msgDir = sessionPath
 	}
+	printImageBlocks(msgDir, msg.ID, notifier)
 
 	// Load and display tool interactions if present
 	toolInteraction, err := LoadToolInteraction(msgDir, msg.ID)

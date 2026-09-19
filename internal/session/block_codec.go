@@ -160,7 +160,7 @@ func storedBlocksFromCore(blocks []core.Block) ([]storedBlock, error) {
 				IsError:   value.IsError,
 			})
 		case core.ImageBlock:
-			stored = append(stored, storedBlock{Type: "image", URL: value.URL, Detail: value.Detail})
+			stored = append(stored, storedBlock{Type: "image", URL: value.URL, Detail: value.Detail, Name: value.Name})
 		case core.AudioBlock:
 			stored = append(stored, storedBlock{
 				Type:     "audio",
@@ -228,7 +228,7 @@ func loadMessageBlocks(sessionPath, msgID string) ([]core.Block, bool, error) {
 				IsError:   block.IsError,
 			})
 		case "image":
-			blocks = append(blocks, core.ImageBlock{URL: block.URL, Detail: block.Detail})
+			blocks = append(blocks, core.ImageBlock{URL: block.URL, Detail: block.Detail, Name: block.Name})
 		case "audio":
 			blocks = append(blocks, core.AudioBlock{
 				ID:       block.AudioID,

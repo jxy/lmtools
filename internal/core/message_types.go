@@ -60,6 +60,9 @@ func (ReasoningBlock) isBlock() {}
 type ImageBlock struct {
 	URL    string
 	Detail string // "auto", "low", or "high"
+	// Name is the attached file's base name, kept for session display. No
+	// renderer sends it.
+	Name string
 }
 
 func (ImageBlock) isBlock() {}
@@ -93,5 +96,32 @@ func NewTextMessage(role, text string) TypedMessage {
 	return TypedMessage{
 		Role:   role,
 		Blocks: []Block{TextBlock{Text: text}},
+	}
+}
+
+// UserMessageBlocks builds the canonical block layout of the user turn typed
+// at the CLI: the attached images in the order given, then one text block when
+// the prompt is non-empty. Every builder of that turn — the session request
+// plan, the session commit, the in-memory store, and the no-session request
+// builder — goes through here so the request the provider answers matches the
+// message the session records. Images lead because Anthropic documents better
+// results with the image ahead of the question, and the other providers do not
+// care about the order.
+func UserMessageBlocks(text string, images []ImageBlock) []Block {
+	blocks := make([]Block, 0, len(images)+1)
+	for _, image := range images {
+		blocks = append(blocks, image)
+	}
+	if text != "" {
+		blocks = append(blocks, TextBlock{Text: text})
+	}
+	return blocks
+}
+
+// NewUserMessage wraps UserMessageBlocks in a user TypedMessage.
+func NewUserMessage(text string, images []ImageBlock) TypedMessage {
+	return TypedMessage{
+		Role:   string(RoleUser),
+		Blocks: UserMessageBlocks(text, images),
 	}
 }
