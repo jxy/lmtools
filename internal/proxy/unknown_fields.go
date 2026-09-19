@@ -47,7 +47,7 @@ func detectUnknownFieldPaths(jsonData []byte, v interface{}) ([]string, bool, er
 }
 
 func dereferenceType(targetType reflect.Type) reflect.Type {
-	for targetType != nil && targetType.Kind() == reflect.Ptr {
+	for targetType != nil && targetType.Kind() == reflect.Pointer {
 		targetType = targetType.Elem()
 	}
 	return targetType
