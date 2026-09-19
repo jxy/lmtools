@@ -43,7 +43,17 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 				})
 				pendingThoughtSignature = ""
 			case ImageBlock:
-				parts = append(parts, GooglePart{Text: "[Image: " + b.URL + "]"})
+				// Gemini takes image bytes as an inlineData part. A URL image
+				// has no Gemini equivalent short of the Files API, so it stays
+				// a text mention rather than being dropped without a trace.
+				if mediaType, data, ok := ParseBase64DataURL(b.URL); ok {
+					parts = append(parts, GooglePart{InlineData: &GoogleInlineData{
+						MimeType: mediaType,
+						Data:     data,
+					}})
+				} else {
+					parts = append(parts, GooglePart{Text: "[Image: " + b.URL + "]"})
+				}
 			case AudioBlock:
 				audioText := "[Audio content"
 				if b.ID != "" {
