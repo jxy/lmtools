@@ -1,15 +1,17 @@
-SHELL := /bin/bash
-
-HOST_GOOS := $(shell go env GOOS)
-HOST_GOARCH := $(shell go env GOARCH)
-
-GOOS ?= $(HOST_GOOS)
-GOARCH ?= $(HOST_GOARCH)
+# This Makefile runs under BSD make and GNU make, including the GNU make 3.81
+# that ships with macOS. Keep it that way: no $(shell ...), $(if ...),
+# $(filter ...), the != assignment, or bash-only recipe syntax. Anything that
+# has to be computed is computed by POSIX sh inside the recipe that needs it.
+#
+# Cross-compilation: set GOOS and GOARCH on the command line or in the
+# environment. A build for the host lands in BIN_DIR; a build for another
+# platform lands in BIN_DIR/<goos>-<goarch>. BUILD_SUBDIR names that
+# subdirectory explicitly, and BUILD_SUBDIR=. flattens a cross build into
+# BIN_DIR.
+GOOS ?=
+GOARCH ?=
 BIN_DIR ?= ./bin
-
-EXE_SUFFIX := $(if $(filter windows,$(GOOS)),.exe,)
-BUILD_SUBDIR ?= $(if $(filter $(HOST_GOOS)-$(HOST_GOARCH),$(GOOS)-$(GOARCH)),,$(GOOS)-$(GOARCH))
-BUILD_OUT_DIR := $(BIN_DIR)$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR),)
+BUILD_SUBDIR ?=
 
 .PHONY: all build test test-unit test-integration test-e2e test-all coverage lint lint-fix clean dev check verify-fixtures verify-fixtures-refresh help
 
@@ -18,9 +20,21 @@ all: lint test build
 
 # Build all binaries for the selected platform
 build:
-	@mkdir -p $(BUILD_OUT_DIR)
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(BUILD_OUT_DIR)/lmc$(EXE_SUFFIX) ./cmd/lmc
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(BUILD_OUT_DIR)/apiproxy$(EXE_SUFFIX) ./cmd/apiproxy
+	@set -e; \
+	host_goos=$$(go env GOHOSTOS); host_goarch=$$(go env GOHOSTARCH); \
+	goos="$(GOOS)"; [ -n "$$goos" ] || goos=$$(go env GOOS); \
+	goarch="$(GOARCH)"; [ -n "$$goarch" ] || goarch=$$(go env GOARCH); \
+	exe=; [ "$$goos" != windows ] || exe=.exe; \
+	subdir="$(BUILD_SUBDIR)"; \
+	if [ -z "$$subdir" ] && [ "$$goos-$$goarch" != "$$host_goos-$$host_goarch" ]; then \
+	    subdir="$$goos-$$goarch"; \
+	fi; \
+	out="$(BIN_DIR)"; [ -z "$$subdir" ] || out="$$out/$$subdir"; \
+	mkdir -p "$$out"; \
+	for cmd in lmc apiproxy; do \
+	    echo "GOOS=$$goos GOARCH=$$goarch go build -o $$out/$$cmd$$exe ./cmd/$$cmd"; \
+	    GOOS=$$goos GOARCH=$$goarch go build -o "$$out/$$cmd$$exe" "./cmd/$$cmd"; \
+	done
 
 # Run unit tests for all packages
 test: test-unit
@@ -83,7 +97,7 @@ help:
 	@echo ""
 	@echo "  make                 - Run lint, test, and build (default)"
 	@echo "  make build           - Build all binaries for GOOS/GOARCH, defaulting to the host"
-	@echo "  make build GOOS=linux GOARCH=amd64 - Cross-build all binaries"
+	@echo "  make build GOOS=linux GOARCH=amd64 - Cross-build all binaries into ./bin/linux-amd64"
 	@echo "  make test            - Run all unit tests"
 	@echo "  make test-integration - Run integration tests (requires binaries)"
 	@echo "  make test-e2e        - Run end-to-end tests with mock servers"

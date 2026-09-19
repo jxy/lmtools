@@ -20,7 +20,8 @@ make build
 ```
 
 `make build` writes `./bin/lmc` and `./bin/apiproxy`. Set `GOOS` and `GOARCH` to
-cross-compile; those builds land in `./bin/<goos>-<goarch>/`.
+cross-compile; those builds land in `./bin/<goos>-<goarch>/`. The Makefile works
+with both BSD make and GNU make.
 
 ## lmc
 
