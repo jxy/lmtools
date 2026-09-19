@@ -646,8 +646,18 @@ func AnthropicBlocksToCoreWithToolNameRegistry(blocks []AnthropicContentBlock, r
 			})
 		case "image":
 			if block.Source != nil {
+				url := core.AnthropicImageSourceURL(
+					core.GetString(block.Source, "type"),
+					core.GetString(block.Source, "url"),
+					core.GetString(block.Source, "media_type"),
+					core.GetString(block.Source, "data"),
+				)
+				if url == "" {
+					logger.GetLogger().Warnf("Dropping image block with neither url nor base64 data while converting to TypedRequest")
+					continue
+				}
 				coreBlocks = append(coreBlocks, core.ImageBlock{
-					URL:    core.GetString(block.Source, "url"),
+					URL:    url,
 					Detail: "auto",
 				})
 			}

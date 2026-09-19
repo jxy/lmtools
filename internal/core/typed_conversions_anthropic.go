@@ -363,7 +363,7 @@ func FromAnthropicTyped(messages []AnthropicMessage) []TypedMessage {
 				case "image":
 					if block.Source != nil {
 						typed.Blocks = append(typed.Blocks, ImageBlock{
-							URL:    block.Source.URL,
+							URL:    AnthropicImageSourceURL(block.Source.Type, block.Source.URL, block.Source.MediaType, block.Source.Data),
 							Detail: "auto",
 						})
 					}

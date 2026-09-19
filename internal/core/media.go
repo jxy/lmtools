@@ -31,3 +31,20 @@ func ParseBase64DataURL(raw string) (mediaType string, data string, ok bool) {
 
 	return parts[0], raw[comma+1:], true
 }
+
+// Base64DataURL assembles a data URL from a media type and an already
+// base64-encoded payload, the inverse of ParseBase64DataURL.
+func Base64DataURL(mediaType, encoded string) string {
+	return "data:" + mediaType + ";base64," + encoded
+}
+
+// AnthropicImageSourceURL is the URL an ImageBlock carries for an Anthropic
+// image source: the url of a url source, or a data URL assembled from a
+// base64 source's media type and data. Reading only the url field turned
+// every base64 image a client sent into an empty block.
+func AnthropicImageSourceURL(sourceType, url, mediaType, data string) string {
+	if strings.EqualFold(sourceType, "base64") || (url == "" && data != "") {
+		return Base64DataURL(mediaType, data)
+	}
+	return url
+}
