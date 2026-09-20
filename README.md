@@ -142,13 +142,14 @@ model as an error result, which it can answer by resizing the file with a
 command. `view_image` is not offered with `-argo-legacy`.
 
 Sending a file to the provider is disclosure, so a `view_image` call is
-approved the way a command that matches no whitelist rule is. Interactive
-`lmc` shows the path and asks `Send shot.png (image/png, 48213 bytes) to the
-model? [y/N]`, `-tool-auto-approve` approves it, and when no prompt can be
-answered it is denied; with `-tool-whitelist` loaded it is denied as not
-whitelisted, because rule files cannot name an image. The image is saved once,
-inside the tool result in the session, and `-show` lists it under the result
-without printing the bytes.
+approved the way a command is. A whitelist rule naming the tool and the file
+or its directory admits it without a prompt, a blacklist rule naming them
+refuses it, and otherwise interactive `lmc` shows the path and asks `Send
+shot.png (image/png, 48213 bytes) to the model? [y/N]`, `-tool-auto-approve`
+approves it, and when no prompt can be answered it is denied; a denial prints
+the rule that would have allowed it. The image is saved once, inside the tool
+result in the session, and `-show` lists it under the result without printing
+the bytes.
 
 Commands can take standard input from a literal `stdin` string or a streamed
 `stdin_file`, and can redirect output to files with `stdout_file` and
@@ -219,6 +220,24 @@ alongside one of those five. Empty file paths and unrecognized field names are
 rejected at load time as well, which is why a call's `timeout` cannot be written
 into a rule; it does not take part in matching, because it bounds how long an
 already-granted command runs rather than what that command can reach.
+
+A rule may name the `view_image` tool instead of a command:
+
+```json
+{"tool":"view_image"}
+{"tool":"view_image","path":"plots"}
+```
+
+The first grants every image the model asks to see; the second grants the
+file `plots` names or any file inside that directory. Both paths are resolved
+against the working directory and cleaned before they are compared, so
+`plots/../secret.png` is judged as `secret.png` and does not match. A `tool`
+rule accepts `path` and nothing else, and it has no array form, since an array
+is an argv prefix: `["view_image"]` grants a command called `view_image`. The
+call's `detail` takes no part in matching. In a blacklist the same forms deny:
+`{"tool":"view_image"}` refuses every image, and a `path` rule refuses the
+file or directory it names. A denied image prints the rule naming the file
+itself; widen it to the directory by hand if that is what you want.
 
 In a whitelist, `workdir` and the three file fields must equal what the call
 supplied, and an omitted field matches only an absent field: a rule naming
@@ -423,13 +442,14 @@ Tools:
   `view_image` returns an image file to the model inside the tool result.
 - `-tool-timeout duration`: Per-command timeout; default `1m`. A tool call may
   set its own `timeout` in seconds instead; that value is clamped to 24 hours.
-- `-tool-whitelist path`: JSON command rules that run without prompting. File
+- `-tool-whitelist path`: JSON rules that run without prompting. File
   redirection, literal `stdin`, and `environ` each require an object rule that
-  names them. When no prompt can be answered, non-matching commands are denied —
-  including when the file produced no rules at all.
-- `-tool-blacklist path`: JSON command rules that are always denied. Array rules
-  cover every shape of the prefix; object rules cover every call carrying the
-  fields they name.
+  names them, and `{"tool":"view_image","path":"plots"}` admits the images
+  under a directory. When no prompt can be answered, non-matching calls are
+  denied — including when the file produced no rules at all.
+- `-tool-blacklist path`: JSON rules that are always denied. Array rules cover
+  every shape of the prefix; object rules cover every call carrying the fields
+  they name, and a `tool` rule covers the images it names.
 - `-tool-auto-approve`: Run without prompting unless denied by the blacklist, or
   by a whitelist non-match when no prompt can be answered.
 - `-tool-non-interactive`: Never prompt. Commands not approved by the policy are

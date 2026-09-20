@@ -354,3 +354,65 @@ func TestViewImageToolIsRefusedWhenNobodyCanApprove(t *testing.T) {
 		t.Fatalf("follow-up request does not tell the model why:\n%s", followUp)
 	}
 }
+
+// A whitelist rule naming the directory admits the file with nobody to ask,
+// which is what a scripted run needs; one that names only commands refuses
+// it and prints the rule that would admit it.
+func TestViewImageWhitelistRulesGovernScriptedRuns(t *testing.T) {
+	lmcBin := getLmcBinary(t)
+	imagePath := writeIntegrationImage(t, "plot.png")
+	apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
+	rulesDir := t.TempDir()
+	imagesUnderDir := filepath.Join(rulesDir, "images.txt")
+	if err := os.WriteFile(imagesUnderDir, []byte(`{"tool":"view_image","path":"`+filepath.Dir(imagePath)+`"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write whitelist: %v", err)
+	}
+	commandsOnly := filepath.Join(rulesDir, "commands.txt")
+	if err := os.WriteFile(commandsOnly, []byte(`["echo"]`+"\n"), 0o600); err != nil {
+		t.Fatalf("write whitelist: %v", err)
+	}
+	wantURL := core.ImageDataURL("image/png", integrationPNG)
+
+	run := func(whitelist string) (stderr, followUp string) {
+		t.Helper()
+		server := newViewImageServer(t, "chat", imagePath)
+		stdout, stderr, err := runLmcCommand(t, lmcBin,
+			[]string{
+				"-provider", "openai",
+				"-provider-url", server.URL + "/v1",
+				"-api-key-file", apiKeyFile,
+				"-model", "gpt-test",
+				"-no-session",
+				"-tool", "-tool-whitelist", whitelist,
+			},
+			"Look at plot.png")
+		if err != nil {
+			t.Fatalf("lmc failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if server.count() != 2 {
+			t.Fatalf("server saw %d requests, want the call and the follow-up", server.count())
+		}
+		server.mu.Lock()
+		defer server.mu.Unlock()
+		return stderr, string(server.bodies[1])
+	}
+
+	stderr, followUp := run(imagesUnderDir)
+	if !strings.Contains(stderr, "Completed in") || !strings.Contains(followUp, wantURL) {
+		t.Fatalf("whitelisted image was not sent\nstderr:\n%s", stderr)
+	}
+
+	stderr, followUp = run(commandsOnly)
+	suggestion := `{"tool":"view_image","path":"` + imagePath + `"}`
+	for _, want := range []string{"Not run: not in whitelist", "To allow this image, either:", suggestion} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(followUp, "base64,") {
+		t.Fatal("a refused image was sent to the provider")
+	}
+	if !strings.Contains(followUp, "denied: not in whitelist") {
+		t.Fatalf("follow-up request does not tell the model why:\n%s", followUp)
+	}
+}

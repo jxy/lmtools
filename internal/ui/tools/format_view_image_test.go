@@ -56,6 +56,14 @@ func TestViewImageOutcomesRenderThroughTheCLI(t *testing.T) {
 	if err := os.WriteFile(notes, []byte("not an image\n"), 0o600); err != nil {
 		t.Fatalf("write notes: %v", err)
 	}
+	commandsOnly := filepath.Join(dir, "commands.txt")
+	if err := os.WriteFile(commandsOnly, []byte(`["/bin/echo"]`+"\n"), 0o600); err != nil {
+		t.Fatalf("write whitelist: %v", err)
+	}
+	imagesUnderDir := filepath.Join(dir, "images.txt")
+	if err := os.WriteFile(imagesUnderDir, []byte(`{"tool":"view_image","path":"`+dir+`"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write whitelist: %v", err)
+	}
 
 	attached := `
 >>> Tools requested: 1
@@ -133,6 +141,34 @@ Attached image shot.png (image/png, 12 bytes).
       Hint: Allow via one of:
               - Run interactively without -tool-non-interactive
               - Use -tool-auto-approve
+              - Add the image to a whitelist
+
+`,
+		},
+		{
+			name:     "whitelisted directory",
+			cfg:      core.RequestOptions{ToolWhitelist: imagesUnderDir, ToolNonInteractive: true},
+			approver: executorTestApprover{approve: false},
+			calls:    []core.ToolCall{viewImageCall(t, "a", core.ViewImageArgs{Path: image})},
+			want:     attached,
+		},
+		{
+			name:     "not in whitelist",
+			cfg:      core.RequestOptions{ToolWhitelist: commandsOnly, ToolNonInteractive: true, ToolAutoApprove: true},
+			approver: executorTestApprover{approve: true},
+			calls:    []core.ToolCall{viewImageCall(t, "a", core.ViewImageArgs{Path: image})},
+			want: `
+>>> Tools requested: 1
+[1/1] View image: "<TMP>/shot.png"
+
+>>> No commands will be run.
+
+>>> Results:
+[1/1] Not run: not in whitelist
+      Hint: Whitelist file: <TMP>/commands.txt
+      Hint: To allow this image, either:
+              1. Add {"tool":"view_image","path":"<TMP>/shot.png"} to your whitelist file and use -tool-whitelist <file>
+              2. Run interactively without -tool-non-interactive
 
 `,
 		},

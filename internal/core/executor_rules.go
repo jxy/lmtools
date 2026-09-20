@@ -1,7 +1,7 @@
-// executor_rules.go holds the command-rule language: the on-disk
-// whitelist/blacklist wire format, its two match semantics (grants match
-// exactly, denials match broadly), and the suggested-rule renderer that
-// denials print.
+// executor_rules.go holds the rule language: the on-disk whitelist/blacklist
+// wire format for commands and for view_image, its two match semantics
+// (grants match exactly, denials match broadly), and the suggested-rule
+// renderers that denials print.
 
 package core
 
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -61,7 +62,21 @@ const (
 // the rest of the call could not, and commandTimeout clamps it to
 // MaxCommandTimeoutSeconds — so pinning it in a rule would make grants brittle
 // against a number the model picks freely, and buy nothing.
+//
+// A rule that names a tool is an image rule: it matches view_image calls and
+// no command, and its one channel is the path. The path is authority in the
+// sense stdin is — it chooses whose bytes leave the machine — and a call
+// always carries one, so a grant that names a path admits the calls inside
+// it and a grant that names none admits every image. Detail is a rendering
+// hint and, like timeout, takes no part.
 type commandRule struct {
+	// tool is set on an image rule and empty on a command rule. matches
+	// refuses the one and matchesImage refuses the other, so the two halves
+	// of one file cannot grant each other's calls.
+	tool string
+	// path is the file or directory an image rule names; nil names every
+	// image.
+	path    *string
 	command []string
 	// nil means the rule does not name the field. For a grant that is a
 	// requirement that the call not carry it; for a denial it is a wildcard.
@@ -78,7 +93,7 @@ type commandRule struct {
 }
 
 func (r commandRule) matches(args UniversalCommandArgs) bool {
-	if !commandHasPrefix(args.Command, r.command) {
+	if r.tool != "" || !commandHasPrefix(args.Command, r.command) {
 		return false
 	}
 
@@ -102,6 +117,45 @@ func (r commandRule) matches(args UniversalCommandArgs) bool {
 	default:
 		return args.isBareCommand()
 	}
+}
+
+// matchesImage is the image half of matching. Both halves of a rule file use
+// the one containment test, because path is a channel every call carries: a
+// grant naming a directory admits what is inside it, a denial naming a
+// directory refuses what is inside it, and neither can be widened or escaped
+// by a field the call adds, since the call has no other.
+func (r commandRule) matchesImage(args ViewImageArgs) bool {
+	if r.tool != ViewImageToolName {
+		return false
+	}
+	return r.path == nil || imagePathWithin(*r.path, args.Path)
+}
+
+// imagePathWithin reports whether call names rule itself or a path inside the
+// directory rule names. Both are resolved against the process working
+// directory and cleaned, which is how the call's path will be opened, so
+// "plots/../secret.png" is judged by where it lands and not by the prefix it
+// spells. Command rules compare their paths as written because a command's
+// paths resolve against a workdir the rule names too; an image call has no
+// workdir, and a prefix compared as written is a grant to walk out of.
+// Symbolic links along the way are not resolved, which is as far as the
+// redirection checks go as well.
+func imagePathWithin(rulePath, callPath string) bool {
+	rule, err := filepath.Abs(rulePath)
+	if err != nil {
+		return false
+	}
+	call, err := filepath.Abs(callPath)
+	if err != nil {
+		return false
+	}
+	if call == rule {
+		return true
+	}
+	if !strings.HasSuffix(rule, string(filepath.Separator)) {
+		rule += string(filepath.Separator)
+	}
+	return strings.HasPrefix(call, rule)
 }
 
 // isBareCommand reports whether the call carries none of the channels a rule
@@ -229,7 +283,11 @@ func loadCommandRules(path string, arrayRuleMode ruleMatchMode) ([]commandRule, 
 // next field lands here, and TestSuggestedRuleMatchesTheCallItWasGeneratedFrom
 // pins the property this comment claims.
 type commandRuleJSON struct {
-	Command    []string          `json:"command"`
+	// Tool and Path are the image rule; they lead so a suggested image rule
+	// reads tool first, the way a suggested command rule reads command first.
+	Tool       string            `json:"tool,omitempty"`
+	Path       *string           `json:"path,omitempty"`
+	Command    []string          `json:"command,omitempty"`
 	Environ    map[string]string `json:"environ,omitempty"`
 	Workdir    *string           `json:"workdir,omitempty"`
 	Stdin      *bool             `json:"stdin,omitempty"`
@@ -266,6 +324,12 @@ func parseCommandRule(line string, arrayRuleMode ruleMatchMode) (commandRule, er
 		}
 		return commandRule{}, fmt.Errorf("invalid JSON command object: %w", err)
 	}
+	if object.Tool != "" {
+		return parseImageRule(object, arrayRuleMode)
+	}
+	if object.Path != nil {
+		return commandRule{}, fmt.Errorf(`command object field "path" belongs to a rule that names "tool"`)
+	}
 	if len(object.Command) == 0 {
 		return commandRule{}, fmt.Errorf("command object has an empty command array")
 	}
@@ -299,6 +363,36 @@ func parseCommandRule(line string, arrayRuleMode ruleMatchMode) (commandRule, er
 		stderrFile: object.StderrFile,
 		matchMode:  objectRuleMode(arrayRuleMode),
 	}, nil
+}
+
+// parseImageRule reads an object rule that names a tool. Only view_image takes
+// one, and it takes path alone: every command channel is refused so a rule
+// cannot be read two ways, and an empty path is refused the way an empty file
+// field is. There is no array form, because an array is an argv prefix.
+func parseImageRule(object commandRuleJSON, arrayRuleMode ruleMatchMode) (commandRule, error) {
+	if object.Tool != ViewImageToolName {
+		return commandRule{}, fmt.Errorf("unknown tool %q: only %s takes a tool rule", object.Tool, ViewImageToolName)
+	}
+	if len(object.Command) > 0 || object.Environ != nil || object.Workdir != nil || object.Stdin != nil ||
+		object.StdinFile != nil || object.StdoutFile != nil || object.StderrFile != nil {
+		return commandRule{}, fmt.Errorf("a %s rule accepts tool and path alone", ViewImageToolName)
+	}
+	if object.Path != nil && *object.Path == "" {
+		return commandRule{}, fmt.Errorf(`command object field "path" cannot be empty`)
+	}
+	return commandRule{
+		tool:      ViewImageToolName,
+		path:      object.Path,
+		matchMode: objectRuleMode(arrayRuleMode),
+	}, nil
+}
+
+// suggestedImageRuleJSON renders the narrowest whitelist rule that would admit
+// this call: the file itself, as the model wrote it. Widening it to the
+// directory is the operator's decision to make by hand.
+func suggestedImageRuleJSON(args ViewImageArgs) string {
+	path := args.Path
+	return MarshalJSONForDisplay(commandRuleJSON{Tool: ViewImageToolName, Path: &path})
 }
 
 // objectRuleMode carries the list's breadth into object rules. A denial list

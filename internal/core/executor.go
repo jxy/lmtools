@@ -94,13 +94,32 @@ func (p approvalPolicy) decide(args UniversalCommandArgs) approvalDecision {
 	return p.decideUnlisted()
 }
 
-// decideUnlisted is steps 3 to 6 of decide: the answer for a call no rule
-// names. A view_image call starts here, because the rule files have no form
-// that names an image, and its answer has to be the one an unlisted command
-// gets under the same flags rather than a second reading of them. In
-// particular a configured whitelist with no way to ask denies the image too:
-// the operator said unlisted calls need review, and a file's bytes sent to a
-// provider are a call.
+// decideImage is decide for a view_image call: the same precedence, matched
+// through the image rules. A command rule never matches an image and an
+// image rule never matches a command, so the two halves of one file cannot
+// grant each other's calls.
+func (p approvalPolicy) decideImage(args ViewImageArgs) approvalDecision {
+	for _, b := range p.blacklist {
+		if b.matchesImage(args) {
+			return decisionDenyBlacklist
+		}
+	}
+
+	for _, w := range p.whitelist {
+		if w.matchesImage(args) {
+			return decisionAllow
+		}
+	}
+
+	return p.decideUnlisted()
+}
+
+// decideUnlisted is steps 3 to 6 of decide and decideImage: the answer for a
+// call no rule names. It is one function so an unlisted image and an unlisted
+// command get the same answer under the same flags rather than two readings
+// of them. In particular a configured whitelist with no way to ask denies the
+// image too: the operator said unlisted calls need review, and a file's bytes
+// sent to a provider are a call.
 func (p approvalPolicy) decideUnlisted() approvalDecision {
 	// 3. A whitelist that cannot be extended by asking is the whole policy
 	if p.hasWhitelist() && !p.canPrompt {
@@ -152,6 +171,15 @@ type preparedExecution struct {
 	args             *UniversalCommandArgs
 	image            *preparedImage
 	approvalRequired bool
+}
+
+// noun is what a rule admitting this call would name, for the advice a
+// denial prints.
+func (exec preparedExecution) noun() string {
+	if exec.image != nil {
+		return "image"
+	}
+	return "command"
 }
 
 // NewExecutor creates a new tool executor.
@@ -305,7 +333,7 @@ func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, 
 	// cannot happen. It stays as the backstop for a policy assembled by hand.
 	switch {
 	case e.approver == nil:
-		e.denyApprovalUnavailable(result, errors.ErrCodeApprovalError, exec.image == nil)
+		e.denyApprovalUnavailable(result, errors.ErrCodeApprovalError, exec.noun())
 		return false
 	case ui == nil:
 		result.Error = "approval failed: interactive approval requires a reviewed tool UI"
@@ -381,17 +409,13 @@ func denyResult(result *ToolResult, code, reason string, hints ...string) {
 // when no whitelist is configured, because decide turns a configured whitelist
 // plus no way to prompt into the not-whitelisted denial, which is the denial
 // that names the file. The allow-routes list stays one hint because it reads
-// as one list. canWhitelist is false for a view_image call, which no rule
-// form can grant; advising a route that does not exist sends the reader to
-// write a rule the loader will reject.
-func (e *Executor) denyApprovalUnavailable(result *ToolResult, code string, canWhitelist bool) {
-	routes := fmt.Sprintf(`Allow via one of:
+// as one list. noun is what the rule would name, the command or the image,
+// so the route reads as the rule the operator would write.
+func (e *Executor) denyApprovalUnavailable(result *ToolResult, code, noun string) {
+	denyResult(result, code, e.approvalUnavailableReason(), fmt.Sprintf(`Allow via one of:
   - %s
-  - Use -tool-auto-approve`, e.restoreApprovalGuidance())
-	if canWhitelist {
-		routes += "\n  - Add the command to a whitelist"
-	}
-	denyResult(result, code, e.approvalUnavailableReason(), routes)
+  - Use -tool-auto-approve
+  - Add the %s to a whitelist`, e.restoreApprovalGuidance(), noun))
 }
 
 // sharedFileConflict is why one call was pulled out of the round, kept per call
@@ -821,7 +845,7 @@ func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedEx
 		if e.log != nil && e.log.IsDebugEnabled() {
 			e.log.Debugf("Command rejected: %s | Reason: approval unavailable", cmdArgs.Command)
 		}
-		e.denyApprovalUnavailable(&result, errors.ErrCodeDeniedNonInteractive, true)
+		e.denyApprovalUnavailable(&result, errors.ErrCodeDeniedNonInteractive, "command")
 		return preparedExecution{args: cmdArgs}, result, false
 	}
 

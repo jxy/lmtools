@@ -34,6 +34,18 @@ func TestShippedExampleRuleFilesLoad(t *testing.T) {
 	if got := policy.decide(UniversalCommandArgs{Command: []string{"ls", "-la"}}); got != decisionAllow {
 		t.Fatalf("plain ls decision = %v, want allow", got)
 	}
+	// The documented image grant admits the directory it names and nothing
+	// beside it, and the documented image denial holds against auto-approve.
+	if got := policy.decideImage(ViewImageArgs{Path: "plots/out.png"}); got != decisionAllow {
+		t.Fatalf("plots image decision = %v, want allow", got)
+	}
+	if got := policy.decideImage(ViewImageArgs{Path: "plots/../secret.png"}); got == decisionAllow {
+		t.Fatal("the example image grant admitted a path that walks out of plots")
+	}
+	policy.autoApprove = true
+	if got := policy.decideImage(ViewImageArgs{Path: "/etc/motd.png"}); got != decisionDenyBlacklist {
+		t.Fatalf("/etc image decision = %v, want blacklist denial", got)
+	}
 	// The documented object grant admits its exact shape.
 	if got := policy.decide(UniversalCommandArgs{
 		Command:    []string{"go", "test", "./..."},

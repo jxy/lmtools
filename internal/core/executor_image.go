@@ -40,8 +40,10 @@ func viewImageOutput(block ImageBlock) string {
 	return "Attached image " + DescribeImageBlock(block) + "."
 }
 
-// prepareViewImage reads the file a view_image call names and decides, under
-// the same policy an unlisted command gets, whether the bytes may be sent.
+// prepareViewImage decides, under the rules and the flags, whether the file a
+// view_image call names may be sent, and reads it when it may. The rules
+// speak to the path alone, so they are consulted before the file is opened:
+// a denied path is not read.
 func (e *Executor) prepareViewImage(call ToolCall) (preparedExecution, ToolResult, bool) {
 	result := ToolResult{ID: call.ID}
 
@@ -58,6 +60,32 @@ func (e *Executor) prepareViewImage(call ToolCall) (preparedExecution, ToolResul
 		return preparedExecution{}, result, false
 	}
 
+	decision := e.policy.decideImage(args)
+	switch decision {
+	case decisionDenyBlacklist:
+		if e.log != nil && e.log.IsDebugEnabled() {
+			e.log.Debugf("Image rejected: %s | Reason: blacklisted", args.Path)
+		}
+		denyResult(&result, errors.ErrCodeDeniedBlacklist, "blacklisted")
+		return preparedExecution{}, result, false
+	case decisionDenyNotWhitelisted:
+		if e.log != nil && e.log.IsDebugEnabled() {
+			e.log.Debugf("Image rejected: %s | Reason: not in whitelist", args.Path)
+		}
+		guidance := fmt.Sprintf(`To allow this image, either:
+  1. Add %s to your whitelist file and use -tool-whitelist <file>
+  2. %s`, suggestedImageRuleJSON(args), e.restoreApprovalGuidance())
+		denyResult(&result, errors.ErrCodeDeniedNotWhitelisted, "not in whitelist",
+			"Whitelist file: "+e.whitelistPath, guidance)
+		return preparedExecution{}, result, false
+	case decisionDenyNonInteractive:
+		if e.log != nil && e.log.IsDebugEnabled() {
+			e.log.Debugf("Image rejected: %s | Reason: approval unavailable", args.Path)
+		}
+		e.denyApprovalUnavailable(&result, errors.ErrCodeDeniedNonInteractive, "image")
+		return preparedExecution{}, result, false
+	}
+
 	block, err := LoadToolImage(args.Path, e.maxImageBytes)
 	if err != nil {
 		if e.log != nil && e.log.IsDebugEnabled() {
@@ -70,26 +98,12 @@ func (e *Executor) prepareViewImage(call ToolCall) (preparedExecution, ToolResul
 	block.Detail = args.Detail
 	prepared := preparedExecution{id: call.ID, image: &preparedImage{args: args, block: block}}
 
-	switch e.policy.decideUnlisted() {
+	switch decision {
 	case decisionAllow:
 		return prepared, result, true
 	case decisionRequireApproval:
 		prepared.approvalRequired = true
 		return prepared, result, true
-	case decisionDenyNotWhitelisted:
-		if e.log != nil && e.log.IsDebugEnabled() {
-			e.log.Debugf("Image rejected: %s | Reason: not in whitelist", args.Path)
-		}
-		denyResult(&result, errors.ErrCodeDeniedNotWhitelisted, "not in whitelist",
-			"Whitelist file: "+e.whitelistPath,
-			ViewImageToolName+" cannot be granted by a whitelist rule; "+e.restoreApprovalGuidance())
-		return preparedExecution{}, result, false
-	case decisionDenyNonInteractive:
-		if e.log != nil && e.log.IsDebugEnabled() {
-			e.log.Debugf("Image rejected: %s | Reason: approval unavailable", args.Path)
-		}
-		e.denyApprovalUnavailable(&result, errors.ErrCodeDeniedNonInteractive, false)
-		return preparedExecution{}, result, false
 	}
 
 	result.Error = "unsupported approval decision"

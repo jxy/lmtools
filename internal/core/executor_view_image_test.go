@@ -96,7 +96,7 @@ func TestViewImageAsksTheImageQuestionAndHonoursTheAnswer(t *testing.T) {
 	}
 }
 
-func TestViewImageIsDeniedUnderAWhitelistNobodyCanExtend(t *testing.T) {
+func TestViewImageIsDeniedUnderAWhitelistThatDoesNotNameIt(t *testing.T) {
 	dir := t.TempDir()
 	whitelist := filepath.Join(dir, "wl.txt")
 	if err := os.WriteFile(whitelist, []byte(`["/bin/echo"]`+"\n"), 0o600); err != nil {
@@ -124,10 +124,19 @@ func TestViewImageIsDeniedUnderAWhitelistNobodyCanExtend(t *testing.T) {
 	if !image.NotRun || image.Code != errors.ErrCodeDeniedNotWhitelisted || image.Reason != "not in whitelist" {
 		t.Fatalf("image result = %#v, want the not-whitelisted denial", image)
 	}
-	for _, want := range []string{"Whitelist file: " + whitelist, "view_image cannot be granted by a whitelist rule", "Run interactively without -tool-non-interactive"} {
+	suggestion := suggestedImageRuleJSON(ViewImageArgs{Path: path})
+	for _, want := range []string{"Whitelist file: " + whitelist, "To allow this image, either:", "Add " + suggestion + " to your whitelist file", "Run interactively without -tool-non-interactive"} {
 		if !strings.Contains(image.Error, want) {
 			t.Errorf("Error = %q, want it to mention %q", image.Error, want)
 		}
+	}
+	// The printed rule admits the call it was printed for.
+	granted, err := parseCommandRule(suggestion, matchBareCommandOnly)
+	if err != nil {
+		t.Fatalf("parse suggested rule %s: %v", suggestion, err)
+	}
+	if !granted.matchesImage(ViewImageArgs{Path: path}) {
+		t.Fatalf("suggested rule %s does not admit the denied call", suggestion)
 	}
 	if len(image.Images) != 0 {
 		t.Fatal("a denied image was still attached")
@@ -144,15 +153,13 @@ func TestViewImageIsDeniedWhenNobodyCanApprove(t *testing.T) {
 	if !result.NotRun || result.Code != errors.ErrCodeDeniedNonInteractive {
 		t.Fatalf("result = %#v, want the approval-unavailable denial", result)
 	}
-	for _, want := range []string{"approval disabled by -tool-non-interactive", "Use -tool-auto-approve"} {
+	for _, want := range []string{"approval disabled by -tool-non-interactive", "Use -tool-auto-approve", "Add the image to a whitelist"} {
 		if !strings.Contains(result.Error, want) {
 			t.Errorf("Error = %q, want it to mention %q", result.Error, want)
 		}
 	}
-	// The whitelist route exists for commands alone; advising it here sends
-	// the reader to write a rule the loader rejects.
-	if strings.Contains(result.Error, "whitelist") {
-		t.Fatalf("Error = %q advises a whitelist for an image", result.Error)
+	if strings.Contains(result.Error, "Add the command") {
+		t.Fatalf("Error = %q names a command for an image", result.Error)
 	}
 }
 
