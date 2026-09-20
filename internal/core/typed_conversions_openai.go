@@ -71,31 +71,7 @@ func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 			}
 
 			if hasToolResults {
-				for _, block := range msg.Blocks {
-					switch b := block.(type) {
-					case ToolResultBlock:
-						content := b.Content
-						toolMsg := OpenAIMessage{
-							Role:       "tool",
-							ToolCallID: b.ToolUseID,
-							Content: OpenAIContentUnion{
-								Text:     &content,
-								Contents: nil,
-							},
-						}
-						result = append(result, toolMsg)
-					case TextBlock:
-						text := b.Text
-						userMsg := OpenAIMessage{
-							Role: "user",
-							Content: OpenAIContentUnion{
-								Text:     &text,
-								Contents: nil,
-							},
-						}
-						result = append(result, userMsg)
-					}
-				}
+				result = append(result, openAIToolResultsMessages(msg.Blocks)...)
 				continue
 			}
 
@@ -214,6 +190,75 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 	return result
 }
 
+// openAIToolResultsMessages renders the tool-results user message for Chat
+// Completions, whose tool message carries text alone. Each result becomes a
+// tool message in order. What the results carry beyond text follows in one
+// user message after them: the images of every result as image_url parts,
+// then each trailing text block as a text part. A round without images keeps
+// the shape every existing request had, a plain user message per text block,
+// so nothing changes on the wire for a plain command round.
+func openAIToolResultsMessages(blocks []Block) []OpenAIMessage {
+	messages := make([]OpenAIMessage, 0, len(blocks))
+	var images []OpenAIContent
+	var texts []string
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case ToolResultBlock:
+			content := b.Content
+			messages = append(messages, OpenAIMessage{
+				Role:       "tool",
+				ToolCallID: b.ToolUseID,
+				Content: OpenAIContentUnion{
+					Text:     &content,
+					Contents: nil,
+				},
+			})
+			for _, image := range b.Images {
+				images = append(images, openAIImagePart(image))
+			}
+		case TextBlock:
+			texts = append(texts, b.Text)
+		}
+	}
+
+	if len(images) == 0 {
+		for _, text := range texts {
+			text := text
+			messages = append(messages, OpenAIMessage{
+				Role: "user",
+				Content: OpenAIContentUnion{
+					Text:     &text,
+					Contents: nil,
+				},
+			})
+		}
+		return messages
+	}
+
+	parts := images
+	for _, text := range texts {
+		parts = append(parts, OpenAIContent{Type: "text", Text: text})
+	}
+	return append(messages, OpenAIMessage{
+		Role:    "user",
+		Content: OpenAIContentUnion{Contents: parts},
+	})
+}
+
+// openAIImagePart renders one image as a Chat Completions image_url part.
+func openAIImagePart(image ImageBlock) OpenAIContent {
+	part := OpenAIContent{
+		Type: "image_url",
+		ImageURL: &OpenAIImageURL{
+			URL: image.URL,
+		},
+	}
+	if image.Detail != "" {
+		part.ImageURL.Detail = image.Detail
+	}
+	return part
+}
+
 // MarshalOpenAIMessagesForRequest converts typed OpenAI messages to []interface{} for request bodies.
 func MarshalOpenAIMessagesForRequest(messages []OpenAIMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
@@ -267,16 +312,7 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 
 		case ImageBlock:
 			hasNonText = true
-			imagePart := OpenAIContent{
-				Type: "image_url",
-				ImageURL: &OpenAIImageURL{
-					URL: v.URL,
-				},
-			}
-			if v.Detail != "" {
-				imagePart.ImageURL.Detail = v.Detail
-			}
-			parts = append(parts, imagePart)
+			parts = append(parts, openAIImagePart(v))
 
 		case AudioBlock:
 			hasNonText = true

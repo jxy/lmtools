@@ -137,6 +137,17 @@ func approverEntryPoints() []approverEntryPoint {
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{
+			name: "ApproveImage",
+			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+				// The prompt describes the bytes that were read, so it names
+				// the sniffed type and decoded size rather than the path alone.
+				return a.ApproveImage(ctx, core.ViewImageArgs{Path: "plots/shot.png"},
+					core.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgo=", Name: "shot.png"})
+			},
+			prompt:    "      Send shot.png (image/png, 8 bytes) to the model? [y/N]: ",
+			eofNotice: "\n      No interactive input available; denying by default.\n",
+		},
+		{
 			name: "ApproveToolRoundLimitReset",
 			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
 				return a.ApproveToolRoundLimitReset(ctx, 4)

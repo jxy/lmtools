@@ -227,6 +227,11 @@ type AnthropicContent struct {
 	IsError    bool                  `json:"is_error,omitempty"`    // For tool_result
 	InputAudio *AudioData            `json:"input_audio,omitempty"` // For audio
 	File       *FileData             `json:"file,omitempty"`        // For file
+	// ContentBlocks is the array form of a tool_result's content: text and
+	// image blocks, which is how an image travels back with a result. ToMap
+	// renders it in place of Content when it is set; requests are built
+	// through ToMap, so it needs no wire tag of its own.
+	ContentBlocks []AnthropicContent `json:"-"`
 }
 
 // ToMap converts AnthropicContent to map[string]interface{} for request marshaling
@@ -288,7 +293,13 @@ func (c AnthropicContent) ToMap() map[string]interface{} {
 		m["tool_use_id"] = c.ToolUseID
 	}
 
-	if c.Content != "" {
+	if len(c.ContentBlocks) > 0 {
+		blocks := make([]interface{}, len(c.ContentBlocks))
+		for i, block := range c.ContentBlocks {
+			blocks[i] = block.ToMap()
+		}
+		m["content"] = blocks
+	} else if c.Content != "" {
 		m["content"] = c.Content
 	}
 
@@ -383,6 +394,13 @@ func (p GooglePart) ToMap() map[string]interface{} {
 		if p.FunctionResponse.Response.Error {
 			frMap["response"].(map[string]interface{})["error"] = true
 		}
+		if len(p.FunctionResponse.Parts) > 0 {
+			nested := make([]map[string]interface{}, 0, len(p.FunctionResponse.Parts))
+			for _, part := range p.FunctionResponse.Parts {
+				nested = append(nested, part.ToMap())
+			}
+			frMap["parts"] = nested
+		}
 		m["functionResponse"] = frMap
 	}
 
@@ -406,6 +424,11 @@ type GoogleFunctionCall struct {
 type GoogleFunctionResponse struct {
 	Name     string                `json:"name"`
 	Response GoogleResponseContent `json:"response"`
+	// Parts carries the media a function returned, nested under the response
+	// the way Gemini 3 documents it: one inlineData part per image. Earlier
+	// Gemini models took such parts as siblings of the functionResponse, and
+	// Gemini 3 rejects that placement, so the nested form is the one written.
+	Parts []GooglePart `json:"parts,omitempty"`
 }
 
 // GoogleResponseContent represents the content of a function response

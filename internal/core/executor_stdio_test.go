@@ -37,7 +37,7 @@ var stdioStreamSetters = []struct {
 // stdioApprover adapts a bare approval func to Approver, declining round-limit
 // resets through the shared stub.
 type stdioApprover struct {
-	DeclineToolRoundLimitReset
+	DeclineNonCommandApprovals
 	approve func(context.Context, UniversalCommandArgs) (bool, error)
 }
 

@@ -161,6 +161,11 @@ type Notifier interface {
 // validation, policy, display ordering, and execution.
 type Approver interface {
 	Approve(ctx context.Context, args UniversalCommandArgs) (bool, error)
+	// ApproveImage asks whether the file a view_image call loaded may be sent
+	// to the provider. image is the block as read and sniffed, so the question
+	// names the type and size of what will actually be sent rather than what
+	// the path suggested.
+	ApproveImage(ctx context.Context, args ViewImageArgs, image ImageBlock) (bool, error)
 	// ApproveToolRoundLimitReset grants another block of maxRounds tool-call rounds.
 	ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error)
 }

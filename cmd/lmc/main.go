@@ -427,7 +427,7 @@ func actualModelForConfig(cfg *config.Config, opts core.RequestOptions) string {
 
 func toolDefinitionsForOptions(opts core.RequestOptions) []core.ToolDefinition {
 	if opts.ToolEnabled {
-		return core.GetBuiltinUniversalCommandTool()
+		return core.GetBuiltinTools(opts)
 	}
 	return nil
 }

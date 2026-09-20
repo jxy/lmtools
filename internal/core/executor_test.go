@@ -600,7 +600,7 @@ func TestExecutorUnsupportedTool(t *testing.T) {
 }
 
 type gateApprover struct {
-	DeclineToolRoundLimitReset
+	DeclineNonCommandApprovals
 	gate  string
 	calls []string
 	mu    sync.Mutex

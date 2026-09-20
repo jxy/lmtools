@@ -94,11 +94,26 @@ func NewTestLogger(debugEnabled bool) *TestLogger {
 type TestApprover struct {
 	DefaultApproval bool
 	ApprovalCalls   []UniversalCommandArgs
+	// ImageApprovalCalls records each view_image prompt; DefaultApproval
+	// answers it, the same as a command.
+	ImageApprovalCalls []ViewImageArgs
 	// ResetResponses answers round-limit reset prompts in order; an exhausted
 	// or empty queue declines. ResetCalls records the maxRounds of each prompt.
 	ResetResponses []bool
 	ResetCalls     []int
 	mu             sync.Mutex
+}
+
+func (a *TestApprover) ApproveImage(ctx context.Context, args ViewImageArgs, _ ImageBlock) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.ImageApprovalCalls = append(a.ImageApprovalCalls, args)
+	return a.DefaultApproval, nil
 }
 
 func (a *TestApprover) Approve(ctx context.Context, args UniversalCommandArgs) (bool, error) {
@@ -133,11 +148,19 @@ func (a *TestApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds
 	return approved, nil
 }
 
-// DeclineToolRoundLimitReset is the round-limit half of Approver for test
-// doubles that only care about Approve. Embed it to decline every reset.
-type DeclineToolRoundLimitReset struct{}
+// DeclineNonCommandApprovals is the round-limit and image halves of Approver
+// for test doubles that only care about Approve. Embed it to decline every
+// reset and every image.
+type DeclineNonCommandApprovals struct{}
 
-func (DeclineToolRoundLimitReset) ApproveToolRoundLimitReset(ctx context.Context, _ int) (bool, error) {
+func (DeclineNonCommandApprovals) ApproveToolRoundLimitReset(ctx context.Context, _ int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (DeclineNonCommandApprovals) ApproveImage(ctx context.Context, _ ViewImageArgs, _ ImageBlock) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}

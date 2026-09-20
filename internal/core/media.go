@@ -92,6 +92,17 @@ func AnthropicImageSourceURL(sourceType, url, mediaType, data string) string {
 	return url
 }
 
+// ImageTooLargeError reports a file over the caller's byte cap. It is a type
+// rather than text so a tool result can add advice a flag error has no use
+// for: the model can shrink the file, the operator would just pick another.
+type ImageTooLargeError struct {
+	Limit int
+}
+
+func (e ImageTooLargeError) Error() string {
+	return fmt.Sprintf("larger than the %s limit", FormatByteCount(e.Limit))
+}
+
 // LoadImageFile reads one -image argument into an ImageBlock carrying a data
 // URL. It accepts a regular file of at most maxBytes whose content sniffs as a
 // supported image type, and records the base name so a session listing can
@@ -105,6 +116,14 @@ func LoadImageFile(path string, maxBytes int) (ImageBlock, error) {
 	}
 	defer file.Close()
 
+	return ReadImageFile(file, path, maxBytes)
+}
+
+// ReadImageFile is the half of LoadImageFile after the open: the regular-file
+// check on the descriptor, the bounded read, and the sniff. It is separate so
+// the tool path can open the file under its own rules and still read it under
+// the flag's.
+func ReadImageFile(file *os.File, path string, maxBytes int) (ImageBlock, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return ImageBlock{}, fmt.Errorf("read image %q: %w", path, err)
@@ -122,7 +141,7 @@ func LoadImageFile(path string, maxBytes int) (ImageBlock, error) {
 		return ImageBlock{}, fmt.Errorf("read image %q: %w", path, err)
 	}
 	if maxBytes > 0 && len(data) > maxBytes {
-		return ImageBlock{}, fmt.Errorf("read image %q: larger than the %s limit", path, FormatByteCount(maxBytes))
+		return ImageBlock{}, fmt.Errorf("read image %q: %w", path, ImageTooLargeError{Limit: maxBytes})
 	}
 	if len(data) == 0 {
 		return ImageBlock{}, fmt.Errorf("read image %q: file is empty", path)

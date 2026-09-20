@@ -50,7 +50,8 @@ func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.
 	if msg.Content != "" {
 		fmt.Printf("\n%s\n", msg.Content)
 	}
-	printImageBlocks(dir, msgID, notifier)
+	images := loadDisplayImages(dir, msgID, notifier)
+	printImageLines("", images.user)
 
 	// Load and display tool interactions if present
 	toolInteraction, err := LoadToolInteraction(dir, msgID)
@@ -60,43 +61,7 @@ func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.
 			notifier.Warnf("Failed to load tool interactions: %v", err)
 		}
 	} else if toolInteraction != nil {
-		// Display tool calls if present
-		if len(toolInteraction.Calls) > 0 {
-			fmt.Println("\n>>> Tool Calls:")
-			for _, call := range toolInteraction.Calls {
-				// Pretty print the arguments
-				args := format.PrettyJSONArgs(call.Args, "     ")
-				fmt.Printf("  • %s (ID: %s)\n", call.Name, call.ID)
-				if args != "" {
-					fmt.Printf("     Args: %s\n", args)
-				}
-			}
-		}
-
-		// Display tool results if present
-		if len(toolInteraction.Results) > 0 {
-			fmt.Println("\n>>> Tool Results:")
-			for _, result := range toolInteraction.Results {
-				if result.Error != "" {
-					fmt.Printf("  [ERROR] (ID: %s): %s\n", result.ID, result.Error)
-				} else {
-					// Truncate long output for display
-					output := format.Truncate(result.Output, format.MaxToolOutputDisplay)
-					status := "[OK]"
-					if result.Truncated {
-						status = "[TRUNCATED]"
-					}
-					fmt.Printf("  %s Result (ID: %s, %dms):\n", status, result.ID, result.Elapsed)
-					// Indent the output
-					lines := strings.Split(output, "\n")
-					for _, line := range lines {
-						if line != "" {
-							fmt.Printf("     %s\n", line)
-						}
-					}
-				}
-			}
-		}
+		printToolInteraction(toolInteraction, images)
 	}
 
 	return nil
@@ -161,23 +126,93 @@ func ShowDispatcherWithManager(manager *Manager, showArg string, notifier core.N
 	return errors.WrapError("find path", stdErrors.New("path not found: "+showArg))
 }
 
-// printImageBlocks lists the images a message carries, one line each. Images
-// live only in the blocks file — the text file holds the prompt alone — so
-// this is the one place -show learns about them. The bytes are never printed.
-func printImageBlocks(msgDir, msgID string, notifier core.Notifier) {
+// displayImages is what -show learns about a message's images from its blocks
+// file: the images of the user turn itself, and the images each tool result
+// carries, keyed by tool_use_id. Both live only in .blocks.json — the text
+// file holds the prompt and .tools.json holds a result's text — so this is
+// the one read that finds them. The bytes are never printed.
+type displayImages struct {
+	user     []core.ImageBlock
+	byResult map[string][]core.ImageBlock
+}
+
+func loadDisplayImages(msgDir, msgID string, notifier core.Notifier) displayImages {
+	var images displayImages
 	blocks, ok, err := loadMessageBlocks(msgDir, msgID)
 	if err != nil {
 		if notifier != nil {
 			notifier.Warnf("Failed to load message blocks: %v", err)
 		}
-		return
+		return images
 	}
 	if !ok {
-		return
+		return images
 	}
 	for _, block := range blocks {
-		if image, isImage := block.(core.ImageBlock); isImage {
-			fmt.Printf("[image: %s]\n", core.DescribeImageBlock(image))
+		switch value := block.(type) {
+		case core.ImageBlock:
+			images.user = append(images.user, value)
+		case core.ToolResultBlock:
+			if len(value.Images) == 0 {
+				continue
+			}
+			if images.byResult == nil {
+				images.byResult = make(map[string][]core.ImageBlock)
+			}
+			images.byResult[value.ToolUseID] = append(images.byResult[value.ToolUseID], value.Images...)
+		}
+	}
+	return images
+}
+
+// printImageLines lists images one line each, in the one form the user turn
+// and the tool results share.
+func printImageLines(indent string, images []core.ImageBlock) {
+	for _, image := range images {
+		fmt.Printf("%s[image: %s]\n", indent, core.DescribeImageBlock(image))
+	}
+}
+
+// printToolInteraction renders a message's tool calls and results. A result's
+// text comes from .tools.json and its images from the blocks file, printed
+// under the output they arrived with.
+func printToolInteraction(toolInteraction *core.ToolInteraction, images displayImages) {
+	// Display tool calls if present
+	if len(toolInteraction.Calls) > 0 {
+		fmt.Println("\n>>> Tool Calls:")
+		for _, call := range toolInteraction.Calls {
+			// Pretty print the arguments
+			args := format.PrettyJSONArgs(call.Args, "     ")
+			fmt.Printf("  • %s (ID: %s)\n", call.Name, call.ID)
+			if args != "" {
+				fmt.Printf("     Args: %s\n", args)
+			}
+		}
+	}
+
+	// Display tool results if present
+	if len(toolInteraction.Results) > 0 {
+		fmt.Println("\n>>> Tool Results:")
+		for _, result := range toolInteraction.Results {
+			if result.Error != "" {
+				fmt.Printf("  [ERROR] (ID: %s): %s\n", result.ID, result.Error)
+				continue
+			}
+			// Truncate long output for display
+			output := format.Truncate(result.Output, format.MaxToolOutputDisplay)
+			status := "[OK]"
+			if result.Truncated {
+				status = "[TRUNCATED]"
+			}
+			fmt.Printf("  %s Result (ID: %s, %dms):\n", status, result.ID, result.Elapsed)
+			// Indent the output
+			lines := strings.Split(output, "\n")
+			for _, line := range lines {
+				if line != "" {
+					fmt.Printf("     %s\n", line)
+				}
+			}
+			printImageLines("     ", images.byResult[result.ID])
 		}
 	}
 }
@@ -241,7 +276,8 @@ func displayMessageWithTools(sessionPath string, msg Message, messageIndex map[s
 		// Fallback to session path if not found in index
 		msgDir = sessionPath
 	}
-	printImageBlocks(msgDir, msg.ID, notifier)
+	images := loadDisplayImages(msgDir, msg.ID, notifier)
+	printImageLines("", images.user)
 
 	// Load and display tool interactions if present
 	toolInteraction, err := LoadToolInteraction(msgDir, msg.ID)
@@ -250,43 +286,7 @@ func displayMessageWithTools(sessionPath string, msg Message, messageIndex map[s
 	}
 
 	if toolInteraction != nil {
-		// Display tool calls if present
-		if len(toolInteraction.Calls) > 0 {
-			fmt.Println("\n>>> Tool Calls:")
-			for _, call := range toolInteraction.Calls {
-				// Pretty print the arguments
-				args := format.PrettyJSONArgs(call.Args, "     ")
-				fmt.Printf("  • %s (ID: %s)\n", call.Name, call.ID)
-				if args != "" {
-					fmt.Printf("     Args: %s\n", args)
-				}
-			}
-		}
-
-		// Display tool results if present
-		if len(toolInteraction.Results) > 0 {
-			fmt.Println("\n>>> Tool Results:")
-			for _, result := range toolInteraction.Results {
-				if result.Error != "" {
-					fmt.Printf("  [ERROR] (ID: %s): %s\n", result.ID, result.Error)
-				} else {
-					// Truncate long output for display
-					output := format.Truncate(result.Output, format.MaxToolOutputDisplay)
-					status := "[OK]"
-					if result.Truncated {
-						status = "[TRUNCATED]"
-					}
-					fmt.Printf("  %s Result (ID: %s, %dms):\n", status, result.ID, result.Elapsed)
-					// Indent the output
-					lines := strings.Split(output, "\n")
-					for _, line := range lines {
-						if line != "" {
-							fmt.Printf("     %s\n", line)
-						}
-					}
-				}
-			}
-		}
+		printToolInteraction(toolInteraction, images)
 	}
 
 	return nil

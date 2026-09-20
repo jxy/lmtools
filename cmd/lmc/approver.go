@@ -77,6 +77,17 @@ func (a *cliApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) 
 	)
 }
 
+// ApproveImage asks about the file a view_image call read. The review line
+// above it showed the path the model asked for; the question names the type
+// and size of what was actually read, which is what will be sent.
+func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, image core.ImageBlock) (bool, error) {
+	return a.ask(ctx,
+		fmt.Sprintf("%sSend %s to the model? [y/N]: ", tools.DetailIndent, core.DescribeImageBlock(image)),
+		"\n"+tools.DetailIndent+"No interactive input available; denying by default.\n",
+		"\n"+tools.DetailIndent+"Approval prompt cancelled.\n",
+	)
+}
+
 func (a *cliApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
 	return a.ask(ctx,
 		fmt.Sprintf("\nTool-call round limit reached (%d). Reset it and continue? [y/N]: ", maxRounds),

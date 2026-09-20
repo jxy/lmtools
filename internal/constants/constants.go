@@ -56,6 +56,16 @@ const (
 	// reported as they arrive rather than second-guessed here.
 	MaxCLIImageBytes = 20 * 1024 * 1024 // 20MB
 
+	// MaxAnthropicImageBytes is the per-image limit Anthropic documents, and
+	// the cap view_image loads under on the Anthropic wire. The -image flag
+	// lets the provider's rejection speak for itself, because the operator
+	// chose the file and sees the error. A tool call is different: the result
+	// is committed to the session before the follow-up request is answered,
+	// so a rejection there leaves a turn no resume can replay. Refusing the
+	// file here instead hands the model an error it can act on, by resizing
+	// the image with a command and asking again.
+	MaxAnthropicImageBytes = 5 * 1000 * 1000 // 5MB
+
 	// MaxCLIResponseSize is the maximum response size for CLI operations
 	MaxCLIResponseSize = 10 * 1024 * 1024 // 10MB
 

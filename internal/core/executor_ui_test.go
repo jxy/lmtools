@@ -41,7 +41,7 @@ func (ui *recordingToolUI) AfterExecute(_ []ToolCall, _ []ToolResult) {
 }
 
 type recordingLifecycleApprover struct {
-	DeclineToolRoundLimitReset
+	DeclineNonCommandApprovals
 	recorder *lifecycleRecorder
 	approve  bool
 	err      error

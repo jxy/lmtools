@@ -119,7 +119,8 @@ provider credentials.
 An image attached with `-image` is saved inline in the session, so resuming or
 branching the session sends it to the provider again. `-show` lists each one
 as `[image: name (media type, size)]` after the message text and never prints
-the image bytes.
+the image bytes. An image the model loaded with `view_image` is saved the same
+way, inside its tool result, and listed under that result.
 
 ### Tool Use
 
@@ -127,6 +128,27 @@ the image bytes.
 argument vector directly with `execvpe`-style semantics, without a shell. A
 whitelist match is already an approval: the matching command runs without a
 prompt, and `-tool-auto-approve` is not needed.
+
+`-tool` also enables `view_image`, which lets the model look at an image file:
+a plot a command just wrote, or a screenshot named in the prompt. The model
+calls it with a `path` and an optional `detail` hint. `lmc` reads the file,
+checks that it is PNG, JPEG, GIF, or WebP, and returns it inside the tool
+result, so the model sees the picture on its next turn. On Anthropic, OpenAI
+Responses, and Gemini 3 the image travels in the result itself; on OpenAI Chat
+Completions, whose tool messages carry text only, it follows in a user message
+right after the round's tool messages. A symlink is refused, and so is a file
+over 5 MB on the Anthropic wire or 20 MiB elsewhere; the refusal reaches the
+model as an error result, which it can answer by resizing the file with a
+command. `view_image` is not offered with `-argo-legacy`.
+
+Sending a file to the provider is disclosure, so a `view_image` call is
+approved the way a command that matches no whitelist rule is. Interactive
+`lmc` shows the path and asks `Send shot.png (image/png, 48213 bytes) to the
+model? [y/N]`, `-tool-auto-approve` approves it, and when no prompt can be
+answered it is denied; with `-tool-whitelist` loaded it is denied as not
+whitelisted, because rule files cannot name an image. The image is saved once,
+inside the tool result in the session, and `-show` lists it under the result
+without printing the bytes.
 
 Commands can take standard input from a literal `stdin` string or a streamed
 `stdin_file`, and can redirect output to files with `stdout_file` and
@@ -392,10 +414,13 @@ Images:
 - `-image-detail string`: OpenAI detail hint for every attached image: `auto`,
   `low`, or `high`. Other providers ignore it.
 
+To let the model open an image itself, see `view_image` under Tool Use.
+
 Tools:
 
-- `-tool`: Enable the built-in `universal_command` tool. Commands run directly
-  with `execvpe`-style semantics, without a shell.
+- `-tool`: Enable the built-in `universal_command` and `view_image` tools.
+  Commands run directly with `execvpe`-style semantics, without a shell;
+  `view_image` returns an image file to the model inside the tool result.
 - `-tool-timeout duration`: Per-command timeout; default `1m`. A tool call may
   set its own `timeout` in seconds instead; that value is clamped to 24 hours.
 - `-tool-whitelist path`: JSON command rules that run without prompting. File

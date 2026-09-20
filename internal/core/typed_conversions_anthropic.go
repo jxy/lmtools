@@ -45,21 +45,7 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 					content = append(content, anthropicContent)
 				}
 			case ImageBlock:
-				source := &AnthropicImageSource{
-					Type: "url",
-					URL:  b.URL,
-				}
-				if mediaType, data, ok := ParseBase64DataURL(b.URL); ok {
-					source = &AnthropicImageSource{
-						Type:      "base64",
-						MediaType: mediaType,
-						Data:      data,
-					}
-				}
-				content = append(content, AnthropicContent{
-					Type:   "image",
-					Source: source,
-				})
+				content = append(content, anthropicImageContent(b))
 			case AudioBlock:
 				audioContent := AnthropicContent{
 					Type: "input_audio",
@@ -93,12 +79,7 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 					Input: input,
 				})
 			case ToolResultBlock:
-				content = append(content, AnthropicContent{
-					Type:      "tool_result",
-					ToolUseID: b.ToolUseID,
-					Content:   b.Content,
-					IsError:   b.IsError,
-				})
+				content = append(content, anthropicToolResultContent(b))
 			}
 		}
 
@@ -112,6 +93,51 @@ func ToAnthropicTyped(messages []TypedMessage) []AnthropicMessage {
 	}
 
 	return result
+}
+
+// anthropicImageContent renders one image: a base64 source for a data URL,
+// a url source for anything else.
+func anthropicImageContent(block ImageBlock) AnthropicContent {
+	source := &AnthropicImageSource{
+		Type: "url",
+		URL:  block.URL,
+	}
+	if mediaType, data, ok := ParseBase64DataURL(block.URL); ok {
+		source = &AnthropicImageSource{
+			Type:      "base64",
+			MediaType: mediaType,
+			Data:      data,
+		}
+	}
+	return AnthropicContent{
+		Type:   "image",
+		Source: source,
+	}
+}
+
+// anthropicToolResultContent renders one tool result. A result without images
+// keeps the string form, which is what every existing request carried. A
+// result with images is the content array Anthropic documents for a
+// tool_result: the text block first, then one image block per image.
+func anthropicToolResultContent(block ToolResultBlock) AnthropicContent {
+	content := AnthropicContent{
+		Type:      "tool_result",
+		ToolUseID: block.ToolUseID,
+		IsError:   block.IsError,
+	}
+	if len(block.Images) == 0 {
+		content.Content = block.Content
+		return content
+	}
+	blocks := make([]AnthropicContent, 0, len(block.Images)+1)
+	if block.Content != "" {
+		blocks = append(blocks, AnthropicContent{Type: "text", Text: block.Content})
+	}
+	for _, image := range block.Images {
+		blocks = append(blocks, anthropicImageContent(image))
+	}
+	content.ContentBlocks = blocks
+	return content
 }
 
 func reasoningBlockToAnthropicContent(block ReasoningBlock) (AnthropicContent, bool) {
@@ -302,6 +328,37 @@ func dedupeNonEmptyStrings(values []string) []string {
 	return result
 }
 
+// toolResultBlockFromAnthropic is the inverse of anthropicToolResultContent:
+// the string form is the text, and the array form folds its text blocks into
+// the text and its image blocks into Images.
+func toolResultBlockFromAnthropic(block AnthropicContent) ToolResultBlock {
+	result := ToolResultBlock{
+		ToolUseID: block.ToolUseID,
+		Content:   block.Content,
+		IsError:   block.IsError,
+	}
+	var texts []string
+	for _, nested := range block.ContentBlocks {
+		switch nested.Type {
+		case "text":
+			if nested.Text != "" {
+				texts = append(texts, nested.Text)
+			}
+		case "image":
+			if nested.Source != nil {
+				result.Images = append(result.Images, ImageBlock{
+					URL:    AnthropicImageSourceURL(nested.Source.Type, nested.Source.URL, nested.Source.MediaType, nested.Source.Data),
+					Detail: "auto",
+				})
+			}
+		}
+	}
+	if result.Content == "" {
+		result.Content = strings.Join(texts, "\n")
+	}
+	return result
+}
+
 // MarshalAnthropicMessagesForRequest converts typed Anthropic messages to []interface{} for request bodies.
 func MarshalAnthropicMessagesForRequest(messages []AnthropicMessage) []interface{} {
 	result := make([]interface{}, 0, len(messages))
@@ -355,11 +412,7 @@ func FromAnthropicTyped(messages []AnthropicMessage) []TypedMessage {
 						Input: block.Input,
 					})
 				case "tool_result":
-					typed.Blocks = append(typed.Blocks, ToolResultBlock{
-						ToolUseID: block.ToolUseID,
-						Content:   block.Content,
-						IsError:   block.IsError,
-					})
+					typed.Blocks = append(typed.Blocks, toolResultBlockFromAnthropic(block))
 				case "image":
 					if block.Source != nil {
 						typed.Blocks = append(typed.Blocks, ImageBlock{

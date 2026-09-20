@@ -174,13 +174,15 @@ func responsesInputItemToTypedMessages(ctx context.Context, rawItem interface{},
 	case "function_call_output":
 		callID, _ := item["call_id"].(string)
 		status, _ := item["status"].(string)
+		text, images := responsesFunctionCallOutputParts(item["output"])
 		return []core.TypedMessage{{
 			Role: string(core.RoleUser),
 			Blocks: []core.Block{core.ToolResultBlock{
 				ToolUseID: callID,
 				Name:      toolNamesByCallID[callID],
-				Content:   responsesFunctionCallOutputText(item["output"]),
+				Content:   text,
 				IsError:   status == "incomplete",
+				Images:    images,
 			}},
 		}}, nil
 	case "custom_tool_call_output":
@@ -228,6 +230,37 @@ func responsesInputItemToTypedMessages(ctx context.Context, rawItem interface{},
 		logger.From(ctx).Warnf("Dropping unsupported Responses input item type %q while converting to TypedRequest", itemType)
 		return nil, nil
 	}
+}
+
+// responsesFunctionCallOutputParts reads a function output. A string is the
+// text. A content list yields its input_image parts as the images the result
+// carries and everything else as text through responsesFunctionCallOutputText,
+// so a part this does not recognize is kept as JSON rather than lost. Custom
+// tool outputs do not come through here: they are documented as strings.
+func responsesFunctionCallOutputParts(output interface{}) (string, []core.ImageBlock) {
+	parts, ok := output.([]interface{})
+	if !ok {
+		return responsesFunctionCallOutputText(output), nil
+	}
+	rest := make([]interface{}, 0, len(parts))
+	var images []core.ImageBlock
+	for _, rawPart := range parts {
+		part, isObject := rawPart.(map[string]interface{})
+		if isObject {
+			if partType, _ := part["type"].(string); partType == "input_image" {
+				if url, _ := part["image_url"].(string); url != "" {
+					detail, _ := part["detail"].(string)
+					images = append(images, core.ImageBlock{URL: url, Detail: detail})
+					continue
+				}
+			}
+		}
+		rest = append(rest, rawPart)
+	}
+	if len(rest) == 0 {
+		return "", images
+	}
+	return responsesFunctionCallOutputText(rest), images
 }
 
 func responsesFunctionCallOutputText(output interface{}) string {

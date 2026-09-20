@@ -18,10 +18,15 @@ func FormatByteCount(size int) string {
 	const (
 		kib = 1024
 		mib = 1024 * kib
+		mb  = 1000 * 1000
 	)
 	switch {
 	case size > 0 && size%mib == 0:
 		return fmt.Sprintf("%dMiB", size/mib)
+	case size > 0 && size%mb == 0:
+		// Provider limits are documented in decimal megabytes, and the cap
+		// view_image enforces on the Anthropic wire is one of them.
+		return fmt.Sprintf("%dMB", size/mb)
 	case size > 0 && size%kib == 0:
 		return fmt.Sprintf("%dKiB", size/kib)
 	default:

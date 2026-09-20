@@ -43,17 +43,7 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 				})
 				pendingThoughtSignature = ""
 			case ImageBlock:
-				// Gemini takes image bytes as an inlineData part. A URL image
-				// has no Gemini equivalent short of the Files API, so it stays
-				// a text mention rather than being dropped without a trace.
-				if mediaType, data, ok := ParseBase64DataURL(b.URL); ok {
-					parts = append(parts, GooglePart{InlineData: &GoogleInlineData{
-						MimeType: mediaType,
-						Data:     data,
-					}})
-				} else {
-					parts = append(parts, GooglePart{Text: "[Image: " + b.URL + "]"})
-				}
+				parts = append(parts, googleImagePart(b))
 			case AudioBlock:
 				audioText := "[Audio content"
 				if b.ID != "" {
@@ -94,15 +84,7 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 				if functionName == "" {
 					functionName = b.ToolUseID
 				}
-				parts = append(parts, GooglePart{
-					FunctionResponse: &GoogleFunctionResponse{
-						Name: functionName,
-						Response: GoogleResponseContent{
-							Content: b.Content,
-							Error:   b.IsError,
-						},
-					},
-				})
+				parts = append(parts, googleFunctionResponsePart(functionName, b))
 			}
 		}
 		if pendingThoughtSignature != "" {
@@ -116,6 +98,49 @@ func toGoogleTypedInternal(messages []TypedMessage, keepSystem bool) []GoogleMes
 	}
 
 	return result
+}
+
+// googleImagePart renders one image. Gemini takes image bytes as an
+// inlineData part. A URL image has no Gemini equivalent short of the Files
+// API, so it stays a text mention rather than being dropped without a trace.
+func googleImagePart(block ImageBlock) GooglePart {
+	if mediaType, data, ok := ParseBase64DataURL(block.URL); ok {
+		return GooglePart{InlineData: &GoogleInlineData{
+			MimeType: mediaType,
+			Data:     data,
+		}}
+	}
+	return GooglePart{Text: googleImageMention(block.URL)}
+}
+
+func googleImageMention(url string) string {
+	return "[Image: " + url + "]"
+}
+
+// googleFunctionResponsePart renders one tool result. Images with bytes are
+// nested under the response as inlineData parts, the placement Gemini 3
+// documents; a URL image joins the response text as the same mention a user
+// message would carry, so it is not dropped in silence.
+func googleFunctionResponsePart(functionName string, block ToolResultBlock) GooglePart {
+	response := &GoogleFunctionResponse{
+		Name: functionName,
+		Response: GoogleResponseContent{
+			Content: block.Content,
+			Error:   block.IsError,
+		},
+	}
+	for _, image := range block.Images {
+		part := googleImagePart(image)
+		if part.InlineData == nil {
+			if response.Response.Content != "" {
+				response.Response.Content += "\n"
+			}
+			response.Response.Content += part.Text
+			continue
+		}
+		response.Parts = append(response.Parts, part)
+	}
+	return GooglePart{FunctionResponse: response}
 }
 
 // MarshalGoogleMessagesForRequest converts typed Google messages to []interface{} for request bodies.

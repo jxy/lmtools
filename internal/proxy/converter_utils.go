@@ -639,10 +639,12 @@ func AnthropicBlocksToCoreWithToolNameRegistry(blocks []AnthropicContentBlock, r
 				Input:        inputJSON,
 			})
 		case "tool_result":
+			text, images := proxyToolResultParts(block.Content)
 			coreBlocks = append(coreBlocks, core.ToolResultBlock{
 				ToolUseID: block.ToolUseID,
-				Content:   proxyToolResultContent(block.Content),
+				Content:   text,
 				IsError:   block.IsError,
+				Images:    images,
 			})
 		case "image":
 			if block.Source != nil {
@@ -812,14 +814,59 @@ func coreAnthropicContentsToProxyBlocks(contents []core.AnthropicContent) []Anth
 	return blocks
 }
 
-func proxyToolResultContent(raw json.RawMessage) string {
+// proxyToolResultParts reads a tool_result's content. A JSON string is the
+// text as sent. An array is read block by block: text blocks join into the
+// text, image blocks become the images the result carries, and any other
+// block — a document, a search result — keeps its JSON in the text so nothing
+// a client sent disappears. Any other value stays its raw JSON, as before.
+// Stringifying the whole array, which is what this did once, turned every
+// screenshot a client returned inside a tool result into a wall of base64
+// text for the backend to read.
+func proxyToolResultParts(raw json.RawMessage) (string, []core.ImageBlock) {
 	if len(raw) == 0 {
-		return ""
+		return "", nil
 	}
 
 	var content string
 	if err := json.Unmarshal(raw, &content); err == nil {
-		return content
+		return content, nil
 	}
-	return string(raw)
+
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return string(raw), nil
+	}
+	texts := make([]string, 0, len(items))
+	var images []core.ImageBlock
+	for _, item := range items {
+		var block AnthropicContentBlock
+		if err := json.Unmarshal(item, &block); err != nil {
+			texts = append(texts, string(item))
+			continue
+		}
+		switch block.Type {
+		case "text":
+			if block.Text != "" {
+				texts = append(texts, block.Text)
+			}
+		case "image":
+			url := ""
+			if block.Source != nil {
+				url = core.AnthropicImageSourceURL(
+					core.GetString(block.Source, "type"),
+					core.GetString(block.Source, "url"),
+					core.GetString(block.Source, "media_type"),
+					core.GetString(block.Source, "data"),
+				)
+			}
+			if url == "" {
+				logger.GetLogger().Warnf("Dropping tool_result image block with neither url nor base64 data while converting to TypedRequest")
+				continue
+			}
+			images = append(images, core.ImageBlock{URL: url, Detail: "auto"})
+		default:
+			texts = append(texts, string(item))
+		}
+	}
+	return strings.Join(texts, "\n"), images
 }

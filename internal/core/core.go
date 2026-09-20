@@ -98,7 +98,7 @@ func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, erro
 
 	// Add tools if enabled
 	if cfg.ToolEnabled {
-		opts.ToolDefs = GetBuiltinUniversalCommandTool()
+		opts.ToolDefs = GetBuiltinTools(cfg)
 	}
 
 	// Use the unified BuildChatRequest
@@ -422,7 +422,7 @@ func BuildToolResultRequest(cfg RequestOptions, model string, system string, too
 	// Preserve follow-up request behavior for callers that rely on tool mode in the
 	// config rather than passing tool definitions explicitly.
 	if len(toolDefs) == 0 && cfg.ToolEnabled {
-		toolDefs = GetBuiltinUniversalCommandTool()
+		toolDefs = GetBuiltinTools(cfg)
 	}
 
 	// Use the new unified BuildChatRequest

@@ -14,7 +14,7 @@ import (
 
 // MockApprover implements the core.Approver interface for testing
 type MockApprover struct {
-	core.DeclineToolRoundLimitReset
+	core.DeclineNonCommandApprovals
 	shouldApprove bool
 	approvalError error
 }

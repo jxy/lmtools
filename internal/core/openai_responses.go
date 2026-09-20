@@ -313,11 +313,31 @@ func openAIResponsesToolCallOutputItem(block ToolResultBlock) map[string]interfa
 	if block.Type == "custom" {
 		itemType = "custom_tool_call_output"
 	}
-	return map[string]interface{}{
+	item := map[string]interface{}{
 		"type":    itemType,
 		"call_id": block.ToolUseID,
 		"output":  block.Content,
 	}
+	// A function output may be a content list, which is how an image travels
+	// back with the text. A custom tool output is documented as a string
+	// alone, and no path in this repository puts an image on one.
+	if len(block.Images) > 0 && itemType == "function_call_output" {
+		item["output"] = openAIResponsesToolOutputParts(block)
+	}
+	return item
+}
+
+// openAIResponsesToolOutputParts is the content-list form of a function
+// output: the text as an input_text part, then one input_image per image.
+func openAIResponsesToolOutputParts(block ToolResultBlock) []map[string]interface{} {
+	parts := make([]map[string]interface{}, 0, len(block.Images)+1)
+	if block.Content != "" {
+		parts = append(parts, map[string]interface{}{"type": "input_text", "text": block.Content})
+	}
+	for _, image := range block.Images {
+		parts = append(parts, openAIResponsesImagePart(image))
+	}
+	return parts
 }
 
 func openAIResponsesToolsFromOpenAITools(raw interface{}) []map[string]interface{} {

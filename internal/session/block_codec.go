@@ -42,6 +42,40 @@ type storedBlock struct {
 	Data             string          `json:"data,omitempty"`
 	Format           string          `json:"format,omitempty"`
 	Duration         int             `json:"duration,omitempty"`
+	// Images are the images a tool_result block carries. They are stored
+	// here and nowhere else: .tools.json keeps the result's text, so the
+	// bytes a view_image call read are held once per message.
+	Images []storedImage `json:"images,omitempty"`
+}
+
+// storedImage is an image nested in a stored tool_result block, the same
+// three fields a top-level stored image block carries.
+type storedImage struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+	Name   string `json:"name,omitempty"`
+}
+
+func storedImagesFromCore(images []core.ImageBlock) []storedImage {
+	if len(images) == 0 {
+		return nil
+	}
+	stored := make([]storedImage, 0, len(images))
+	for _, image := range images {
+		stored = append(stored, storedImage{URL: image.URL, Detail: image.Detail, Name: image.Name})
+	}
+	return stored
+}
+
+func coreImagesFromStored(images []storedImage) []core.ImageBlock {
+	if len(images) == 0 {
+		return nil
+	}
+	blocks := make([]core.ImageBlock, 0, len(images))
+	for _, image := range images {
+		blocks = append(blocks, core.ImageBlock{URL: image.URL, Detail: image.Detail, Name: image.Name})
+	}
+	return blocks
 }
 
 func marshalMessageBlocks(msg Message, toolInteraction *core.ToolInteraction) ([]byte, error) {
@@ -158,6 +192,7 @@ func storedBlocksFromCore(blocks []core.Block) ([]storedBlock, error) {
 				Name:      value.Name,
 				Text:      value.Content,
 				IsError:   value.IsError,
+				Images:    storedImagesFromCore(value.Images),
 			})
 		case core.ImageBlock:
 			stored = append(stored, storedBlock{Type: "image", URL: value.URL, Detail: value.Detail, Name: value.Name})
@@ -226,6 +261,7 @@ func loadMessageBlocks(sessionPath, msgID string) ([]core.Block, bool, error) {
 				Name:      block.Name,
 				Content:   block.Text,
 				IsError:   block.IsError,
+				Images:    coreImagesFromStored(block.Images),
 			})
 		case "image":
 			blocks = append(blocks, core.ImageBlock{URL: block.URL, Detail: block.Detail, Name: block.Name})

@@ -50,7 +50,7 @@ type Config struct {
 	ListModels bool // list available models from provider
 
 	// Tool support
-	EnableTool         bool          // enable built-in universal_command tool
+	EnableTool         bool          // enable the built-in universal_command and view_image tools
 	ToolTimeout        time.Duration // timeout for tool execution
 	ToolWhitelist      string        // JSON command rules that run without prompting
 	ToolBlacklist      string        // JSON command rules that are always denied
@@ -131,7 +131,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.ImageDetail, "image-detail", "", "OpenAI detail hint for every -image: auto, low, high")
 
 	// Tool Options
-	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable universal_command with direct execvpe-style execution (no shell)")
+	fs.BoolVar(&cfg.EnableTool, "tool", false, "enable universal_command with direct execvpe-style execution (no shell) and view_image, which returns an image file to the model")
 	fs.DurationVar(&cfg.ToolTimeout, "tool-timeout", core.DefaultToolTimeout, "timeout per command")
 	fs.StringVar(&cfg.ToolWhitelist, "tool-whitelist", "", "path to JSON command-rule whitelist; redirected calls require exact object rules")
 	fs.StringVar(&cfg.ToolBlacklist, "tool-blacklist", "", "path to JSON command-rule blacklist; matches are always denied")

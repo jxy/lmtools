@@ -107,7 +107,7 @@ func TestApproverContextAlreadyCancelled(t *testing.T) {
 
 // blockingApprover is a test approver that blocks until signaled
 type blockingApprover struct {
-	DeclineToolRoundLimitReset
+	DeclineNonCommandApprovals
 	blockChan chan struct{}
 	readyChan chan struct{}
 	mu        sync.Mutex

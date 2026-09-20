@@ -70,8 +70,30 @@ func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.U
 		return
 	}
 
+	if image := imageCallArgs(call); image != nil {
+		ui.notifier.Promptf("%s View image: %s\n", prefix, core.MarshalJSONForDisplay(image.Path))
+		if image.Detail != "" {
+			ui.notifier.Promptf("%sDetail: %s\n", DetailIndent, image.Detail)
+		}
+		return
+	}
+
 	ui.notifier.Promptf("%s Tool: %s\n", prefix, call.Name)
 	ui.notifier.Promptf("%sArguments: %s\n", DetailIndent, compactToolArguments(call.Args))
+}
+
+// imageCallArgs decodes a view_image call's arguments for display, and
+// returns nil for any other tool or for arguments that do not decode, which
+// then fall through to the generic rendering.
+func imageCallArgs(call core.ToolCall) *core.ViewImageArgs {
+	if call.Name != core.ViewImageToolName {
+		return nil
+	}
+	var args core.ViewImageArgs
+	if json.Unmarshal(call.Args, &args) != nil || args.Path == "" {
+		return nil
+	}
+	return &args
 }
 
 // BeforeRun announces execution after every approval has resolved.

@@ -35,6 +35,13 @@ type ToolResultBlock struct {
 	Name      string // Function name (needed for Google's functionResponse)
 	Content   string
 	IsError   bool
+	// Images ride the result beside its text, which is how view_image hands
+	// the model the file it asked for. Each renderer places them in the shape
+	// its wire accepts: Anthropic and Responses nest them in the result, Google
+	// nests them under functionResponse.parts, and Chat Completions, whose tool
+	// message is text only, sends them in a user message right after the
+	// round's tool messages.
+	Images []ImageBlock
 }
 
 func (ToolResultBlock) isBlock() {}

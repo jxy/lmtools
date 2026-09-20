@@ -119,6 +119,11 @@ type ToolResult struct {
 	// set. The executor stamps it so consumers describe what the truncating
 	// writer did rather than re-deriving the limit from configuration.
 	TruncatedTo int `json:"truncated_to_bytes,omitempty"`
+	// Images are what a view_image call loaded. They travel with the result
+	// in memory and into the tool_result block the round's message carries;
+	// the JSON tag keeps them out of .tools.json, so a session holds the bytes
+	// once, in .blocks.json, and Output stays the text description.
+	Images []ImageBlock `json:"-"`
 }
 
 // ToolInteraction represents tool calls and results for session storage
@@ -369,7 +374,7 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 	}
 
 	if len(toolDefs) == 0 && cfg.ToolEnabled {
-		toolDefs = GetBuiltinUniversalCommandTool()
+		toolDefs = GetBuiltinTools(cfg)
 	}
 
 	// Build request

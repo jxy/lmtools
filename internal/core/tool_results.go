@@ -22,11 +22,15 @@ func ToolResultsMessageBlocks(results []ToolResult, additionalText string, toolN
 
 // ToolResultBlockFromResult converts an execution result into a message block.
 // Failed commands keep captured output so the model can diagnose and recover.
+// Images come along unchanged: this is the one place a result becomes a
+// block, so it is the one place an image loaded by view_image joins the
+// message the provider is sent and the session records.
 func ToolResultBlockFromResult(result ToolResult, name string) ToolResultBlock {
 	block := ToolResultBlock{
 		ToolUseID: result.ID,
 		Name:      name,
 		Content:   result.Output,
+		Images:    append([]ImageBlock(nil), result.Images...),
 	}
 	if result.Error != "" {
 		block.IsError = true

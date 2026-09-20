@@ -311,7 +311,7 @@ func TestToolResultStatusDistinguishesCancellationBeforeAndDuringExecution(t *te
 // executorTestApprover answers every approval the same way, so a scenario is
 // described entirely by the policy it was built with.
 type executorTestApprover struct {
-	core.DeclineToolRoundLimitReset
+	core.DeclineNonCommandApprovals
 	approve bool
 	err     error
 }
