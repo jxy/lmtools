@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/mcp"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providerconfig"
 	"os"
@@ -57,6 +58,11 @@ type Config struct {
 	ToolAutoApprove    bool          // run unless denied by blacklist or restrictive whitelist
 	ToolNonInteractive bool          // never prompt; deny commands not approved by policy
 	ToolMaxOutputBytes int           // maximum output size per tool execution (default: 1MB)
+
+	// MCP servers
+	MCPConfigPaths []string           // -mcp-config files in command-line order
+	MCPServers     []mcp.ServerConfig // servers those files configure, loaded at parse time
+	MCPWarnings    []string           // what the loader noted, for the operator
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -103,6 +109,10 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, err
 	}
 
+	if err := validateMCPFlags(&cfg); err != nil {
+		return cfg, err
+	}
+
 	if err := validateToolFlags(cfg); err != nil {
 		return cfg, err
 	}
@@ -140,6 +150,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.IntVar(&cfg.MaxToolRounds, "max-tool-rounds", core.DefaultMaxToolRounds, "tool execution rounds per block before interactive confirmation")
 	fs.IntVar(&cfg.MaxToolParallel, "max-tool-parallel", core.DefaultMaxToolParallel, "maximum concurrent command executions")
 	fs.IntVar(&cfg.ToolMaxOutputBytes, "tool-max-output-bytes", int(core.DefaultMaxOutputSize), "maximum captured output bytes per command")
+	fs.Var(mcpConfigFlag{paths: &cfg.MCPConfigPaths}, "mcp-config", "path to an mcpServers JSON file whose servers' tools are advertised beside the built-in ones; implies -tool; repeatable")
 
 	// Configuration
 	providerconfig.RegisterFlags(fs, &cfg.Options, providerconfig.Defaults{

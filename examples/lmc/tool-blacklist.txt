@@ -1,0 +1,55 @@
+# Example blacklist file for tool execution
+#
+# One rule per line. Blank lines and lines starting with # are ignored.
+# The blacklist is checked first and beats the whitelist and -tool-auto-approve.
+#
+# Array form denies a command prefix in every shape it can take: any workdir,
+# any environment, any literal stdin, any redirection.
+#
+# Object form narrows the denial to calls that carry the fields it names, and
+# ignores the fields it does not. {"command":["tee"],"stdout_file":"/etc/hosts"}
+# still denies that call when it also sets stderr_file, which an exact match
+# would have let through. "environ" works the same way one variable at a time:
+# the variables named must be present, and the call may carry others. A denial
+# still has to spell an exact value, so it catches a known-bad setting and not
+# a category of them; grant the environments you want instead.
+#
+# Denials match on argv prefix, so they are evaded by any spelling that does not
+# start with the listed tokens: ["rm"] does not stop ["/bin/rm"], ["sudo"] does
+# not stop ["env","sudo"], and nothing here constrains a shell invoked directly.
+# A blacklist narrows accidents; a whitelist is what bounds a hostile caller.
+#
+# A rule naming the view_image tool denies images: {"tool":"view_image"} refuses
+# every image, and {"tool":"view_image","path":"/etc"} refuses that file or any
+# file inside that directory.
+
+["rm"]
+["rmdir"]
+["mv"]
+["cp"]
+["chmod"]
+["chown"]
+["kill"]
+["pkill"]
+["shutdown"]
+["reboot"]
+["dd"]
+["mkfs"]
+["fdisk"]
+["sudo"]
+["su"]
+["git", "push", "--force"]
+["git", "push", "-f"]
+["npm", "install", "-g"]
+["curl", "-X", "DELETE"]
+["wget", "-O", "/"]
+
+# Protect specific files from redirection, whatever else the call sets.
+{"command": ["tee"], "stdout_file": "/etc/hosts"}
+
+# Keep system files out of the model's eyes.
+{"tool": "view_image", "path": "/etc"}
+
+# Refuse one MCP tool whatever else grants it; {"mcp":"filesystem"} would
+# refuse every tool of that server.
+{"mcp": "filesystem", "tool": "write_file"}

@@ -13,6 +13,7 @@ import (
 	"lmtools/internal/errors"
 	"lmtools/internal/limitio"
 	"lmtools/internal/logger"
+	"lmtools/internal/mcp"
 	"lmtools/internal/modelcatalog"
 	"lmtools/internal/providerrequest"
 	"lmtools/internal/providers"
@@ -200,6 +201,14 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
+	host, err := connectMCPServers(ctx, &cfg, &opts, notifier)
+	if err != nil {
+		return err
+	}
+	if host != nil {
+		defer host.Close()
+	}
+
 	pendingToolMode := session.PendingToolExecute
 	if cfg.PrintCurl {
 		pendingToolMode = session.PendingToolPreview
@@ -253,6 +262,36 @@ func warnShowThinkingWithoutEffort(cfg config.Config, notifier core.Notifier) {
 		return
 	}
 	notifier.Warnf("-show-thinking displays provider-returned summaries but does not request reasoning; add -effort high (or another non-none effort) to request it")
+}
+
+// connectMCPServers starts the servers -mcp-config names and attaches their
+// tools to the run: advertised beside the built-in ones, called through the
+// executor, and described in the system prompt. It runs after the prompt
+// is read and before the session plan, which needs the effective system
+// prompt the tools extend. The host is nil when no server is configured.
+func connectMCPServers(ctx context.Context, cfg *config.Config, opts *core.RequestOptions, notifier core.Notifier) (*mcp.Host, error) {
+	if len(cfg.MCPServers) == 0 {
+		return nil, nil
+	}
+	for _, warning := range cfg.MCPWarnings {
+		notifier.Warnf("-mcp-config: %s", warning)
+	}
+	host, err := mcp.Connect(ctx, cfg.MCPServers, mcp.HostOptions{
+		ClientInfo:     mcp.DefaultClientInfo,
+		Log:            logger.From(ctx).Debugf,
+		Warn:           notifier.Warnf,
+		CallTimeout:    opts.GetToolTimeout(),
+		StartupTimeout: mcp.DefaultStartupTimeout,
+	})
+	if err != nil {
+		return nil, errors.WrapError("connect MCP servers", err)
+	}
+	for _, server := range host.Servers() {
+		logger.From(ctx).Infof("MCP server %s | Transport: %s | Protocol: %s (%s era) | Tools: %d",
+			server.Name, server.Transport, server.Protocol, server.Era, server.ToolCount)
+	}
+	core.ApplyMCP(opts, host)
+	return host, nil
 }
 
 func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
@@ -426,10 +465,7 @@ func actualModelForConfig(cfg *config.Config, opts core.RequestOptions) string {
 }
 
 func toolDefinitionsForOptions(opts core.RequestOptions) []core.ToolDefinition {
-	if opts.ToolEnabled {
-		return core.GetBuiltinTools(opts)
-	}
-	return nil
+	return core.AdvertisedTools(opts)
 }
 
 func logBuiltHTTPRequest(ctx context.Context, cfg *config.Config, logDir string, notifier core.Notifier, req *http.Request, body []byte) {

@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func TestMain(t *testing.T) {
+func TestMainHelpFlags(t *testing.T) {
 	// This tests that main doesn't panic with help flag
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()

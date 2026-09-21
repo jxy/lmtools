@@ -98,7 +98,7 @@ func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, erro
 
 	// Add tools if enabled
 	if cfg.ToolEnabled {
-		opts.ToolDefs = GetBuiltinTools(cfg)
+		opts.ToolDefs = AdvertisedTools(cfg)
 	}
 
 	// Use the unified BuildChatRequest
@@ -249,6 +249,7 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	}
 
 	response.Streamed = streamed
+	AnnotateMCPToolCalls(response.ToolCalls, opts.ToolDefs)
 	if output != nil {
 		output.HandleResponseComplete(response)
 	}

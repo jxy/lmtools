@@ -97,6 +97,8 @@ type TestApprover struct {
 	// ImageApprovalCalls records each view_image prompt; DefaultApproval
 	// answers it, the same as a command.
 	ImageApprovalCalls []ViewImageArgs
+	// MCPApprovalCalls records each MCP tool prompt, answered the same way.
+	MCPApprovalCalls []MCPCall
 	// ResetResponses answers round-limit reset prompts in order; an exhausted
 	// or empty queue declines. ResetCalls records the maxRounds of each prompt.
 	ResetResponses []bool
@@ -113,6 +115,18 @@ func (a *TestApprover) ApproveImage(ctx context.Context, args ViewImageArgs, _ I
 	defer a.mu.Unlock()
 
 	a.ImageApprovalCalls = append(a.ImageApprovalCalls, args)
+	return a.DefaultApproval, nil
+}
+
+func (a *TestApprover) ApproveMCP(ctx context.Context, call MCPCall) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.MCPApprovalCalls = append(a.MCPApprovalCalls, call)
 	return a.DefaultApproval, nil
 }
 
@@ -161,6 +175,13 @@ func (DeclineNonCommandApprovals) ApproveToolRoundLimitReset(ctx context.Context
 }
 
 func (DeclineNonCommandApprovals) ApproveImage(ctx context.Context, _ ViewImageArgs, _ ImageBlock) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (DeclineNonCommandApprovals) ApproveMCP(ctx context.Context, _ MCPCall) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}

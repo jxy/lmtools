@@ -21,6 +21,11 @@ type ToolDefinition struct {
 	InputSchema          interface{} `json:"input_schema"`
 	Format               interface{} `json:"format,omitempty"`
 	Strict               *bool       `json:"strict,omitempty"`
+	// MCPServer and MCPTool name the server and the server's own tool
+	// behind a qualified MCP tool name. No wire renders them; response
+	// parsing copies them onto the calls the model makes.
+	MCPServer string `json:"-"`
+	MCPTool   string `json:"-"`
 }
 
 const CustomToolInputField = "input"
@@ -96,6 +101,11 @@ type ToolCall struct {
 	Input            string          `json:"input,omitempty"`
 	AssistantContent string          `json:"assistant_content,omitempty"` // The text content from assistant alongside tool calls
 	ThoughtSignature string          `json:"thought_signature,omitempty"`
+	// MCPServer and MCPTool label a call to an MCP tool with the server and
+	// the server's tool name, for the review line, the session, and -show.
+	// The executor routes by Name; these are what a person reads.
+	MCPServer string `json:"mcp_server,omitempty"`
+	MCPTool   string `json:"mcp_tool,omitempty"`
 }
 
 // ToolResult represents the result of executing a tool
@@ -374,7 +384,7 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 	}
 
 	if len(toolDefs) == 0 && cfg.ToolEnabled {
-		toolDefs = GetBuiltinTools(cfg)
+		toolDefs = AdvertisedTools(cfg)
 	}
 
 	// Build request

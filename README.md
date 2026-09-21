@@ -122,6 +122,10 @@ as `[image: name (media type, size)]` after the message text and never prints
 the image bytes. An image the model loaded with `view_image` is saved the same
 way, inside its tool result, and listed under that result.
 
+A call the model made to an MCP server is recorded with the server and tool
+name, which `-show` prints under the call. Resuming a session with such a
+call pending needs the `-mcp-config` that defines the server.
+
 ### Tool Use
 
 `-tool` enables the built-in `universal_command` tool. It executes each requested
@@ -150,6 +154,67 @@ approves it, and when no prompt can be answered it is denied; a denial prints
 the rule that would have allowed it. The image is saved once, inside the tool
 result in the session, and `-show` lists it under the result without printing
 the bytes.
+
+#### MCP servers
+
+`-mcp-config file` connects the servers a Model Context Protocol (MCP)
+configuration names and advertises their tools beside the built-in ones; it
+implies `-tool`. The file is the `mcpServers` JSON that Claude Code and
+Gemini CLI write, so a file made for them loads unchanged:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}
+    },
+    "docs": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"},
+      "timeout": 120000
+    }
+  }
+}
+```
+
+A server with `command` is started as a subprocess without a shell and spoken
+to over stdio; a server with `url` is a Streamable HTTP endpoint. The other
+fields are `type` (`stdio` or `http`, inferred when absent), `args`, `env`,
+`cwd`, `headers`, `timeout` (per call, in milliseconds; the default is
+`-tool-timeout`), `startupTimeout` (milliseconds, 30 seconds by default),
+`includeTools` and `excludeTools` (the server's own tool names), and
+`optional`. `${VAR}` and `${VAR:-default}` expand from the environment in
+`command`, `args`, `env`, `cwd`, `url`, and `headers`; an unset variable
+without a default is an error. Unknown fields are ignored with a warning,
+`type: "sse"` is refused because the HTTP+SSE transport is deprecated, and
+the flag may be repeated to merge files as long as no server is named twice.
+Servers are connected when `lmc` starts and shut down when it exits. A server
+that fails to start fails the run, unless it is `optional`, which skips it
+with a warning.
+
+`lmc` speaks the `2026-07-28` revision of the protocol and the earlier
+revisions with the `initialize` handshake, and detects which one a server
+uses. Each tool is advertised as `mcp__<server>__<tool>`, with characters
+outside letters, digits, `_`, and `-` replaced and a long name shortened to
+64 characters with a stable suffix. A server's `instructions` are appended to
+the tool system prompt under a heading naming the server. Authorization to an
+HTTP server is whatever `headers` carries; `lmc` does not run an OAuth flow.
+
+An MCP call is approved the way a command is. A whitelist rule naming the
+server, or the server and tool, admits it without a prompt, a blacklist rule
+refuses it, and otherwise interactive `lmc` shows the server, tool, and
+arguments and asks `Call github/list_issues? [y/N]`; `-tool-auto-approve`
+approves it, and when no prompt can be answered it is denied with the rule
+that would have allowed it. The result's text reaches the model as the tool
+output. Images in the result are attached the way `view_image` attaches a
+file, under the same size cap, and audio, resource links, and other content
+the wire cannot carry become one line notes. A server that reports an error,
+asks the user a question (which `lmc` does not answer), or fails to reply in
+time produces an error result the model can read. Calls are recorded in the
+session with the server and tool name, and resuming a session that has one
+pending needs the same `-mcp-config`.
 
 Commands can take standard input from a literal `stdin` string or a streamed
 `stdin_file`, and can redirect output to files with `stdout_file` and
@@ -238,6 +303,19 @@ call's `detail` takes no part in matching. In a blacklist the same forms deny:
 `{"tool":"view_image"}` refuses every image, and a `path` rule refuses the
 file or directory it names. A denied image prints the rule naming the file
 itself; widen it to the directory by hand if that is what you want.
+
+A rule may name an MCP server instead:
+
+```json
+{"mcp":"github"}
+{"mcp":"github","tool":"list_issues"}
+```
+
+The first grants every tool of the server, the second one tool; `tool` is
+the server's own tool name, without the `mcp__github__` prefix the model
+sees. An `mcp` rule accepts `tool` and nothing else, and it has no array
+form. The call's arguments take no part in matching. In a blacklist the same
+forms deny. A denied call prints the rule naming the one tool.
 
 In a whitelist, `workdir` and the three file fields must equal what the call
 supplied, and an omitted field matches only an absent field: a rule naming
@@ -357,6 +435,12 @@ echo "Inspect this repository" | ./bin/lmc \
   -tool \
   -tool-auto-approve \
   -tool-blacklist blacklist.txt
+
+# Give the model the tools of the MCP servers a file names, approving each
+# call at the prompt.
+echo "List the files in my home directory" | ./bin/lmc \
+  -argo-user "$USER" \
+  -mcp-config examples/lmc/mcp-config.json
 ```
 
 ### lmc Flags
@@ -440,16 +524,22 @@ Tools:
 - `-tool`: Enable the built-in `universal_command` and `view_image` tools.
   Commands run directly with `execvpe`-style semantics, without a shell;
   `view_image` returns an image file to the model inside the tool result.
+- `-mcp-config path`: Connect the MCP servers an `mcpServers` JSON file names
+  and advertise their tools beside the built-in ones. Implies `-tool`;
+  repeatable. See MCP servers under Tool Use.
 - `-tool-timeout duration`: Per-command timeout; default `1m`. A tool call may
   set its own `timeout` in seconds instead; that value is clamped to 24 hours.
+  An MCP call uses its server's `timeout` when the configuration sets one.
 - `-tool-whitelist path`: JSON rules that run without prompting. File
   redirection, literal `stdin`, and `environ` each require an object rule that
-  names them, and `{"tool":"view_image","path":"plots"}` admits the images
-  under a directory. When no prompt can be answered, non-matching calls are
-  denied — including when the file produced no rules at all.
+  names them, `{"tool":"view_image","path":"plots"}` admits the images under a
+  directory, and `{"mcp":"github","tool":"list_issues"}` admits an MCP tool.
+  When no prompt can be answered, non-matching calls are denied — including
+  when the file produced no rules at all.
 - `-tool-blacklist path`: JSON rules that are always denied. Array rules cover
   every shape of the prefix; object rules cover every call carrying the fields
-  they name, and a `tool` rule covers the images it names.
+  they name, a `tool` rule covers the images it names, and an `mcp` rule
+  covers the server or tool it names.
 - `-tool-auto-approve`: Run without prompting unless denied by the blacklist, or
   by a whitelist non-match when no prompt can be answered.
 - `-tool-non-interactive`: Never prompt. Commands not approved by the policy are

@@ -57,6 +57,10 @@ type RequestOptions struct {
 	// loaded as data URLs. They join the stdin prompt through
 	// UserMessageBlocks.
 	Images []ImageBlock
+	// MCP is the connected MCP servers, nil when none are configured. Their
+	// tools are advertised after the built-in ones and the executor routes
+	// calls to them through it.
+	MCP MCPTools
 }
 
 func (o RequestOptions) GetEffectiveSystem() string {
@@ -166,6 +170,9 @@ type Approver interface {
 	// names the type and size of what will actually be sent rather than what
 	// the path suggested.
 	ApproveImage(ctx context.Context, args ViewImageArgs, image ImageBlock) (bool, error)
+	// ApproveMCP asks whether an MCP tool may be called with the arguments
+	// the model gave, which the review line above the prompt has shown.
+	ApproveMCP(ctx context.Context, call MCPCall) (bool, error)
 	// ApproveToolRoundLimitReset grants another block of maxRounds tool-call rounds.
 	ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error)
 }

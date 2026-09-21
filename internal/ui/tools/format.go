@@ -78,6 +78,15 @@ func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.U
 		return
 	}
 
+	if call.MCPServer != "" {
+		// The executor labelled the call with the server and the server's
+		// tool name; the qualified name the model used is what a rule
+		// would not name, so the line reads the way a rule does.
+		ui.notifier.Promptf("%s MCP tool: %s/%s\n", prefix, call.MCPServer, call.MCPTool)
+		ui.notifier.Promptf("%sArguments: %s\n", DetailIndent, compactToolArguments(call.Args))
+		return
+	}
+
 	ui.notifier.Promptf("%s Tool: %s\n", prefix, call.Name)
 	ui.notifier.Promptf("%sArguments: %s\n", DetailIndent, compactToolArguments(call.Args))
 }
@@ -134,15 +143,21 @@ func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResu
 		if i > 0 {
 			ui.notifier.Promptf("\n")
 		}
-		formatToolResult(ui.notifier, i, total, commandCallArgs(calls[i]), result)
+		formatToolResult(ui.notifier, i, total, calls[i], result)
 	}
 	ui.notifier.Promptf("\n")
 }
 
-func formatToolResult(notifier core.Notifier, index, total int, args *core.UniversalCommandArgs, result core.ToolResult) {
+func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCall, result core.ToolResult) {
+	args := commandCallArgs(call)
 	prefix := fmt.Sprintf("[%d/%d]", index+1, total)
 	status, hints := toolResultStatus(result)
 	details := toolResultDetails(args)
+	if call.MCPServer != "" && len(result.Images) > 0 {
+		// An MCP result's text says nothing about the images beside it, the
+		// way a view_image result's text does, so the count is said here.
+		details = append(details, fmt.Sprintf("%d image(s) attached", len(result.Images)))
+	}
 	// A redirected stream landed in a file, so capturing nothing is what was
 	// asked for rather than something to report.
 	redirected := args != nil && (args.StdoutFile != "" || args.StderrFile != "")

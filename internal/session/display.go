@@ -184,6 +184,9 @@ func printToolInteraction(toolInteraction *core.ToolInteraction, images displayI
 			// Pretty print the arguments
 			args := format.PrettyJSONArgs(call.Args, "     ")
 			fmt.Printf("  • %s (ID: %s)\n", call.Name, call.ID)
+			if call.MCPServer != "" {
+				fmt.Printf("     MCP: %s/%s\n", call.MCPServer, call.MCPTool)
+			}
 			if args != "" {
 				fmt.Printf("     Args: %s\n", args)
 			}

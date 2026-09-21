@@ -76,7 +76,12 @@ type commandRule struct {
 	tool string
 	// path is the file or directory an image rule names; nil names every
 	// image.
-	path    *string
+	path *string
+	// mcp is set on an MCP rule: the server it names, with tool holding the
+	// server's tool name or empty for every tool of that server. matches
+	// and matchesImage refuse such a rule and matchesMCP refuses every
+	// other.
+	mcp     string
 	command []string
 	// nil means the rule does not name the field. For a grant that is a
 	// requirement that the call not carry it; for a denial it is a wildcard.
@@ -93,7 +98,7 @@ type commandRule struct {
 }
 
 func (r commandRule) matches(args UniversalCommandArgs) bool {
-	if r.tool != "" || !commandHasPrefix(args.Command, r.command) {
+	if r.tool != "" || r.mcp != "" || !commandHasPrefix(args.Command, r.command) {
 		return false
 	}
 
@@ -125,10 +130,21 @@ func (r commandRule) matches(args UniversalCommandArgs) bool {
 // directory refuses what is inside it, and neither can be widened or escaped
 // by a field the call adds, since the call has no other.
 func (r commandRule) matchesImage(args ViewImageArgs) bool {
-	if r.tool != ViewImageToolName {
+	if r.mcp != "" || r.tool != ViewImageToolName {
 		return false
 	}
 	return r.path == nil || imagePathWithin(*r.path, args.Path)
+}
+
+// matchesMCP is the MCP half of matching: the rule names a server, and a
+// tool or every tool of it. Both halves of a rule file read it the same
+// way, because a call carries no channel a rule could be widened or
+// escaped through; the arguments are the model's and no rule names them.
+func (r commandRule) matchesMCP(server, tool string) bool {
+	if r.mcp == "" || r.mcp != server {
+		return false
+	}
+	return r.tool == "" || r.tool == tool
 }
 
 // imagePathWithin reports whether call names rule itself or a path inside the
@@ -283,8 +299,12 @@ func loadCommandRules(path string, arrayRuleMode ruleMatchMode) ([]commandRule, 
 // next field lands here, and TestSuggestedRuleMatchesTheCallItWasGeneratedFrom
 // pins the property this comment claims.
 type commandRuleJSON struct {
-	// Tool and Path are the image rule; they lead so a suggested image rule
-	// reads tool first, the way a suggested command rule reads command first.
+	// MCP names the server of an MCP rule and leads so a suggested MCP rule
+	// reads mcp first. Tool and Path are the image rule, and Tool doubles
+	// as the tool of an MCP rule; they lead the command fields so a
+	// suggested image rule reads tool first, the way a suggested command
+	// rule reads command first.
+	MCP        string            `json:"mcp,omitempty"`
 	Tool       string            `json:"tool,omitempty"`
 	Path       *string           `json:"path,omitempty"`
 	Command    []string          `json:"command,omitempty"`
@@ -323,6 +343,9 @@ func parseCommandRule(line string, arrayRuleMode ruleMatchMode) (commandRule, er
 			return commandRule{}, fmt.Errorf("command object must contain one JSON value")
 		}
 		return commandRule{}, fmt.Errorf("invalid JSON command object: %w", err)
+	}
+	if object.MCP != "" {
+		return parseMCPRule(object, arrayRuleMode)
 	}
 	if object.Tool != "" {
 		return parseImageRule(object, arrayRuleMode)
@@ -393,6 +416,32 @@ func parseImageRule(object commandRuleJSON, arrayRuleMode ruleMatchMode) (comman
 func suggestedImageRuleJSON(args ViewImageArgs) string {
 	path := args.Path
 	return MarshalJSONForDisplay(commandRuleJSON{Tool: ViewImageToolName, Path: &path})
+}
+
+// parseMCPRule reads an object rule that names an MCP server. It takes the
+// server and, optionally, one of its tools, and nothing else: every command
+// channel and the image path are refused so a rule cannot be read two
+// ways. There is no array form, because an array is an argv prefix.
+func parseMCPRule(object commandRuleJSON, arrayRuleMode ruleMatchMode) (commandRule, error) {
+	if len(object.Command) > 0 || object.Environ != nil || object.Workdir != nil || object.Stdin != nil ||
+		object.StdinFile != nil || object.StdoutFile != nil || object.StderrFile != nil || object.Path != nil {
+		return commandRule{}, fmt.Errorf("an mcp rule accepts mcp and tool alone")
+	}
+	if strings.TrimSpace(object.MCP) != object.MCP {
+		return commandRule{}, fmt.Errorf(`command object field "mcp" has surrounding whitespace`)
+	}
+	return commandRule{
+		mcp:       object.MCP,
+		tool:      object.Tool,
+		matchMode: objectRuleMode(arrayRuleMode),
+	}, nil
+}
+
+// suggestedMCPRuleJSON renders the narrowest whitelist rule that would
+// admit this call: the one tool of the one server. Widening it to the
+// whole server is the operator's decision to make by hand.
+func suggestedMCPRuleJSON(server, tool string) string {
+	return MarshalJSONForDisplay(commandRuleJSON{MCP: server, Tool: tool})
 }
 
 // objectRuleMode carries the list's breadth into object rules. A denial list

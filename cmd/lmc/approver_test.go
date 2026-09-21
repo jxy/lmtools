@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"lmtools/internal/core"
@@ -145,6 +146,16 @@ func approverEntryPoints() []approverEntryPoint {
 					core.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgo=", Name: "shot.png"})
 			},
 			prompt:    "      Send shot.png (image/png, 8 bytes) to the model? [y/N]: ",
+			eofNotice: "\n      No interactive input available; denying by default.\n",
+		},
+		{
+			name: "ApproveMCP",
+			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+				// The review line above showed the arguments; the question
+				// names the server and tool the way a rule would.
+				return a.ApproveMCP(ctx, core.MCPCall{Server: "github", Tool: "list_issues", Arguments: json.RawMessage(`{"repo":"a/b"}`)})
+			},
+			prompt:    "      Call github/list_issues? [y/N]: ",
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{

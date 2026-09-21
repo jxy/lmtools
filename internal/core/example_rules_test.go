@@ -9,8 +9,8 @@ import (
 // tells them to paste an object rule into one. If the loader and the examples
 // disagree, the remediation loop the denial describes is closed.
 func TestShippedExampleRuleFilesLoad(t *testing.T) {
-	whitelistPath := filepath.Join("..", "..", "examples", "tools", "whitelist.txt")
-	blacklistPath := filepath.Join("..", "..", "examples", "tools", "blacklist.txt")
+	whitelistPath := filepath.Join("..", "..", "examples", "lmc", "tool-whitelist.txt")
+	blacklistPath := filepath.Join("..", "..", "examples", "lmc", "tool-blacklist.txt")
 
 	whitelist, err := loadCommandRules(whitelistPath, matchBareCommandOnly)
 	if err != nil {
@@ -42,9 +42,23 @@ func TestShippedExampleRuleFilesLoad(t *testing.T) {
 	if got := policy.decideImage(ViewImageArgs{Path: "plots/../secret.png"}); got == decisionAllow {
 		t.Fatal("the example image grant admitted a path that walks out of plots")
 	}
+	// The documented MCP grants admit the one tool and the whole server they
+	// name and nothing beside them.
+	if got := policy.decideMCP("filesystem", "read_file"); got != decisionAllow {
+		t.Fatalf("filesystem read_file decision = %v, want allow", got)
+	}
+	if got := policy.decideMCP("docs", "search"); got != decisionAllow {
+		t.Fatalf("docs search decision = %v, want allow", got)
+	}
+	if got := policy.decideMCP("filesystem", "list_directory"); got == decisionAllow {
+		t.Fatal("the example MCP grants admitted a filesystem tool they do not name")
+	}
 	policy.autoApprove = true
 	if got := policy.decideImage(ViewImageArgs{Path: "/etc/motd.png"}); got != decisionDenyBlacklist {
 		t.Fatalf("/etc image decision = %v, want blacklist denial", got)
+	}
+	if got := policy.decideMCP("filesystem", "write_file"); got != decisionDenyBlacklist {
+		t.Fatalf("filesystem write_file decision = %v, want blacklist denial", got)
 	}
 	// The documented object grant admits its exact shape.
 	if got := policy.decide(UniversalCommandArgs{

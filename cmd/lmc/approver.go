@@ -88,6 +88,17 @@ func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, im
 	)
 }
 
+// ApproveMCP asks about a call to an MCP tool. The review line above it
+// showed the server, the tool, and the arguments; the question names the
+// server and tool the way a rule would.
+func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (bool, error) {
+	return a.ask(ctx,
+		fmt.Sprintf("%sCall %s/%s? [y/N]: ", tools.DetailIndent, call.Server, call.Tool),
+		"\n"+tools.DetailIndent+"No interactive input available; denying by default.\n",
+		"\n"+tools.DetailIndent+"Approval prompt cancelled.\n",
+	)
+}
+
 func (a *cliApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
 	return a.ask(ctx,
 		fmt.Sprintf("\nTool-call round limit reached (%d). Reset it and continue? [y/N]: ", maxRounds),

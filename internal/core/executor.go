@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/errors"
+	"lmtools/internal/mcp"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,6 +115,26 @@ func (p approvalPolicy) decideImage(args ViewImageArgs) approvalDecision {
 	return p.decideUnlisted()
 }
 
+// decideMCP is decide for a call to an MCP tool: the same precedence,
+// matched through the rules that name a server. An MCP rule matches
+// neither a command nor an image and the reverse holds, so a grant for one
+// kind of call never admits another.
+func (p approvalPolicy) decideMCP(server, tool string) approvalDecision {
+	for _, b := range p.blacklist {
+		if b.matchesMCP(server, tool) {
+			return decisionDenyBlacklist
+		}
+	}
+
+	for _, w := range p.whitelist {
+		if w.matchesMCP(server, tool) {
+			return decisionAllow
+		}
+	}
+
+	return p.decideUnlisted()
+}
+
 // decideUnlisted is steps 3 to 6 of decide and decideImage: the answer for a
 // call no rule names. It is one function so an unlisted image and an unlisted
 // command get the same answer under the same flags rather than two readings
@@ -160,24 +181,33 @@ type Executor struct {
 	policy           approvalPolicy
 	log              ExecLogger
 	approver         Approver
+	// mcp is the connected servers and mcpTools the advertised tools by
+	// qualified name; both are nil when no server is configured.
+	mcp      MCPTools
+	mcpTools map[string]mcp.QualifiedTool
 }
 
-// preparedExecution is one call that passed preparation. Exactly one of args
-// and image is set: a command carries its parsed arguments, a view_image call
-// carries the file it already read.
+// preparedExecution is one call that passed preparation. Exactly one of
+// args, image, and mcp is set: a command carries its parsed arguments, a
+// view_image call carries the file it already read, an MCP call carries
+// the server, tool, and arguments it resolves to.
 type preparedExecution struct {
 	index            int
 	id               string
 	args             *UniversalCommandArgs
 	image            *preparedImage
+	mcp              *preparedMCP
 	approvalRequired bool
 }
 
 // noun is what a rule admitting this call would name, for the advice a
 // denial prints.
 func (exec preparedExecution) noun() string {
-	if exec.image != nil {
+	switch {
+	case exec.image != nil:
 		return "image"
+	case exec.mcp != nil:
+		return "tool"
 	}
 	return "command"
 }
@@ -197,6 +227,13 @@ func NewExecutor(cfg RequestOptions, log ExecLogger, approver Approver) (*Execut
 		// anyway is refused here rather than loaded into a request the wire
 		// has not been shown to accept.
 		e.imageUnavailable = ViewImageToolName + " is not available with -argo-legacy"
+	}
+	if cfg.MCP != nil {
+		e.mcp = cfg.MCP
+		e.mcpTools = make(map[string]mcp.QualifiedTool)
+		for _, tool := range cfg.MCP.Tools() {
+			e.mcpTools[tool.Name] = tool
+		}
 	}
 	var whitelist, blacklist []commandRule
 
@@ -256,6 +293,12 @@ func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall, ui Too
 			exec, result, ready = e.prepareSingle(ctx, call)
 		}
 
+		if exec.mcp != nil {
+			// Label the call for the review line and the result list, even
+			// when response parsing had no definitions to label it from.
+			calls[i].MCPServer, calls[i].MCPTool = exec.mcp.call.Server, exec.mcp.call.Tool
+			call = calls[i]
+		}
 		if ui != nil {
 			ui.ShowCall(i, len(calls), call, exec.args)
 		}
@@ -343,9 +386,12 @@ func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, 
 
 	var approved bool
 	var err error
-	if exec.image != nil {
+	switch {
+	case exec.image != nil:
 		approved, err = e.approver.ApproveImage(ctx, exec.image.args, exec.image.block)
-	} else {
+	case exec.mcp != nil:
+		approved, err = e.approver.ApproveMCP(ctx, exec.mcp.call)
+	default:
 		approved, err = e.approver.Approve(ctx, *exec.args)
 	}
 	switch {
@@ -806,8 +852,20 @@ func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedEx
 	if call.Name == ViewImageToolName {
 		return e.prepareViewImage(call)
 	}
+	if tool, ok := e.mcpTools[call.Name]; ok {
+		return e.prepareMCPCall(call, tool)
+	}
 	if call.Name != UniversalCommandToolName {
-		result.Error = fmt.Sprintf("unsupported tool: %s", call.Name)
+		switch {
+		case call.MCPServer != "":
+			// A pending call from a session whose server this run lacks.
+			result.Error = fmt.Sprintf("MCP tool %s is not available in this run; pass the -mcp-config file that defines server %q",
+				call.Name, call.MCPServer)
+		case strings.HasPrefix(call.Name, mcp.QualifiedPrefix):
+			result.Error = fmt.Sprintf("MCP tool %s is not available in this run; pass the -mcp-config file that defines it", call.Name)
+		default:
+			result.Error = fmt.Sprintf("unsupported tool: %s", call.Name)
+		}
 		result.Code = errors.ErrCodeInvalidInput
 		return preparedExecution{}, result, false
 	}
@@ -884,6 +942,9 @@ func (e *Executor) executePrepared(ctx context.Context, exec preparedExecution) 
 	}
 	if exec.image != nil {
 		return exec.image.result(exec.id)
+	}
+	if exec.mcp != nil {
+		return e.executeMCPCall(ctx, exec)
 	}
 
 	// Start execution timer

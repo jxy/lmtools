@@ -1,0 +1,63 @@
+# Example whitelist file for tool execution
+#
+# One rule per line. Blank lines and lines starting with # are ignored.
+#
+# Array form grants a command prefix and nothing else. It matches only calls
+# that carry no environ, no literal stdin, and no file redirection, because a
+# grant written for "python3" must not also authorize whatever program gets
+# piped into it, nor whatever library LD_PRELOAD names.
+#
+# Object form grants one exact shape. Name every field the call will carry; a
+# field left out has to be absent from the call for the rule to match.
+#   {"command":["grep"],"stdout_file":"hits.txt"}
+#   {"command":["sort"],"workdir":"/tmp/job","stdin_file":"in.txt","stdout_file":"out.txt"}
+#   {"command":["python3"],"stdin":true}
+#   {"command":["make"],"environ":{"CC":"clang"}}
+#
+# "stdin": true permits any literal stdin for that prefix. Weigh it the way you
+# would weigh granting a shell: an interpreter plus stdin is arbitrary code.
+#
+# "environ" grants one exact environment: same variables, same values. There is
+# no wildcard form, because a call that can set LD_PRELOAD chooses the code
+# every program in the round loads.
+#
+# A rule may name the view_image tool instead of a command. Without "path" it
+# grants every image the model asks to see; with "path" it grants that file or
+# any file inside that directory, judged after both paths are resolved against
+# the working directory, so "plots/../secret.png" is not inside "plots".
+#   {"tool":"view_image","path":"plots"}
+#
+# A denied command or image prints the exact rule that would have allowed it,
+# ready to paste in here.
+
+["ls"]
+["date"]
+["pwd"]
+["echo"]
+["cat"]
+["head"]
+["tail"]
+["wc"]
+["grep"]
+["git", "status"]
+["git", "log"]
+["git", "diff"]
+["npm", "test"]
+["npm", "run"]
+["go", "test"]
+["make"]
+
+# Redirected and environment-bearing variants of the same commands, granted one
+# shape at a time.
+{"command": ["go", "test"], "stdout_file": "test-output.txt"}
+{"command": ["go", "test"], "environ": {"GOFLAGS": "-count=1"}}
+{"command": ["make"], "stdout_file": "build.log", "stderr_file": "build.log"}
+
+# Images the model may look at without asking: anything under plots.
+{"tool": "view_image", "path": "plots"}
+
+# MCP tools the model may call without asking: one tool of one server, and
+# every tool of another. "tool" is the server's own tool name, without the
+# mcp__<server>__ prefix the model sees. Arguments take no part in matching.
+{"mcp": "filesystem", "tool": "read_file"}
+{"mcp": "docs"}
