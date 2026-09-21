@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+
+      - name: Build
+        run: |
+          for target in linux/amd64 freebsd/amd64 darwin/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            make build GOOS="$goos" GOARCH="$goarch" BUILD_SUBDIR="$goos-$goarch"
+          done
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          for dir in bin/*-*/; do
+            platform=$(basename "$dir")
+            tar -czf "dist/lmtools-$GITHUB_REF_NAME-$platform.tar.gz" \
+              -C "$dir" lmc apiproxy \
+              -C "$GITHUB_WORKSPACE" LICENSE README.md
+          done
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          ls -l dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber dist/*
+          else
+            set -- --title "$GITHUB_REF_NAME" --generate-notes
+            case "$GITHUB_REF_NAME" in
+              *-*) set -- "$@" --prerelease ;;
+            esac
+            gh release create "$GITHUB_REF_NAME" "$@" dist/*
+          fi

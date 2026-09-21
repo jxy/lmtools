@@ -23,6 +23,11 @@ make build
 cross-compile; those builds land in `./bin/<goos>-<goarch>/`. The Makefile works
 with both BSD make and GNU make.
 
+Prebuilt binaries for linux/amd64, freebsd/amd64, and macOS/arm64 are attached
+to each [GitHub release](https://github.com/jxy/lmtools/releases) as
+`lmtools-<tag>-<goos>-<goarch>.tar.gz`, with a `SHA256SUMS` file beside them.
+Each archive holds `lmc`, `apiproxy`, `LICENSE`, and this README.
+
 ## lmc
 
 For chat and embeddings, `lmc` reads the input from stdin and writes the result
