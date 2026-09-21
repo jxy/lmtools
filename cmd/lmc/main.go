@@ -21,6 +21,7 @@ import (
 	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
+	"lmtools/internal/version"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -159,6 +160,10 @@ func run(notifier core.Notifier) error {
 	cfg, err := config.ParseFlags(os.Args[1:])
 	if err != nil {
 		return errors.WrapError("parse flags", err)
+	}
+	if cfg.Version {
+		fmt.Println(version.String("lmc"))
+		return nil
 	}
 	opts := cfg.RequestOptions()
 

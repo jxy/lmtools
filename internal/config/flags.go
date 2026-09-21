@@ -49,6 +49,7 @@ type Config struct {
 	SkipFlockCheck      bool          // skip file locking check
 
 	ListModels bool // list available models from provider
+	Version    bool // print version information and exit
 
 	// Tool support
 	EnableTool         bool          // enable the built-in universal_command and view_image tools
@@ -83,6 +84,12 @@ func ParseFlags(args []string) (Config, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
+	}
+
+	// -version is answered before any validation, like -h: it needs no
+	// provider, credentials, or input.
+	if cfg.Version {
+		return cfg, nil
 	}
 
 	explicit := applyExplicitFlags(fs, &cfg)
@@ -171,6 +178,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.DurationVar(&cfg.Timeout, "timeout", 10*time.Minute, "HTTP request timeout")
 
 	fs.BoolVar(&cfg.ListModels, "list-models", false, "list available models from provider")
+	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 
 	// Retry configuration
 	fs.IntVar(&cfg.Retries, "retries", 3, "number of retry attempts for failed requests")

@@ -28,6 +28,10 @@ to each [GitHub release](https://github.com/jxy/lmtools/releases) as
 `lmtools-<tag>-<goos>-<goarch>.tar.gz`, with a `SHA256SUMS` file beside them.
 Each archive holds `lmc`, `apiproxy`, `LICENSE`, and this README.
 
+`lmc -version` and `apiproxy -version` print the version the go command
+stamped at build time: the release tag for a release archive, or a
+pseudo-version naming the commit for a build from an untagged checkout.
+
 ## lmc
 
 For chat and embeddings, `lmc` reads the input from stdin and writes the result
@@ -614,6 +618,11 @@ Requests and logging:
 - `-log-dir string`: Default `~/.lmc/logs`.
 - `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
 
+Build information:
+
+- `-version`: Print the build's version and exit. The line names the module
+  version stamped at build time, the Go toolchain, and the commit.
+
 ## apiproxy
 
 `apiproxy` binds `127.0.0.1:8082` and translates request and response formats at
@@ -678,6 +687,7 @@ chmod 600 ~/.google-key
   default and logs each request it changes.
 - `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
 - `-log-format string`: `text` or `json`.
+- `-version`: Print the build's version and exit.
 
 ### Supported Endpoints
 

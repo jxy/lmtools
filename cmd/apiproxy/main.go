@@ -11,6 +11,7 @@ import (
 	"lmtools/internal/providerconfig"
 	"lmtools/internal/providers"
 	"lmtools/internal/proxy"
+	"lmtools/internal/version"
 	"math"
 	"net/http"
 	"os"
@@ -87,6 +88,9 @@ Request Options:
 Logging Options:
   -log-level string          Log level: DEBUG, INFO, WARN, ERROR (default: "INFO")
   -log-format string         Log format: text, json (default: "text")
+
+Other Options:
+  -version                   Print version information and exit
   -no-color                  Disable colored output
 
 Examples:
@@ -149,7 +153,13 @@ func main() {
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (DEBUG, INFO, WARN, ERROR)")
 	flag.StringVar(&logFormat, "log-format", "text", "Log format (text, json)")
 
+	showVersion := flag.Bool("version", false, "Print version information and exit")
+
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version.String("apiproxy"))
+		return
+	}
 	maxRequestBodySizeBytes, err := requestBodyLimitBytes(maxRequestBodySize)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)

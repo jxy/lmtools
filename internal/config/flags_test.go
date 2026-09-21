@@ -434,3 +434,21 @@ func TestEmbedModeWithExplicitNoSessionTrue(t *testing.T) {
 		t.Error("NoSession should be true")
 	}
 }
+
+// TestVersionFlagSkipsValidation: -version is answered before the provider,
+// credential, and flag combination checks, so it works alone and even beside
+// a combination that would otherwise be rejected.
+func TestVersionFlagSkipsValidation(t *testing.T) {
+	for _, args := range [][]string{
+		{"-version"},
+		{"-version", "-argo-dev", "-argo-test"},
+	} {
+		cfg, err := ParseFlags(args)
+		if err != nil {
+			t.Fatalf("ParseFlags(%v) error = %v", args, err)
+		}
+		if !cfg.Version {
+			t.Fatalf("ParseFlags(%v).Version = false, want true", args)
+		}
+	}
+}

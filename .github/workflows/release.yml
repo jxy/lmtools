@@ -18,7 +18,8 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          # Go 1.24 or later stamps the tag into the binary; go.mod names 1.21.
+          go-version: '1.26'
           cache-dependency-path: go.mod
 
       - name: Build
@@ -27,6 +28,16 @@ jobs:
             goos="${target%/*}"
             goarch="${target#*/}"
             make build GOOS="$goos" GOARCH="$goarch" BUILD_SUBDIR="$goos-$goarch"
+          done
+
+      - name: Check the stamped version
+        run: |
+          for bin in bin/*-*/lmc bin/*-*/apiproxy; do
+            if ! go version -m "$bin" | grep -Eq "^[[:space:]]+mod[[:space:]]+lmtools[[:space:]]+$GITHUB_REF_NAME[[:space:]]*$"; then
+              echo "$bin is not stamped with $GITHUB_REF_NAME:"
+              go version -m "$bin"
+              exit 1
+            fi
           done
 
       - name: Package
