@@ -178,9 +178,12 @@ type Executor struct {
 	// imageUnavailable, when set, is why every view_image call is refused
 	// before its file is opened: the wire cannot carry the result.
 	imageUnavailable string
-	policy           approvalPolicy
-	log              ExecLogger
-	approver         Approver
+	// excluded is why a call to a withheld built-in tool is refused, by
+	// tool name: the run's -tool-include or -tool-exclude left it out.
+	excluded map[string]string
+	policy   approvalPolicy
+	log      ExecLogger
+	approver Approver
 	// mcp is the connected servers and mcpTools the advertised tools by
 	// qualified name; both are nil when no server is configured.
 	mcp      MCPTools
@@ -227,6 +230,12 @@ func NewExecutor(cfg RequestOptions, log ExecLogger, approver Approver) (*Execut
 		// anyway is refused here rather than loaded into a request the wire
 		// has not been shown to accept.
 		e.imageUnavailable = ViewImageToolName + " is not available with -argo-legacy"
+	}
+	if len(cfg.ExcludedTools) > 0 {
+		e.excluded = make(map[string]string, len(cfg.ExcludedTools))
+		for _, name := range cfg.ExcludedTools {
+			e.excluded[name] = name + " is not available in this run; -tool-include or -tool-exclude leaves it out"
+		}
 	}
 	if cfg.MCP != nil {
 		e.mcp = cfg.MCP
@@ -849,6 +858,11 @@ func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedEx
 		return preparedExecution{}, result, false
 	}
 
+	if reason, ok := e.excluded[call.Name]; ok {
+		result.Error = reason
+		result.Code = errors.ErrCodeInvalidInput
+		return preparedExecution{}, result, false
+	}
 	if call.Name == ViewImageToolName {
 		return e.prepareViewImage(call)
 	}
@@ -858,11 +872,12 @@ func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedEx
 	if call.Name != UniversalCommandToolName {
 		switch {
 		case call.MCPServer != "":
-			// A pending call from a session whose server this run lacks.
-			result.Error = fmt.Sprintf("MCP tool %s is not available in this run; pass the -mcp-config file that defines server %q",
+			// A pending call from a session whose server this run lacks or
+			// whose tool it excludes.
+			result.Error = fmt.Sprintf("MCP tool %s is not available in this run: no -mcp-config defines server %q, or the tool is excluded from it",
 				call.Name, call.MCPServer)
 		case strings.HasPrefix(call.Name, mcp.QualifiedPrefix):
-			result.Error = fmt.Sprintf("MCP tool %s is not available in this run; pass the -mcp-config file that defines it", call.Name)
+			result.Error = fmt.Sprintf("MCP tool %s is not available in this run: no -mcp-config defines it, or it is excluded", call.Name)
 		default:
 			result.Error = fmt.Sprintf("unsupported tool: %s", call.Name)
 		}

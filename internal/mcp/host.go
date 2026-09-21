@@ -143,41 +143,43 @@ func (h *Host) addTool(cfg ServerConfig, tool Tool) {
 	h.tools = append(h.tools, QualifiedTool{Name: name, Server: cfg.Name, Tool: tool, headers: headers})
 }
 
-// filterTools applies includeTools and excludeTools. A name in either list
-// that the server does not offer is reported, since it is most likely a
-// typo that leaves a tool exposed or hidden by accident.
+// filterTools applies the file's includeTools and excludeTools, then the
+// run's -tool-include and -tool-exclude names for the server. A name in any
+// list that the server does not offer is reported, since it is most likely
+// a typo that leaves a tool exposed or hidden by accident.
 func filterTools(cfg ServerConfig, tools []Tool, warnf Logf) []Tool {
 	offered := make(map[string]bool, len(tools))
 	for _, tool := range tools {
 		offered[tool.Name] = true
 	}
+	kept := tools
 	for _, list := range []struct {
-		field string
-		names []string
-	}{{"includeTools", cfg.IncludeTools}, {"excludeTools", cfg.ExcludeTools}} {
+		field   string
+		names   []string
+		include bool
+	}{
+		{"includeTools", cfg.IncludeTools, true},
+		{"excludeTools", cfg.ExcludeTools, false},
+		{"-tool-include", cfg.Selection.Include, true},
+		{"-tool-exclude", cfg.Selection.Exclude, false},
+	} {
+		if len(list.names) == 0 {
+			continue
+		}
+		named := make(map[string]bool, len(list.names))
 		for _, name := range list.names {
+			named[name] = true
 			if !offered[name] {
 				warnf("MCP server %q: %s names %q, which the server does not offer", cfg.Name, list.field, name)
 			}
 		}
-	}
-	include := make(map[string]bool, len(cfg.IncludeTools))
-	for _, name := range cfg.IncludeTools {
-		include[name] = true
-	}
-	exclude := make(map[string]bool, len(cfg.ExcludeTools))
-	for _, name := range cfg.ExcludeTools {
-		exclude[name] = true
-	}
-	kept := make([]Tool, 0, len(tools))
-	for _, tool := range tools {
-		if len(include) > 0 && !include[tool.Name] {
-			continue
+		next := make([]Tool, 0, len(kept))
+		for _, tool := range kept {
+			if named[tool.Name] == list.include {
+				next = append(next, tool)
+			}
 		}
-		if exclude[tool.Name] {
-			continue
-		}
-		kept = append(kept, tool)
+		kept = next
 	}
 	return kept
 }

@@ -27,6 +27,14 @@ Rules for universal_command:
 
 Run only safe, relevant commands and use their results to complete the request.`
 
+// ToolSystemPromptWithoutCommand is the tool prompt of a run that withholds
+// universal_command through -tool-include or -tool-exclude. The command
+// rules are left out: rules for a tool the model cannot call would only
+// invite the call.
+const ToolSystemPromptWithoutCommand = `You are a helpful assistant with access to tools.
+
+Make only safe, relevant tool calls and use their results to complete the request.`
+
 // Error messages
 const (
 	// ErrEmbedWithTool is shown when trying to use embed mode with tools

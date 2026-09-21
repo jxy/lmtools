@@ -61,6 +61,21 @@ type RequestOptions struct {
 	// tools are advertised after the built-in ones and the executor routes
 	// calls to them through it.
 	MCP MCPTools
+	// ExcludedTools are the built-in tools the run withholds: named by
+	// -tool-exclude, or left out of -tool-include. They are not advertised,
+	// the executor refuses a call to one, and the built-in tool prompt does
+	// without the command rules when universal_command is among them.
+	ExcludedTools []string
+}
+
+// ExcludesTool reports whether a built-in tool is withheld from the run.
+func (o RequestOptions) ExcludesTool(name string) bool {
+	for _, excluded := range o.ExcludedTools {
+		if excluded == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (o RequestOptions) GetEffectiveSystem() string {

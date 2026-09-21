@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"lmtools/internal/constants"
+	"lmtools/internal/prompts"
 )
 
 // UniversalCommandToolName is the name of the built-in command tool. The
@@ -22,15 +23,36 @@ type ViewImageArgs struct {
 
 // GetBuiltinTools lists the tools -tool advertises: universal_command, and
 // view_image on every wire but the legacy Argo one, which has not been shown
-// to accept the content arrays an image result needs. The image tool names
-// the cap it loads under, which is the cap the executor enforces for the same
-// options, so the model is told the number it will be held to.
+// to accept the content arrays an image result needs, less whatever the run
+// withholds through ExcludedTools. The image tool names the cap it loads
+// under, which is the cap the executor enforces for the same options, so
+// the model is told the number it will be held to.
 func GetBuiltinTools(cfg RequestOptions) []ToolDefinition {
-	tools := GetBuiltinUniversalCommandTool()
-	if cfg.ArgoLegacy {
-		return tools
+	var tools []ToolDefinition
+	if !cfg.ExcludesTool(UniversalCommandToolName) {
+		tools = append(tools, GetBuiltinUniversalCommandTool()...)
 	}
-	return append(tools, GetBuiltinViewImageTool(ToolImageByteLimit(cfg)))
+	if !cfg.ArgoLegacy && !cfg.ExcludesTool(ViewImageToolName) {
+		tools = append(tools, GetBuiltinViewImageTool(ToolImageByteLimit(cfg)))
+	}
+	return tools
+}
+
+// BuiltinToolNames are the built-in tools in the order they are advertised,
+// which is the order -tool-include and -tool-exclude report them in.
+var BuiltinToolNames = []string{UniversalCommandToolName, ViewImageToolName}
+
+// ToolSystemPromptFor is the system prompt a tool run writes on its own:
+// the command prompt, or the shorter one when universal_command is among
+// the excluded tools. The config layer picks the effective prompt with it
+// and the resume policy decides a fork with it, so the two agree.
+func ToolSystemPromptFor(excluded []string) string {
+	for _, name := range excluded {
+		if name == UniversalCommandToolName {
+			return prompts.ToolSystemPromptWithoutCommand
+		}
+	}
+	return prompts.ToolSystemPrompt
 }
 
 // ToolImageByteLimit is the cap view_image loads under. Anthropic rejects an

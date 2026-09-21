@@ -61,8 +61,13 @@ type Config struct {
 
 	// MCP servers
 	MCPConfigPaths []string           // -mcp-config files in command-line order
-	MCPServers     []mcp.ServerConfig // servers those files configure, loaded at parse time
+	MCPServers     []mcp.ServerConfig // servers those files configure, loaded at parse time, less what the selection drops
 	MCPWarnings    []string           // what the loader noted, for the operator
+
+	// Tool selection
+	ToolInclude   []string // -tool-include selectors in command-line order
+	ToolExclude   []string // -tool-exclude selectors in command-line order
+	ExcludedTools []string // built-in tools the selection withholds
 }
 
 func ParseFlags(args []string) (Config, error) {
@@ -113,6 +118,10 @@ func ParseFlags(args []string) (Config, error) {
 		return cfg, err
 	}
 
+	if err := validateToolSelection(&cfg); err != nil {
+		return cfg, err
+	}
+
 	if err := validateToolFlags(cfg); err != nil {
 		return cfg, err
 	}
@@ -151,6 +160,8 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.IntVar(&cfg.MaxToolParallel, "max-tool-parallel", core.DefaultMaxToolParallel, "maximum concurrent command executions")
 	fs.IntVar(&cfg.ToolMaxOutputBytes, "tool-max-output-bytes", int(core.DefaultMaxOutputSize), "maximum captured output bytes per command")
 	fs.Var(mcpConfigFlag{paths: &cfg.MCPConfigPaths}, "mcp-config", "path to an mcpServers JSON file whose servers' tools are advertised beside the built-in ones; implies -tool; repeatable")
+	fs.Var(selectorFlag{flag: "-tool-include", names: &cfg.ToolInclude}, "tool-include", "advertise only these tools: universal_command, view_image, an MCP server, or server/tool; comma separated, repeatable")
+	fs.Var(selectorFlag{flag: "-tool-exclude", names: &cfg.ToolExclude}, "tool-exclude", "withhold these tools, in the same form as -tool-include; an excluded server is never started")
 
 	// Configuration
 	providerconfig.RegisterFlags(fs, &cfg.Options, providerconfig.Defaults{
@@ -228,7 +239,7 @@ Examples:
 func (c Config) RequestOptions() core.RequestOptions {
 	effectiveSystem := c.System
 	if c.EnableTool && !c.SystemExplicitlySet {
-		effectiveSystem = prompts.ToolSystemPrompt
+		effectiveSystem = core.ToolSystemPromptFor(c.ExcludedTools)
 	}
 
 	argoEnv := c.ArgoEnv
@@ -268,5 +279,6 @@ func (c Config) RequestOptions() core.RequestOptions {
 		Resume:              c.Resume,
 		Branch:              c.Branch,
 		Images:              append([]core.ImageBlock(nil), c.Images...),
+		ExcludedTools:       append([]string(nil), c.ExcludedTools...),
 	}
 }

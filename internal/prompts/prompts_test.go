@@ -45,3 +45,14 @@ func TestToolSystemPromptNamesTheOneDiscardMechanism(t *testing.T) {
 		}
 	}
 }
+
+func TestToolSystemPromptWithoutCommandNamesNoCommand(t *testing.T) {
+	for _, forbidden := range []string{"universal_command", "argv", "workdir", "stdin"} {
+		if strings.Contains(ToolSystemPromptWithoutCommand, forbidden) {
+			t.Errorf("ToolSystemPromptWithoutCommand mentions %q, which the run withholds", forbidden)
+		}
+	}
+	if !strings.Contains(ToolSystemPromptWithoutCommand, "tools") {
+		t.Error("ToolSystemPromptWithoutCommand does not tell the model it has tools")
+	}
+}

@@ -44,6 +44,13 @@ func validateMCPFlags(cfg *Config) error {
 	if len(loaded.Servers) == 0 {
 		return fmt.Errorf("-mcp-config: no servers are configured")
 	}
+	for _, server := range loaded.Servers {
+		// A bare -tool-include or -tool-exclude selector is a built-in tool
+		// or a server; the two names are kept apart here.
+		if isBuiltinToolName(server.Name) {
+			return fmt.Errorf("-mcp-config: server %q has the name of a built-in tool", server.Name)
+		}
+	}
 	cfg.MCPServers = loaded.Servers
 	cfg.MCPWarnings = loaded.Warnings
 	cfg.EnableTool = true

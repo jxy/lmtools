@@ -377,3 +377,109 @@ func TestMCPServerFailuresAreReportedOrSkipped(t *testing.T) {
 		})
 	}
 }
+
+// writeSelectionConfig writes the echo server beside one whose command does
+// not exist, so a test can show that excluding a server also skips its launch.
+func writeSelectionConfig(t *testing.T) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	env, err := mcptest.ScenarioEnv(echoScenario())
+	if err != nil {
+		t.Fatalf("scenario env: %v", err)
+	}
+	data, err := json.Marshal(map[string]interface{}{"mcpServers": map[string]interface{}{
+		"fake":   map[string]interface{}{"command": executable, "env": map[string]string{mcptest.EnvScenario: env}},
+		"broken": map[string]interface{}{"command": "/nonexistent/mcp-server"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+func TestToolSelectionFlagsGovernTheRun(t *testing.T) {
+	lmcBin := getLmcBinary(t)
+	configPath := writeSelectionConfig(t)
+	apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
+	echo := mcp.QualifiedName("fake", "echo")
+
+	for _, tt := range []struct {
+		name        string
+		args        []string
+		wantErr     string
+		wantOut     []string
+		wantAbsent  []string
+		wantWarning string
+	}{
+		{
+			name:       "excluding a server skips its launch",
+			args:       []string{"-tool-exclude", "broken"},
+			wantOut:    []string{echo, core.UniversalCommandToolName, core.ViewImageToolName, "Rules for universal_command"},
+			wantAbsent: []string{"broken"},
+		},
+		{
+			name:       "including one tool withholds the rest and the command rules",
+			args:       []string{"-tool-include", "fake/echo"},
+			wantOut:    []string{echo, "access to tools"},
+			wantAbsent: []string{core.UniversalCommandToolName, core.ViewImageToolName},
+		},
+		{
+			name:       "excluding tools keeps the others",
+			args:       []string{"-tool-exclude", "broken,fake/echo,view_image"},
+			wantOut:    []string{core.UniversalCommandToolName, "Rules for universal_command"},
+			wantAbsent: []string{echo, core.ViewImageToolName},
+		},
+		{
+			name:        "a tool the server does not offer is reported",
+			args:        []string{"-tool-exclude", "broken,fake/eco"},
+			wantOut:     []string{echo},
+			wantWarning: `-tool-exclude names "eco", which the server does not offer`,
+		},
+		{
+			name:    "a selector naming nothing fails before anything starts",
+			args:    []string{"-tool-include", "nothing"},
+			wantErr: `"nothing" is neither a built-in tool nor a configured MCP server`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := runLmcCommand(t, lmcBin, append([]string{
+				"-provider", "openai",
+				"-provider-url", "http://127.0.0.1:9/v1",
+				"-api-key-file", apiKeyFile,
+				"-model", "gpt-test",
+				"-no-session",
+				"-mcp-config", configPath,
+				"-print-curl",
+			}, tt.args...), "Say hi")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(stderr, tt.wantErr) {
+					t.Fatalf("lmc err = %v, stderr:\n%s\nwant %q", err, stderr, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("lmc failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+			}
+			for _, want := range tt.wantOut {
+				if !strings.Contains(stdout, want) {
+					t.Fatalf("curl output lacks %q:\n%s", want, stdout)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(stdout, absent) {
+					t.Fatalf("curl output still carries %q:\n%s", absent, stdout)
+				}
+			}
+			if tt.wantWarning != "" && !strings.Contains(stderr, tt.wantWarning) {
+				t.Fatalf("stderr lacks %q:\n%s", tt.wantWarning, stderr)
+			}
+		})
+	}
+}

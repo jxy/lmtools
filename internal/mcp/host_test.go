@@ -177,3 +177,30 @@ func TestHostHeaderAnnotationsGovernHTTPOnly(t *testing.T) {
 		t.Fatalf("warnings = %v", warnings.all())
 	}
 }
+
+func TestHostAppliesTheRunSelectionAfterTheFile(t *testing.T) {
+	cfg, _ := stdioConfig(t, "selected", mcptest.Scenario{
+		Era: mcptest.EraModern,
+		Tools: []mcp.Tool{
+			{Name: "keep", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "also", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "hidden", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "other", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+	})
+	cfg.ExcludeTools = []string{"hidden"}
+	cfg.Selection = mcp.ToolSelection{Include: []string{"keep", "also", "hidden", "missing"}, Exclude: []string{"also", "typo"}}
+	warnings := &testLog{}
+	host := connectHost(t, []mcp.ServerConfig{cfg}, mcp.HostOptions{Warn: warnings.logf})
+	if got := strings.Join(toolNames(host), ","); got != "mcp__selected__keep" {
+		t.Fatalf("tools = %s", got)
+	}
+	for _, want := range []string{`-tool-include names "missing"`, `-tool-exclude names "typo"`} {
+		if !warnings.contains(want) {
+			t.Fatalf("warnings = %v, want %q", warnings.all(), want)
+		}
+	}
+	if warnings.contains(`names "hidden"`) {
+		t.Fatalf("a tool the server offers was reported: %v", warnings.all())
+	}
+}

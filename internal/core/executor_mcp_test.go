@@ -400,7 +400,7 @@ func TestMCPToolsAbsentFromTheRun(t *testing.T) {
 		mcpToolCall("bare", "mcp__github__list_issues", `{}`),
 		mcpToolCall("other", "frobnicate", `{}`),
 	}, TestToolUI{})
-	if !strings.Contains(results[0].Error, `pass the -mcp-config file that defines server "github"`) || results[0].Code != errors.ErrCodeInvalidInput {
+	if !strings.Contains(results[0].Error, `no -mcp-config defines server "github", or the tool is excluded`) || results[0].Code != errors.ErrCodeInvalidInput {
 		t.Fatalf("labelled result = %#v", results[0])
 	}
 	if !strings.Contains(results[1].Error, "-mcp-config") {
@@ -408,5 +408,31 @@ func TestMCPToolsAbsentFromTheRun(t *testing.T) {
 	}
 	if results[2].Error != "unsupported tool: frobnicate" {
 		t.Fatalf("other result = %#v", results[2])
+	}
+}
+
+func TestExecutorRefusesExcludedBuiltinToolsAndKeepsMCPImages(t *testing.T) {
+	tools := githubTools()
+	tools.results["mcp__github__list_issues"] = &mcp.CallToolResult{Content: []mcp.Content{
+		{Type: "image", MimeType: "image/jpeg", Data: base64.StdEncoding.EncodeToString(mcpJPEGBytes)},
+	}}
+	cfg := RequestOptions{ToolAutoApprove: true, ExcludedTools: []string{UniversalCommandToolName, ViewImageToolName}}
+	executor := newMCPExecutor(t, cfg, NewTestApprover(true), tools)
+
+	results := executor.ExecuteParallel(context.Background(), []ToolCall{
+		{ID: "cmd", Name: UniversalCommandToolName, Args: json.RawMessage(`{"command":["true"]}`)},
+		{ID: "img", Name: ViewImageToolName, Args: json.RawMessage(`{"path":"x.png"}`)},
+		mcpToolCall("mcp", "mcp__github__list_issues", `{}`),
+	}, TestToolUI{})
+	for _, i := range []int{0, 1} {
+		if results[i].Code != errors.ErrCodeInvalidInput || !strings.Contains(results[i].Error, "-tool-include or -tool-exclude leaves it out") {
+			t.Fatalf("result %d = %#v, want a refusal naming the flags", i, results[i])
+		}
+	}
+	if results[2].Error != "" || len(results[2].Images) != 1 {
+		t.Fatalf("MCP result = %#v, want its image attached", results[2])
+	}
+	if recorded := tools.recorded(); len(recorded) != 1 {
+		t.Fatalf("calls = %#v, want the MCP call alone", recorded)
 	}
 }

@@ -18,7 +18,7 @@ const (
 )
 
 // ServerConfig is one server from an mcpServers file after expansion and
-// validation.
+// validation, plus what the run's flags say about it.
 type ServerConfig struct {
 	Name           string
 	Type           string
@@ -33,6 +33,18 @@ type ServerConfig struct {
 	IncludeTools   []string
 	ExcludeTools   []string
 	Optional       bool
+	// Selection is the run's narrowing of the server beyond its file. The
+	// loader leaves it zero; the flag layer fills it in.
+	Selection ToolSelection
+}
+
+// ToolSelection is what -tool-include and -tool-exclude say about one
+// server's tools: Include keeps the named tools alone, empty keeping every
+// one, and Exclude drops the named tools. Both apply after the file's
+// includeTools and excludeTools.
+type ToolSelection struct {
+	Include []string
+	Exclude []string
 }
 
 // Config is what a set of files configures: the servers, sorted by name so

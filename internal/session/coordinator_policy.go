@@ -36,10 +36,11 @@ func DecideResumeFork(sessionSystem *string, cfg core.RequestOptions) ResumeFork
 		return ResumeForkDecision{}
 	}
 
-	// The built-in tool prompt of this run: the tool prompt, extended by
-	// the MCP addendum when servers are configured. A session on a built-in
-	// prompt follows it; a custom prompt the operator once passed stays.
-	want := prompts.ToolSystemPrompt + core.MCPSystemPromptAddendum(cfg.MCP)
+	// The built-in tool prompt of this run: the tool prompt, or the shorter
+	// one when universal_command is excluded, extended by the MCP addendum
+	// when servers are configured. A session on a built-in prompt follows
+	// it; a custom prompt the operator once passed stays.
+	want := core.ToolSystemPromptFor(cfg.ExcludedTools) + core.MCPSystemPromptAddendum(cfg.MCP)
 	if sessionSystem == nil {
 		return ResumeForkDecision{ShouldFork: true, NewSystem: want}
 	}
@@ -50,8 +51,10 @@ func DecideResumeFork(sessionSystem *string, cfg core.RequestOptions) ResumeFork
 }
 
 // isBuiltinPrompt reports whether a session's system prompt is one lmc
-// wrote on its own: the default prompt, the tool prompt, or the tool prompt
-// with an MCP addendum from an earlier run.
+// wrote on its own: the default prompt, either tool prompt, or either tool
+// prompt with an MCP addendum from an earlier run.
 func isBuiltinPrompt(system string) bool {
-	return system == prompts.DefaultSystemPrompt || strings.HasPrefix(system, prompts.ToolSystemPrompt)
+	return system == prompts.DefaultSystemPrompt ||
+		strings.HasPrefix(system, prompts.ToolSystemPrompt) ||
+		strings.HasPrefix(system, prompts.ToolSystemPromptWithoutCommand)
 }

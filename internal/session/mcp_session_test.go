@@ -128,3 +128,32 @@ func TestMCPToolCallsKeepTheirLabelsInTheSessionAndShow(t *testing.T) {
 		t.Fatalf("-show output = %q", output)
 	}
 }
+
+func TestDecideResumeForkFollowsTheCommandlessPrompt(t *testing.T) {
+	withoutCommand := prompts.ToolSystemPromptWithoutCommand + core.MCPSystemPromptAddendum(githubMCP())
+	withCommand := prompts.ToolSystemPrompt + core.MCPSystemPromptAddendum(githubMCP())
+	for _, tt := range []struct {
+		name          string
+		sessionSystem *string
+		excluded      []string
+		wantFork      bool
+		wantSystem    string
+	}{
+		{name: "the command prompt forks when the command goes", sessionSystem: stringPtr(withCommand), excluded: []string{core.UniversalCommandToolName}, wantFork: true, wantSystem: withoutCommand},
+		{name: "the commandless prompt forks when the command returns", sessionSystem: stringPtr(withoutCommand), wantFork: true, wantSystem: withCommand},
+		{name: "the same commandless prompt does not fork", sessionSystem: stringPtr(withoutCommand), excluded: []string{core.UniversalCommandToolName}, wantFork: false},
+		{name: "withholding the image tool changes nothing", sessionSystem: stringPtr(withCommand), excluded: []string{core.ViewImageToolName}, wantFork: false},
+		{name: "a custom prompt stays", sessionSystem: stringPtr("custom system"), excluded: []string{core.UniversalCommandToolName}, wantFork: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := newTestCoordinatorConfig()
+			cfg.ToolEnabled = true
+			cfg.MCP = githubMCP()
+			cfg.ExcludedTools = tt.excluded
+			decision := DecideResumeFork(tt.sessionSystem, cfg)
+			if decision.ShouldFork != tt.wantFork || decision.NewSystem != tt.wantSystem {
+				t.Fatalf("decision = %+v, want fork %v to %q", decision, tt.wantFork, tt.wantSystem)
+			}
+		})
+	}
+}

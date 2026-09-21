@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"lmtools/internal/prompts"
+	"strings"
+	"testing"
+)
 
 func TestBuiltinUniversalCommandIncludesStdioFields(t *testing.T) {
 	tools := GetBuiltinUniversalCommandTool()
@@ -49,5 +53,46 @@ func TestBuiltinUniversalCommandIncludesStdioFields(t *testing.T) {
 	required, ok := schema["required"].([]string)
 	if !ok || len(required) != 1 || required[0] != "command" {
 		t.Fatalf("required = %#v, want command only", schema["required"])
+	}
+}
+
+func TestGetBuiltinToolsHonoursTheExclusions(t *testing.T) {
+	names := func(cfg RequestOptions) string {
+		var out []string
+		for _, tool := range GetBuiltinTools(cfg) {
+			out = append(out, tool.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, tt := range []struct {
+		name string
+		cfg  RequestOptions
+		want string
+	}{
+		{name: "nothing excluded", cfg: RequestOptions{}, want: "universal_command,view_image"},
+		{name: "image excluded", cfg: RequestOptions{ExcludedTools: []string{ViewImageToolName}}, want: "universal_command"},
+		{name: "command excluded", cfg: RequestOptions{ExcludedTools: []string{UniversalCommandToolName}}, want: "view_image"},
+		{name: "both excluded", cfg: RequestOptions{ExcludedTools: BuiltinToolNames}, want: ""},
+		{name: "legacy wire and command excluded", cfg: RequestOptions{ArgoLegacy: true, ExcludedTools: []string{UniversalCommandToolName}}, want: ""},
+	} {
+		if got := names(tt.cfg); got != tt.want {
+			t.Errorf("%s: tools = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestToolSystemPromptForDropsTheCommandRulesWithTheCommand(t *testing.T) {
+	if got := ToolSystemPromptFor(nil); got != prompts.ToolSystemPrompt {
+		t.Fatalf("prompt without exclusions = %q", got)
+	}
+	if got := ToolSystemPromptFor([]string{ViewImageToolName}); got != prompts.ToolSystemPrompt {
+		t.Fatalf("prompt without the image tool = %q", got)
+	}
+	got := ToolSystemPromptFor([]string{UniversalCommandToolName})
+	if got != prompts.ToolSystemPromptWithoutCommand {
+		t.Fatalf("prompt without the command tool = %q", got)
+	}
+	if strings.Contains(got, UniversalCommandToolName) {
+		t.Fatalf("the prompt still names the withheld tool: %q", got)
 	}
 }

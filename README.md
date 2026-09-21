@@ -155,67 +155,6 @@ the rule that would have allowed it. The image is saved once, inside the tool
 result in the session, and `-show` lists it under the result without printing
 the bytes.
 
-#### MCP servers
-
-`-mcp-config file` connects the servers a Model Context Protocol (MCP)
-configuration names and advertises their tools beside the built-in ones; it
-implies `-tool`. The file is the `mcpServers` JSON that Claude Code and
-Gemini CLI write, so a file made for them loads unchanged:
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}
-    },
-    "docs": {
-      "url": "https://mcp.example.com/mcp",
-      "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"},
-      "timeout": 120000
-    }
-  }
-}
-```
-
-A server with `command` is started as a subprocess without a shell and spoken
-to over stdio; a server with `url` is a Streamable HTTP endpoint. The other
-fields are `type` (`stdio` or `http`, inferred when absent), `args`, `env`,
-`cwd`, `headers`, `timeout` (per call, in milliseconds; the default is
-`-tool-timeout`), `startupTimeout` (milliseconds, 30 seconds by default),
-`includeTools` and `excludeTools` (the server's own tool names), and
-`optional`. `${VAR}` and `${VAR:-default}` expand from the environment in
-`command`, `args`, `env`, `cwd`, `url`, and `headers`; an unset variable
-without a default is an error. Unknown fields are ignored with a warning,
-`type: "sse"` is refused because the HTTP+SSE transport is deprecated, and
-the flag may be repeated to merge files as long as no server is named twice.
-Servers are connected when `lmc` starts and shut down when it exits. A server
-that fails to start fails the run, unless it is `optional`, which skips it
-with a warning.
-
-`lmc` speaks the `2026-07-28` revision of the protocol and the earlier
-revisions with the `initialize` handshake, and detects which one a server
-uses. Each tool is advertised as `mcp__<server>__<tool>`, with characters
-outside letters, digits, `_`, and `-` replaced and a long name shortened to
-64 characters with a stable suffix. A server's `instructions` are appended to
-the tool system prompt under a heading naming the server. Authorization to an
-HTTP server is whatever `headers` carries; `lmc` does not run an OAuth flow.
-
-An MCP call is approved the way a command is. A whitelist rule naming the
-server, or the server and tool, admits it without a prompt, a blacklist rule
-refuses it, and otherwise interactive `lmc` shows the server, tool, and
-arguments and asks `Call github/list_issues? [y/N]`; `-tool-auto-approve`
-approves it, and when no prompt can be answered it is denied with the rule
-that would have allowed it. The result's text reaches the model as the tool
-output. Images in the result are attached the way `view_image` attaches a
-file, under the same size cap, and audio, resource links, and other content
-the wire cannot carry become one line notes. A server that reports an error,
-asks the user a question (which `lmc` does not answer), or fails to reply in
-time produces an error result the model can read. Calls are recorded in the
-session with the server and tool name, and resuming a session that has one
-pending needs the same `-mcp-config`.
-
 Commands can take standard input from a literal `stdin` string or a streamed
 `stdin_file`, and can redirect output to files with `stdout_file` and
 `stderr_file` instead of returning those streams in the tool result. Relative
@@ -443,6 +382,102 @@ echo "List the files in my home directory" | ./bin/lmc \
   -mcp-config examples/lmc/mcp-config.json
 ```
 
+#### MCP servers
+
+`-mcp-config file` connects the servers a Model Context Protocol (MCP)
+configuration names and advertises their tools beside the built-in ones; it
+implies `-tool`. The file is the `mcpServers` JSON that Claude Code and
+Gemini CLI write, so a file made for them loads unchanged:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}
+    },
+    "docs": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"},
+      "timeout": 120000
+    }
+  }
+}
+```
+
+A server with `command` is started as a subprocess without a shell and spoken
+to over stdio; a server with `url` is a Streamable HTTP endpoint. The other
+fields are `type` (`stdio` or `http`, inferred when absent), `args`, `env`,
+`cwd`, `headers`, `timeout` (per call, in milliseconds; the default is
+`-tool-timeout`), `startupTimeout` (milliseconds, 30 seconds by default),
+`includeTools` and `excludeTools` (the server's own tool names), and
+`optional`. `${VAR}` and `${VAR:-default}` expand from the environment in
+`command`, `args`, `env`, `cwd`, `url`, and `headers`; an unset variable
+without a default is an error. Unknown fields are ignored with a warning,
+`type: "sse"` is refused because the HTTP+SSE transport is deprecated, and
+the flag may be repeated to merge files as long as no server is named twice.
+Servers are connected when `lmc` starts and shut down when it exits. A server
+that fails to start fails the run, unless it is `optional`, which skips it
+with a warning.
+
+`lmc` speaks the `2026-07-28` revision of the protocol and the earlier
+revisions with the `initialize` handshake, and detects which one a server
+uses. Each tool is advertised as `mcp__<server>__<tool>`, with characters
+outside letters, digits, `_`, and `-` replaced and a long name shortened to
+64 characters with a stable suffix. A server's `instructions` are appended to
+the tool system prompt under a heading naming the server. Authorization to an
+HTTP server is whatever `headers` carries; `lmc` does not run an OAuth flow.
+
+An MCP call is approved the way a command is. A whitelist rule naming the
+server, or the server and tool, admits it without a prompt, a blacklist rule
+refuses it, and otherwise interactive `lmc` shows the server, tool, and
+arguments and asks `Call github/list_issues? [y/N]`; `-tool-auto-approve`
+approves it, and when no prompt can be answered it is denied with the rule
+that would have allowed it. The result's text reaches the model as the tool
+output. Images in the result are attached the way `view_image` attaches a
+file, under the same size cap, and audio, resource links, and other content
+the wire cannot carry become one line notes. A server that reports an error,
+asks the user a question (which `lmc` does not answer), or fails to reply in
+time produces an error result the model can read. Calls are recorded in the
+session with the server and tool name, and resuming a session that has one
+pending needs the same `-mcp-config`.
+
+#### Choosing tools for a run
+
+`-tool-include` and `-tool-exclude` narrow the tools a run advertises, out of
+those `-tool` and `-mcp-config` turn on. A selector is `universal_command`,
+`view_image`, an MCP server name for every tool of that server, or
+`server/tool` for one of them; selectors are comma separated and the flags
+may be repeated. Include narrows the run to what it names, exclude removes
+from what remains, and a name in both is excluded. A server that include
+leaves out or exclude names is never started. A tool named as `server/tool`
+is settled when the server lists its tools, after the file's `includeTools`
+and `excludeTools`, and a name the server does not offer is reported the
+same way. A withheld tool is not advertised, and a call to it, such as one
+pending in a resumed session, is an error result. The rule files stay the
+permission layer: a withheld tool needs no rule.
+
+A run that withholds `universal_command` gets a shorter tool system prompt
+without the command rules, and a resumed session on the other prompt forks,
+as it does when MCP servers change. A selector naming nothing the run has, a
+selection that leaves no tool at all, and an MCP server named
+`universal_command` or `view_image` are errors at startup.
+
+```bash
+# The filesystem server alone: no local commands, no image tool.
+echo "List the files in my home directory" | ./bin/lmc \
+  -argo-user "$USER" \
+  -mcp-config examples/lmc/mcp-config.json \
+  -tool-include filesystem
+
+# Local commands and the server, less one of its tools and the image tool.
+echo "Inspect this repository" | ./bin/lmc \
+  -argo-user "$USER" \
+  -mcp-config examples/lmc/mcp-config.json \
+  -tool-exclude filesystem/directory_tree,view_image
+```
+
 ### lmc Flags
 
 Provider and credentials:
@@ -527,6 +562,12 @@ Tools:
 - `-mcp-config path`: Connect the MCP servers an `mcpServers` JSON file names
   and advertise their tools beside the built-in ones. Implies `-tool`;
   repeatable. See MCP servers under Tool Use.
+- `-tool-include selectors`: Advertise only the tools named:
+  `universal_command`, `view_image`, an MCP server, or `server/tool`. Comma
+  separated; repeatable. A server left out is never started. Needs `-tool`
+  or `-mcp-config`.
+- `-tool-exclude selectors`: Withhold the tools named, in the same form.
+  Applied after `-tool-include`. See Choosing tools for a run under Tool Use.
 - `-tool-timeout duration`: Per-command timeout; default `1m`. A tool call may
   set its own `timeout` in seconds instead; that value is clamped to 24 hours.
   An MCP call uses its server's `timeout` when the configuration sets one.
