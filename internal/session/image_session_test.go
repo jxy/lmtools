@@ -15,7 +15,7 @@ func sessionTestImage() core.ImageBlock {
 
 func prepareImagePlan(t *testing.T, ctx context.Context, cfg core.RequestOptions, input string) *RequestPlan {
 	t.Helper()
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, input, false, core.NewTestApprover(true), PendingToolExecute)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, input, false, PendingToolExecute)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}

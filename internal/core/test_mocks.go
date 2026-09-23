@@ -103,6 +103,10 @@ type TestApprover struct {
 	// or empty queue declines. ResetCalls records the maxRounds of each prompt.
 	ResetResponses []bool
 	ResetCalls     []int
+	// RerunResponses answers questions about rerunning an uncertain call in
+	// order; an exhausted or empty queue declines. RerunCalls records each.
+	RerunResponses []bool
+	RerunCalls     []ToolCall
 	mu             sync.Mutex
 }
 
@@ -162,6 +166,23 @@ func (a *TestApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds
 	return approved, nil
 }
 
+func (a *TestApprover) ApproveRerun(ctx context.Context, call ToolCall) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.RerunCalls = append(a.RerunCalls, call)
+	if len(a.RerunResponses) == 0 {
+		return false, nil
+	}
+	approved := a.RerunResponses[0]
+	a.RerunResponses = a.RerunResponses[1:]
+	return approved, nil
+}
+
 // DeclineNonCommandApprovals is the round-limit and image halves of Approver
 // for test doubles that only care about Approve. Embed it to decline every
 // reset and every image.
@@ -188,6 +209,13 @@ func (DeclineNonCommandApprovals) ApproveMCP(ctx context.Context, _ MCPCall) (bo
 	return false, nil
 }
 
+func (DeclineNonCommandApprovals) ApproveRerun(ctx context.Context, _ ToolCall) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // NewTestApprover creates a TestApprover with default approval
 func NewTestApprover(defaultApproval bool) *TestApprover {
 	return &TestApprover{
@@ -201,6 +229,7 @@ type TestToolUI struct{}
 
 func (TestToolUI) ShowCall(int, int, ToolCall, *UniversalCommandArgs) {}
 func (TestToolUI) BeforeRun(int, int, int)                            {}
+func (TestToolUI) ShowRerun(ToolCall, string)                         {}
 func (TestToolUI) AfterExecute([]ToolCall, []ToolResult)              {}
 
 // TestNotifier is a mock that implements Notifier interface for testing

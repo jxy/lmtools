@@ -99,6 +99,18 @@ func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (bool, 
 	)
 }
 
+// ApproveRerun asks about a call an earlier run started without recording
+// its outcome. The notice above it named the call and its arguments; running
+// it again may repeat whatever it already did, which is why the answer
+// defaults to no and no policy can give it.
+func (a *cliApprover) ApproveRerun(ctx context.Context, call core.ToolCall) (bool, error) {
+	return a.ask(ctx,
+		fmt.Sprintf("%sRun %s again? It may already have run. [y/N]: ", tools.DetailIndent, call.Name),
+		"\n"+tools.DetailIndent+"No interactive input available; not running it again.\n",
+		"\n"+tools.DetailIndent+"Rerun prompt cancelled.\n",
+	)
+}
+
 func (a *cliApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
 	return a.ask(ctx,
 		fmt.Sprintf("\nTool-call round limit reached (%d). Reset it and continue? [y/N]: ", maxRounds),

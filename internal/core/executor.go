@@ -188,6 +188,63 @@ type Executor struct {
 	// qualified name; both are nil when no server is configured.
 	mcp      MCPTools
 	mcpTools map[string]mcp.QualifiedTool
+	// recorder, when set, records each call's start and outcome durably.
+	recorder ToolRecorder
+	// recordErrs holds the records the current batch could not write.
+	recordMu   sync.Mutex
+	recordErrs []error
+}
+
+// SetRecorder makes the executor record each call it handles: the start
+// immediately before the call runs, and the outcome once the call has one.
+// A nil recorder records nothing.
+func (e *Executor) SetRecorder(recorder ToolRecorder) {
+	e.recorder = recorder
+}
+
+// recordStart records that a call is about to run. A call whose start
+// cannot be recorded must not run: after a crash, recovery would take it for
+// a call that never started and run it a second time.
+func (e *Executor) recordStart(call ToolCall) error {
+	if e.recorder == nil {
+		return nil
+	}
+	if err := e.recorder.Started(call); err != nil {
+		e.noteRecordingFailure(fmt.Errorf("record the start of tool call %s: %w", call.ID, err))
+		return err
+	}
+	return nil
+}
+
+// recordOutcome records a call's outcome. A failure does not change the
+// result: the caller still commits it in the results message. It is kept for
+// TakeRecordingError, because a copy of the transcript that still shows the
+// call pending would find a start without an outcome and treat the call as
+// uncertain, and the operator has to hear that now rather than then.
+func (e *Executor) recordOutcome(call ToolCall, result ToolResult) {
+	if e.recorder == nil {
+		return
+	}
+	if err := e.recorder.Finished(call, result); err != nil {
+		e.noteRecordingFailure(fmt.Errorf("record the outcome of tool call %s: %w", call.ID, err))
+	}
+}
+
+func (e *Executor) noteRecordingFailure(err error) {
+	e.recordMu.Lock()
+	defer e.recordMu.Unlock()
+	e.recordErrs = append(e.recordErrs, err)
+}
+
+// TakeRecordingError returns the records ExecuteParallel could not write
+// since the last call, joined, and forgets them. It is nil when everything
+// was recorded or nothing records.
+func (e *Executor) TakeRecordingError() error {
+	e.recordMu.Lock()
+	defer e.recordMu.Unlock()
+	err := stdErrors.Join(e.recordErrs...)
+	e.recordErrs = nil
+	return err
 }
 
 // preparedExecution is one call that passed preparation. Exactly one of
@@ -336,6 +393,19 @@ func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall, ui Too
 		ui.BeforeRun(len(calls), len(prepared), workers)
 	}
 
+	// Every call refused before this point has its outcome already, and
+	// recording it now means recovery reads the refusal instead of asking
+	// again.
+	runnable := make([]bool, len(calls))
+	for _, exec := range prepared {
+		runnable[exec.index] = true
+	}
+	for i := range calls {
+		if !runnable[i] {
+			e.recordOutcome(calls[i], results[i])
+		}
+	}
+
 	jobs := make(chan preparedExecution)
 	var wg sync.WaitGroup
 
@@ -344,7 +414,22 @@ func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall, ui Too
 		go func() {
 			defer wg.Done()
 			for exec := range jobs {
+				call := calls[exec.index]
+				if ctx.Err() == nil {
+					if err := e.recordStart(call); err != nil {
+						result := ToolResult{
+							ID:     exec.id,
+							NotRun: true,
+							Error:  fmt.Sprintf("not run: recording the call's start failed: %v", err),
+							Code:   errors.ErrCodeExecError,
+						}
+						results[exec.index] = result
+						e.recordOutcome(call, result)
+						continue
+					}
+				}
 				results[exec.index] = e.executePrepared(ctx, exec)
+				e.recordOutcome(call, results[exec.index])
 			}
 		}()
 	}

@@ -9,6 +9,7 @@ import (
 	"lmtools/internal/logger"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -126,6 +127,8 @@ type MessageStaging struct {
 	JsonPath   string
 	ToolsPath  string
 	BlocksPath string
+	// Revision is the new revision the staged metadata carries.
+	Revision string
 }
 
 // Close removes all staged files (cleanup on error or after successful commit).
@@ -149,8 +152,12 @@ func stageMessageFiles(sessionPath string, msg Message, toolInteraction *core.To
 	return stageMessageFilesWithBlocks(sessionPath, msg, toolInteraction, nil)
 }
 
+// stageMessageFilesWithBlocks stages msg for a commit under a new revision,
+// whatever revision msg carries: every commit names its message anew, so a
+// copy never shares its source's revision.
 func stageMessageFilesWithBlocks(sessionPath string, msg Message, toolInteraction *core.ToolInteraction, blocks []core.Block) (*MessageStaging, error) {
-	staging := &MessageStaging{}
+	msg.Revision = newRevision()
+	staging := &MessageStaging{Revision: msg.Revision}
 	fileSet, err := buildMessageFileSetWithBlocks(msg, toolInteraction, blocks)
 	if err != nil {
 		return nil, err
@@ -217,9 +224,64 @@ func commitStagedMessageLocked(ctx context.Context, sessionPath, msgID string, s
 // messageCommitter encapsulates the atomic commit logic for session messages.
 type messageCommitter struct {
 	sessionPath string
+	// expected, when set, is the head the lineage must still end at when the
+	// commit takes the lock. It is nil for writers that pin no head, which
+	// keep the identifier collision fallback.
+	expected *MessageRef
+}
+
+// checkHeadLocked reports whether a session directory still ends at the
+// expected head. ids is the directory's listing, taken under the commit
+// locks, which include the tree's. The head's message must first still be
+// the one the head was taken from; one that is gone or is another message
+// now is a HeadReplacedError.
+// Only the active directory can gain messages that extend a lineage:
+// messages appended to a parent after a branch point are not in a sibling's
+// lineage. So a head inside the directory must be its last message, and a
+// head in an ancestor requires the directory to be empty.
+func checkHeadLocked(sessionPath string, ids []string, expected *MessageRef) error {
+	if expected == nil {
+		return nil
+	}
+	if err := verifyHeadLocked(DefaultManager(), *expected); err != nil {
+		return err
+	}
+	last := ""
+	if len(ids) > 0 {
+		last = ids[len(ids)-1]
+	}
+	if expected.ID != "" && filepath.Clean(expected.Path) == filepath.Clean(sessionPath) {
+		if last == expected.ID {
+			return nil
+		}
+	} else if last == "" {
+		return nil
+	}
+	return &HeadMovedError{SessionPath: sessionPath, Expected: *expected, Found: last}
+}
+
+// nextMessageIDFrom returns the identifier after the highest in a listing.
+func nextMessageIDFrom(ids []string) (string, error) {
+	maxID := -1
+	for _, msgID := range ids {
+		id, err := strconv.ParseUint(msgID, 16, 64)
+		if err != nil {
+			continue
+		}
+		if int(id) > maxID {
+			maxID = int(id)
+		}
+	}
+	return formatVariableWidthHexID(maxID + 1), nil
 }
 
 var afterGetNextMessageIDForTest func(sessionPath, msgID string)
+
+// beforeAppendCommitForTest runs before an appended message commits, once per
+// attempt. A fork's copies do not come through here, so a test can fail the
+// write that follows a completed fork. An error it returns fails the append,
+// the way an I/O failure would.
+var beforeAppendCommitForTest func(sessionPath string) error
 
 const messageCommitLockTimeout = 5 * time.Second
 
@@ -236,16 +298,21 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 	var conflictMsgID string
 	var siblingPath string
 
-	err := WithSessionLock(mc.sessionPath, messageCommitLockTimeout, func() error {
-		var err error
-		msgID, err = GetNextMessageID(mc.sessionPath)
+	err := withCommitLocks(mc.sessionPath, messageCommitLockTimeout, func() error {
+		ids, err := listMessages(mc.sessionPath)
+		if err != nil {
+			return errors.WrapError("get next message ID", errors.WrapError("list messages", err))
+		}
+		if err := checkHeadLocked(mc.sessionPath, ids, mc.expected); err != nil {
+			return err
+		}
+		msgID, err = nextMessageIDFrom(ids)
 		if err != nil {
 			return errors.WrapError("get next message ID", err)
 		}
 		if afterGetNextMessageIDForTest != nil {
 			afterGetNextMessageIDForTest(mc.sessionPath, msgID)
 		}
-
 		paths := buildMessageFilePaths(mc.sessionPath, msgID)
 		if fileExists(paths.JSONPath) {
 			needSibling = true
@@ -299,11 +366,21 @@ func (mc *messageCommitter) CommitMessageWithBlocksWithRetries(ctx context.Conte
 		}
 
 		if currentPath != mc.sessionPath {
-			mc = newMessageCommitter(currentPath)
+			mc = &messageCommitter{sessionPath: currentPath, expected: mc.expected}
 		}
 
+		if beforeAppendCommitForTest != nil {
+			if err := beforeAppendCommitForTest(currentPath); err != nil {
+				return SaveResult{}, err
+			}
+		}
 		msgID, needSibling, siblingPath, err := mc.Commit(ctx, staged)
 		if err != nil {
+			if stdErrors.Is(err, ErrHeadMoved) {
+				// Not a race to retry: the lineage this write belongs to
+				// has changed, and the caller decides where it goes now.
+				return SaveResult{}, err
+			}
 			if stdErrors.Is(err, ErrLockTimeout) && attempt < maxRetries-1 {
 				logger.From(ctx).Debugf("Lock timeout on attempt %d/%d, retrying...", attempt+1, maxRetries)
 				continue
@@ -320,7 +397,7 @@ func (mc *messageCommitter) CommitMessageWithBlocksWithRetries(ctx context.Conte
 					attempt+1,
 				)
 			}
-			return SaveResult{Path: currentPath, MessageID: msgID}, nil
+			return SaveResult{Path: currentPath, MessageID: msgID, Revision: staged.Revision}, nil
 		}
 
 		lastConflictMsgID = msgID

@@ -29,7 +29,7 @@ func setupCoordinatorTestEnv(t *testing.T) context.Context {
 }
 
 func prepareSessionForTest(ctx context.Context, cfg core.RequestOptions, notifier core.Notifier, inputStr string, isRegeneration bool, approver core.Approver) (*Session, bool, error) {
-	plan, err := PrepareRequest(ctx, cfg, notifier, core.TestToolUI{}, inputStr, isRegeneration, approver, PendingToolExecute)
+	plan, err := PrepareRequest(ctx, cfg, notifier, core.TestToolUI{}, inputStr, isRegeneration, PendingToolExecute)
 	if err != nil {
 		return nil, false, err
 	}

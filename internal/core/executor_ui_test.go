@@ -40,6 +40,10 @@ func (ui *recordingToolUI) AfterExecute(_ []ToolCall, _ []ToolResult) {
 	ui.recorder.add("results")
 }
 
+func (ui *recordingToolUI) ShowRerun(call ToolCall, _ string) {
+	ui.recorder.add("rerun:" + call.ID)
+}
+
 type recordingLifecycleApprover struct {
 	DeclineNonCommandApprovals
 	recorder *lifecycleRecorder

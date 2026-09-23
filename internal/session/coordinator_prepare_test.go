@@ -3,8 +3,11 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -259,59 +262,71 @@ func TestCoordinatorPrepareRequestBranch(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPrepareRequestPendingTools tests executing pending tools on resume
+// TestCoordinatorPrepareRequestPendingTools checks that preparing a request
+// never runs a tool. Pending calls at the head are refused until
+// ResolvePendingToolCalls has resolved them, however often preparation is
+// tried, and the plan prepared afterwards carries their results.
 func TestCoordinatorPrepareRequestPendingTools(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
-	// Create an existing session
 	existingSession, err := CreateSession("System prompt", logger.GetLogger())
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	// Add a message with pending tool calls
-	assistantMsg := Message{
-		Role:      core.RoleAssistant,
-		Content:   "I'll help you with that",
-		Timestamp: time.Now(),
+	marker := filepath.Join(t.TempDir(), "ran")
+	call := core.ToolCall{
+		ID:           "call_123",
+		Name:         "universal_command",
+		Args:         json.RawMessage(fmt.Sprintf(`{"command":["touch",%q]}`, marker)),
+		InvocationID: core.NewInvocationID(),
 	}
-	toolInteraction := &core.ToolInteraction{
-		Calls: []core.ToolCall{
-			{
-				ID:   "call_123",
-				Name: "universal_command",
-				Args: json.RawMessage(`{"command":["echo","hello"]}`),
-			},
-		},
+	claim, err := NewToolJournal().Claim([]core.ToolCall{call})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
 	}
-	if _, err := AppendMessageWithToolInteraction(ctx, existingSession, assistantMsg, toolInteraction.Calls, toolInteraction.Results); err != nil {
+	claim.Release()
+	assistantMsg := Message{Role: core.RoleAssistant, Content: "I'll help you with that", Timestamp: time.Now()}
+	if _, err := AppendMessageWithToolInteraction(ctx, existingSession, assistantMsg, []core.ToolCall{call}, nil); err != nil {
 		t.Fatalf("Failed to append message with tools: %v", err)
 	}
 
-	// Create a config that enables tools
 	cfg := newTestCoordinatorConfig()
 	cfg.Resume = GetSessionID(existingSession.Path)
 	cfg.System = "System prompt"
 	cfg.ToolEnabled = true
 	notifier := core.NewTestNotifier()
-	approver := core.NewTestApprover(true)
 
-	// Test resuming with pending tools
-	sess, executedPending, err := prepareSessionForTest(ctx, cfg, notifier, "", false, approver)
+	for attempt := 0; attempt < 2; attempt++ {
+		_, err := PrepareRequest(ctx, cfg, notifier, core.TestToolUI{}, "", false, PendingToolExecute)
+		if err == nil || !strings.Contains(err.Error(), "must be resolved") {
+			t.Fatalf("PrepareRequest() attempt %d error = %v, want the unresolved pending call refused", attempt+1, err)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("preparing a request ran the pending command, marker stat err = %v", err)
+	}
+
+	sess, err := OpenSession(cfg.Resume)
 	if err != nil {
-		t.Fatalf("PrepareRequest failed: %v", err)
+		t.Fatalf("OpenSession() error = %v", err)
+	}
+	resolution, err := ResolvePendingToolCalls(ctx, sess, cfg, core.NewTestLogger(false), notifier, core.TestToolUI{}, core.NewTestApprover(true))
+	if err != nil || !resolution.Committed {
+		t.Fatalf("ResolvePendingToolCalls() = %+v, %v; want the call run and its result committed", resolution, err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("resolution did not run the pending command: %v", err)
 	}
 
-	// Verify result
-	if sess == nil {
-		t.Fatal("Expected non-nil session")
+	plan, err := PrepareRequestAt(ctx, cfg, notifier, core.TestToolUI{}, sess, "", false, PendingToolExecute)
+	if err != nil {
+		t.Fatalf("PrepareRequestAt() error = %v", err)
 	}
-	if !executedPending {
-		t.Error("Expected ExecutedPending=true when pending tools found")
+	last := plan.Messages[len(plan.Messages)-1]
+	if _, ok := last.Blocks[0].(core.ToolResultBlock); last.Role != string(core.RoleUser) || !ok {
+		t.Fatalf("last planned message = %#v, want the committed tool results", last)
 	}
-
-	// Note: Actual tool execution would require more setup with the executor
-	// This test verifies that pending tools are detected and the flag is set
 }
 
 // TestCoordinatorPrepareRequestRegeneration tests regeneration (no user message saved)

@@ -20,7 +20,6 @@ import (
 	"lmtools/internal/retry"
 	"lmtools/internal/session"
 	"lmtools/internal/ui"
-	"lmtools/internal/ui/tools"
 	"lmtools/internal/version"
 	"net/http"
 	"net/http/httputil"
@@ -39,74 +38,101 @@ const (
 	exitInterrupted = 130 // Standard for SIGINT
 )
 
-func executeRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, logDir, inputStr string, plan *session.RequestPlan) error {
+// executeRequest sends a planned turn and handles the response: the plan
+// commits once the response parses, then either the tool loop or the answer
+// save writes the rest. The outcome records how far the writes got on every
+// exit.
+func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, inputStr string, plan *session.RequestPlan) (turnOutcome, error) {
+	var out turnOutcome
 	ctx = logger.WithNewRequestCounter(ctx)
 
-	rb, err := buildHTTPRequest(ctx, cfg, opts, plan, inputStr)
+	rb, err := buildHTTPRequest(ctx, env.cfg, opts, plan, inputStr)
 	if err != nil {
-		return err
+		return out, err
 	}
-	logBuiltHTTPRequest(ctx, cfg, logDir, notifier, rb.Request, rb.Body)
+	logBuiltHTTPRequest(ctx, env.cfg, env.logDir, env.notifier, rb.Request, rb.Body)
 
-	resp, err := sendWithRetry(ctx, rb.Request, cfg)
+	resp, err := sendWithRetry(ctx, rb.Request, env.cfg)
 	if err != nil {
-		return err
+		return out, err
 	}
-	presenter := newResponsePresenter(os.Stdout, os.Stderr, cfg.ShowThinking)
+	presenter := newResponsePresenter(env.stdout, env.stderr, env.cfg.ShowThinking)
 	defer presenter.Close()
 
-	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), notifier, core.ResponseParseOptions{
+	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), env.notifier, core.ResponseParseOptions{
 		ArgoLegacy: opts.ArgoLegacy,
 		ToolDefs:   rb.ToolDefs,
 		Output:     presenter,
 	})
 	if err != nil {
-		return errors.WrapError("handle response", err)
+		return out, errors.WrapError("handle response", err)
 	}
 
-	var sess *session.Session
 	if plan != nil {
-		committed, err := plan.Commit(ctx)
-		if err != nil {
-			return errors.WrapError("commit session", err)
+		// The response has arrived, so its turn is recorded even if the run
+		// is being cancelled.
+		commitCtx, cancel := core.PersistenceContext(ctx)
+		committed, err := plan.Commit(commitCtx)
+		cancel()
+		if committed != nil {
+			// Set even on failure: a commit that fails part way returns
+			// the session its writes reached.
+			out.Session = committed
 		}
-		sess = committed
+		if err != nil {
+			err = errors.WrapError("commit session", err)
+			if core.ResponseHasContent(response) {
+				// The response was presented as it arrived, so the operator
+				// saw an answer the transcript does not hold.
+				out.UnsavedAnswer = err
+			}
+			return out, err
+		}
+		if afterTurnCommitForTest != nil {
+			afterTurnCommitForTest(committed)
+		}
 	}
 
 	if len(response.ToolCalls) > 0 {
 		logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
-		tc := newToolContext(ctx, cfg, opts, notifier, toolUI, approver, logDir, sess, &response, rb, inputStr, presenter)
-		return finishToolExecution(core.HandleToolExecution(tc))
+		tc := newToolContext(ctx, env, opts, out.Session, &response, rb, inputStr, presenter)
+		result := core.HandleToolExecution(tc)
+		out.UnsavedAnswer = result.UnsavedAnswer
+		return out, finishToolExecution(result)
 	}
 
-	return handleNormalResponse(ctx, cfg, notifier, &response, sess, rb.Model)
+	out.UnsavedAnswer = persistAssistantOnly(ctx, response, out.Session, env.cfg, env.notifier, rb.Model)
+	return out, nil
 }
 
-func newToolContext(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, logDir string, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) core.ToolContext {
+func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) core.ToolContext {
 	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
 
-	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.From(ctx))
+	retryClient := retry.NewClientWithRetries(env.cfg.Timeout, env.cfg.Retries, logger.From(ctx))
 
 	execCfg := core.ToolExecutionConfig{
 		Store:       store,
 		RetryClient: retryClient,
 		LogRequestFn: func(body []byte) error {
-			return logger.From(ctx).LogJSON(logDir, "tool_result_input", body)
+			return logger.From(ctx).LogJSON(env.logDir, "tool_result_input", body)
 		},
 		ActualModel: rb.Model,
+	}
+	if sess != nil {
+		execCfg.Journal = session.NewToolJournal()
 	}
 
 	return core.ToolContext{
 		Ctx:             ctx,
 		Cfg:             opts,
 		Logger:          logger.From(ctx),
-		Notifier:        notifier,
-		Approver:        approver,
+		Notifier:        env.notifier,
+		Approver:        env.approver,
 		ExecCfg:         execCfg,
 		Model:           rb.Model,
 		ToolDefs:        rb.ToolDefs,
 		MessagesFn:      messageBuilder,
-		UI:              toolUI,
+		UI:              env.toolUI,
 		Output:          output,
 		InitialResponse: *response,
 	}
@@ -121,24 +147,21 @@ func createToolStoreAndMessageBuilder(ctx context.Context, opts core.RequestOpti
 	return store, store.Messages
 }
 
+// createMessageBuilder builds each follow-up request through the session's
+// pinned head, so a message another writer appended cannot enter it.
 func createMessageBuilder(ctx context.Context, sess *session.Session) func(string) ([]core.TypedMessage, error) {
-	cached, err := session.CreateCachedMessageBuilder(ctx, sess.Path)
+	cached, err := session.CreateCachedMessageBuilderForSession(ctx, sess)
 	if err == nil {
 		return cached
 	}
 	logger.From(ctx).Warnf("Failed to create cached message builder: %v", err)
-	return func(path string) ([]core.TypedMessage, error) {
-		return session.BuildMessagesWithToolInteractions(ctx, path)
+	return func(string) ([]core.TypedMessage, error) {
+		return session.BuildMessagesForSession(ctx, sess)
 	}
 }
 
 func finishToolExecution(result core.ToolExecutionResult) error {
 	return result.Error
-}
-
-func handleNormalResponse(ctx context.Context, cfg *config.Config, notifier core.Notifier, response *core.Response, sess *session.Session, model string) error {
-	persistAssistantOnly(ctx, *response, sess, cfg, notifier, model)
-	return nil
 }
 
 func main() {
@@ -187,14 +210,9 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
-	// Check if we're branching from an assistant message (regeneration)
-	isRegeneration := false
-	if cfg.Branch != "" {
-		isAssistant, err := session.IsAssistantMessage(cfg.Branch)
-		if err != nil {
-			return errors.WrapError("check branch message type", err)
-		}
-		isRegeneration = isAssistant
+	isRegeneration, err := branchRegenerates(cfg.Branch)
+	if err != nil {
+		return err
 	}
 	if err := validateImageTurn(isRegeneration, opts.Images); err != nil {
 		return err
@@ -214,34 +232,9 @@ func run(notifier core.Notifier) error {
 		defer host.Close()
 	}
 
-	pendingToolMode := session.PendingToolExecute
-	if cfg.PrintCurl {
-		pendingToolMode = session.PendingToolPreview
-	}
-	// The command review and the approval prompt share one operator-facing
-	// stream, decided once here; the executor and the pending-tools path both
-	// receive this same UI.
-	toolNotifier, approver := newOperatorToolSurface(notifier)
-	toolUI := tools.NewCLIToolUI(toolNotifier)
-	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, notifier, toolUI, approver, inputStr, isRegeneration, pendingToolMode)
-	if err != nil {
-		return err
-	}
-	hasPendingTools := plan != nil && plan.HasPendingTools
-	if !isRegeneration && inputStr == "" && len(opts.Images) == 0 && !hasPendingTools {
-		return errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
-	}
-
-	if cfg.PrintCurl {
-		rb, err := buildHTTPRequest(ctx, &cfg, opts, plan, inputStr)
-		if err != nil {
-			return err
-		}
-		fmt.Println(renderCurlCommand(rb.Request, rb.Body))
-		return nil
-	}
-
-	return executeRequest(ctx, &cfg, opts, notifier, toolUI, approver, logDir, inputStr, plan)
+	env := newTurnEnv(&cfg, notifier, logDir)
+	_, err = runTurn(ctx, env, opts, turnInput{text: inputStr, isRegeneration: isRegeneration})
+	return err
 }
 
 // warnUnusedReasoningControls warns when reasoning.mode/context are set but the
@@ -299,11 +292,11 @@ func connectMCPServers(ctx context.Context, cfg *config.Config, opts *core.Reque
 	return host, nil
 }
 
-func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, approver core.Approver, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
+func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
 	if cfg.NoSession {
 		return nil, nil
 	}
-	return session.PrepareRequest(ctx, opts, notifier, toolUI, inputStr, isRegeneration, approver, pendingToolMode)
+	return session.PrepareRequest(ctx, opts, notifier, toolUI, inputStr, isRegeneration, pendingToolMode)
 }
 
 // handleSpecialFlags handles flags that don't require the full request processing
@@ -633,26 +626,37 @@ func logWireHTTPResponseHeaders(ctx context.Context, resp *http.Response) {
 	log.Debugf("WIRE BACKEND RESPONSE HEADERS:\n%s", buf.String())
 }
 
-// persistAssistantOnly saves assistant response when there are no tool calls
-func persistAssistantOnly(ctx context.Context, response core.Response, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) {
-	// Save assistant response to session if enabled (but NOT when there are tool calls - HandleToolExecution will do it)
-	if sess != nil && (response.Text != "" || response.ThoughtSignature != "" || len(response.Blocks) > 0) {
-		logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(response.Text), cfg.StreamChat)
-		store := session.NewStore(sess, logger.From(ctx))
-		previousPath := sess.Path
-		path, messageID, err := store.SaveAssistantResponse(ctx, response, model)
-		if err != nil {
-			// Log error but don't fail the request
-			notifier.Warnf("Warning: failed to save response to session: %v", err)
-		} else if path != previousPath {
-			notifier.Infof("Response saved to sibling branch %s as message %s",
-				session.GetSessionID(path), messageID)
-		} else {
-			logger.From(ctx).Debugf("Response saved to session %s as message %s", session.GetSessionID(path), messageID)
-		}
-	} else {
+// persistAssistantOnly saves an answer that carried no tool calls; the tool
+// loop saves the answers it handles. A failed save is warned about and does
+// not fail the request, as it never has, and is returned so the turn outcome
+// can record that the transcript lacks an answer that was already shown.
+func persistAssistantOnly(ctx context.Context, response core.Response, sess *session.Session, cfg *config.Config, notifier core.Notifier, model string) error {
+	if sess == nil || (response.Text == "" && response.ThoughtSignature == "" && len(response.Blocks) == 0) {
 		logger.From(ctx).Debugf("Not saving response | Session: %v | Output length: %d", sess != nil, len(response.Text))
+		return nil
 	}
+
+	logger.From(ctx).Debugf("Saving assistant response to session | Length: %d | Streaming: %v", len(response.Text), cfg.StreamChat)
+	// The answer has been shown, so it is saved even if the run is being
+	// cancelled.
+	ctx, cancel := core.PersistenceContext(ctx)
+	defer cancel()
+	store := session.NewStore(sess, logger.From(ctx))
+	previousPath := sess.Path
+	forksBefore := len(sess.ConflictForks)
+	path, messageID, err := store.SaveAssistantResponse(ctx, response, model)
+	if err != nil {
+		notifier.Warnf("Warning: failed to save response to session: %v", err)
+		return err
+	}
+	// A move to a conflict fork is reported by the turn, as a fork.
+	if path != previousPath && len(sess.ConflictForks) == forksBefore {
+		notifier.Infof("Response saved to sibling branch %s as message %s",
+			session.GetSessionID(path), messageID)
+	} else {
+		logger.From(ctx).Debugf("Response saved to session %s as message %s", session.GetSessionID(path), messageID)
+	}
+	return nil
 }
 
 // listModels queries and displays available models for the configured provider

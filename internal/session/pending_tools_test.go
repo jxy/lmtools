@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/core"
+	lmerrors "lmtools/internal/errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -71,283 +73,149 @@ func (m *MockLogger) Infof(format string, args ...interface{})  {}
 func (m *MockLogger) Warnf(format string, args ...interface{})  {}
 func (m *MockLogger) Errorf(format string, args ...interface{}) {}
 
-// TestExecutePendingTools tests the pending tools execution functionality
-func TestExecutePendingTools(t *testing.T) {
-	UseTestSessionDir(t)
-
-	tests := []struct {
-		name             string
-		setupSession     func() (*Session, error)
-		expectHasPending bool
-		expectError      bool
-		approverBehavior bool
-		checkResults     func(t *testing.T, sess *Session)
-	}{
-		{
-			name: "no_pending_tools",
-			setupSession: func() (*Session, error) {
-				// Create a session with no pending tools
-				sess, err := CreateSession("", core.NewTestLogger(false))
-				if err != nil {
-					return nil, err
-				}
-				// Add a user message
-				msg := Message{
-					Role:      "user",
-					Content:   "Hello",
-					Timestamp: time.Now(),
-				}
-				_, err = AppendMessageWithToolInteraction(context.Background(), sess, msg, nil, nil)
-				return sess, err
-			},
-			expectHasPending: false,
-			expectError:      false,
-		},
-		{
-			name: "pending_tools_approved",
-			setupSession: func() (*Session, error) {
-				// Create a session with pending tool calls
-				sess, err := CreateSession("", core.NewTestLogger(false))
-				if err != nil {
-					return nil, err
-				}
-
-				// Add an assistant message with tool calls
-				assistantMsg := Message{
-					Role:      "assistant",
-					Content:   "I'll help you list files",
-					Timestamp: time.Now(),
-					Model:     "test-model",
-				}
-				toolCalls := []core.ToolCall{
-					{
-						ID:   "call_123",
-						Name: "universal_command",
-						Args: json.RawMessage(`{"command":["ls","-la"]}`),
-					},
-				}
-
-				_, err = AppendMessageWithToolInteraction(context.Background(), sess, assistantMsg, toolCalls, nil)
-				return sess, err
-			},
-			expectHasPending: true,
-			expectError:      false,
-			approverBehavior: true,
-			checkResults: func(t *testing.T, sess *Session) {
-				// Verify that tool results were saved
-				messages, err := GetLineage(sess.Path)
-				if err != nil {
-					t.Fatalf("Failed to get lineage: %v", err)
-				}
-
-				// Should have 2 messages: assistant with tool calls, user with tool results
-				if len(messages) != 2 {
-					t.Errorf("Expected 2 messages, got %d", len(messages))
-				}
-
-				if len(messages) >= 2 {
-					lastMsg := messages[len(messages)-1]
-					if lastMsg.Role != "user" {
-						t.Errorf("Expected last message to be user role, got %s", lastMsg.Role)
-					}
-
-					// Check for tool results
-					toolInteraction, err := LoadToolInteraction(sess.Path, lastMsg.ID)
-					if err != nil {
-						t.Fatalf("Failed to load tool interaction: %v", err)
-					}
-
-					if toolInteraction == nil || len(toolInteraction.Results) == 0 {
-						t.Error("Expected tool results to be saved")
-					}
-				}
-			},
-		},
-		{
-			name: "pending_tools_denied",
-			setupSession: func() (*Session, error) {
-				// Create a session with pending tool calls
-				sess, err := CreateSession("", core.NewTestLogger(false))
-				if err != nil {
-					return nil, err
-				}
-
-				// Add an assistant message with tool calls
-				assistantMsg := Message{
-					Role:      "assistant",
-					Content:   "I'll help you remove files",
-					Timestamp: time.Now(),
-					Model:     "test-model",
-				}
-				toolCalls := []core.ToolCall{
-					{
-						ID:   "call_456",
-						Name: "universal_command",
-						Args: json.RawMessage(`{"command":["rm","-rf","/"]}`),
-					},
-				}
-
-				_, err = AppendMessageWithToolInteraction(context.Background(), sess, assistantMsg, toolCalls, nil)
-				return sess, err
-			},
-			expectHasPending: true,
-			expectError:      false, // Denial is not an error, results are still saved
-			approverBehavior: false,
-			checkResults: func(t *testing.T, sess *Session) {
-				// Verify that tool results were saved with error
-				messages, err := GetLineage(sess.Path)
-				if err != nil {
-					t.Fatalf("Failed to get lineage: %v", err)
-				}
-
-				if len(messages) >= 2 {
-					lastMsg := messages[len(messages)-1]
-					toolInteraction, err := LoadToolInteraction(sess.Path, lastMsg.ID)
-					if err != nil {
-						t.Fatalf("Failed to load tool interaction: %v", err)
-					}
-
-					if toolInteraction == nil || len(toolInteraction.Results) == 0 {
-						t.Error("Expected tool results to be saved even for denied commands")
-					}
-
-					// Check that the result contains an error
-					if len(toolInteraction.Results) > 0 && toolInteraction.Results[0].Error == "" {
-						t.Error("Expected error in tool result for denied command")
-					}
-				}
-			},
-		},
-		{
-			name: "multiple_pending_tools",
-			setupSession: func() (*Session, error) {
-				// Create a session with multiple pending tool calls
-				sess, err := CreateSession("", core.NewTestLogger(false))
-				if err != nil {
-					return nil, err
-				}
-
-				// Add an assistant message with multiple tool calls
-				assistantMsg := Message{
-					Role:      "assistant",
-					Content:   "I'll help you with multiple tasks",
-					Timestamp: time.Now(),
-					Model:     "test-model",
-				}
-				toolCalls := []core.ToolCall{
-					{
-						ID:   "call_001",
-						Name: "universal_command",
-						Args: json.RawMessage(`{"command":["echo","Hello"]}`),
-					},
-					{
-						ID:   "call_002",
-						Name: "universal_command",
-						Args: json.RawMessage(`{"command":["echo","World"]}`),
-					},
-					{
-						ID:   "call_003",
-						Name: "universal_command",
-						Args: json.RawMessage(`{"command":["pwd"]}`),
-					},
-				}
-
-				_, err = AppendMessageWithToolInteraction(context.Background(), sess, assistantMsg, toolCalls, nil)
-				return sess, err
-			},
-			expectHasPending: true,
-			expectError:      false,
-			approverBehavior: true,
-			checkResults: func(t *testing.T, sess *Session) {
-				messages, err := GetLineage(sess.Path)
-				if err != nil {
-					t.Fatalf("Failed to get lineage: %v", err)
-				}
-
-				if len(messages) >= 2 {
-					lastMsg := messages[len(messages)-1]
-					toolInteraction, err := LoadToolInteraction(sess.Path, lastMsg.ID)
-					if err != nil {
-						t.Fatalf("Failed to load tool interaction: %v", err)
-					}
-
-					if toolInteraction == nil || len(toolInteraction.Results) != 3 {
-						t.Errorf("Expected 3 tool results, got %d", len(toolInteraction.Results))
-					}
-				}
-			},
-		},
+// pendingCallSession creates a session whose head is an assistant message
+// holding calls, with nothing answering them.
+func pendingCallSession(t *testing.T, calls []core.ToolCall) *Session {
+	t.Helper()
+	sess, err := CreateSession("", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
 	}
+	ctx := context.Background()
+	if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{Role: core.RoleUser, Content: "run it", Timestamp: time.Now()}, nil, nil); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{Role: core.RoleAssistant, Content: "running", Timestamp: time.Now(), Model: "test-model"}, calls, nil); err != nil {
+		t.Fatalf("append assistant tool calls: %v", err)
+	}
+	return sess
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup session
-			sess, err := tt.setupSession()
-			if err != nil {
-				t.Fatalf("Failed to setup session: %v", err)
-			}
+// claimedNeverStarted claims calls the way the tool loop does before saving
+// them, then releases the claim as a run that died before starting any would.
+func claimedNeverStarted(t *testing.T, calls []core.ToolCall) {
+	t.Helper()
+	claim, err := NewToolJournal().Claim(calls)
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	claim.Release()
+}
 
-			// Create test dependencies
-			ctx := context.Background()
-			cfg := core.NewTestRequestConfig()
-			cfg.ToolEnabled = true
-			cfg.ToolTimeout = 5 * time.Second
-			logger := &MockLogger{debugEnabled: true}
-			approver := &MockApprover{shouldApprove: tt.approverBehavior}
+func pendingToolTestConfig() core.RequestOptions {
+	cfg := core.NewTestRequestConfig()
+	cfg.ToolEnabled = true
+	cfg.ToolTimeout = 5 * time.Second
+	return cfg
+}
 
-			// Execute pending tools
-			hasPending, err := ExecutePendingTools(ctx, sess, cfg, logger, core.TestToolUI{}, approver)
-
-			// Check expectations
-			if hasPending != tt.expectHasPending {
-				t.Errorf("Expected hasPending=%v, got %v", tt.expectHasPending, hasPending)
-			}
-
-			if tt.expectError && err == nil {
-				t.Error("Expected error but got none")
-			}
-
-			if !tt.expectError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			// Run additional checks if provided
-			if tt.checkResults != nil {
-				tt.checkResults(t, sess)
-			}
-		})
+func echoCall(id, invocation, text string) core.ToolCall {
+	return core.ToolCall{
+		ID:           id,
+		Name:         "universal_command",
+		Args:         json.RawMessage(fmt.Sprintf(`{"command":["echo",%q]}`, text)),
+		InvocationID: invocation,
 	}
 }
 
-func TestExecutePendingToolsRequiresToolFlag(t *testing.T) {
-	UseTestSessionDir(t)
+func lastToolResults(t *testing.T, sess *Session) []core.ToolResult {
+	t.Helper()
+	messages, err := GetLineage(sess.Path)
+	if err != nil {
+		t.Fatalf("GetLineage() error = %v", err)
+	}
+	last := messages[len(messages)-1]
+	interaction, err := LoadToolInteraction(sess.Path, last.ID)
+	if err != nil {
+		t.Fatalf("LoadToolInteraction() error = %v", err)
+	}
+	if interaction == nil {
+		t.Fatalf("last message %s carries no tool results", last.ID)
+	}
+	return interaction.Results
+}
 
+func TestResolvePendingToolCallsWithoutPendingCallsDoesNothing(t *testing.T) {
+	UseTestSessionDir(t)
 	sess, err := CreateSession("", core.NewTestLogger(false))
 	if err != nil {
-		t.Fatalf("CreateSession failed: %v", err)
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := AppendMessageWithToolInteraction(context.Background(), sess, Message{Role: core.RoleUser, Content: "Hello", Timestamp: time.Now()}, nil, nil); err != nil {
+		t.Fatalf("append: %v", err)
 	}
 
-	assistantMsg := Message{
-		Role:      "assistant",
-		Content:   "I'll run a command",
-		Timestamp: time.Now(),
-		Model:     "test-model",
+	resolution, err := ResolvePendingToolCalls(context.Background(), sess, pendingToolTestConfig(), &MockLogger{}, core.NewTestNotifier(), core.TestToolUI{}, &MockApprover{shouldApprove: true})
+	if err != nil {
+		t.Fatalf("ResolvePendingToolCalls() error = %v", err)
 	}
-	toolCalls := []core.ToolCall{
-		{
-			ID:   "call_123",
-			Name: "universal_command",
-			Args: json.RawMessage(`{"command":["echo","ok"]}`),
-		},
+	if resolution.Found || resolution.Committed {
+		t.Fatalf("resolution = %+v, want nothing found or committed", resolution)
 	}
-	if _, err := AppendMessageWithToolInteraction(context.Background(), sess, assistantMsg, toolCalls, nil); err != nil {
-		t.Fatalf("AppendMessageWithToolInteraction failed: %v", err)
+}
+
+func TestResolvePendingToolCallsRunsClaimedCallsThatNeverStarted(t *testing.T) {
+	UseTestSessionDir(t)
+	calls := []core.ToolCall{
+		echoCall("call_001", core.NewInvocationID(), "Hello"),
+		echoCall("call_002", core.NewInvocationID(), "World"),
 	}
+	claimedNeverStarted(t, calls)
+	sess := pendingCallSession(t, calls)
+
+	resolution, err := ResolvePendingToolCalls(context.Background(), sess, pendingToolTestConfig(), &MockLogger{}, core.NewTestNotifier(), core.TestToolUI{}, &MockApprover{shouldApprove: true})
+	if err != nil {
+		t.Fatalf("ResolvePendingToolCalls() error = %v", err)
+	}
+	if !resolution.Found || !resolution.Committed {
+		t.Fatalf("resolution = %+v, want found and committed", resolution)
+	}
+	results := lastToolResults(t, sess)
+	if len(results) != 2 || !strings.Contains(results[0].Output, "Hello") || !strings.Contains(results[1].Output, "World") {
+		t.Fatalf("results = %+v, want both commands run", results)
+	}
+	if pending, err := CheckForPendingToolCalls(context.Background(), sess.Path); err != nil || len(pending) != 0 {
+		t.Fatalf("pending after resolution = %v (err %v), want none", pending, err)
+	}
+}
+
+// A call saved before invocations had identities may already have run, so
+// it is uncertain: without an operator to ask, it is answered with an unknown
+// outcome and not run.
+func TestResolvePendingToolCallsDoesNotRerunLegacyCalls(t *testing.T) {
+	UseTestSessionDir(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	calls := []core.ToolCall{{
+		ID:   "call_legacy",
+		Name: "universal_command",
+		Args: json.RawMessage(fmt.Sprintf(`{"command":["touch",%q]}`, marker)),
+	}}
+	sess := pendingCallSession(t, calls)
+
+	resolution, err := ResolvePendingToolCalls(context.Background(), sess, pendingToolTestConfig(), &MockLogger{}, core.NewTestNotifier(), core.TestToolUI{}, &MockApprover{shouldApprove: true})
+	if err != nil {
+		t.Fatalf("ResolvePendingToolCalls() error = %v", err)
+	}
+	if !resolution.Committed {
+		t.Fatalf("resolution = %+v, want the unknown outcome committed", resolution)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("legacy call ran again, marker stat err = %v", err)
+	}
+	results := lastToolResults(t, sess)
+	if len(results) != 1 || results[0].Code != lmerrors.ErrCodeOutcomeUnknown || results[0].NotRun {
+		t.Fatalf("results = %+v, want one unknown outcome that does not claim the call never ran", results)
+	}
+}
+
+func TestResolvePendingToolCallsRequiresToolFlag(t *testing.T) {
+	UseTestSessionDir(t)
+	sess := pendingCallSession(t, []core.ToolCall{echoCall("call_123", core.NewInvocationID(), "ok")})
 
 	cfg := core.NewTestRequestConfig()
 	cfg.ToolEnabled = false
-	hasPending, err := ExecutePendingTools(context.Background(), sess, cfg, &MockLogger{}, core.TestToolUI{}, &MockApprover{shouldApprove: true})
-	if !hasPending {
+	resolution, err := ResolvePendingToolCalls(context.Background(), sess, cfg, &MockLogger{}, core.NewTestNotifier(), core.TestToolUI{}, &MockApprover{shouldApprove: true})
+	if !resolution.Found {
 		t.Fatal("expected pending tools to be reported")
 	}
 	if err == nil || !strings.Contains(err.Error(), "require -tool") {

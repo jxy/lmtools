@@ -14,12 +14,17 @@ type MessageMetadata struct {
 	Timestamp        time.Time `json:"timestamp"`
 	Model            *string   `json:"model"`
 	ThoughtSignature *string   `json:"thought_signature,omitempty"`
+	// Revision names one commit of the message: every commit writes a new
+	// one, a fork's copy included. Messages committed before revisions
+	// existed have none.
+	Revision string `json:"revision,omitempty"`
 }
 
 func buildMessageMetadata(msg Message) MessageMetadata {
 	metadata := MessageMetadata{
 		Role:      msg.Role,
 		Timestamp: msg.Timestamp,
+		Revision:  msg.Revision,
 	}
 	if msg.Model != "" {
 		metadata.Model = &msg.Model
@@ -114,6 +119,20 @@ func writeMessage(sessionPath, msgID string, msg Message) error {
 	return nil
 }
 
+// readRevision reads the revision from a message's metadata. It is empty for
+// a message committed before revisions existed.
+func readRevision(sessionPath, msgID string) (string, error) {
+	metaBytes, err := os.ReadFile(buildMessageFilePaths(sessionPath, msgID).JSONPath)
+	if err != nil {
+		return "", err
+	}
+	var metadata MessageMetadata
+	if err := json.Unmarshal(metaBytes, &metadata); err != nil {
+		return "", errors.WrapError("unmarshal metadata of message "+msgID, err)
+	}
+	return metadata.Revision, nil
+}
+
 // readMessage reads a message from disk.
 // Invariant: A message exists if and only if its .json exists.
 // .txt may be missing (e.g., tool-only messages), .tools.json is optional.
@@ -146,6 +165,7 @@ func readMessage(sessionPath, msgID string) (*Message, error) {
 		Role:      metadata.Role,
 		Content:   content,
 		Timestamp: metadata.Timestamp,
+		Revision:  metadata.Revision,
 	}
 
 	if metadata.Model != nil {

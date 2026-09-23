@@ -83,7 +83,24 @@ func AppendMessagesWithBlocks(ctx context.Context, session *Session, entries []M
 		staged = append(staged, files)
 	}
 
-	result, committed, conflictID, err := commitStagedMessageBatch(ctx, session.Path, staged)
+	result, committed, conflictID, err := commitStagedMessageBatch(ctx, session.Path, session.Head, staged)
+	// Whatever the batch committed is the lineage now, even when a later
+	// entry failed, so a pinned head follows it before any error returns;
+	// otherwise the next write would find the head moved and fork past
+	// messages this value wrote.
+	if committed > 0 {
+		session.advanceHead(result)
+	}
+	if err != nil && stdErrors.Is(err, ErrHeadMoved) && session.Head != nil {
+		// The batch committed nothing. Move to a fork through the expected
+		// head and write every entry there, one at a time. The fork is kept
+		// whatever happens next, as AppendMessageWithBlocks keeps its own.
+		cleanupStaged()
+		if forkErr := forkForMovedHead(ctx, session); forkErr != nil {
+			return result, forkErr
+		}
+		result, committed, conflictID, err = SaveResult{Path: session.Path}, 0, "", nil
+	}
 	if err != nil || conflictID != "" {
 		if err != nil && !stdErrors.Is(err, ErrLockTimeout) {
 			return result, err
@@ -121,7 +138,12 @@ func AppendMessagesWithBlocks(ctx context.Context, session *Session, entries []M
 	return result, nil
 }
 
-// commitStagedMessageBatch takes the session lock and commits as many staged
+// beforeBatchEntryCommitForTest runs before each entry of a batch commits, under
+// the session lock. An error it returns fails the batch at that entry, the way
+// an I/O failure would.
+var beforeBatchEntryCommitForTest func(index int) error
+
+// commitStagedMessageBatch takes the commit locks and commits as many staged
 // entries as it can after one directory scan. It reports how many it committed
 // and, separately, an ID claimed by another writer so the caller can fork at
 // that exact point.
@@ -130,15 +152,22 @@ func AppendMessagesWithBlocks(ctx context.Context, session *Session, entries []M
 // path stops between retries. The caller propagates that error instead of
 // writing the rest of the transcript one message at a time under a context that
 // is already dead.
-func commitStagedMessageBatch(ctx context.Context, sessionPath string, staged []*MessageStaging) (SaveResult, int, string, error) {
+func commitStagedMessageBatch(ctx context.Context, sessionPath string, expected *MessageRef, staged []*MessageStaging) (SaveResult, int, string, error) {
 	result := SaveResult{Path: sessionPath}
 	if ctx.Err() != nil {
 		return result, 0, "", errors.WrapError("commit cancelled", ctx.Err())
 	}
 	committed := 0
 	conflictID := ""
-	err := WithSessionLock(sessionPath, messageCommitLockTimeout, func() error {
-		nextID, err := GetNextMessageID(sessionPath)
+	err := withCommitLocks(sessionPath, messageCommitLockTimeout, func() error {
+		ids, err := listMessages(sessionPath)
+		if err != nil {
+			return errors.WrapError("get next message ID", errors.WrapError("list messages", err))
+		}
+		if err := checkHeadLocked(sessionPath, ids, expected); err != nil {
+			return err
+		}
+		nextID, err := nextMessageIDFrom(ids)
 		if err != nil {
 			return errors.WrapError("get next message ID", err)
 		}
@@ -150,9 +179,14 @@ func commitStagedMessageBatch(ctx context.Context, sessionPath string, staged []
 			afterGetNextMessageIDForTest(sessionPath, nextID)
 		}
 
-		for _, entry := range staged {
+		for index, entry := range staged {
 			if ctx.Err() != nil {
 				return errors.WrapError("commit cancelled", ctx.Err())
+			}
+			if beforeBatchEntryCommitForTest != nil {
+				if err := beforeBatchEntryCommitForTest(index); err != nil {
+					return err
+				}
 			}
 			msgID := formatVariableWidthHexID(int(id))
 			if fileExists(buildMessageFilePaths(sessionPath, msgID).JSONPath) {
@@ -164,6 +198,7 @@ func commitStagedMessageBatch(ctx context.Context, sessionPath string, staged []
 			}
 			result.Path = sessionPath
 			result.MessageID = msgID
+			result.Revision = entry.Revision
 			committed++
 			id++
 		}

@@ -2,20 +2,24 @@ package session
 
 import (
 	"context"
-	stdErrors "errors"
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
-	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // MessageRef identifies a committed message by the directory that owns its
-// metadata file and its local message ID.
+// metadata file and its local message ID. Revision, when set, is the
+// identity of the message the ref was taken from, which another message
+// under the same path and ID does not share; see Pinned Heads. A ref without
+// one, such as LastMessageRefWithManager returns, names whatever message
+// holds the path and ID.
 type MessageRef struct {
-	Path string
-	ID   string
+	Path     string
+	ID       string
+	Revision string
 }
 
 type lineageMessageRef struct {
@@ -47,20 +51,42 @@ func BuildMessagesWithToolInteractionsThroughMessageWithManager(ctx context.Cont
 	return buildTypedMessagesFromLineageRefs(ctx, refs)
 }
 
-func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.TypedMessage, core.Role, error) {
+// buildBranchRequestMessages returns the request messages for branching at
+// branchRef, the anchor's role, and the head of that lineage: the last
+// message the request carries, which the branch's writes follow. The scan,
+// the sidecars, and the head's identity are read under one hold of the
+// tree's lock.
+func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.TypedMessage, core.Role, *MessageRef, error) {
 	manager := DefaultManager()
 	sessionPath, messageID := manager.ParseMessageID(branchRef)
 	if messageID == "" {
-		return nil, "", errors.WrapError("parse branch reference", fmt.Errorf("branch reference must point to a message: %s", branchRef))
+		return nil, "", nil, errors.WrapError("parse branch reference", fmt.Errorf("branch reference must point to a message: %s", branchRef))
 	}
 
 	sessionPath = manager.ResolveSessionPath(sessionPath)
 	anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
 	anchorPath = manager.ResolveSessionPath(anchorPath)
 
+	var (
+		messages   []core.TypedMessage
+		anchorRole core.Role
+		head       *MessageRef
+	)
+	err := withTreeLock(anchorPath, func() error {
+		var err error
+		messages, anchorRole, head, err = branchRequestMessagesLocked(ctx, manager, anchorPath, anchorID)
+		return err
+	})
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return messages, anchorRole, head, nil
+}
+
+func branchRequestMessagesLocked(ctx context.Context, manager *Manager, anchorPath, anchorID string) ([]core.TypedMessage, core.Role, *MessageRef, error) {
 	refs, err := lineageMessageRefsWithManager(manager, anchorPath)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	anchorIdx := -1
@@ -71,7 +97,7 @@ func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.T
 		}
 	}
 	if anchorIdx == -1 {
-		return nil, "", errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
+		return nil, "", nil, errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
 	}
 
 	anchorRole := refs[anchorIdx].message.Role
@@ -92,14 +118,18 @@ func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.T
 			refs = refs[:prevAssistantIdx+1]
 		}
 	default:
-		return nil, "", errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", anchorRole, anchorID))
+		return nil, "", nil, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", anchorRole, anchorID))
 	}
 
 	messages, err := buildTypedMessagesFromLineageRefs(ctx, refs)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return messages, anchorRole, nil
+	head, err := pinHeadLocked(refs)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return messages, anchorRole, head, nil
 }
 
 // ForkSessionThroughMessageWithManager creates a new session containing only
@@ -110,30 +140,17 @@ func ForkSessionThroughMessageWithManager(ctx context.Context, manager *Manager,
 	}
 	sessionPath = manager.ResolveSessionPath(sessionPath)
 
-	var (
-		newSession *Session
-		err        error
-	)
-	if newSystemPrompt != nil {
-		newSession, err = manager.CreateSession(*newSystemPrompt, logger.From(ctx))
-	} else {
-		newSession, err = manager.CreateSession("", logger.From(ctx))
-	}
-	if err != nil {
-		return nil, errors.WrapError("create new session", err)
-	}
-
-	refs, err := lineageMessageRefsThroughMessageWithManager(manager, sessionPath, terminalPath, terminalMessageID)
-	if err != nil {
-		_ = os.RemoveAll(newSession.Path)
-		return nil, err
-	}
-	if err := copyLineageMessageRefs(ctx, refs, newSession); err != nil {
-		_ = os.RemoveAll(newSession.Path)
-		return nil, err
-	}
-
-	return newSession, nil
+	return buildFork(ctx, manager, sessionPath, func() (forkSource, error) {
+		refs, err := lineageMessageRefsThroughMessageWithManager(manager, sessionPath, terminalPath, terminalMessageID)
+		if err != nil {
+			return forkSource{}, err
+		}
+		source := forkSource{refs: refs}
+		if newSystemPrompt != nil {
+			source.system = *newSystemPrompt
+		}
+		return source, nil
+	})
 }
 
 func lineageMessageRefsThroughMessageWithManager(manager *Manager, sessionPath, terminalPath, terminalMessageID string) ([]lineageMessageRef, error) {
@@ -302,8 +319,15 @@ func buildTypedMessageFromLineageRef(ref lineageMessageRef, toolNamesByID map[st
 }
 
 func pendingToolCallsFromLineageRefs(ctx context.Context, refs []lineageMessageRef) ([]core.ToolCall, error) {
+	calls, _, err := pendingToolCallsWithRef(ctx, refs)
+	return calls, err
+}
+
+// pendingToolCallsWithRef returns the tool calls pending at the end of refs
+// and the assistant message that holds them.
+func pendingToolCallsWithRef(_ context.Context, refs []lineageMessageRef) ([]core.ToolCall, lineageMessageRef, error) {
 	if len(refs) == 0 {
-		return nil, nil
+		return nil, lineageMessageRef{}, nil
 	}
 
 	resolved := make(map[string]bool)
@@ -311,15 +335,15 @@ func pendingToolCallsFromLineageRefs(ctx context.Context, refs []lineageMessageR
 		ref := refs[i]
 		toolInteraction, err := LoadToolInteraction(ref.path, ref.message.ID)
 		if err != nil {
-			return nil, errors.WrapError("load tool interaction for message "+ref.message.ID, err)
+			return nil, lineageMessageRef{}, errors.WrapError("load tool interaction for message "+ref.message.ID, err)
 		}
 
 		if ref.message.Role == core.RoleAssistant && toolInteraction != nil && len(toolInteraction.Calls) > 0 {
 			pending := unresolvedToolCalls(toolInteraction, resolved)
 			if len(pending) == 0 {
-				return nil, nil
+				return nil, lineageMessageRef{}, nil
 			}
-			return pending, nil
+			return pending, ref, nil
 		}
 
 		for _, res := range toolInteractionResults(toolInteraction) {
@@ -329,10 +353,10 @@ func pendingToolCallsFromLineageRefs(ctx context.Context, refs []lineageMessageR
 		}
 
 		if ref.message.Role == core.RoleUser && (toolInteraction == nil || len(toolInteraction.Results) == 0) {
-			return nil, nil
+			return nil, lineageMessageRef{}, nil
 		}
 	}
-	return nil, nil
+	return nil, lineageMessageRef{}, nil
 }
 
 func unresolvedToolCalls(toolInteraction *core.ToolInteraction, resolved map[string]bool) []core.ToolCall {
@@ -368,27 +392,40 @@ func toolInteractionResults(toolInteraction *core.ToolInteraction) []core.ToolRe
 	return toolInteraction.Results
 }
 
-func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, newSession *Session) error {
-	mc := newMessageCommitter(newSession.Path)
+// copyLineageMessageRefs copies refs, leaving out their system message, into
+// fork, whose lock the caller holds and whose last message is head, and
+// returns the fork's last message afterwards. Each copy is a new commit with
+// a revision of its own; its tool interaction and blocks, invocation
+// identities included, are copied as they are.
+func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, fork *Session, head MessageRef) (MessageRef, error) {
+	id := uint64(0)
+	if head.ID != "" {
+		last, err := strconv.ParseUint(head.ID, 16, 64)
+		if err != nil {
+			return MessageRef{}, errors.WrapError("parse message ID "+head.ID, err)
+		}
+		id = last + 1
+	}
 	for _, ref := range refs {
 		msg := ref.message
 		if msg.Role == core.RoleSystem {
 			continue
 		}
 
-		var toolInteraction *core.ToolInteraction
-		ti, err := LoadToolInteraction(ref.path, msg.ID)
+		// A copy is exact or it fails. Copying a message without its tool
+		// calls separates them from their results, and without its blocks
+		// drops images and reasoning, so an unreadable file is an error.
+		toolInteraction, err := LoadToolInteraction(ref.path, msg.ID)
 		if err != nil {
-			logger.From(ctx).Debugf("Failed to load tool interaction for message %s: %v", msg.ID, err)
-		} else if ti != nil {
-			toolInteraction = ti
+			return MessageRef{}, errors.WrapError("copy tool interaction of message "+msg.ID, err)
 		}
 
 		var blocks []core.Block
 		loadedBlocks, ok, err := loadMessageBlocks(ref.path, msg.ID)
 		if err != nil {
-			logger.From(ctx).Debugf("Failed to load typed blocks for message %s: %v", msg.ID, err)
-		} else if ok {
+			return MessageRef{}, errors.WrapError("copy typed blocks of message "+msg.ID, err)
+		}
+		if ok {
 			blocks = loadedBlocks
 		}
 
@@ -399,19 +436,19 @@ func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, newSe
 			Timestamp:        msg.Timestamp,
 			Model:            msg.Model,
 		}
-		staged, err := stageMessageFilesWithBlocks(mc.sessionPath, newMsg, toolInteraction, blocks)
+		staged, err := stageMessageFilesWithBlocks(fork.Path, newMsg, toolInteraction, blocks)
 		if err != nil {
-			return errors.WrapError("stage message", err)
+			return MessageRef{}, errors.WrapError("stage message", err)
 		}
-		newMsgID, needSibling, _, err := mc.Commit(ctx, staged)
+		newMsgID := formatVariableWidthHexID(int(id))
+		err = commitStagedMessageLocked(ctx, fork.Path, newMsgID, staged)
 		staged.Close()
 		if err != nil {
-			return errors.WrapError("place message", err)
+			return MessageRef{}, errors.WrapError("place message", err)
 		}
-		if needSibling {
-			return errors.WrapError("copy message", stdErrors.New("unexpected conflict when copying message"))
-		}
+		head = MessageRef{Path: fork.Path, ID: newMsgID, Revision: staged.Revision}
+		id++
 		logger.From(ctx).Debugf("Copied message %s -> %s (role=%s, hasTools=%v)", msg.ID, newMsgID, msg.Role, toolInteraction != nil)
 	}
-	return nil
+	return head, nil
 }

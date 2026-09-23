@@ -135,6 +135,45 @@ A call the model made to an MCP server is recorded with the server and tool
 name, which `-show` prints under the call. Resuming a session with such a
 call pending needs the `-mcp-config` that defines the server.
 
+#### Interrupted tool rounds
+
+When a turn is cancelled while tools run, `lmc` still saves the results of
+the calls that finished and marks the ones that were interrupted or never
+started, so the session is left with no round half done. If the process is
+killed or its terminal closes, the session can instead end with tool calls
+still pending. Resuming it with `-tool` resolves them before anything is
+sent:
+
+- A call that finished has its outcome on record, and `lmc` sends that
+  outcome instead of running the call again.
+- A call that never started runs, with the usual approval.
+- A call that may already have run is not run again automatically. That is
+  a call that started without recording an outcome, or one saved by an
+  older `lmc`, which recorded nothing. Interactive `lmc` shows the call and
+  asks `Run universal_command again? It may already have run. [y/N]`.
+  Neither `-tool-auto-approve` nor a whitelist answers that question.
+  Without a terminal, or with `-tool-non-interactive`, the model is told
+  the outcome is unknown.
+
+If the request that follows fails, run the same `-resume` again. It sends
+the saved results and runs nothing, and it accepts empty input for that. If
+`lmc` cannot write one of the records described next, it still saves the
+results, then stops with an error naming the call: another copy of the
+session would find that call's outcome unknown.
+
+These records live under `~/.lmc/sessions/.journal`, one per tool call. A
+branch or a copy of a session finds the same record, so a call runs once
+even when two runs resume the same session: the second waits for the first
+and then uses its outcome. The records hold command output and images and
+can grow large, and `-delete` leaves them in place. Older `lmc` builds
+ignore them, so an older build should not resume a session whose pending
+tool calls a newer build handles.
+
+If another run adds messages to a session while a turn is running, the turn
+keeps its messages apart from them. It continues in a new session copied
+from the conversation it had seen, and `lmc` prints a note naming the new
+session.
+
 ### Tool Use
 
 `-tool` enables the built-in `universal_command` tool. It executes each requested
@@ -996,6 +1035,11 @@ applies to every path except `-provider openai` and
   annotations, or logprobs.
 - Local response and conversation state lives under `~/.apiproxy/sessions` or
   `-sessions-dir`, not on OpenAI's servers.
+- Give each `apiproxy` process a `-sessions-dir` of its own, apart from `lmc`
+  sessions. The local state finds a conversation's last message by session
+  path and message ID, so another process that deletes a session there and
+  writes another at the same path can make a later request continue the
+  replacement's history.
 - `store:false` turns off local persistence for foreground converted requests,
   so response retrieval and `previous_response_id` do not work for those
   responses.
@@ -1015,6 +1059,7 @@ applies to every path except `-provider openai` and
 ## Data Locations
 
 - `lmc` sessions: `~/.lmc/sessions`
+- `lmc` tool call records: `~/.lmc/sessions/.journal`
 - `lmc` logs: `~/.lmc/logs`
 - `apiproxy` Responses state: `~/.apiproxy/sessions`
 - Built binaries: `./bin/lmc` and `./bin/apiproxy`

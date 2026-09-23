@@ -13,6 +13,9 @@ const (
 	ErrCodeApprovalError        = "APPROVAL_ERROR"
 	ErrCodeInvalidInput         = "INVALID_INPUT"
 	ErrCodeCancelled            = "CANCELLED"
+	// ErrCodeOutcomeUnknown marks a call an earlier run started without
+	// recording its outcome, which was not run again.
+	ErrCodeOutcomeUnknown = "OUTCOME_UNKNOWN"
 )
 
 // WrapError wraps an error with an operation description

@@ -3,12 +3,52 @@
 package session
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+// runSessionLockOwner takes a session's lock, starts a command that outlives
+// it while holding the lock, reports the command's process ID, and waits to
+// be killed.
+func runSessionLockOwner(sessionPath string) int {
+	err := WithSessionLock(sessionPath, 0, func() error {
+		command := exec.Command("sleep", "60")
+		if err := command.Start(); err != nil {
+			return err
+		}
+		fmt.Printf("ready %d\n", command.Process.Pid)
+		time.Sleep(time.Hour)
+		return nil
+	})
+	if err != nil {
+		fmt.Println("error", err)
+		return 1
+	}
+	return 0
+}
+
+// Killing the run that holds a session's lock frees the lock, even though a
+// command it started while holding it still runs: the lock descriptor is
+// close-on-exec, so the command never held it.
+func TestSessionLockEndsWithItsHolderAndNotItsCommands(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "0001")
+	owner, commandPID := startOwner(t, sessionLockOwnerEnv+"="+sessionPath)
+
+	free := func() error { return nil }
+	if err := WithSessionLock(sessionPath, 50*time.Millisecond, free); !errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("taking the lock while its holder lives: error = %v, want %v", err, ErrLockTimeout)
+	}
+	killOwner(t, owner, commandPID)
+	if err := WithSessionLock(sessionPath, time.Second, free); err != nil {
+		t.Fatalf("taking the lock after its holder died: error = %v, want it free while the command still runs", err)
+	}
+}
 
 func TestWithSessionLock_Basic(t *testing.T) {
 	tmpDir := t.TempDir()

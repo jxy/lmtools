@@ -103,3 +103,27 @@ func CreateCachedMessageBuilder(ctx context.Context, sessionPath string) (func(s
 		return snapshot.buildTypedMessages(ctx, path)
 	}, nil
 }
+
+// CreateCachedMessageBuilderForSession is CreateCachedMessageBuilder for a
+// session value. While the value pins a head, every build ends at the head
+// as it stands then, so the requests of a turn carry exactly the messages the
+// turn's writes follow; the path argument is ignored in favour of the
+// value's current path, which a conflict fork moves.
+func CreateCachedMessageBuilderForSession(ctx context.Context, sess *Session) (func(string) ([]core.TypedMessage, error), error) {
+	var snapshot *conversationSnapshot
+	err := withTreeLock(sess.Path, func() error {
+		var err error
+		snapshot, err = newConversationSnapshotWithManager(DefaultManager(), sess.Path)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return func(path string) ([]core.TypedMessage, error) {
+		if sess.Head == nil {
+			return snapshot.buildTypedMessages(ctx, path)
+		}
+		return snapshot.buildTypedMessagesThrough(sess.Path, *sess.Head)
+	}, nil
+}

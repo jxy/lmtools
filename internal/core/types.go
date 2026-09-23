@@ -190,4 +190,9 @@ type Approver interface {
 	ApproveMCP(ctx context.Context, call MCPCall) (bool, error)
 	// ApproveToolRoundLimitReset grants another block of maxRounds tool-call rounds.
 	ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error)
+	// ApproveRerun asks whether to run again a call an earlier run started
+	// without recording its outcome. Policy cannot answer this question: a
+	// whitelist or -tool-auto-approve says the command may run, not that
+	// running it twice is safe, so only a person can say yes.
+	ApproveRerun(ctx context.Context, call ToolCall) (bool, error)
 }

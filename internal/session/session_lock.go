@@ -28,8 +28,10 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 		return errors.WrapError("create lock directory", err)
 	}
 
-	// Open or create lock file
-	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR, uint32(constants.FilePerm))
+	// Open or create the lock file, close-on-exec from the open itself: a
+	// command another goroutine starts while the lock is held would otherwise
+	// inherit the descriptor and hold the lock until it exits.
+	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC, uint32(constants.FilePerm))
 	if err != nil {
 		return errors.WrapError("open lock file", err)
 	}
@@ -83,6 +85,49 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 
 	// Execute the function
 	return fn()
+}
+
+// treeReadLockTimeout bounds how long a reader waits for a session tree's
+// lock, which a commit, a fork's copy, or a deletion may hold.
+const treeReadLockTimeout = 30 * time.Second
+
+// treeRoot returns the root session directory of the tree sessionPath is in:
+// the path without its branch directories. Every mutation of a tree takes
+// that directory's lock: a commit takes it before the lock of the directory
+// it writes to, and a branch's creation, a deletion, and taking a failed
+// fork apart take it alone. Nothing removes or replaces a committed file of
+// the tree without it. It does not depend on a Manager, so a session of
+// apiproxy's store resolves to its own root.
+func treeRoot(sessionPath string) string {
+	root := filepath.Clean(sessionPath)
+	for {
+		if ok, _, _ := IsSiblingDir(filepath.Base(root)); !ok {
+			return root
+		}
+		root = filepath.Dir(root)
+	}
+}
+
+// withTreeLock runs fn holding the lock of sessionPath's tree, so every
+// committed file fn reads stays as it is until fn returns. A function whose
+// name ends in Locked reads the tree and expects its caller to hold that
+// lock already; taking it again would wait on this process's own lock.
+func withTreeLock(sessionPath string, fn func() error) error {
+	return WithSessionLock(treeRoot(sessionPath), treeReadLockTimeout, fn)
+}
+
+// withCommitLocks runs fn holding the locks a commit into sessionPath takes:
+// its tree's lock, and then the lock of the directory itself, which builds
+// from before tree locks take alone. The lock of a root session's directory
+// is its tree's lock.
+func withCommitLocks(sessionPath string, timeout time.Duration, fn func() error) error {
+	root := treeRoot(sessionPath)
+	if root == filepath.Clean(sessionPath) {
+		return WithSessionLock(root, timeout, fn)
+	}
+	return WithSessionLock(root, timeout, func() error {
+		return WithSessionLock(sessionPath, timeout, fn)
+	})
 }
 
 // WithSessionLockT is a generic version that returns a value

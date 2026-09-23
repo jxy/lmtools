@@ -116,10 +116,14 @@ func AppendMessageWithToolInteraction(ctx context.Context, session *Session, msg
 	return AppendMessageWithBlocks(ctx, session, msg, toolCalls, toolResults, nil)
 }
 
+// AppendMessageWithBlocks appends one message. When the session value pins a
+// head, the commit checks that the lineage still ends there and the value's
+// head advances to the new message. When another writer has moved the head,
+// the value moves to a fork through the expected head and the message is
+// written there; Session.ConflictForks records the move. The fork is kept
+// even when the write in it fails: it holds the history the write expected,
+// which is where a retry continues.
 func AppendMessageWithBlocks(ctx context.Context, session *Session, msg Message, toolCalls []core.ToolCall, toolResults []core.ToolResult, blocks []core.Block) (SaveResult, error) {
-	// Create message committer
-	mc := newMessageCommitter(session.Path)
-
 	// Build tool interaction
 	var toolInteraction *core.ToolInteraction
 	if len(toolCalls) > 0 || len(toolResults) > 0 {
@@ -129,6 +133,20 @@ func AppendMessageWithBlocks(ctx context.Context, session *Session, msg Message,
 		}
 	}
 
-	// Use the unified commit method
-	return mc.CommitMessageWithBlocksWithRetries(ctx, msg, toolInteraction, blocks)
+	commit := func() (SaveResult, error) {
+		mc := &messageCommitter{sessionPath: session.Path, expected: session.Head}
+		return mc.CommitMessageWithBlocksWithRetries(ctx, msg, toolInteraction, blocks)
+	}
+	result, err := commit()
+	if err != nil && stdErrors.Is(err, ErrHeadMoved) && session.Head != nil {
+		if forkErr := forkForMovedHead(ctx, session); forkErr != nil {
+			return SaveResult{}, forkErr
+		}
+		result, err = commit()
+	}
+	if err != nil {
+		return result, err
+	}
+	session.advanceHead(result)
+	return result, nil
 }

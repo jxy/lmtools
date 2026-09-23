@@ -32,7 +32,7 @@ func CreateSibling(ctx context.Context, sessionPath, messageID string) (string, 
 
 	// Get the root session for locking to prevent any concurrent sibling creation
 	// within the same session tree
-	rootSession := GetRootSession(sessionPath)
+	rootSession := treeRoot(sessionPath)
 
 	// Use session lock at the root level to prevent concurrent sibling creation
 	// Use retry logic to allow multiple goroutines to eventually succeed

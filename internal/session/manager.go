@@ -128,16 +128,62 @@ func (m *Manager) ensureFlockSupport(log core.Logger) {
 
 // CreateSession creates a new session with a sequential ID.
 func (m *Manager) CreateSession(systemPrompt string, log core.Logger) (*Session, error) {
+	session, _, err := m.createSession(systemPrompt, log)
+	return session, err
+}
+
+// createSession creates a new session and returns it with a ref to the
+// message it wrote: its system message, or an empty ref when it wrote none.
+func (m *Manager) createSession(systemPrompt string, log core.Logger) (*Session, MessageRef, error) {
+	sessionsDir, candidates, err := m.sessionCandidates(log)
+	if err != nil {
+		return nil, MessageRef{}, err
+	}
+
+	for _, sessionPath := range candidates {
+		if _, err := os.Stat(sessionPath); err == nil {
+			continue
+		}
+
+		if err := os.Mkdir(sessionPath, constants.DirPerm); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return nil, MessageRef{}, errors.WrapError("create session directory", err)
+		}
+
+		session := &Session{Path: sessionPath, SessionsDir: sessionsDir}
+		head := MessageRef{}
+		if systemPrompt != "" {
+			revision, err := saveSystemMessage(session, systemPrompt)
+			if err != nil {
+				if log != nil {
+					log.Debugf("Failed to save system message: %v", err)
+				}
+			} else {
+				head = MessageRef{Path: sessionPath, ID: "0000", Revision: revision}
+			}
+		}
+
+		return session, head, nil
+	}
+
+	return nil, MessageRef{}, fmt.Errorf("failed to create session after 100 attempts: too many collisions")
+}
+
+// sessionCandidates returns the sessions directory and, in order, the paths a
+// new session may take there: the IDs past the highest one in use.
+func (m *Manager) sessionCandidates(log core.Logger) (string, []string, error) {
 	m.ensureFlockSupport(log)
 
 	sessionsDir := m.SessionsDir()
 	if err := os.MkdirAll(sessionsDir, constants.DirPerm); err != nil {
-		return nil, errors.WrapError("create sessions directory", err)
+		return "", nil, errors.WrapError("create sessions directory", err)
 	}
 
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return nil, errors.WrapError("read sessions directory", err)
+		return "", nil, errors.WrapError("read sessions directory", err)
 	}
 
 	maxID := 0
@@ -153,32 +199,11 @@ func (m *Manager) CreateSession(systemPrompt string, log core.Logger) (*Session,
 		}
 	}
 
+	candidates := make([]string, 0, 99)
 	for i := maxID + 1; i < maxID+100; i++ {
-		sessionID := formatVariableWidthHexID(i)
-		sessionPath := filepath.Join(sessionsDir, sessionID)
-
-		if _, err := os.Stat(sessionPath); err == nil {
-			continue
-		}
-
-		if err := os.Mkdir(sessionPath, constants.DirPerm); err != nil {
-			if os.IsExist(err) {
-				continue
-			}
-			return nil, errors.WrapError("create session directory", err)
-		}
-
-		session := &Session{Path: sessionPath, SessionsDir: sessionsDir}
-		if systemPrompt != "" {
-			if err := saveSystemMessage(session, systemPrompt); err != nil && log != nil {
-				log.Debugf("Failed to save system message: %v", err)
-			}
-		}
-
-		return session, nil
+		candidates = append(candidates, filepath.Join(sessionsDir, formatVariableWidthHexID(i)))
 	}
-
-	return nil, fmt.Errorf("failed to create session after 100 attempts: too many collisions")
+	return sessionsDir, candidates, nil
 }
 
 // LoadSession loads an existing session by path.

@@ -39,11 +39,25 @@ func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.U
 		ui.notifier.Promptf("\n")
 	}
 
+	ui.showCallLines(fmt.Sprintf("[%d/%d]", index+1, total), call, args)
+}
+
+// ShowRerun displays a call an earlier run may already have executed, and
+// why its outcome is unknown, immediately before the question whether to run
+// it again. It renders through the notifier the approval question uses, the
+// way ShowCall does for a new call.
+func (ui *CLIToolUI) ShowRerun(call core.ToolCall, reason string) {
+	ui.notifier.Promptf("\n>>> Outcome unknown: %s\n", reason)
+	ui.showCallLines("[rerun]", call, nil)
+}
+
+// showCallLines renders one call under prefix: its command and the fields
+// that shape it, the image it would read, or its tool and arguments.
+func (ui *CLIToolUI) showCallLines(prefix string, call core.ToolCall, args *core.UniversalCommandArgs) {
 	if args == nil {
 		args = commandCallArgs(call)
 	}
 
-	prefix := fmt.Sprintf("[%d/%d]", index+1, total)
 	if args != nil && len(args.Command) > 0 {
 		ui.notifier.Promptf("%s Command: %s\n", prefix, core.MarshalJSONForDisplay(args.Command))
 		if args.Workdir != "" {

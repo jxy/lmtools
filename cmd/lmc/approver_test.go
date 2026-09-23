@@ -159,6 +159,16 @@ func approverEntryPoints() []approverEntryPoint {
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{
+			name: "ApproveRerun",
+			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+				// The review line above named the call and why its outcome
+				// is unknown; the question names the tool and the risk.
+				return a.ApproveRerun(ctx, core.ToolCall{ID: "call-1", Name: "universal_command"})
+			},
+			prompt:    "      Run universal_command again? It may already have run. [y/N]: ",
+			eofNotice: "\n      No interactive input available; not running it again.\n",
+		},
+		{
 			name: "ApproveToolRoundLimitReset",
 			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
 				return a.ApproveToolRoundLimitReset(ctx, 4)

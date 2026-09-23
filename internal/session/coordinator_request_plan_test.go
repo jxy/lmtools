@@ -19,7 +19,7 @@ func TestCoordinatorPrepareRequestNewSessionDefersWritesUntilCommit(t *testing.T
 	cfg := newTestCoordinatorConfig()
 	cfg.System = "plan system"
 
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "hello", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "hello", false, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -66,7 +66,7 @@ func TestCoordinatorPrepareRequestResumeAppendsInputWithoutWritingUntilCommit(t 
 	cfg.Resume = GetSessionID(sess.Path)
 	cfg.System = "session system"
 
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "preview question", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "preview question", false, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCoordinatorPrepareRequestPreviewPendingToolsUsesPlaceholderWithoutWriti
 	cfg.System = "session system"
 	cfg.ToolEnabled = true
 
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", false, nil, PendingToolPreview)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", false, PendingToolPreview)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -161,8 +161,10 @@ func TestAppendPendingToolPreviewResultsMatchesCommittedMessage(t *testing.T) {
 			staged[0].Blocks[len(staged[0].Blocks)-1], pending.AdditionalText)
 	}
 
-	if err := commitPendingToolResults(ctx, sess, pending, core.NewTestLogger(false)); err != nil {
-		t.Fatalf("commitPendingToolResults() error = %v", err)
+	// ResolvePendingToolCalls commits pending results through SaveToolResults,
+	// so the preview has to match what that call writes.
+	if _, err := SaveToolResults(ctx, sess, pending.PreviewResults, pending.AdditionalText); err != nil {
+		t.Fatalf("SaveToolResults() error = %v", err)
 	}
 	rebuilt, err := BuildMessagesWithToolInteractions(ctx, sess.Path)
 	if err != nil {
@@ -183,7 +185,7 @@ func TestCoordinatorPrepareRequestBranchAssistantDefersSiblingUntilCommit(t *tes
 	cfg.Branch = GetSessionID(sess.Path) + "/" + assistantID
 	cfg.System = "system prompt"
 
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", true, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", true, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -217,7 +219,7 @@ func TestCoordinatorPrepareRequestBranchUserUsesPreviousAssistant(t *testing.T) 
 	cfg.Branch = GetSessionID(sess.Path) + "/" + userID
 	cfg.System = "system prompt"
 
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "alternate second user", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "alternate second user", false, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -253,7 +255,7 @@ func TestCoordinatorPrepareRequestNestedBranchBubblesToOriginalAnchor(t *testing
 	cfg.Branch = GetSessionID(sibling.Path) + "/" + alternateAssistantID
 	cfg.System = "system prompt"
 
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", true, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "", true, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}
@@ -270,7 +272,7 @@ func TestRequestPlanCommitRejectsSecondCommit(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 
 	cfg := newTestCoordinatorConfig()
-	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "hello", false, nil, PendingToolSkip)
+	plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "hello", false, PendingToolSkip)
 	if err != nil {
 		t.Fatalf("PrepareRequest() error = %v", err)
 	}

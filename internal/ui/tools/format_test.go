@@ -862,3 +862,18 @@ func TestDenialStatusRendersTheExecutorReasonAndHints(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIToolUIShowRerunNamesTheCallAndTheReason(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	ui := NewCLIToolUI(notifier)
+	call := commandCall(t, "call-touch", []string{"touch", "marker"}, core.UniversalCommandArgs{Workdir: "/tmp"})
+
+	ui.ShowRerun(call, "an earlier run started it and recorded no outcome")
+
+	want := "\n>>> Outcome unknown: an earlier run started it and recorded no outcome\n" +
+		"[rerun] Command: [\"touch\",\"marker\"]\n" +
+		DetailIndent + "Workdir: \"/tmp\"\n"
+	if got := notifier.out.String(); got != want {
+		t.Fatalf("ShowRerun() rendered\n%q\nwant\n%q", got, want)
+	}
+}

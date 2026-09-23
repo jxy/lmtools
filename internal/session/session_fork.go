@@ -34,7 +34,18 @@ func MaybeForkForSystem(ctx context.Context, sess *Session, effectiveSystem stri
 	originalID := GetSessionID(sess.Path)
 	logger.From(ctx).Infof("Forking session %s due to system prompt change", originalID)
 
-	newSession, err := ForkSessionWithSystemMessage(ctx, sess.Path, &effectiveSystem)
+	var newSession *Session
+	if sess.Head != nil {
+		// A pinned head bounds the copy, so a message another writer
+		// appended past it stays out of the fork this turn continues in,
+		// and the fork pins the head it was built through.
+		newSession, err = buildFork(ctx, DefaultManager(), sess.Path, func() (forkSource, error) {
+			refs, _, err := lineageThroughHeadLocked(DefaultManager(), sess.Path, sess.Head)
+			return forkSource{refs: refs, system: effectiveSystem, pin: true}, err
+		})
+	} else {
+		newSession, err = ForkSessionWithSystemMessage(ctx, sess.Path, &effectiveSystem)
+	}
 	if err != nil {
 		return nil, false, errors.WrapError("create forked session", err)
 	}
@@ -45,13 +56,16 @@ func MaybeForkForSystem(ctx context.Context, sess *Session, effectiveSystem stri
 	return newSession, true, nil
 }
 
-// saveSystemMessage saves the system prompt as message 0000.
-func saveSystemMessage(session *Session, systemPrompt string) error {
-	return writeMessage(session.Path, "0000", Message{
+// saveSystemMessage saves the system prompt as message 0000 and returns the
+// revision it was committed with.
+func saveSystemMessage(session *Session, systemPrompt string) (string, error) {
+	revision := newRevision()
+	return revision, writeMessage(session.Path, "0000", Message{
 		ID:        "0000",
 		Role:      core.RoleSystem,
 		Content:   systemPrompt,
 		Timestamp: time.Now(),
+		Revision:  revision,
 	})
 }
 
@@ -91,35 +105,15 @@ func ForkSessionWithManager(ctx context.Context, manager *Manager, originalPath 
 	}
 	originalPath = manager.ResolveSessionPath(originalPath)
 
-	var (
-		newSession *Session
-		err        error
-	)
-	if newSystemPrompt != nil {
-		newSession, err = manager.CreateSession(*newSystemPrompt, logger.From(ctx))
-	} else {
-		newSession, err = manager.CreateSession("", logger.From(ctx))
-	}
-	if err != nil {
-		return nil, errors.WrapError("create new session", err)
-	}
-
-	if err := copyForkLineageWithManager(ctx, manager, originalPath, newSession); err != nil {
-		os.RemoveAll(newSession.Path)
-		return nil, err
-	}
-
-	return newSession, nil
-}
-
-func copyForkLineageWithManager(ctx context.Context, manager *Manager, originalPath string, newSession *Session) error {
-	if manager == nil {
-		manager = DefaultManager()
-	}
-	refs, err := lineageMessageRefsWithManager(manager, originalPath)
-	if err != nil {
-		return errors.WrapError("get lineage from original session", err)
-	}
-
-	return copyLineageMessageRefs(ctx, refs, newSession)
+	return buildFork(ctx, manager, originalPath, func() (forkSource, error) {
+		refs, err := lineageMessageRefsWithManager(manager, originalPath)
+		if err != nil {
+			return forkSource{}, errors.WrapError("get lineage from original session", err)
+		}
+		source := forkSource{refs: refs}
+		if newSystemPrompt != nil {
+			source.system = *newSystemPrompt
+		}
+		return source, nil
+	})
 }

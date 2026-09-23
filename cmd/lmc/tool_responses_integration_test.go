@@ -209,7 +209,9 @@ func assertStoredResponsesToolLoop(t *testing.T, sessionsDir string, rounds int)
 	}
 	var sessionDirs []os.DirEntry
 	for _, entry := range entries {
-		if entry.IsDir() {
+		// Dot directories are not sessions; the invocation journal lives in
+		// one, and -show-sessions skips them the same way.
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 			sessionDirs = append(sessionDirs, entry)
 		}
 	}

@@ -516,13 +516,22 @@ func TestPendingToolsIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Save the call the way the tool loop does: with an invocation identity,
+	// claimed in the journal, and abandoned before it started.
+	calls := []core.ToolCall{{
+		ID:   "call-1",
+		Name: "universal_command",
+		Args: json.RawMessage(`{"command": ["echo", "hello from tool"]}`),
+	}}
+	core.AssignInvocationIDs(calls)
+	claim, err := session.NewToolJournal().Claim(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.Release()
 	_, err = session.SaveAssistantResponseWithTools(context.Background(), sess,
 		"I'll echo that for you:",
-		[]core.ToolCall{{
-			ID:   "call-1",
-			Name: "universal_command",
-			Args: json.RawMessage(`{"command": ["echo", "hello from tool"]}`),
-		}},
+		calls,
 		"claude-3-opus-20240229",
 	)
 	if err != nil {
@@ -575,6 +584,99 @@ func TestPendingToolsIntegration(t *testing.T) {
 	t.Logf("Tool results saved in %s", toolResultsPath)
 	if len(interaction.Results) != 1 {
 		t.Fatalf("Expected 1 tool result, got %d", len(interaction.Results))
+	}
+}
+
+// TestLegacyPendingToolIsNotRunAgainIntegration resumes a session whose
+// pending call was saved before calls had invocation identities. Nothing
+// records whether an earlier run executed it, so it is uncertain: a resume
+// that cannot ask the operator sends an unknown outcome and does not run it,
+// even with -tool-auto-approve.
+func TestLegacyPendingToolIsNotRunAgainIntegration(t *testing.T) {
+	binPath := getLmcBinary(t)
+
+	tempDir := t.TempDir()
+	sessionsDir := filepath.Join(tempDir, "sessions")
+	logDir := filepath.Join(tempDir, "logs")
+	if err := os.MkdirAll(sessionsDir, constants.DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(logDir, constants.DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(tempDir, "ran")
+
+	ms := mockserver.NewMockServer()
+	ms.SetResponseFunc(func(req *http.Request) (interface{}, int, error) {
+		return map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": "Understood."}},
+		}, 200, nil
+	})
+	defer ms.Close()
+
+	useTempSessionsDir(t, sessionsDir)
+	sess, err := session.CreateSession("", core.NewTestLogger(false))
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	if _, err := session.AppendMessageWithToolInteraction(context.Background(), sess, session.Message{
+		Role:      "user",
+		Content:   "Touch the marker",
+		Timestamp: time.Now(),
+	}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.SaveAssistantResponseWithTools(context.Background(), sess, "Touching it:", []core.ToolCall{{
+		ID:   "call-legacy",
+		Name: "universal_command",
+		Args: json.RawMessage(fmt.Sprintf(`{"command": ["touch", %q]}`, marker)),
+	}}, "claude-3-opus-20240229"); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{
+		"-provider", "anthropic",
+		"-provider-url", ms.Server.URL + "/messages",
+		"-model", "claude-3-opus-20240229",
+		"-resume", session.GetSessionID(sess.Path),
+		"-sessions-dir", sessionsDir,
+		"-log-dir", logDir,
+		"-tool",
+		"-tool-auto-approve",
+	}
+	_, stderr, err := runLmcCommand(t, binPath, args, "continuing", WithLogDir(logDir))
+	if err != nil {
+		t.Fatalf("Failed to run continuation: %v\nStderr: %s", err, stderr)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("the legacy pending call ran again, marker stat err = %v\nstderr: %s", err, stderr)
+	}
+
+	var sawUnknown bool
+	err = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".tools.json") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var interaction core.ToolInteraction
+		if err := json.Unmarshal(data, &interaction); err != nil {
+			return err
+		}
+		for _, result := range interaction.Results {
+			if result.ID == "call-legacy" && result.Code == "OUTCOME_UNKNOWN" {
+				sawUnknown = true
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("search tool results: %v", err)
+	}
+	if !sawUnknown {
+		t.Fatalf("no unknown outcome recorded for the legacy call\nstderr: %s", stderr)
 	}
 }
 

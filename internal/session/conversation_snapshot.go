@@ -102,6 +102,50 @@ func (s *conversationSnapshot) buildTypedMessages(ctx context.Context, path stri
 	return slices.Clone(s.built), nil
 }
 
+// buildTypedMessagesThrough builds the lineage through head, under one hold
+// of the tree's lock for the refresh, the check of the head, and the
+// sidecars it decodes. The refresh still reads everything appended to the
+// active directory, and whatever another writer appended past the head is
+// left out of the result, so it never reaches a request.
+func (s *conversationSnapshot) buildTypedMessagesThrough(path string, head MessageRef) ([]core.TypedMessage, error) {
+	var messages []core.TypedMessage
+	err := withTreeLock(path, func() error {
+		if err := s.refresh(path); err != nil {
+			return err
+		}
+		end := 0
+		if head.ID != "" {
+			end = -1
+			for i, ref := range s.refs {
+				if sameMessage(ref, head) {
+					end = i + 1
+					break
+				}
+			}
+			if end == -1 {
+				return &HeadReplacedError{Expected: head}
+			}
+			// A refresh reads only what was appended since the last scan,
+			// so a message another run replaced under the same ID would
+			// still be served from the snapshot. The head's message on disk
+			// decides: while it is the one the head was taken from, so is
+			// every message before it, since none of them can go without it.
+			if err := verifyHeadLocked(s.manager, head); err != nil {
+				return err
+			}
+		}
+		if afterHeadVerifiedForTest != nil {
+			afterHeadVerifiedForTest(path)
+		}
+		if err := s.buildRefsThrough(end); err != nil {
+			return err
+		}
+		messages = slices.Clone(s.built[:end])
+		return nil
+	})
+	return messages, err
+}
+
 // buildAppendedRefs decodes the sidecars of the refs that joined since the last
 // build and leaves the earlier ones alone. Between rebuilds refs only ever
 // grows by append — a different session path, a sibling branch, a deletion, or
@@ -111,6 +155,11 @@ func (s *conversationSnapshot) buildTypedMessages(ctx context.Context, path stri
 // Without this the tool loop re-opened and re-decoded the whole transcript once
 // per round, which is quadratic in the number of rounds.
 func (s *conversationSnapshot) buildAppendedRefs() error {
+	return s.buildRefsThrough(len(s.refs))
+}
+
+// buildRefsThrough decodes the refs up to end that are not decoded yet.
+func (s *conversationSnapshot) buildRefsThrough(end int) error {
 	if s.toolNames == nil {
 		s.toolNames = make(map[string]string, len(s.refs))
 	}
@@ -118,7 +167,7 @@ func (s *conversationSnapshot) buildAppendedRefs() error {
 	// A failure leaves built holding the prefix it finished, still aligned with
 	// refs, so a retry resumes at the message that failed rather than replaying
 	// the tool-name index from the start.
-	for i := len(s.built); i < len(s.refs); i++ {
+	for i := len(s.built); i < end; i++ {
 		message, err := buildTypedMessageFromLineageRef(s.refs[i], s.toolNames)
 		if err != nil {
 			return err

@@ -54,7 +54,7 @@ func TestMainHelpFlags(t *testing.T) {
 
 func TestPersistAssistantOnlyWarnsButDoesNotFailOnSaveError(t *testing.T) {
 	notifier := core.NewTestNotifier()
-	persistAssistantOnly(
+	err := persistAssistantOnly(
 		context.Background(),
 		core.Response{Text: "assistant text"},
 		&session.Session{Path: filepath.Join(t.TempDir(), "missing-session")},
@@ -63,6 +63,9 @@ func TestPersistAssistantOnlyWarnsButDoesNotFailOnSaveError(t *testing.T) {
 		"gpt-test",
 	)
 
+	if err == nil {
+		t.Fatal("persistAssistantOnly() error = nil, want the save failure returned for the turn outcome")
+	}
 	if len(notifier.WarnMessages) == 0 {
 		t.Fatal("persistAssistantOnly() warning count = 0, want save failure warning")
 	}
@@ -244,7 +247,7 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	}
 
 	opts := cfg.RequestOptions()
-	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, core.NewTestNotifier(), core.TestToolUI{}, core.NewTestApprover(false), "preview question", false, session.PendingToolPreview)
+	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, core.NewTestNotifier(), core.TestToolUI{}, "preview question", false, session.PendingToolPreview)
 	if err != nil {
 		t.Fatalf("prepareSessionRequestPlan() error = %v", err)
 	}
@@ -273,7 +276,7 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	}
 }
 
-func TestHandleNormalResponsePersistsWithoutPrinting(t *testing.T) {
+func TestPersistAssistantOnlyPersistsWithoutPrinting(t *testing.T) {
 	ctx := context.Background()
 	oldDir := session.GetSessionsDir()
 	session.SetSessionsDir(t.TempDir())
@@ -283,12 +286,12 @@ func TestHandleNormalResponsePersistsWithoutPrinting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	response := &core.Response{Text: "assistant answer"}
+	response := core.Response{Text: "assistant answer"}
 	out, err := captureStdout(t, func() error {
-		return handleNormalResponse(ctx, &config.Config{}, core.NewTestNotifier(), response, sess, "test-model")
+		return persistAssistantOnly(ctx, response, sess, &config.Config{}, core.NewTestNotifier(), "test-model")
 	})
 	if err != nil {
-		t.Fatalf("handleNormalResponse() error = %v", err)
+		t.Fatalf("persistAssistantOnly() error = %v", err)
 	}
 	if out != "" {
 		t.Fatalf("stdout = %q, want presentation to remain owned by responsePresenter", out)

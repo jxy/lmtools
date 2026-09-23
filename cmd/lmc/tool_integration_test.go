@@ -144,7 +144,11 @@ func TestToolIntegrationFlow(t *testing.T) {
 		ToolAutoApprove: true,
 	}
 
-	// Initialize logger with log directory
+	// Initialize logger with log directory. Initialization is first-call-wins,
+	// so an earlier test that made the default logger would otherwise keep it,
+	// and response logs would go to ~/.lmc/logs.
+	logger.ResetForTesting()
+	t.Cleanup(logger.ResetForTesting)
 	if err := logger.InitializeWithOptions(
 		logger.WithLogDir(logDir),
 		logger.WithLevel("info"),

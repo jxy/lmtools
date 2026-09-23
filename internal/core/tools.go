@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"lmtools/internal/retry"
 	"net/http"
@@ -106,6 +107,14 @@ type ToolCall struct {
 	// The executor routes by Name; these are what a person reads.
 	MCPServer string `json:"mcp_server,omitempty"`
 	MCPTool   string `json:"mcp_tool,omitempty"`
+	// InvocationID identifies this invocation across every copy of the
+	// transcript that carries it: a sibling branch shares the message and a
+	// fork copies it, and both keep the identity, so they resolve to the
+	// same ownership and outcome records. It is assigned when the message
+	// holding the call first commits, kept in .tools.json, and rendered to
+	// no wire. A call without one was written before invocations were
+	// recorded.
+	InvocationID string `json:"invocation_id,omitempty"`
 }
 
 // ToolResult represents the result of executing a tool
@@ -154,6 +163,9 @@ type ToolExecutionConfig struct {
 	RetryClient  *retry.Client           // The retry client to use for requests
 	LogRequestFn func(body []byte) error // Optional function to log requests
 	ActualModel  string                  // The actual model being used
+	// Journal owns and records each round's calls. It is nil when nothing
+	// is persisted, with -no-session, and then no call is recorded.
+	Journal ToolJournal
 }
 
 // ToolContext encapsulates all dependencies needed for tool execution
@@ -178,6 +190,10 @@ type ToolExecutionResult struct {
 	FinalText     string // The final response text from the model
 	FinalStreamed bool   // True if the final response was already printed while streaming
 	Error         error  // Any error that occurred
+	// UnsavedAnswer is the error from saving a response the loop had
+	// already presented. Error carries it too; this field says which
+	// failure left the transcript without something the operator saw.
+	UnsavedAnswer error
 }
 
 // ToolUI displays one append-only tool execution batch. It observes execution;
@@ -193,54 +209,110 @@ type ToolUI interface {
 	// AfterExecute is called after the batch finishes, with calls and results in
 	// their original request order.
 	AfterExecute(calls []ToolCall, results []ToolResult)
+	// ShowRerun presents a call an earlier run may already have executed,
+	// and why its outcome is unknown, immediately before the question
+	// whether to run it again. It renders on the stream that question
+	// uses, so the operator is never asked about a call they were not
+	// shown.
+	ShowRerun(call ToolCall, reason string)
+}
+
+// ResponseHasContent reports whether a response carries anything a session
+// keeps: text, tool calls, a thought signature, or typed blocks.
+func ResponseHasContent(response Response) bool {
+	return response.Text != "" || len(response.ToolCalls) > 0 || response.ThoughtSignature != "" || len(response.Blocks) > 0
 }
 
 // handleToolExecutionLoop implements the tool execution loop.
-func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
+func handleToolExecutionLoop(tc ToolContext) ToolExecutionResult {
 	maxRounds := tc.Cfg.GetMaxToolRounds()
-
-	executor, err := NewExecutor(tc.Cfg, tc.Logger, tc.Approver)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to create executor: %w", err)
-	}
 
 	response := tc.InitialResponse
 	finalText := response.Text
 	finalStreamed := response.Streamed
+	// presentedUnsaved is true while the response the loop holds has been
+	// presented and not saved yet. Whatever ends the loop in that state, a
+	// failed save or anything before the save, leaves the transcript without
+	// a response the operator saw, and the result says so.
+	presentedUnsaved := ResponseHasContent(response)
+	finish := func(err error) ToolExecutionResult {
+		result := ToolExecutionResult{FinalText: finalText, FinalStreamed: finalStreamed, Error: err}
+		if err != nil && presentedUnsaved {
+			result.UnsavedAnswer = err
+		}
+		return result
+	}
+
+	executor, err := NewExecutor(tc.Cfg, tc.Logger, tc.Approver)
+	if err != nil {
+		return finish(fmt.Errorf("failed to create executor: %w", err))
+	}
+
+	// claim owns the calls of the round about to run. It is taken before the
+	// message holding them commits and released once their results commit,
+	// so no other run finds these calls pending while this one owns them.
+	var claim ToolClaim
+	defer func() {
+		if claim != nil {
+			claim.Release()
+		}
+	}()
 
 	for round := 0; len(response.ToolCalls) > 0; round++ {
 		if round > 0 && round%maxRounds == 0 {
 			approved, err := executor.requestToolRoundLimitReset(tc.Ctx, maxRounds)
 			if err != nil {
-				return finalText, finalStreamed, err
+				return finish(err)
 			}
 			if !approved {
-				return finalText, finalStreamed, fmt.Errorf("reached maximum tool execution rounds (%d)", maxRounds)
+				return finish(fmt.Errorf("reached maximum tool execution rounds (%d)", maxRounds))
 			}
 		}
 
 		// Save assistant's response with tool calls only on first round
 		// Subsequent rounds already saved their tool calls at the end of the previous iteration
 		if round == 0 {
-			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
-				return finalText, finalStreamed, err
+			if claim, err = claimRoundCalls(tc.ExecCfg.Journal, response.ToolCalls); err != nil {
+				return finish(err)
 			}
+			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
+				return finish(err)
+			}
+			presentedUnsaved = false
 		}
 
 		// Review, approve, execute, and display the batch. Approval preflight is
 		// completed before any parallel worker starts.
+		executor.SetRecorder(claim)
 		results := executor.ExecuteParallel(tc.Ctx, response.ToolCalls, tc.UI)
+		recordErr := executor.TakeRecordingError()
 
-		// Save tool results
+		// Save tool results. A cancelled turn still commits them: every call
+		// has a result by now, including the ones cancellation kept from
+		// starting, and leaving them uncommitted would leave the calls
+		// pending for a later run to find. A journal that failed to record
+		// an outcome does not stop the save either; the failure is reported
+		// once the save has been attempted.
 		additionalText := BuildTruncationNotes(results, response.ToolCalls)
-		if err := persistToolResultsRound(tc.Ctx, tc.ExecCfg.Store, results, additionalText); err != nil {
-			return finalText, finalStreamed, err
+		saveErr := persistToolResultsRound(tc.Ctx, tc.ExecCfg.Store, results, additionalText)
+		if claim != nil {
+			claim.Release()
+			claim = nil
+		}
+		if recordErr != nil {
+			recordErr = fmt.Errorf("record tool call outcomes: %w", recordErr)
+		}
+		if err := stdErrors.Join(saveErr, recordErr); err != nil {
+			return finish(err)
+		}
+		if err := tc.Ctx.Err(); err != nil {
+			return finish(err)
 		}
 
 		// Build and send follow-up request
 		resp, err := BuildAndSendFollowupRequest(tc.Ctx, tc.Cfg, tc.ExecCfg, tc.Model, tc.ToolDefs, tc.MessagesFn, tc.Logger)
 		if err != nil {
-			return finalText, finalStreamed, err
+			return finish(err)
 		}
 		// HandleResponse closes the response body - no need to close it here
 
@@ -251,8 +323,9 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 			Output:     tc.Output,
 		})
 		if err != nil {
-			return finalText, finalStreamed, fmt.Errorf("failed to handle tool result response: %w", err)
+			return finish(fmt.Errorf("failed to handle tool result response: %w", err))
 		}
+		presentedUnsaved = ResponseHasContent(response)
 
 		// Update final text if we got a response
 		if response.Text != "" {
@@ -262,13 +335,34 @@ func handleToolExecutionLoop(tc ToolContext) (string, bool, error) {
 
 		// Save response if we have content, tool calls, or provider metadata to preserve.
 		if response.Text != "" || len(response.ToolCalls) > 0 || response.ThoughtSignature != "" || len(response.Blocks) > 0 {
-			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
-				return finalText, finalStreamed, err
+			if len(response.ToolCalls) > 0 {
+				if claim, err = claimRoundCalls(tc.ExecCfg.Journal, response.ToolCalls); err != nil {
+					return finish(err)
+				}
 			}
+			if err := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); err != nil {
+				return finish(err)
+			}
+			presentedUnsaved = false
 		}
 	}
 
-	return finalText, finalStreamed, nil
+	return finish(nil)
+}
+
+// claimRoundCalls gives a round's calls their invocation identities and, when
+// a journal is configured, takes ownership of them. Both happen before the
+// message holding the calls commits.
+func claimRoundCalls(journal ToolJournal, calls []ToolCall) (ToolClaim, error) {
+	AssignInvocationIDs(calls)
+	if journal == nil {
+		return nil, nil
+	}
+	claim, err := journal.Claim(calls)
+	if err != nil {
+		return nil, fmt.Errorf("claim tool calls: %w", err)
+	}
+	return claim, nil
 }
 
 // requestToolRoundLimitReset asks whether the round counter may start another
@@ -307,20 +401,18 @@ func (e *Executor) requestToolRoundLimitReset(ctx context.Context, maxRounds int
 // Performance optimization: The function builds a message index once at the start to avoid
 // O(n^2) behavior when rebuilding messages across multiple tool execution rounds.
 func HandleToolExecution(tc ToolContext) ToolExecutionResult {
-	finalText, finalStreamed, err := handleToolExecutionLoop(tc)
-
-	return ToolExecutionResult{
-		FinalText:     finalText,
-		FinalStreamed: finalStreamed,
-		Error:         err,
-	}
+	return handleToolExecutionLoop(tc)
 }
 
-// persistAssistantRound saves an assistant message with optional tool calls
+// persistAssistantRound saves an assistant message with optional tool calls.
+// The response has already arrived, so the save runs on a persistence
+// context: cancelling the turn does not lose what the provider sent.
 func persistAssistantRound(ctx context.Context, store SessionStore, response Response, model string, logger Logger) error {
 	if response.Text == "" && len(response.ToolCalls) == 0 && response.ThoughtSignature == "" && len(response.Blocks) == 0 {
 		return nil
 	}
+	ctx, cancel := PersistenceContext(ctx)
+	defer cancel()
 
 	var err error
 	if responseStore, ok := store.(AssistantResponseStore); ok {
@@ -339,8 +431,11 @@ func persistAssistantRound(ctx context.Context, store SessionStore, response Res
 	return nil
 }
 
-// persistToolResultsRound saves tool execution results
+// persistToolResultsRound saves tool execution results on a persistence
+// context, so a cancellation that cut the round short still records it.
 func persistToolResultsRound(ctx context.Context, store SessionStore, results []ToolResult, additionalText string) error {
+	ctx, cancel := PersistenceContext(ctx)
+	defer cancel()
 	_, _, err := store.SaveToolResults(ctx, results, additionalText)
 	if err != nil {
 		return fmt.Errorf("failed to save tool results: %w", err)
