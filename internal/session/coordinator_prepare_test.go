@@ -307,7 +307,7 @@ func TestCoordinatorPrepareRequestPendingTools(t *testing.T) {
 		t.Fatalf("preparing a request ran the pending command, marker stat err = %v", err)
 	}
 
-	sess, err := OpenSession(cfg.Resume)
+	sess, err := OpenSession(ctx, cfg.Resume)
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}

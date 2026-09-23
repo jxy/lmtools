@@ -118,7 +118,7 @@ func TestReadThroughAHeadKeepsTheSidecarsItChecked(t *testing.T) {
 			if _, err := lookAndAnswer(ctx, source, original); err != nil {
 				t.Fatalf("lookAndAnswer() error = %v", err)
 			}
-			pinned, err := OpenSession(GetSessionID(source.Path))
+			pinned, err := OpenSession(ctx, GetSessionID(source.Path))
 			if err != nil {
 				t.Fatalf("OpenSession() error = %v", err)
 			}
@@ -174,7 +174,7 @@ func branchWithImage(t *testing.T, ctx context.Context) (*Session, string) {
 	if err != nil {
 		t.Fatalf("lookAndAnswer() error = %v", err)
 	}
-	pinned, err := OpenSession(GetSessionID(branchPath))
+	pinned, err := OpenSession(ctx, GetSessionID(branchPath))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -234,4 +234,77 @@ func TestContinuationsWaitForADeletionInProgress(t *testing.T) {
 			}
 		})
 	}
+}
+
+// expectCancelledWait holds the tree's lock of sessionPath as another run
+// would, starts run, cancels run's context once run is waiting, and checks
+// that run then returns the context's error at once.
+func expectCancelledWait(t *testing.T, sessionPath string, cancel context.CancelFunc, run func() error) {
+	t.Helper()
+	held, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	go func() {
+		holder <- WithSessionLock(treeRoot(sessionPath), 0, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer func() {
+		close(release)
+		if err := <-holder; err != nil {
+			t.Errorf("holding the lock: %v", err)
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- run() }()
+	select {
+	case err := <-done:
+		t.Fatalf("finished while another run held the tree's lock: error = %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancelled := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error after the cancellation = %v, want %v", err, context.Canceled)
+		}
+		if waited := time.Since(cancelled); waited > time.Second {
+			t.Fatalf("returned %v after the cancellation, want at once", waited)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("still waiting 5s after the cancellation")
+	}
+}
+
+// Every way of continuing a head, and opening a session, waits while another
+// run holds the tree's lock. Cancelling the context, as Ctrl-C does, ends
+// that wait at once with the context's error, long before the lock's timeout.
+func TestLockWaitsEndWhenTheContextIsCancelled(t *testing.T) {
+	for _, tt := range continuations {
+		t.Run(tt.name, func(t *testing.T) {
+			base := setupCoordinatorTestEnv(t)
+			source, _ := pinnedSource(t, base)
+			sess, err := OpenSession(base, GetSessionID(source.Path))
+			if err != nil {
+				t.Fatalf("OpenSession() error = %v", err)
+			}
+			ctx, cancel := context.WithCancel(base)
+			defer cancel()
+			expectCancelledWait(t, sess.Path, cancel, tt.prepare(t, ctx, sess))
+		})
+	}
+	t.Run("open", func(t *testing.T) {
+		base := setupCoordinatorTestEnv(t)
+		source, _ := pinnedSource(t, base)
+		ctx, cancel := context.WithCancel(base)
+		defer cancel()
+		expectCancelledWait(t, source.Path, cancel, func() error {
+			_, err := OpenSession(ctx, GetSessionID(source.Path))
+			return err
+		})
+	})
 }

@@ -159,7 +159,7 @@ func commitStagedMessageBatch(ctx context.Context, sessionPath string, expected 
 	}
 	committed := 0
 	conflictID := ""
-	err := withCommitLocks(sessionPath, messageCommitLockTimeout, func() error {
+	err := withCommitLocks(ctx, sessionPath, messageCommitLockTimeout, func() error {
 		ids, err := listMessages(sessionPath)
 		if err != nil {
 			return errors.WrapError("get next message ID", errors.WrapError("list messages", err))

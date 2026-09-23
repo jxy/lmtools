@@ -96,7 +96,7 @@ func TestEveryCommitGivesItsMessageANewRevision(t *testing.T) {
 		}
 	}
 
-	pinned, err := OpenSession(GetSessionID(source.Path))
+	pinned, err := OpenSession(ctx, GetSessionID(source.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -130,7 +130,7 @@ func pinnedSource(t *testing.T, ctx context.Context) (*Session, MessageRef) {
 	source := createPlanSession(t, "source system")
 	appendPlanMessage(t, ctx, source, core.RoleUser, "question")
 	appendPlanMessage(t, ctx, source, core.RoleAssistant, "answer")
-	pinned, err := OpenSession(GetSessionID(source.Path))
+	pinned, err := OpenSession(ctx, GetSessionID(source.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -267,7 +267,7 @@ func TestPinnedHeadRefusesADeletedMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := setupCoordinatorTestEnv(t)
 			source, through := pinnedSource(t, ctx)
-			pinned, err := OpenSession(GetSessionID(source.Path))
+			pinned, err := OpenSession(ctx, GetSessionID(source.Path))
 			if err != nil {
 				t.Fatalf("OpenSession() error = %v", err)
 			}
@@ -296,7 +296,7 @@ func TestLegacyHeadContinuesWhileItsLineageIsUnchanged(t *testing.T) {
 	appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
 	appendPlanMessage(t, ctx, sess, core.RoleAssistant, "answer")
 	stripRevisions(t, sess.Path)
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -327,7 +327,7 @@ func TestLegacyHeadRefusesASessionForkedAgainAtItsPath(t *testing.T) {
 				t.Fatalf("ForkThroughHead() error = %v", err)
 			}
 			stripRevisions(t, fork.Path)
-			if fork, err = OpenSession(GetSessionID(fork.Path)); err != nil {
+			if fork, err = OpenSession(ctx, GetSessionID(fork.Path)); err != nil {
 				t.Fatalf("OpenSession() error = %v", err)
 			}
 			if !strings.HasPrefix(fork.Head.Revision, lineageFingerprint) {

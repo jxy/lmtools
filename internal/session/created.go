@@ -143,7 +143,7 @@ type forkSource struct {
 // returned. A fork read through a pinned head pins its own last message.
 func buildFork(ctx context.Context, manager *Manager, sourcePath string, read func() (forkSource, error)) (*Session, error) {
 	var fork *Session
-	err := withTreeLock(sourcePath, func() error {
+	err := withTreeLock(ctx, sourcePath, func() error {
 		source, err := read()
 		if err != nil {
 			return err

@@ -105,7 +105,7 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 	if resolvesPendingTools(env, opts, in) {
 		// Resolving pending calls is a step of its own, before the request is
 		// prepared, so a failed request is retried without running a tool.
-		resumed, err = session.OpenSession(opts.Resume)
+		resumed, err = session.OpenSession(ctx, opts.Resume)
 		if err != nil {
 			return out, err
 		}

@@ -354,7 +354,7 @@ func (mc *messageCommitter) Commit(ctx context.Context, staging *MessageStaging)
 	var conflictMsgID string
 	var siblingPath string
 
-	err := withCommitLocks(mc.sessionPath, messageCommitLockTimeout, func() error {
+	err := withCommitLocks(ctx, mc.sessionPath, messageCommitLockTimeout, func() error {
 		ids, err := listMessages(mc.sessionPath)
 		if err != nil {
 			return errors.WrapError("get next message ID", errors.WrapError("list messages", err))

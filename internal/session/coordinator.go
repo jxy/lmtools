@@ -150,7 +150,7 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 		decision ResumeForkDecision
 		messages []core.TypedMessage
 	)
-	err := withTreeLock(sess.Path, func() error {
+	err := withTreeLock(ctx, sess.Path, func() error {
 		refs, pinned, err := lineageThroughHeadLocked(DefaultManager(), sess.Path, head)
 		if err != nil {
 			return errors.WrapError("build session messages", err)

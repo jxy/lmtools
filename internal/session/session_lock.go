@@ -3,6 +3,7 @@
 package session
 
 import (
+	"context"
 	stdErrors "errors"
 	"lmtools/internal/constants"
 	"lmtools/internal/errors"
@@ -20,6 +21,12 @@ var (
 // WithSessionLock executes a function while holding an exclusive lock on the session.
 // If timeout is 0, it waits indefinitely. If timeout > 0, it returns ErrLockTimeout on timeout.
 func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error) error {
+	return withSessionLockContext(context.Background(), sessionPath, timeout, fn)
+}
+
+// withSessionLockContext is WithSessionLock with a wait that also ends when
+// ctx is done, with an error that matches ctx's.
+func withSessionLockContext(ctx context.Context, sessionPath string, timeout time.Duration, fn func() error) error {
 	lockPath := sessionPath + ".lock"
 
 	// Ensure lock directory exists
@@ -37,44 +44,8 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 	}
 	defer syscall.Close(fd)
 
-	// Try to acquire lock with timeout handling
-	if timeout > 0 {
-		deadline := time.Now().Add(timeout)
-		backoff := time.Millisecond
-		maxBackoff := 50 * time.Millisecond
-
-		for {
-			// Try non-blocking lock acquisition
-			err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
-			if err == nil {
-				// Successfully acquired lock
-				break
-			}
-
-			// Check if it's a "would block" error
-			if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
-				return errors.WrapError("acquire lock", err)
-			}
-
-			// Check timeout
-			if time.Now().After(deadline) {
-				return ErrLockTimeout
-			}
-
-			// Back off before retrying
-			time.Sleep(backoff)
-			if backoff < maxBackoff {
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-			}
-		}
-	} else {
-		// Wait indefinitely
-		if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
-			return errors.WrapError("acquire lock", err)
-		}
+	if err := waitForLock(ctx, fd, timeout); err != nil {
+		return err
 	}
 
 	// We have the lock, ensure we release it
@@ -85,6 +56,49 @@ func WithSessionLock(sessionPath string, timeout time.Duration, fn func() error)
 
 	// Execute the function
 	return fn()
+}
+
+// waitForLock takes the exclusive lock on fd. With no timeout and a context
+// that can never be done, it blocks in flock. Otherwise it tries without
+// blocking and backs off between tries, and gives up with ErrLockTimeout once
+// the timeout has passed, or with ctx's error as soon as ctx is done.
+func waitForLock(ctx context.Context, fd int, timeout time.Duration) error {
+	if timeout == 0 && ctx.Done() == nil {
+		if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
+			return errors.WrapError("acquire lock", err)
+		}
+		return nil
+	}
+
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	backoff := time.Millisecond
+	const maxBackoff = 50 * time.Millisecond
+	for {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapError("wait for session lock", err)
+		}
+		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return nil
+		}
+		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+			return errors.WrapError("acquire lock", err)
+		}
+		if timeout > 0 && time.Now().After(deadline) {
+			return ErrLockTimeout
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.WrapError("wait for session lock", ctx.Err())
+		case <-timer.C:
+		}
+		backoff = min(2*backoff, maxBackoff)
+	}
 }
 
 // treeReadLockTimeout bounds how long a reader waits for a session tree's
@@ -109,24 +123,26 @@ func treeRoot(sessionPath string) string {
 }
 
 // withTreeLock runs fn holding the lock of sessionPath's tree, so every
-// committed file fn reads stays as it is until fn returns. A function whose
-// name ends in Locked reads the tree and expects its caller to hold that
-// lock already; taking it again would wait on this process's own lock.
-func withTreeLock(sessionPath string, fn func() error) error {
-	return WithSessionLock(treeRoot(sessionPath), treeReadLockTimeout, fn)
+// committed file fn reads stays as it is until fn returns. The wait for the
+// lock ends when ctx is done. A function whose name ends in Locked reads the
+// tree and expects its caller to hold that lock already; taking it again
+// would wait on this process's own lock.
+func withTreeLock(ctx context.Context, sessionPath string, fn func() error) error {
+	return withSessionLockContext(ctx, treeRoot(sessionPath), treeReadLockTimeout, fn)
 }
 
 // withCommitLocks runs fn holding the locks a commit into sessionPath takes:
 // its tree's lock, and then the lock of the directory itself, which builds
 // from before tree locks take alone. The lock of a root session's directory
-// is its tree's lock.
-func withCommitLocks(sessionPath string, timeout time.Duration, fn func() error) error {
+// is its tree's lock. The waits end when ctx is done; a commit of work
+// already done runs on core.PersistenceContext, which only its deadline ends.
+func withCommitLocks(ctx context.Context, sessionPath string, timeout time.Duration, fn func() error) error {
 	root := treeRoot(sessionPath)
 	if root == filepath.Clean(sessionPath) {
-		return WithSessionLock(root, timeout, fn)
+		return withSessionLockContext(ctx, root, timeout, fn)
 	}
-	return WithSessionLock(root, timeout, func() error {
-		return WithSessionLock(sessionPath, timeout, fn)
+	return withSessionLockContext(ctx, root, timeout, func() error {
+		return withSessionLockContext(ctx, sessionPath, timeout, fn)
 	})
 }
 

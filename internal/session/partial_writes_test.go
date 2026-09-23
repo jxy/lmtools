@@ -138,7 +138,7 @@ func TestAppendMessagesAdvancesThePinnedHeadPastAPartialBatch(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "")
 	appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -341,7 +341,7 @@ func TestConflictForkIsKeptWhenItsWriteFails(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "")
 	appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -467,7 +467,7 @@ var forkCases = []forkCase{
 		return ForkSessionWithManager(ctx, DefaultManager(), source.Path, &system)
 	}},
 	{name: "system prompt change", system: "fork system", pinned: true, fork: func(ctx context.Context, source *Session) (*Session, error) {
-		pinned, err := OpenSession(GetSessionID(source.Path))
+		pinned, err := OpenSession(ctx, GetSessionID(source.Path))
 		if err != nil {
 			return nil, err
 		}

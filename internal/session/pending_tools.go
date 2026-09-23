@@ -72,7 +72,7 @@ func ResolvePendingToolCalls(ctx context.Context, sess *Session, cfg core.Reques
 		calls  []core.ToolCall
 		holder lineageMessageRef
 	)
-	err := withTreeLock(sess.Path, func() error {
+	err := withTreeLock(ctx, sess.Path, func() error {
 		refs, head, err := lineageThroughHeadLocked(manager, sess.Path, sess.Head)
 		if err != nil {
 			return lmerrors.WrapError("read session lineage", err)

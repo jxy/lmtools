@@ -72,7 +72,7 @@ func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.T
 		anchorRole core.Role
 		head       *MessageRef
 	)
-	err := withTreeLock(anchorPath, func() error {
+	err := withTreeLock(ctx, anchorPath, func() error {
 		var err error
 		messages, anchorRole, head, err = branchRequestMessagesLocked(ctx, manager, anchorPath, anchorID)
 		return err

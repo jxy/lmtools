@@ -36,21 +36,24 @@ func CreateSibling(ctx context.Context, sessionPath, messageID string) (string, 
 
 	// Use session lock at the root level to prevent concurrent sibling creation
 	// Use retry logic to allow multiple goroutines to eventually succeed
-	return WithSessionLockT(rootSession, 5*time.Second, func() (string, error) {
+	var created string
+	err := withSessionLockContext(ctx, rootSession, 5*time.Second, func() error {
 		// Re-calculate the sibling path inside the lock to ensure consistency
 		siblingPath, err := GetNextSiblingPath(anchorPath, anchorID)
 		if err != nil {
-			return "", errors.WrapError("get sibling path", err)
+			return errors.WrapError("get sibling path", err)
 		}
 
 		fullPath := filepath.Join(anchorPath, siblingPath)
 		if err := os.MkdirAll(fullPath, constants.DirPerm); err != nil {
-			return "", errors.WrapError("create sibling directory", err)
+			return errors.WrapError("create sibling directory", err)
 		}
 
 		logger.From(ctx).Debugf("Created sibling branch: %s", GetSessionID(fullPath))
-		return fullPath, nil
+		created = fullPath
+		return nil
 	})
+	return created, err
 }
 
 // GetLineage returns all messages in the conversation path, handling sibling branches correctly.

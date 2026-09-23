@@ -107,9 +107,9 @@ func (s *conversationSnapshot) buildTypedMessages(ctx context.Context, path stri
 // sidecars it decodes. The refresh still reads everything appended to the
 // active directory, and whatever another writer appended past the head is
 // left out of the result, so it never reaches a request.
-func (s *conversationSnapshot) buildTypedMessagesThrough(path string, head MessageRef) ([]core.TypedMessage, error) {
+func (s *conversationSnapshot) buildTypedMessagesThrough(ctx context.Context, path string, head MessageRef) ([]core.TypedMessage, error) {
 	var messages []core.TypedMessage
-	err := withTreeLock(path, func() error {
+	err := withTreeLock(ctx, path, func() error {
 		if err := s.refresh(path); err != nil {
 			return err
 		}

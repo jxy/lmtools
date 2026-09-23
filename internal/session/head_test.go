@@ -131,7 +131,7 @@ func TestCachedBuilderExcludesMessagesPastThePinnedHead(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "")
 	appendPlanMessage(t, ctx, sess, core.RoleUser, "first question")
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -170,7 +170,7 @@ func TestConflictForkKeepsAToolResultsHead(t *testing.T) {
 	if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{Role: core.RoleAssistant, Content: "running", Timestamp: time.Now()}, []core.ToolCall{call}, nil); err != nil {
 		t.Fatalf("append tool call: %v", err)
 	}
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -216,7 +216,7 @@ func TestConflictForkPreservesTheSystemPrompt(t *testing.T) {
 			ctx := setupCoordinatorTestEnv(t)
 			sess := createPlanSession(t, system)
 			appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
-			sess, err := OpenSession(GetSessionID(sess.Path))
+			sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 			if err != nil {
 				t.Fatalf("OpenSession() error = %v", err)
 			}
@@ -289,7 +289,7 @@ func TestConflictForkKeepsInvocationIdentity(t *testing.T) {
 	if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{Role: core.RoleAssistant, Content: "running", Timestamp: time.Now()}, []core.ToolCall{echoCall("call_1", invocation, "hi")}, nil); err != nil {
 		t.Fatalf("append tool call: %v", err)
 	}
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
@@ -312,7 +312,7 @@ func TestConflictForkKeepsInvocationIdentity(t *testing.T) {
 func TestPinnedWritesFromOneWriterAdvanceTheHead(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "")
-	sess, err := OpenSession(GetSessionID(sess.Path))
+	sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}

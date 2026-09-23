@@ -111,7 +111,7 @@ func CreateCachedMessageBuilder(ctx context.Context, sessionPath string) (func(s
 // value's current path, which a conflict fork moves.
 func CreateCachedMessageBuilderForSession(ctx context.Context, sess *Session) (func(string) ([]core.TypedMessage, error), error) {
 	var snapshot *conversationSnapshot
-	err := withTreeLock(sess.Path, func() error {
+	err := withTreeLock(ctx, sess.Path, func() error {
 		var err error
 		snapshot, err = newConversationSnapshotWithManager(DefaultManager(), sess.Path)
 		return err
@@ -124,6 +124,6 @@ func CreateCachedMessageBuilderForSession(ctx context.Context, sess *Session) (f
 		if sess.Head == nil {
 			return snapshot.buildTypedMessages(ctx, path)
 		}
-		return snapshot.buildTypedMessagesThrough(sess.Path, *sess.Head)
+		return snapshot.buildTypedMessagesThrough(ctx, sess.Path, *sess.Head)
 	}, nil
 }

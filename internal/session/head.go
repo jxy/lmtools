@@ -216,8 +216,8 @@ func lineageThroughHeadLocked(manager *Manager, sessionPath string, head *Messag
 // on the head it was read through, all under one hold of the tree's lock:
 // the scan, the check of the head, and every sidecar read loads. A nil head
 // pins the lineage's current end.
-func readThroughHead(manager *Manager, sessionPath string, head *MessageRef, read func(refs []lineageMessageRef, head *MessageRef) error) error {
-	return withTreeLock(sessionPath, func() error {
+func readThroughHead(ctx context.Context, manager *Manager, sessionPath string, head *MessageRef, read func(refs []lineageMessageRef, head *MessageRef) error) error {
+	return withTreeLock(ctx, sessionPath, func() error {
 		refs, pinned, err := lineageThroughHeadLocked(manager, sessionPath, head)
 		if err != nil {
 			return err
@@ -227,12 +227,13 @@ func readThroughHead(manager *Manager, sessionPath string, head *MessageRef, rea
 }
 
 // OpenSession loads the session a resume names and pins its current head.
-func OpenSession(sessionID string) (*Session, error) {
+// Its wait for the tree's lock ends when ctx is done.
+func OpenSession(ctx context.Context, sessionID string) (*Session, error) {
 	sess, err := loadSessionWithRetry(sessionID)
 	if err != nil {
 		return nil, errors.WrapError("load session", fmt.Errorf("session or message not found: %s", sessionID))
 	}
-	err = readThroughHead(DefaultManager(), sess.Path, nil, func(_ []lineageMessageRef, head *MessageRef) error {
+	err = readThroughHead(ctx, DefaultManager(), sess.Path, nil, func(_ []lineageMessageRef, head *MessageRef) error {
 		sess.Head = head
 		return nil
 	})
@@ -306,7 +307,7 @@ func BuildMessagesForSession(ctx context.Context, sess *Session) ([]core.TypedMe
 		return BuildMessagesWithToolInteractions(ctx, sess.Path)
 	}
 	var messages []core.TypedMessage
-	err := readThroughHead(DefaultManager(), sess.Path, sess.Head, func(refs []lineageMessageRef, _ *MessageRef) error {
+	err := readThroughHead(ctx, DefaultManager(), sess.Path, sess.Head, func(refs []lineageMessageRef, _ *MessageRef) error {
 		var err error
 		messages, err = buildTypedMessagesFromLineageRefs(ctx, refs)
 		return err
