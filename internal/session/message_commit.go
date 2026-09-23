@@ -53,9 +53,18 @@ func commitFiles(ctx context.Context, files []filePair) (CommitResult, error) {
 	}
 
 	for i, f := range files {
-		if f.Tmp == "" || f.Final == "" {
+		if f.Final == "" {
 			if log := logger.From(ctx); log != nil {
 				log.Debugf("Skipping empty entry at index %d", i)
+			}
+			continue
+		}
+		if f.Tmp == "" {
+			// The message has no file of this kind, so one already at its
+			// path was left by a message that no longer exists.
+			if err := clearUnownedSidecar(ctx, f.Final, &result); err != nil {
+				rollback()
+				return result, err
 			}
 			continue
 		}
@@ -68,6 +77,10 @@ func commitFiles(ctx context.Context, files []filePair) (CommitResult, error) {
 		} else if strings.HasSuffix(f.Final, ".txt") && info.Size() == 0 {
 			if log := logger.From(ctx); log != nil {
 				log.Debugf("Empty text file, skipping: %s", f.Final)
+			}
+			if err := clearUnownedSidecar(ctx, f.Final, &result); err != nil {
+				rollback()
+				return result, err
 			}
 			continue
 		}
@@ -119,6 +132,49 @@ func commitFiles(ctx context.Context, files []filePair) (CommitResult, error) {
 	}
 
 	return result, nil
+}
+
+// clearUnownedSidecar removes the file at final, a sidecar path of a message
+// being committed without a file of that kind, when no committed message owns
+// it. Deleting a message in an older build left its .blocks.json behind, and
+// the next message committed under the same ID would read that file as its
+// own. A file whose message metadata exists is left alone; the commit of the
+// metadata refuses that destination.
+func clearUnownedSidecar(ctx context.Context, final string, result *CommitResult) error {
+	jsonPath, ok := sidecarMetadataPath(final)
+	if !ok {
+		return nil
+	}
+	if _, err := os.Stat(final); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return errors.WrapError("check "+filepath.Base(final), err)
+	}
+	if _, err := os.Stat(jsonPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return errors.WrapError("check "+filepath.Base(jsonPath), err)
+	}
+	if err := os.Remove(final); err != nil && !os.IsNotExist(err) {
+		return errors.WrapError("remove orphaned "+filepath.Base(final), err)
+	}
+	if log := logger.From(ctx); log != nil {
+		log.Debugf("Removed orphaned file (no matching .json metadata): %s", final)
+	}
+	result.OrphanedFiles = append(result.OrphanedFiles, final)
+	return nil
+}
+
+// sidecarMetadataPath returns the metadata path of the message a sidecar
+// path belongs to, and false for a path that is no sidecar.
+func sidecarMetadataPath(path string) (string, bool) {
+	for _, suffix := range []string{".tools.json", ".blocks.json", ".txt"} {
+		if strings.HasSuffix(path, suffix) {
+			return strings.TrimSuffix(path, suffix) + ".json", true
+		}
+	}
+	return "", false
 }
 
 // MessageStaging represents staged message files before atomic commit.

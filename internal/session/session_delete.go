@@ -53,6 +53,20 @@ func DeleteNode(nodePath string) error {
 	})
 }
 
+// removeMessageFiles removes every file of a committed message, its metadata
+// first, so the message stops existing before any of its sidecars goes. A
+// sidecar left behind would be read as its own by the next message committed
+// under the same ID.
+func removeMessageFiles(dirPath, msgID string) error {
+	paths := buildMessageFilePaths(dirPath, msgID)
+	for _, path := range []string{paths.JSONPath, paths.TxtPath, paths.ToolsPath, paths.BlocksPath} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return errors.WrapError("delete "+filepath.Base(path), err)
+		}
+	}
+	return nil
+}
+
 // deleteMessageAndDescendants deletes a message and all subsequent messages/branches.
 func deleteMessageAndDescendants(dirPath string, msgNum int) error {
 	msgIDs, err := listMessages(dirPath)
@@ -67,11 +81,8 @@ func deleteMessageAndDescendants(dirPath string, msgNum int) error {
 		}
 
 		if int(num) >= msgNum {
-			paths := buildMessageFilePaths(dirPath, msgID)
-			_ = os.Remove(paths.TxtPath)
-			_ = os.Remove(paths.ToolsPath)
-			if err := os.Remove(paths.JSONPath); err != nil && !os.IsNotExist(err) {
-				return errors.WrapError("delete metadata file", err)
+			if err := removeMessageFiles(dirPath, msgID); err != nil {
+				return err
 			}
 		}
 	}
