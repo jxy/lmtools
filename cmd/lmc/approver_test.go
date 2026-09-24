@@ -351,7 +351,7 @@ func TestNewCLIApproverRequiresTerminalStdin(t *testing.T) {
 		t.Skip("test stdin is a terminal; this case needs a non-terminal stdin")
 	}
 	base := &mockNotifier{}
-	reviewNotifier, approver := newOperatorToolSurface(base)
+	reviewNotifier, approver := newOperatorToolSurface(base, newInputOwner(os.Stdin))
 	if approver != nil {
 		t.Fatalf("newOperatorToolSurface() approver = %#v, want nil without a terminal to read from", approver)
 	}

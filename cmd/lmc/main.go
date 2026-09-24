@@ -218,8 +218,16 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
+	// One reader owns standard input from here on: the prompt, and the
+	// answers to any question a tool call asks.
+	input := newInputOwner(os.Stdin)
+	defer func() { _ = input.close() }()
+	if input.terminal && input.termErr != nil {
+		logger.From(ctx).Debugf("Reading the terminal on standard input as a stream: %v", input.termErr)
+	}
+
 	// Read and validate input
-	inputStr, err := readAndValidateInput(isRegeneration)
+	inputStr, err := readAndValidateInput(ctx, input, isRegeneration)
 	if err != nil {
 		return err
 	}
@@ -232,7 +240,7 @@ func run(notifier core.Notifier) error {
 		defer host.Close()
 	}
 
-	env := newTurnEnv(&cfg, notifier, logDir)
+	env := newTurnEnv(&cfg, notifier, logDir, input)
 	_, err = runTurn(ctx, env, opts, turnInput{text: inputStr, isRegeneration: isRegeneration})
 	return err
 }
@@ -392,13 +400,14 @@ func validateImageTurn(isRegeneration bool, images []core.ImageBlock) error {
 	return errors.WrapError("validate input", stdErrors.New("-image needs a user turn; -branch from an assistant message regenerates its answer without one"))
 }
 
-// readAndValidateInput reads input from stdin and validates it
-func readAndValidateInput(isRegeneration bool) (string, error) {
+// readAndValidateInput reads the prompt of a single run, all of standard
+// input up to its end. On a terminal, Ctrl-C ends the read.
+func readAndValidateInput(ctx context.Context, input *inputOwner, isRegeneration bool) (string, error) {
 	// Only read stdin if not regenerating
 	var inputStr string
 	if !isRegeneration {
 		// Read stdin with size limit to prevent DoS
-		inputBytes, err := limitio.ReadLimited(os.Stdin, constants.MaxCLIInputSize)
+		inputBytes, err := input.readAll(ctx, constants.MaxCLIInputSize)
 		if err != nil {
 			return "", errors.WrapError("read stdin", err)
 		}

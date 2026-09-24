@@ -35,7 +35,8 @@ pseudo-version naming the commit for a build from an untagged checkout.
 ## lmc
 
 For chat and embeddings, `lmc` reads the input from stdin and writes the result
-to stdout.
+to stdout. Typed at a terminal, the input ends with Ctrl-D at the start of a
+line, and Ctrl-C ends the run.
 
 ### Chat
 
@@ -364,7 +365,11 @@ whatever the blacklist does not stop.
 Approval needs a terminal on stdin to read the answer, and there is no
 substitute for it. The command review and the question go to stderr, or
 together to `/dev/tty` when stderr is redirected, so `lmc -tool 2>lmc.log`
-still shows what it asks you to approve.
+still shows what it asks you to approve. Before each question `lmc` discards
+what the terminal holds, so a line typed while the model was generating, or
+keys typed without Enter, cannot answer it; when a complete line was
+discarded, a note above the question says so. An answer longer than 64 bytes
+is a denial.
 
 Whitelist and blacklist files contain one JSON command rule per nonempty,
 non-comment line. Matching is exact per argument and treats `command` as a

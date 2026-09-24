@@ -30,7 +30,7 @@ type turnEnv struct {
 	stderr io.Writer
 }
 
-func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string) *turnEnv {
+func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input *inputOwner) *turnEnv {
 	pendingToolMode := session.PendingToolExecute
 	if cfg.PrintCurl {
 		pendingToolMode = session.PendingToolPreview
@@ -38,7 +38,7 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string) *turn
 	// The command review and the approval prompt share one operator-facing
 	// stream, decided once here; the executor and the pending-tools path both
 	// receive this same UI.
-	toolNotifier, approver := newOperatorToolSurface(notifier)
+	toolNotifier, approver := newOperatorToolSurface(notifier, input)
 	return &turnEnv{
 		cfg:             cfg,
 		notifier:        notifier,
