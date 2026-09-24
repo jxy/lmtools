@@ -41,12 +41,13 @@ var afterLockedSessionCreatedForTest func(sessionPath string)
 // run holding it is using the candidate, so creation moves on to the next.
 const newSessionLockWait = time.Millisecond
 
-// createSessionUnderLock creates a session, writes its system message when
-// there is one, and runs build on it with a ref to that message, an empty ref
-// when there is none, all while holding the session's lock, which it takes
-// before the directory exists and releases after build returns. When build
-// fails, the session is taken apart before the lock is released.
-func (m *Manager) createSessionUnderLock(ctx context.Context, systemPrompt string, build func(*Session, MessageRef) error) (*Session, error) {
+// createSessionUnderLock creates a session, writes system as its system
+// message when system is not nil, even when it is empty, and runs build on
+// it with a ref to that message, an empty ref when there is none, all while
+// holding the session's lock, which it takes before the directory exists and
+// releases after build returns. When build fails, the session is taken apart
+// before the lock is released.
+func (m *Manager) createSessionUnderLock(ctx context.Context, system *string, build func(*Session, MessageRef) error) (*Session, error) {
 	sessionsDir, candidates, err := m.sessionCandidates(logger.From(ctx))
 	if err != nil {
 		return nil, err
@@ -66,7 +67,7 @@ func (m *Manager) createSessionUnderLock(ctx context.Context, systemPrompt strin
 				return errors.WrapError("create session directory", err)
 			}
 			sess := &Session{Path: sessionPath, SessionsDir: sessionsDir}
-			if err := buildNewSession(sess, systemPrompt, build); err != nil {
+			if err := buildNewSession(sess, system, build); err != nil {
 				return stdErrors.Join(err, m.takeApartLocked(sessionPath))
 			}
 			created = sess
@@ -85,10 +86,10 @@ func (m *Manager) createSessionUnderLock(ctx context.Context, systemPrompt strin
 	return nil, fmt.Errorf("failed to create session after 100 attempts: too many collisions")
 }
 
-func buildNewSession(sess *Session, systemPrompt string, build func(*Session, MessageRef) error) error {
+func buildNewSession(sess *Session, system *string, build func(*Session, MessageRef) error) error {
 	head := MessageRef{}
-	if systemPrompt != "" {
-		revision, err := saveSystemMessage(sess, systemPrompt)
+	if system != nil {
+		revision, err := saveSystemMessage(sess, *system)
 		if err != nil {
 			return errors.WrapError("save system message", err)
 		}
@@ -127,11 +128,13 @@ func (m *Manager) takeApartLocked(sessionPath string) error {
 	return nil
 }
 
-// forkSource is what a fork copies: the lineage, the system prompt the fork
-// gets in place of any in the lineage, and whether the fork pins its head.
+// forkSource is what a fork copies: the lineage, the system message the
+// fork begins with in place of any in the lineage, nil for none, and
+// whether the fork pins its head. A stored empty prompt is a system message
+// like any other, distinct from none.
 type forkSource struct {
 	refs   []lineageMessageRef
-	system string
+	system *string
 	pin    bool
 }
 

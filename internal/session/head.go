@@ -273,14 +273,14 @@ func forkForMovedHead(ctx context.Context, sess *Session) error {
 
 // ForkThroughHead creates a session holding exactly the lineage of
 // sessionPath through head: the system message the lineage carries, when it
-// carries one, and every later message with its tool interactions and typed
-// blocks, which keep each tool call's invocation identity. The source is
-// read and copied under its tree's lock, and the fork is built under its
-// own. head's message must be the one head was taken from: the lineage
-// through a replacement is another history, so a deleted or replaced head
-// fails the fork with a HeadReplacedError. A message whose files cannot be
-// read fails it as well and takes the fork apart. The returned session pins
-// its own last message.
+// carries one, a stored empty prompt included, and every later message with
+// its tool interactions and typed blocks, which keep each tool call's
+// invocation identity. The source is read and copied under its tree's lock,
+// and the fork is built under its own. head's message must be the one head
+// was taken from: the lineage through a replacement is another history, so
+// a deleted or replaced head fails the fork with a HeadReplacedError. A
+// message whose files cannot be read fails it as well and takes the fork
+// apart. The returned session pins its own last message.
 func ForkThroughHead(ctx context.Context, manager *Manager, sessionPath string, head MessageRef) (*Session, error) {
 	if manager == nil {
 		manager = DefaultManager()
@@ -291,11 +291,7 @@ func ForkThroughHead(ctx context.Context, manager *Manager, sessionPath string, 
 		if err != nil {
 			return forkSource{}, err
 		}
-		system := ""
-		if len(refs) > 0 && refs[0].message.Role == core.RoleSystem {
-			system = refs[0].message.Content
-		}
-		return forkSource{refs: refs, system: system, pin: true}, nil
+		return forkSource{refs: refs, system: lineageSystemPrompt(refs), pin: true}, nil
 	})
 }
 

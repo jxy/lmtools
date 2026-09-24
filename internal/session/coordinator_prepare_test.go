@@ -243,7 +243,8 @@ func TestCoordinatorPrepareRequestBranch(t *testing.T) {
 		t.Errorf("Expected sibling path to start with %s, got %s", expectedPrefix, sess.Path)
 	}
 
-	// Verify only first message was copied
+	// The branch replaces the first user message and keeps the system prompt
+	// its root begins with.
 	messages, err := GetLineage(sess.Path)
 	if err != nil {
 		t.Fatalf("Failed to get lineage: %v", err)
@@ -254,11 +255,11 @@ func TestCoordinatorPrepareRequestBranch(t *testing.T) {
 		t.Logf("Message %d: Role=%s, Content=%q", i, msg.Role, msg.Content)
 	}
 
-	if len(messages) != 1 {
-		t.Fatalf("Expected 1 message in branch (new alternative message), got %d", len(messages))
+	if len(messages) != 2 || messages[0].Role != core.RoleSystem || messages[0].Content != "System prompt" {
+		t.Fatalf("branch lineage has %d messages, want the root's system prompt and then the alternative message", len(messages))
 	}
-	if messages[0].Content != "Alternative message 2" {
-		t.Errorf("Expected message content='Alternative message 2', got %q", messages[0].Content)
+	if messages[1].Content != "Alternative message 2" {
+		t.Errorf("Expected message content='Alternative message 2', got %q", messages[1].Content)
 	}
 }
 

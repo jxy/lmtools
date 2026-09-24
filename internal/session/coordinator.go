@@ -161,11 +161,7 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 			return err
 		}
 
-		sessionSystemMsg, err := GetSystemMessage(sess.Path)
-		if err != nil {
-			return errors.WrapError("get session system message", err)
-		}
-		decision = DecideResumeFork(sessionSystemMsg, c.cfg)
+		decision = DecideResumeFork(lineageSystemPrompt(refs), c.cfg)
 
 		if messages, err = buildTypedMessagesFromLineageRefs(ctx, refs); err != nil {
 			return errors.WrapError("build session messages", err)
@@ -183,72 +179,72 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 		Messages:        messages,
 		HasPendingTools: pending.HasPending,
 		commit: func(ctx context.Context) (*Session, error) {
-			committed, forked, err := c.commitResumeSystemDecision(ctx, sess, decision)
-			if err != nil {
-				return nil, err
-			}
-			var created []Session
-			if forked {
-				created = append(created, *committed)
-			}
-			forkID := GetSessionID(committed.Path)
-			forksBefore := len(committed.ConflictForks)
-			if err := c.maybeSaveUserInput(ctx, committed, inputStr, isRegeneration); err != nil {
-				return failCommit(err, committed, forksBefore, created...)
-			}
-			if forked {
-				c.notifier.Infof("Forked session due to system prompt change: %s", forkID)
-			}
-			return committed, nil
+			return c.commitResume(ctx, sess, decision, inputStr, isRegeneration)
 		},
 	}, nil
 }
 
+// commitResume commits a plan that continues sess: the fork its decision
+// made, when it made one, and then the user message.
+func (c *requestPreparer) commitResume(ctx context.Context, sess *Session, decision ResumeForkDecision, inputStr string, isRegeneration bool) (*Session, error) {
+	committed, forked, err := c.commitResumeSystemDecision(ctx, sess, decision)
+	if err != nil {
+		return nil, err
+	}
+	var created []Session
+	if forked {
+		created = append(created, *committed)
+	}
+	forkID := GetSessionID(committed.Path)
+	forksBefore := len(committed.ConflictForks)
+	if err := c.maybeSaveUserInput(ctx, committed, inputStr, isRegeneration); err != nil {
+		return failCommit(err, committed, forksBefore, created...)
+	}
+	if forked {
+		c.notifier.Infof("Forked session due to system prompt change: %s", forkID)
+	}
+	return committed, nil
+}
+
 func (c *requestPreparer) prepareMessageResumeRequest(ctx context.Context, resumeRef, inputStr string, isRegeneration bool) (*RequestPlan, error) {
-	messages, _, head, err := buildBranchRequestMessages(ctx, resumeRef)
+	request, err := buildBranchRequestMessages(ctx, resumeRef)
 	if err != nil {
 		return nil, err
 	}
 
-	decision := DecideResumeFork(nil, c.cfg)
-	messages = applyPlannedSystemDecision(messages, decision)
+	decision := DecideResumeFork(request.system, c.cfg)
+	messages := applyPlannedSystemDecision(request.messages, decision)
 	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
 		commit: func(ctx context.Context) (*Session, error) {
-			branch, err := c.commitBranch(ctx, resumeRef, "create branch", head)
+			if decision.ShouldFork {
+				// The fork copies the lineage through the anchor under the
+				// new prompt, so no branch is made: it would stay empty.
+				return c.commitResume(ctx, &Session{Path: request.path, Head: request.head}, decision, inputStr, isRegeneration)
+			}
+			branch, err := c.commitBranch(ctx, resumeRef, "create branch", request.head)
 			if err != nil {
 				return nil, err
 			}
-			created := []Session{*branch}
-			sess, forked, err := c.commitResumeSystemDecision(ctx, branch, decision)
-			if err != nil {
-				return failCommit(err, nil, 0, created...)
-			}
-			if forked {
-				created = append(created, *sess)
-			}
-			forkID := GetSessionID(sess.Path)
-			forksBefore := len(sess.ConflictForks)
-			if err := c.maybeSaveUserInput(ctx, sess, inputStr, isRegeneration); err != nil {
-				return failCommit(err, sess, forksBefore, created...)
+			created := *branch
+			if err := c.maybeSaveUserInput(ctx, branch, inputStr, isRegeneration); err != nil {
+				return failCommit(err, branch, 0, created)
 			}
 			c.notifier.Infof("Branching from message %s", resumeRef)
-			if forked {
-				c.notifier.Infof("Forked session due to system prompt change: %s", forkID)
-			}
-			return sess, nil
+			return branch, nil
 		},
 	}, nil
 }
 
 func (c *requestPreparer) prepareBranchRequest(ctx context.Context, branchRef, inputStr string, isRegeneration bool) (*RequestPlan, error) {
-	messages, _, head, err := buildBranchRequestMessages(ctx, branchRef)
+	request, err := buildBranchRequestMessages(ctx, branchRef)
 	if err != nil {
 		return nil, err
 	}
-	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
+	head := request.head
+	messages := appendPlannedUserMessage(request.messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
@@ -289,7 +285,11 @@ func (c *requestPreparer) commitResumeSystemDecision(ctx context.Context, sess *
 	if !decision.ShouldFork {
 		return sess, false, nil
 	}
-	return MaybeForkForSystem(ctx, sess, decision.NewSystem)
+	fork, err := forkForSystem(ctx, sess, decision.NewSystem)
+	if err != nil {
+		return nil, false, err
+	}
+	return fork, true, nil
 }
 
 // appendPlannedUserMessage stages the user turn the provider will answer. It

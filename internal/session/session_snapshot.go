@@ -51,43 +51,47 @@ func BuildMessagesWithToolInteractionsThroughMessageWithManager(ctx context.Cont
 	return buildTypedMessagesFromLineageRefs(ctx, refs)
 }
 
-// buildBranchRequestMessages returns the request messages for branching at
-// branchRef, the anchor's role, and the head of that lineage: the last
-// message the request carries, which the branch's writes follow. The scan,
-// the sidecars, and the head's identity are read under one hold of the
-// tree's lock.
-func buildBranchRequestMessages(ctx context.Context, branchRef string) ([]core.TypedMessage, core.Role, *MessageRef, error) {
+// branchRequest is what preparing a request at a message reads: the
+// messages the request carries, the anchor's role, the head of that lineage,
+// which the branch's writes follow, the system prompt the lineage carries,
+// and the path of the directory the anchor is in.
+type branchRequest struct {
+	messages   []core.TypedMessage
+	anchorRole core.Role
+	head       *MessageRef
+	system     *string
+	path       string
+}
+
+// buildBranchRequestMessages reads what a request that branches at branchRef
+// carries. The scan, the sidecars, and the head's identity are read under one
+// hold of the tree's lock.
+func buildBranchRequestMessages(ctx context.Context, branchRef string) (branchRequest, error) {
 	manager := DefaultManager()
 	sessionPath, messageID := manager.ParseMessageID(branchRef)
 	if messageID == "" {
-		return nil, "", nil, errors.WrapError("parse branch reference", fmt.Errorf("branch reference must point to a message: %s", branchRef))
+		return branchRequest{}, errors.WrapError("parse branch reference", fmt.Errorf("branch reference must point to a message: %s", branchRef))
 	}
 
 	sessionPath = manager.ResolveSessionPath(sessionPath)
 	anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
 	anchorPath = manager.ResolveSessionPath(anchorPath)
 
-	var (
-		messages   []core.TypedMessage
-		anchorRole core.Role
-		head       *MessageRef
-	)
+	var request branchRequest
 	err := withTreeLock(ctx, anchorPath, func() error {
 		var err error
-		messages, anchorRole, head, err = branchRequestMessagesLocked(ctx, manager, anchorPath, anchorID)
+		request, err = branchRequestLocked(ctx, manager, anchorPath, anchorID)
 		return err
 	})
-	if err != nil {
-		return nil, "", nil, err
-	}
-	return messages, anchorRole, head, nil
+	return request, err
 }
 
-func branchRequestMessagesLocked(ctx context.Context, manager *Manager, anchorPath, anchorID string) ([]core.TypedMessage, core.Role, *MessageRef, error) {
+func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anchorID string) (branchRequest, error) {
 	refs, err := lineageMessageRefsWithManager(manager, anchorPath)
 	if err != nil {
-		return nil, "", nil, err
+		return branchRequest{}, err
 	}
+	request := branchRequest{system: lineageSystemPrompt(refs), path: anchorPath}
 
 	anchorIdx := -1
 	for i, ref := range refs {
@@ -97,11 +101,11 @@ func branchRequestMessagesLocked(ctx context.Context, manager *Manager, anchorPa
 		}
 	}
 	if anchorIdx == -1 {
-		return nil, "", nil, errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
+		return branchRequest{}, errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
 	}
 
-	anchorRole := refs[anchorIdx].message.Role
-	switch anchorRole {
+	request.anchorRole = refs[anchorIdx].message.Role
+	switch request.anchorRole {
 	case core.RoleAssistant:
 		refs = refs[:anchorIdx]
 	case core.RoleUser:
@@ -113,27 +117,38 @@ func branchRequestMessagesLocked(ctx context.Context, manager *Manager, anchorPa
 			}
 		}
 		if prevAssistantIdx == -1 {
-			refs = nil
+			// A branch at the first user message keeps the system prompt
+			// the lineage begins with, and nothing else.
+			refs = systemPrefix(refs)
 		} else {
 			refs = refs[:prevAssistantIdx+1]
 		}
 	default:
-		return nil, "", nil, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", anchorRole, anchorID))
+		return branchRequest{}, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", request.anchorRole, anchorID))
 	}
 
-	messages, err := buildTypedMessagesFromLineageRefs(ctx, refs)
-	if err != nil {
-		return nil, "", nil, err
+	if request.messages, err = buildTypedMessagesFromLineageRefs(ctx, refs); err != nil {
+		return branchRequest{}, err
 	}
-	head, err := pinHeadLocked(refs)
-	if err != nil {
-		return nil, "", nil, err
+	if request.head, err = pinHeadLocked(refs); err != nil {
+		return branchRequest{}, err
 	}
-	return messages, anchorRole, head, nil
+	return request, nil
+}
+
+// systemPrefix returns the system message refs begin with, alone, or nothing
+// when they begin with another message.
+func systemPrefix(refs []lineageMessageRef) []lineageMessageRef {
+	if len(refs) > 0 && refs[0].message.Role == core.RoleSystem {
+		return refs[:1]
+	}
+	return nil
 }
 
 // ForkSessionThroughMessageWithManager creates a new session containing only
-// the visible lineage through a specific committed message snapshot.
+// the visible lineage through a specific committed message snapshot. The
+// fork begins with newSystemPrompt as its system message, an empty prompt
+// included, and with none when newSystemPrompt is nil.
 func ForkSessionThroughMessageWithManager(ctx context.Context, manager *Manager, sessionPath, terminalPath, terminalMessageID string, newSystemPrompt *string) (*Session, error) {
 	if manager == nil {
 		manager = DefaultManager()
@@ -145,11 +160,7 @@ func ForkSessionThroughMessageWithManager(ctx context.Context, manager *Manager,
 		if err != nil {
 			return forkSource{}, err
 		}
-		source := forkSource{refs: refs}
-		if newSystemPrompt != nil {
-			source.system = *newSystemPrompt
-		}
-		return source, nil
+		return forkSource{refs: refs, system: newSystemPrompt}, nil
 	})
 }
 
@@ -269,6 +280,10 @@ func scanLineage(manager *Manager, sessionPath string) (lineageScan, error) {
 			} else if lastAssistant != nil && !assistantAlreadyInLineage {
 				lineage = append(lineage, *lastAssistant)
 				assistantAlreadyInLineage = true
+			} else if i == 0 {
+				// A branch at the root's first user message still
+				// continues under the root's system prompt.
+				lineage = append(lineage, systemPrefix(refs[:branchIdx])...)
 			}
 
 		default:

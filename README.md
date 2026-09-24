@@ -125,6 +125,12 @@ echo "One-off question" | ./bin/lmc -argo-user "$USER" -no-session
 `-show-sessions`, `-show`, and `-delete` touch only local files, so they need no
 provider credentials.
 
+A resumed session keeps the system prompt it started with, and a branch keeps
+the prompt of the session it branched from. A different `-s` forks the
+conversation into a new session under that prompt. So does `-tool` on a
+session that uses one of the built-in prompts when this run advertises a
+different tool set, because the built-in tool prompt follows the tools.
+
 An image attached with `-image` is saved inline in the session, so resuming or
 branching the session sends it to the provider again. `-show` lists each one
 as `[image: name (media type, size)]` after the message text and never prints

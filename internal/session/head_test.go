@@ -6,6 +6,7 @@ import (
 	"errors"
 	"lmtools/internal/core"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -210,11 +211,29 @@ func TestConflictForkKeepsAToolResultsHead(t *testing.T) {
 	}
 }
 
+// A conflict fork begins with the system message its source's lineage
+// carries: a custom prompt, a stored empty prompt, which is a prompt like
+// any other, or none. A resume of the fork with tools on then decides from
+// that message as it would from the source's: a custom or stored empty
+// prompt stays, and only a fork with no prompt takes the tool prompt.
 func TestConflictForkPreservesTheSystemPrompt(t *testing.T) {
-	for _, system := range []string{"custom system", ""} {
-		t.Run("system="+system, func(t *testing.T) {
+	custom, empty := "custom system", ""
+	for _, tc := range []struct {
+		name   string
+		system *string
+	}{
+		{name: "custom prompt", system: &custom},
+		{name: "stored empty prompt", system: &empty},
+		{name: "no prompt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := setupCoordinatorTestEnv(t)
-			sess := createPlanSession(t, system)
+			sess := createPlanSession(t, "")
+			if tc.system != nil {
+				if _, err := saveSystemMessage(sess, *tc.system); err != nil {
+					t.Fatalf("saveSystemMessage() error = %v", err)
+				}
+			}
 			appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
 			sess, err := OpenSession(ctx, GetSessionID(sess.Path))
 			if err != nil {
@@ -231,11 +250,41 @@ func TestConflictForkPreservesTheSystemPrompt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetSystemMessage() error = %v", err)
 			}
-			switch {
-			case system == "" && got != nil:
-				t.Fatalf("fork system message = %q, want none", *got)
-			case system != "" && (got == nil || *got != system):
-				t.Fatalf("fork system message = %v, want %q", got, system)
+			if (got == nil) != (tc.system == nil) || (got != nil && *got != *tc.system) {
+				show := func(system *string) string {
+					if system == nil {
+						return "none"
+					}
+					return strconv.Quote(*system)
+				}
+				t.Fatalf("fork system message = %s, want %s", show(got), show(tc.system))
+			}
+
+			cfg := newTestCoordinatorConfig()
+			cfg.ToolEnabled = true
+			cfg.Resume = GetSessionID(sess.Path)
+			plan, err := PrepareRequest(ctx, cfg, core.NewTestNotifier(), core.TestToolUI{}, "next question", false, PendingToolSkip)
+			if err != nil {
+				t.Fatalf("PrepareRequest() error = %v", err)
+			}
+			committed, err := plan.Commit(ctx)
+			if err != nil {
+				t.Fatalf("Commit() error = %v", err)
+			}
+			forked := GetRootSession(committed.Path) != GetRootSession(sess.Path)
+			if forked != (tc.system == nil) {
+				t.Fatalf("resuming the fork with tools forked = %v, want %v", forked, tc.system == nil)
+			}
+			if tc.system == nil {
+				return
+			}
+			if len(plan.Messages) == 0 || plan.Messages[0].Role != string(core.RoleSystem) {
+				t.Fatal("the resume's request carries no system message, want the fork's")
+			}
+			for _, block := range plan.Messages[0].Blocks {
+				if text, ok := block.(core.TextBlock); ok && text.Text != *tc.system {
+					t.Fatalf("the resume's request carries the system prompt %.40q, want %q", text.Text, *tc.system)
+				}
 			}
 		})
 	}
