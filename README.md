@@ -475,6 +475,25 @@ Servers are connected when `lmc` starts and shut down when it exits. A server
 that fails to start fails the run, unless it is `optional`, which skips it
 with a warning.
 
+Each stdio server runs in a process group of its own. Ctrl-C reaches `lmc`
+and the commands it runs and leaves the servers running, and Ctrl-Z stops
+`lmc` and its commands while the servers wait idle until `lmc` resumes.
+Shutdown closes a server's stdin, where the protocol's shutdown begins, then
+sends `SIGTERM` to its whole process group and `SIGKILL` two seconds later,
+which also ends what a launcher such as `npx` or `uvx` left running, even a
+process that ignores `SIGTERM`. A server that has exited stays a zombie
+until the `SIGKILL`, so the ID of its group cannot pass to another group
+that a signal would then reach. Since the group cannot be checked while the
+zombie holds it, those two seconds pass even when nothing is left, so `lmc`
+takes about two seconds longer to exit when it runs stdio servers; the
+servers shut down together. Shutdown gives up after about six seconds and
+reports anything it could not confirm. A process that moved to another
+group with `setsid` is out of its reach, and if `lmc` is killed before it
+can shut down, a server learns of it from the end of its stdin, so one that
+ignores that is left running. A server that exits on its own is reported
+once and stays a zombie until shutdown; its tools stay listed, and a call to
+one returns an error to the model.
+
 `lmc` speaks the `2026-07-28` revision of the protocol and the earlier
 revisions with the `initialize` handshake, and detects which one a server
 uses. Each tool is advertised as `mcp__<server>__<tool>`, with characters

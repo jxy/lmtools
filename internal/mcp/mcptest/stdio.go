@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // RunFromEnv serves a scenario from the environment and exits, when the
@@ -31,6 +34,16 @@ func RunFromEnv() {
 	os.Exit(0)
 }
 
+// writePID writes a process ID to path through a rename, so a test polling
+// the file never reads it half written.
+func writePID(path string, pid int) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // ScenarioEnv renders a scenario for a subprocess's environment.
 func ScenarioEnv(scn Scenario) (string, error) {
 	data, err := json.Marshal(scn)
@@ -46,6 +59,20 @@ func ScenarioEnv(scn Scenario) (string, error) {
 func Serve(scn Scenario, stdin io.Reader, stdout, stderr io.Writer) error {
 	if scn.IgnoreSIGTERM {
 		signal.Ignore(syscall.SIGTERM)
+	}
+	if scn.PIDPath != "" {
+		if err := writePID(scn.PIDPath, os.Getpid()); err != nil {
+			return err
+		}
+	}
+	if scn.SpawnDescendant != "" {
+		descendant := exec.Command("sleep", "60")
+		if err := descendant.Start(); err != nil {
+			return fmt.Errorf("start descendant: %w", err)
+		}
+		if err := writePID(scn.SpawnDescendant, descendant.Process.Pid); err != nil {
+			return err
+		}
 	}
 	for _, line := range scn.StderrLines {
 		fmt.Fprintln(stderr, line)
@@ -75,6 +102,12 @@ func Serve(scn Scenario, stdin io.Reader, stdout, stderr io.Writer) error {
 					s.deliverResponse(&msg)
 				case len(msg.ID) == 0:
 					s.handleNotification(&msg)
+				case scn.StallAfter != "" && msg.Method == scn.StallAfter:
+					for _, r := range s.handleRequest(&msg, "stdio") {
+						emit(r.msg)
+					}
+					// Never read stdin again.
+					stayAlive()
 				default:
 					handlers.Add(1)
 					go func(msg *Message) {
@@ -96,7 +129,16 @@ func Serve(scn Scenario, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	handlers.Wait()
 	if scn.IgnoreStdinClose {
-		select {}
+		stayAlive()
 	}
 	return nil
+}
+
+// stayAlive never returns. It sleeps rather than blocking in an empty
+// select, which the runtime ends as a deadlock on Linux, so the subprocess
+// stays alive until a signal ends it.
+func stayAlive() {
+	for {
+		time.Sleep(time.Hour)
+	}
 }

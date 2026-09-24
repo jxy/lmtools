@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -82,6 +83,7 @@ func (h *Host) connectOne(ctx context.Context, cfg ServerConfig) error {
 	client, err := Dial(ctx, cfg, DialOptions{
 		ClientInfo:     h.opts.ClientInfo,
 		Log:            h.opts.Log,
+		Warn:           h.opts.Warn,
 		HTTPClient:     h.opts.HTTPClient,
 		StartupTimeout: h.opts.StartupTimeout,
 	})
@@ -299,10 +301,17 @@ func (h *Host) client(server string) *Client {
 	return nil
 }
 
-// Close shuts every server down.
+// Close shuts every server down, all at once, since a stdio server's
+// shutdown takes at least its grace after SIGTERM.
 func (h *Host) Close() {
+	var wg sync.WaitGroup
 	for _, client := range h.clients {
-		_ = client.Close()
+		wg.Add(1)
+		go func(client *Client) {
+			defer wg.Done()
+			_ = client.Close()
+		}(client)
 	}
+	wg.Wait()
 	h.clients = nil
 }

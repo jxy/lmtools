@@ -16,8 +16,13 @@ import (
 
 // TestMain lets this test binary be the stdio server the client launches:
 // with the scenario variable set it serves and exits before any test runs.
+// With the relay variable set it plays lmc instead; see runRelayFromEnv.
+// Every stdio shutdown waits its whole grace after SIGTERM, so the tests
+// shorten the timing; a test about the timing sets its own.
 func TestMain(m *testing.M) {
 	mcptest.RunFromEnv()
+	mcp.SetShutdownTimingForTest(200*time.Millisecond, 3*time.Second)
+	runRelayFromEnv()
 	os.Exit(m.Run())
 }
 

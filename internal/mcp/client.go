@@ -44,8 +44,12 @@ func (e era) String() string {
 
 // DialOptions configure a connection.
 type DialOptions struct {
-	ClientInfo     Implementation
+	ClientInfo Implementation
+	// Log receives debug lines. Warn receives what the operator should
+	// see: a stdio server that exited on its own, and cleanup its shutdown
+	// could not confirm. A nil Warn sends those to Log.
 	Log            Logf
+	Warn           Logf
 	HTTPClient     *http.Client
 	StartupTimeout time.Duration
 }
@@ -56,6 +60,7 @@ type Client struct {
 	cfg        ServerConfig
 	clientInfo Implementation
 	log        Logf
+	warn       Logf
 	transport  transport
 	nextID     atomic.Int64
 
@@ -64,19 +69,28 @@ type Client struct {
 	version      string
 	serverInfo   Implementation
 	instructions string
+	// dialed is set once Dial succeeds, and exited once the transport
+	// reports an exit the client did not cause, with exitErr its status.
+	dialed  bool
+	exited  bool
+	exitErr error
 }
 
 // Dial starts or connects to one server and settles which era it speaks.
 func Dial(ctx context.Context, cfg ServerConfig, opts DialOptions) (*Client, error) {
-	c := &Client{cfg: cfg, clientInfo: opts.ClientInfo, log: serverLogf(opts.Log, cfg.Name)}
+	warn := opts.Warn
+	if warn == nil {
+		warn = opts.Log
+	}
+	c := &Client{cfg: cfg, clientInfo: opts.ClientInfo, log: serverLogf(opts.Log, cfg.Name), warn: serverLogf(warn, cfg.Name)}
 	if c.clientInfo.Name == "" {
 		c.clientInfo = DefaultClientInfo
 	}
-	handler := peerHandler{onNotification: c.onNotification, onRequest: c.onRequest}
+	handler := peerHandler{onNotification: c.onNotification, onRequest: c.onRequest, onExit: c.serverExited}
 
 	switch cfg.Type {
 	case TransportStdio:
-		t, err := startStdio(cfg, handler, c.log)
+		t, err := startStdio(cfg, handler, c.log, c.warn)
 		if err != nil {
 			return nil, fmt.Errorf("mcp server %q: %w", cfg.Name, err)
 		}
@@ -98,7 +112,38 @@ func Dial(ctx context.Context, cfg ServerConfig, opts DialOptions) (*Client, err
 		_ = c.transport.close()
 		return nil, fmt.Errorf("mcp server %q: %w", cfg.Name, err)
 	}
+	c.mu.Lock()
+	c.dialed = true
+	exited, exitErr := c.exited, c.exitErr
+	c.mu.Unlock()
+	if exited {
+		c.reportExit(exitErr)
+	}
 	return c, nil
+}
+
+// serverExited hears from the transport that the server exited when the
+// client had not shut it down. The exit is reported once, and only after
+// Dial succeeded: an exit while dialing fails Dial, which reports it.
+func (c *Client) serverExited(err error) {
+	c.mu.Lock()
+	c.exited, c.exitErr = true, err
+	dialed := c.dialed
+	c.mu.Unlock()
+	if dialed {
+		c.reportExit(err)
+	}
+}
+
+// reportExit tells the operator that the server is gone. Its tools stay
+// advertised, because the tool list and the system prompt are settled when
+// the run starts, and a call to one returns an error result.
+func (c *Client) reportExit(err error) {
+	if err != nil {
+		c.warn("server exited: %v; its tools stay listed and calls to them fail", err)
+		return
+	}
+	c.warn("server exited; its tools stay listed and calls to them fail")
 }
 
 // Name is the configured server name.

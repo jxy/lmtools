@@ -57,6 +57,18 @@ type Scenario struct {
 	IgnoreStdinClose bool     `json:"ignoreStdinClose,omitempty"`
 	IgnoreSIGTERM    bool     `json:"ignoreSigterm,omitempty"`
 	StderrLines      []string `json:"stderrLines,omitempty"`
+	// PIDPath, for the subprocess, is a file that receives its process ID
+	// once it starts.
+	PIDPath string `json:"pidPath,omitempty"`
+	// StallAfter, for the subprocess, is a method after whose answer the
+	// server stops reading its stdin and stays alive, the way a server
+	// that has stopped reading does.
+	StallAfter string `json:"stallAfter,omitempty"`
+	// SpawnDescendant, for the subprocess, is a file that receives the
+	// process ID of a sleep the server starts in its own process group and
+	// leaves running when it exits, the way a launcher such as npx can.
+	// With IgnoreSIGTERM, the sleep inherits the ignored SIGTERM.
+	SpawnDescendant string `json:"spawnDescendant,omitempty"`
 	// RecordPath, for the subprocess, is a file that receives one JSON
 	// line per message received.
 	RecordPath string `json:"recordPath,omitempty"`
