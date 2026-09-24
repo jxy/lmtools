@@ -57,6 +57,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		return out, err
 	}
 	presenter := newResponsePresenter(env.stdout, env.stderr, env.cfg.ShowThinking)
+	presenter.separate = env.answersOnScreen
 	defer presenter.Close()
 
 	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), env.notifier, core.ResponseParseOptions{
@@ -88,6 +89,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 			}
 			return out, err
 		}
+		out.PlanCommitted = true
 		if afterTurnCommitForTest != nil {
 			afterTurnCommitForTest(committed)
 		}
@@ -175,11 +177,6 @@ func main() {
 }
 
 func run(notifier core.Notifier) error {
-	// Single context with signal handling
-	ctx, cancel := signal.NotifyContext(context.Background(),
-		os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
 	cfg, err := config.ParseFlags(os.Args[1:])
 	if err != nil {
 		return errors.WrapError("parse flags", err)
@@ -187,6 +184,25 @@ func run(notifier core.Notifier) error {
 	if cfg.Version {
 		fmt.Println(version.String("lmc"))
 		return nil
+	}
+
+	// A single run ends at its first interrupt. A loop outlives one: it
+	// keeps its signal handler across turns, and until the first prompt the
+	// startup phase is what an interrupt ends.
+	var (
+		ctx        context.Context
+		signals    *replSignals
+		endStartup func()
+	)
+	if cfg.REPL {
+		signals = watchREPLSignals()
+		defer signals.stop()
+		ctx, endStartup = signals.begin()
+		defer endStartup()
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
 	}
 	opts := cfg.RequestOptions()
 
@@ -214,8 +230,12 @@ func run(notifier core.Notifier) error {
 	if err != nil {
 		return err
 	}
-	if err := validateImageTurn(isRegeneration, opts.Images); err != nil {
-		return err
+	// A loop keeps the images for its first prompt, and sends none with a
+	// regeneration; a single run has no other turn to give them.
+	if !cfg.REPL {
+		if err := validateImageTurn(isRegeneration, opts.Images); err != nil {
+			return err
+		}
 	}
 
 	// One reader owns standard input from here on: the prompt, and the
@@ -223,7 +243,15 @@ func run(notifier core.Notifier) error {
 	input := newInputOwner(os.Stdin)
 	defer func() { _ = input.close() }()
 	if input.terminal && input.termErr != nil {
+		if cfg.REPL {
+			// A blocking read of standard input cannot be ended, and a
+			// loop reads again after every question and every turn.
+			return errors.WrapError("-repl needs its own open of the terminal on standard input", input.termErr)
+		}
 		logger.From(ctx).Debugf("Reading the terminal on standard input as a stream: %v", input.termErr)
+	}
+	if cfg.REPL {
+		return runREPL(ctx, endStartup, signals, &cfg, opts, input, logDir, isRegeneration)
 	}
 
 	// Read and validate input
@@ -582,7 +610,13 @@ func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
-		logger.From(ctx).Errorf("Request failed after %v: %v", time.Since(startTime), err)
+		if ctx.Err() != nil {
+			// A cancelled request is the operator's doing, not a failure
+			// to put on the terminal.
+			logger.From(ctx).Infof("Request cancelled after %v: %v", time.Since(startTime), err)
+		} else {
+			logger.From(ctx).Errorf("Request failed after %v: %v", time.Since(startTime), err)
+		}
 		return nil, err
 	}
 

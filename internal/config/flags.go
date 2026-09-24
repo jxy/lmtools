@@ -20,6 +20,7 @@ type Config struct {
 	Model            string // model to use
 	Embed            bool   // whether to run in embed mode
 	StreamChat       bool   // whether to use streaming chat mode
+	REPL             bool   // read turns until the end of input, continuing one conversation
 	PrintCurl        bool   // print the equivalent curl command instead of sending the request
 	ShowThinking     bool   // print visible provider-returned thinking summaries to stderr
 	Effort           string // reasoning effort hint
@@ -93,9 +94,13 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	explicit := applyExplicitFlags(fs, &cfg)
+	if err := validateREPLFlags(cfg); err != nil {
+		return cfg, err
+	}
 	if err := applyEmbedModeDefaults(&cfg, explicit); err != nil {
 		return cfg, err
 	}
+	applyREPLDefaults(&cfg, explicit)
 
 	if err := validateModeFlagCombinations(cfg); err != nil {
 		return cfg, err
@@ -144,6 +149,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 
 	// Chat Options
 	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
+	fs.BoolVar(&cfg.REPL, "repl", false, "read one turn per line from stdin until it ends, continuing one session; turns streaming on unless -stream is given")
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.BoolVar(&cfg.ShowThinking, "show-thinking", false, "print provider-returned thinking summaries to stderr (does not enable reasoning)")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
@@ -236,10 +242,13 @@ Examples:
   # Resume a session
   echo "Continue from where we left off" | %s -argo-user myuser -resume 001a
 
+  # Hold a conversation, one turn per line, until Ctrl-D
+  %s -argo-user myuser -repl
+
   # Show all conversation trees
   %s -argo-user myuser -show-sessions
 `,
-		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 // RequestOptions converts parsed CLI flags into the concrete value consumed by

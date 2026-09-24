@@ -181,6 +181,61 @@ keeps its messages apart from them. It continues in a new session copied
 from the conversation it had seen, and `lmc` prints a note naming the new
 session.
 
+### Conversation Loop
+
+`lmc -repl` holds a conversation in one process. It reads one turn per line
+from stdin until stdin ends, and each turn continues from where the previous
+one left the session, so MCP servers start once and stay up across turns.
+
+```bash
+./bin/lmc -argo-user "$USER" -repl
+./bin/lmc -argo-user "$USER" -repl -resume 0001 -tool
+./bin/lmc -argo-user "$USER" -repl < questions.txt > answers.txt
+```
+
+- A line ending in `\` continues the turn on the next line; `\\` at the end
+  of a line puts one backslash there and ends the turn. An empty line at the
+  prompt sends nothing. The turn is sent as typed, a turn larger than 10MB
+  is discarded with a note, and pasted lines are read one turn per line like
+  typed ones.
+- On a terminal the prompt is `> `, and `. ` on a continuation line. It goes
+  to stderr, or to the terminal when stderr is redirected, with the notes,
+  thinking summaries, tool transcript, and approval questions. Lines typed
+  while a turn runs are read as the next turns, in order; an approval
+  question discards them, as a single run's does. There is no line editing
+  beyond what the terminal provides (erase, word erase, line kill), and no
+  history.
+- Ctrl-D at the prompt ends the loop. Ctrl-D inside an unfinished turn, a
+  continuation or text ended by Ctrl-D without Enter, ends the loop without
+  sending it, with a note. Ctrl-C during a turn cancels the turn and returns
+  to the prompt, noting what the turn saved; Ctrl-C at an idle prompt says
+  how to exit, and a second one in a row exits. Any line typed in between,
+  even an empty one, starts the count again. Before the first prompt, while
+  `lmc` starts and connects MCP servers, Ctrl-C ends the run with status
+  130. SIGTERM or a hangup cancels the turn and exits once it has saved what
+  it must.
+- With stdout a terminal, it carries the answers alone, and the prompt starts
+  below an answer after an empty line. With stdout redirected, each answer
+  ends with a newline and an empty line separates it from the next. This is
+  formatting for a reader, not a record format, since an answer can hold
+  empty lines itself; the session holds both sides, and `-show` prints them.
+- The first turn that saves anything settles where the conversation goes:
+  a new session, or the one `-resume` or `-branch` names. A turn that fails
+  before saving anything leaves that choice for the next turn. `-branch` on
+  an assistant message regenerates it before the first prompt, and a resumed
+  session with pending tool calls resolves them first. Images from `-image`
+  go with the first turn whose prompt is saved, so unlike a single run,
+  `-repl` accepts them with a regeneration, which goes out without them.
+- If another run changes the session, the loop continues in a fork, as a
+  single run does, and names it. If an answer that was shown could not be
+  saved, the loop stops rather than continue from a session without it.
+- `-repl` turns streaming on unless `-stream` is given, so `-stream=false`
+  keeps it off. It cannot be used with `-e`, `-print-curl`,
+  `-show-sessions`, `-show`, `-delete`, `-list-models`, or `-no-session`.
+  With a terminal on stdin it needs to open that terminal again by its
+  name, and stops at startup, naming the terminal and the reason, when it
+  cannot.
+
 ### Tool Use
 
 `-tool` enables the built-in `universal_command` tool. It executes each requested
@@ -575,6 +630,8 @@ Mode and model:
   output controls.
 - `-list-models`: List the models the provider reports.
 - `-stream`: Stream the chat response.
+- `-repl`: Read one turn per line from stdin until it ends, continuing one
+  session. See [Conversation Loop](#conversation-loop).
 - `-openai-responses`: Send the chat through the provider's Responses API
   instead of chat completions. Requires `-provider openai` or `-provider argo`,
   and does not combine with `-argo-legacy`. On Argo it applies to `gpt*` models,

@@ -139,3 +139,19 @@ func TestStreamLinesQueuedLineSurvivesEndedRequests(t *testing.T) {
 		}
 	}
 }
+
+// A line past the bound keeps its last bytes however it arrives, whole or in
+// pieces as small reads deliver it, so a marker at its end is still known.
+func TestLineBuilderKeepsTheTailOfALineTooLong(t *testing.T) {
+	line := "0123456789ab\\"
+	for size := 1; size <= len(line); size++ {
+		b := lineBuilder{bound: 4}
+		for start := 0; start < len(line); start += size {
+			b.add([]byte(line[start:min(start+size, len(line))]))
+		}
+		got := b.line(false)
+		if !got.tooLong || got.text != "" || got.tail != "ab\\" {
+			t.Fatalf("pieces of %d: line = %+v, want too long with the tail ab\\", size, got)
+		}
+	}
+}

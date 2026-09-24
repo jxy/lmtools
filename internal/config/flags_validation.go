@@ -14,6 +14,7 @@ import (
 
 type explicitFlagState struct {
 	noSession bool
+	stream    bool
 }
 
 func applyExplicitFlags(fs *flag.FlagSet, cfg *Config) explicitFlagState {
@@ -25,6 +26,8 @@ func applyExplicitFlags(fs *flag.FlagSet, cfg *Config) explicitFlagState {
 			cfg.SystemExplicitlySet = true
 		case "no-session":
 			explicit.noSession = true
+		case "stream":
+			explicit.stream = true
 		}
 	})
 
@@ -41,6 +44,41 @@ func applyEmbedModeDefaults(cfg *Config, explicit explicitFlagState) error {
 	}
 
 	return nil
+}
+
+// validateREPLFlags refuses what -repl cannot do: a mode that sends no chat
+// turn, or a run without a session to hold the conversation, which a loop
+// does not support yet. It runs before embed mode turns sessions off, so
+// -repl -e names -e.
+func validateREPLFlags(cfg Config) error {
+	if !cfg.REPL {
+		return nil
+	}
+	for _, flag := range []struct {
+		name string
+		set  bool
+	}{
+		{"-e", cfg.Embed},
+		{"-print-curl", cfg.PrintCurl},
+		{"-show-sessions", cfg.ShowSessions},
+		{"-show", cfg.Show != ""},
+		{"-delete", cfg.Delete != ""},
+		{"-list-models", cfg.ListModels},
+		{"-no-session", cfg.NoSession},
+	} {
+		if flag.set {
+			return fmt.Errorf("invalid flag combination: -repl cannot be used with %s", flag.name)
+		}
+	}
+	return nil
+}
+
+// applyREPLDefaults turns streaming on for -repl, unless -stream was given,
+// which -stream=false then keeps off.
+func applyREPLDefaults(cfg *Config, explicit explicitFlagState) {
+	if cfg.REPL && !explicit.stream {
+		cfg.StreamChat = true
+	}
 }
 
 func validateModeFlagCombinations(cfg Config) error {

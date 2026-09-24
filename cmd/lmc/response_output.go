@@ -22,6 +22,9 @@ type responsePresenter struct {
 	answer       io.Writer
 	diagnostics  io.Writer
 	showThinking bool
+	// separate keeps a note off the end of an answer on the screen both
+	// share; newResponsePresenter sets it.
+	separate bool
 
 	thinkingActive       bool
 	thinkingHasText      bool
@@ -37,6 +40,7 @@ func newResponsePresenter(answer, diagnostics io.Writer, showThinking bool) *res
 		answer:       answer,
 		diagnostics:  diagnostics,
 		showThinking: showThinking,
+		separate:     true,
 	}
 }
 
@@ -147,7 +151,7 @@ func (p *responsePresenter) writeAnswer(text string) {
 // that a note, tool transcript, or error written to stderr cannot be glued to
 // the assistant's last streamed byte in an interactive terminal.
 func (p *responsePresenter) separateDiagnosticsFromAnswer() {
-	if !p.answerWritten || p.diagnosticsSeparated {
+	if !p.separate || !p.answerWritten || p.diagnosticsSeparated {
 		return
 	}
 	if missing := 2 - p.answerNewlines; missing > 0 {

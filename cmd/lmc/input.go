@@ -27,29 +27,51 @@ type inputLine struct {
 	// tooLong reports that the line passed the bound it was read under.
 	// text is then empty, and the whole line has been read.
 	tooLong bool
+	// tail is the end of a line too long, its last lineTailBytes bytes, so
+	// a marker there, such as a backslash that continues a turn, is still
+	// known.
+	tail string
 }
+
+// lineTailBytes is how much of the end of a line too long is kept: enough
+// for a doubled backslash and a carriage return.
+const lineTailBytes = 3
 
 // lineBuilder gathers the pieces of one line under a bound.
 type lineBuilder struct {
 	text    []byte
 	bound   int
 	tooLong bool
+	tail    []byte
 }
 
 func (b *lineBuilder) add(part []byte) {
-	if b.tooLong {
-		return
-	}
-	if len(b.text)+len(part) > b.bound {
+	if !b.tooLong && len(b.text)+len(part) > b.bound {
 		b.tooLong = true
+		b.tail = lastBytes(nil, b.text)
 		b.text = nil
+	}
+	if b.tooLong {
+		b.tail = lastBytes(b.tail, part)
 		return
 	}
 	b.text = append(b.text, part...)
 }
 
+// lastBytes returns the last lineTailBytes bytes of tail followed by more.
+func lastBytes(tail, more []byte) []byte {
+	if len(more) >= lineTailBytes {
+		return append([]byte(nil), more[len(more)-lineTailBytes:]...)
+	}
+	joined := append(append([]byte(nil), tail...), more...)
+	if len(joined) > lineTailBytes {
+		joined = joined[len(joined)-lineTailBytes:]
+	}
+	return joined
+}
+
 func (b *lineBuilder) line(eof bool) inputLine {
-	return inputLine{text: string(b.text), eof: eof, tooLong: b.tooLong}
+	return inputLine{text: string(b.text), eof: eof, tooLong: b.tooLong, tail: string(b.tail)}
 }
 
 // answerSource reads the answer to one question. show displays the
@@ -112,16 +134,23 @@ func (o *inputOwner) readAll(ctx context.Context, limit int64) ([]byte, error) {
 	return limitio.ReadLimited(o.stdin, limit)
 }
 
-// readLine reads one line at a prompt. Nothing is dropped first, so lines
-// typed while a turn ran are read in order, as they would be from a pipe.
+// readLine reads one line at a prompt, under the size a single run
+// accepts. Nothing is dropped first, so lines typed while a turn ran are
+// read in order, as they would be from a pipe.
 func (o *inputOwner) readLine(ctx context.Context) (inputLine, error) {
+	return o.readLineUnder(ctx, constants.MaxCLIInputSize)
+}
+
+// readLineUnder reads one line at a prompt under bound. Input that is not a
+// terminal is read ahead under the bound of the first request.
+func (o *inputOwner) readLineUnder(ctx context.Context, bound int) (inputLine, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.term != nil {
-		return o.term.readLine(ctx, constants.MaxCLIInputSize)
+		return o.term.readLine(ctx, bound)
 	}
 	if o.lines == nil {
-		o.lines = startStreamLines(o.stdin, constants.MaxCLIInputSize)
+		o.lines = startStreamLines(o.stdin, bound)
 	}
 	return o.lines.next(ctx)
 }

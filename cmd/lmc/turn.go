@@ -28,6 +28,10 @@ type turnEnv struct {
 	// and the separation that keeps a note off the end of an answer.
 	stdout io.Writer
 	stderr io.Writer
+	// answersOnScreen reports that answers appear where stderr's notes do,
+	// so a note must be kept off the end of an answer. A loop whose stdout is
+	// not a terminal sends answers elsewhere, and separates them itself.
+	answersOnScreen bool
 }
 
 func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input *inputOwner) *turnEnv {
@@ -48,6 +52,7 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 		pendingToolMode: pendingToolMode,
 		stdout:          os.Stdout,
 		stderr:          os.Stderr,
+		answersOnScreen: true,
 	}
 }
 
@@ -56,6 +61,11 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 type turnInput struct {
 	text           string
 	isRegeneration bool
+	// from is the session a loop continues: the value an earlier turn
+	// committed to, whose pinned head is where that turn left the
+	// conversation. Nil before anything was committed, when the options
+	// name the starting point.
+	from *session.Session
 }
 
 // turnOutcome reports what a turn left in the session. runTurn fills it on
@@ -75,6 +85,9 @@ type turnOutcome struct {
 	// ConflictForks lists the forks the turn's writes moved to because
 	// another writer changed the session while the turn ran.
 	ConflictForks []session.ConflictFork
+	// PlanCommitted reports that the request plan's writes landed, the
+	// turn's user message and its images among them.
+	PlanCommitted bool
 }
 
 // Committed reports whether the turn wrote anything to the session.
@@ -102,12 +115,14 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 
 	var plan *session.RequestPlan
 	resolvedPending := false
-	if resolvesPendingTools(env, opts, in) {
+	if in.from != nil || resolvesPendingTools(env, opts, in) {
 		// Resolving pending calls is a step of its own, before the request is
 		// prepared, so a failed request is retried without running a tool.
-		resumed, err = session.OpenSession(ctx, opts.Resume)
-		if err != nil {
-			return out, err
+		resumed = in.from
+		if resumed == nil {
+			if resumed, err = session.OpenSession(ctx, opts.Resume); err != nil {
+				return out, err
+			}
 		}
 		var resolution session.PendingResolution
 		resolution, err = session.ResolvePendingToolCalls(ctx, resumed, opts, logger.From(ctx), env.notifier, env.toolUI, env.approver)
@@ -147,6 +162,7 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 		out.Session = executed.Session
 	}
 	out.UnsavedAnswer = executed.UnsavedAnswer
+	out.PlanCommitted = executed.PlanCommitted
 	return out, err
 }
 

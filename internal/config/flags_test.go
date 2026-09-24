@@ -452,3 +452,42 @@ func TestVersionFlagSkipsValidation(t *testing.T) {
 		}
 	}
 }
+
+// -repl refuses the modes that send no chat turn and a run without a
+// session, naming the flag it cannot be used with.
+func TestParseFlagsREPLRefusals(t *testing.T) {
+	for _, flag := range [][]string{
+		{"-e"}, {"-print-curl"}, {"-show-sessions"}, {"-show", "0001"}, {"-delete", "0001"}, {"-list-models"}, {"-no-session"},
+	} {
+		t.Run(flag[0], func(t *testing.T) {
+			args := append([]string{"-argo-user", "testuser", "-repl"}, flag...)
+			_, err := ParseFlags(args)
+			want := "-repl cannot be used with " + flag[0]
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("ParseFlags(%v) error = %v, want %q", args, err, want)
+			}
+		})
+	}
+}
+
+// -repl turns streaming on unless -stream was given, and -stream=false keeps
+// it off.
+func TestParseFlagsREPLStreams(t *testing.T) {
+	for _, tc := range []struct {
+		args   []string
+		stream bool
+	}{
+		{args: []string{"-repl"}, stream: true},
+		{args: []string{"-repl", "-stream=false"}, stream: false},
+		{args: []string{"-repl", "-stream"}, stream: true},
+		{args: []string{}, stream: false},
+	} {
+		cfg, err := ParseFlags(append([]string{"-argo-user", "testuser"}, tc.args...))
+		if err != nil {
+			t.Fatalf("ParseFlags(%v) error = %v", tc.args, err)
+		}
+		if cfg.StreamChat != tc.stream {
+			t.Fatalf("ParseFlags(%v) StreamChat = %v, want %v", tc.args, cfg.StreamChat, tc.stream)
+		}
+	}
+}
