@@ -128,9 +128,12 @@ func (n *recordingNotifier) record(format string, args ...interface{}) {
 	n.messages = append(n.messages, fmt.Sprintf(format, args...))
 }
 
-func (n *recordingNotifier) Infof(format string, args ...interface{})   { n.record(format, args...) }
-func (n *recordingNotifier) Warnf(format string, args ...interface{})   { n.record(format, args...) }
-func (n *recordingNotifier) Errorf(format string, args ...interface{})  { n.record(format, args...) }
+func (n *recordingNotifier) Infof(format string, args ...interface{}) { n.record(format, args...) }
+
+func (n *recordingNotifier) Warnf(format string, args ...interface{}) { n.record(format, args...) }
+
+func (n *recordingNotifier) Errorf(format string, args ...interface{}) { n.record(format, args...) }
+
 func (n *recordingNotifier) Promptf(format string, args ...interface{}) { n.record(format, args...) }
 
 func (n *recordingNotifier) has(substring string) bool {
