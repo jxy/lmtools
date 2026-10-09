@@ -107,22 +107,21 @@ func TestApprover_EdgeCases(t *testing.T) {
 				t.Fatalf("Approve() error = %v", err)
 			}
 
-			if result != tt.expected {
+			if result.Approved != tt.expected {
 				t.Errorf("Approve() = %v, expected %v", result, tt.expected)
 			}
-			if len(notifier.messages) == 0 || notifier.messages[0] != "      Allow execution? [y/N]: " {
+			if len(notifier.messages) == 0 || notifier.messages[0] != "      Allow execution? [y/N or reason; /ed to edit]: " {
 				t.Fatalf("approval prompt = %#v", notifier.messages)
 			}
 		})
 	}
 }
 
-// approverEntryPoint is one of the two yes/no conversations an approver
-// holds. Both delegate to ask and readYesNo, so shared-behavior tests run
-// against each entry point rather than trusting the delegation.
+// approverEntryPoint adapts each approval conversation to a common test
+// result, including the round-limit question that only returns a boolean.
 type approverEntryPoint struct {
 	name      string
-	invoke    func(*cliApprover, context.Context) (bool, error)
+	invoke    func(*cliApprover, context.Context) (core.Approval, error)
 	prompt    string
 	eofNotice string
 }
@@ -131,47 +130,48 @@ func approverEntryPoints() []approverEntryPoint {
 	return []approverEntryPoint{
 		{
 			name: "Approve",
-			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
 				return a.Approve(ctx, core.UniversalCommandArgs{})
 			},
-			prompt:    "      Allow execution? [y/N]: ",
+			prompt:    "      Allow execution? [y/N or reason; /ed to edit]: ",
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{
 			name: "ApproveImage",
-			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
 				// The prompt describes the bytes that were read, so it names
 				// the sniffed type and decoded size rather than the path alone.
 				return a.ApproveImage(ctx, core.ViewImageArgs{Path: "plots/shot.png"},
 					core.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgo=", Name: "shot.png"})
 			},
-			prompt:    "      Send shot.png (image/png, 8 bytes) to the model? [y/N]: ",
+			prompt:    "      Send shot.png (image/png, 8 bytes) to the model? [y/N or reason; /ed to edit]: ",
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{
 			name: "ApproveMCP",
-			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
 				// The review line above showed the arguments; the question
 				// names the server and tool the way a rule would.
 				return a.ApproveMCP(ctx, core.MCPCall{Server: "github", Tool: "list_issues", Arguments: json.RawMessage(`{"repo":"a/b"}`)})
 			},
-			prompt:    "      Call github/list_issues? [y/N]: ",
+			prompt:    "      Call github/list_issues? [y/N or reason; /ed to edit]: ",
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{
 			name: "ApproveRerun",
-			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
+			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
 				// The review line above named the call and why its outcome
 				// is unknown; the question names the tool and the risk.
 				return a.ApproveRerun(ctx, core.ToolCall{ID: "call-1", Name: "universal_command"})
 			},
-			prompt:    "      Run universal_command again? It may already have run. [y/N]: ",
+			prompt:    "      Run universal_command again? It may already have run. [y/N or reason; /ed to edit]: ",
 			eofNotice: "\n      No interactive input available; not running it again.\n",
 		},
 		{
 			name: "ApproveToolRoundLimitReset",
-			invoke: func(a *cliApprover, ctx context.Context) (bool, error) {
-				return a.ApproveToolRoundLimitReset(ctx, 4)
+			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
+				approved, err := a.ApproveToolRoundLimitReset(ctx, 4)
+				return core.Approval{Approved: approved}, err
 			},
 			prompt:    "\nTool-call round limit reached (4). Reset it and continue? [y/N]: ",
 			eofNotice: "\nNo interactive input available; keeping the tool-call round limit.\n",
@@ -207,7 +207,7 @@ func TestApproverAnswerTerminatedByEOFIsTheAnswer(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s() error = %v", entry.name, err)
 				}
-				if approved != tt.expected {
+				if approved.Approved != tt.expected {
 					t.Fatalf("%s(%q) = %v, want %v", entry.name, tt.input, approved, tt.expected)
 				}
 				// An answered prompt has its echo closed with a newline; only
@@ -224,6 +224,102 @@ func TestApproverAnswerTerminatedByEOFIsTheAnswer(t *testing.T) {
 	}
 }
 
+func TestApproverReturnsDenialReason(t *testing.T) {
+	for _, entry := range approverEntryPoints() {
+		for _, test := range []struct {
+			input  string
+			reason string
+		}{
+			{"Only inspect files; do not modify them.\n", "Only inspect files; do not modify them."},
+			{"  Use the cached result — no network.  \n", "Use the cached result — no network."},
+			{"yes, but use a different command\n", "yes, but use a different command"},
+			{"no, this is a read-only review\n", "no, this is a read-only review"},
+			{"Do not send this image", "Do not send this image"},
+			{"N\n", ""},
+			{" NO \n", ""},
+			{" \n", ""},
+		} {
+			t.Run(entry.name+"/"+test.input, func(t *testing.T) {
+				approver := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(test.input))
+				decision, err := entry.invoke(approver, context.Background())
+				wantReason := test.reason
+				if entry.name == "ApproveToolRoundLimitReset" {
+					wantReason = "" // This confirmation does not produce a tool result.
+				}
+				if err != nil || decision.Approved || decision.Reason != wantReason {
+					t.Fatalf("decision=%+v error=%v, want denial reason %q", decision, err, wantReason)
+				}
+			})
+		}
+	}
+}
+
+func TestApproverUsesNormalInputLimit(t *testing.T) {
+	defer func(size int) { maxTurnBytes = size }(maxTurnBytes)
+	maxTurnBytes = 128
+	reason := strings.Repeat("x", maxTurnBytes)
+	for _, test := range []struct {
+		input, reason string
+		approved      bool
+	}{
+		{reason + "\n", reason, false},
+		{reason + "x\nn\n", "", false},
+		{"yes" + strings.Repeat(" ", 80) + "\n", "", true},
+	} {
+		approver := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(test.input))
+		decision, err := approver.Approve(context.Background(), core.UniversalCommandArgs{})
+		if err != nil || decision.Approved != test.approved || decision.Reason != test.reason {
+			t.Fatalf("decision=%+v error=%v", decision, err)
+		}
+	}
+}
+
+func TestApproverContinuedInputUsesFinalText(t *testing.T) {
+	for _, test := range []struct {
+		input, reason string
+		approved      bool
+	}{
+		{"Only inspect files\\\nDo not modify anything.\n", "Only inspect files\nDo not modify anything.", false},
+		{"yes\\\nplease\n", "yes\nplease", false},
+		{"yes\\\n\n", "", true},
+		{"no\\\nKeep the review read-only.\n", "no\nKeep the review read-only.", false},
+		{"Keep a literal slash\\\\\n", "Keep a literal slash\\", false},
+		{"//ed\n", "/ed", false},
+		{"First line\\\n//ed\n", "First line\n/ed", false},
+		{"Unfinished\\\n", "", false},
+		{"Unfinished\\", "", false},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			approver := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(test.input))
+			decision, err := approver.Approve(context.Background(), core.UniversalCommandArgs{})
+			if err != nil || decision.Approved != test.approved || decision.Reason != test.reason {
+				t.Fatalf("decision=%+v error=%v; want approved=%v reason=%q", decision, err, test.approved, test.reason)
+			}
+		})
+	}
+}
+
+func TestApproverLiteralInputIsIndependentOfLineEnding(t *testing.T) {
+	for _, entry := range approverEntryPoints() {
+		if entry.name == "ApproveToolRoundLimitReset" {
+			continue
+		}
+		for _, test := range []struct{ input, reason string }{
+			{`//ed`, `/ed`},
+			{`Use a literal backslash\\`, `Use a literal backslash\`},
+			{`//ed\\`, `/ed\`},
+		} {
+			for _, ending := range []string{"", "\n", "\r\n"} {
+				approver := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(test.input+ending))
+				decision, err := entry.invoke(approver, context.Background())
+				if err != nil || decision.Approved || decision.Reason != test.reason {
+					t.Fatalf("%s(%q): decision=%+v error=%v, want reason %q", entry.name, test.input+ending, decision, err, test.reason)
+				}
+			}
+		}
+	}
+}
+
 var errTestReadFailure = errors.New("stdin exploded")
 
 // Only an end of input is an answer. A stream that failed for any other reason
@@ -234,7 +330,7 @@ func TestApproverReportsReadFailure(t *testing.T) {
 	approver := newCLIApproverWithReader(notifier, iotest.ErrReader(errTestReadFailure))
 
 	approved, err := approver.Approve(context.Background(), core.UniversalCommandArgs{})
-	if approved {
+	if approved.Approved {
 		t.Fatal("Approve() approved despite a failed read")
 	}
 	if !errors.Is(err, errTestReadFailure) {
@@ -252,7 +348,7 @@ func TestApproverReadsUnterminatedAnswerAfterBufferedPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Approve() first error = %v", err)
 	}
-	if denied {
+	if denied.Approved {
 		t.Fatal("Approve() first call approved despite an explicit n")
 	}
 
@@ -260,7 +356,7 @@ func TestApproverReadsUnterminatedAnswerAfterBufferedPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Approve() second error = %v", err)
 	}
-	if !approved {
+	if !approved.Approved {
 		t.Fatal("Approve() second call denied a y typed without a trailing newline")
 	}
 }
@@ -276,7 +372,7 @@ func TestApproverReusesBufferedReaderAcrossPrompts(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s() call %d error = %v", entry.name, i+1, err)
 				}
-				if !approved {
+				if !approved.Approved {
 					t.Fatalf("%s() call %d denied buffered approval", entry.name, i+1)
 				}
 			}

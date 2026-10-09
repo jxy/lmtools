@@ -180,20 +180,20 @@ type Notifier interface {
 // Approver resolves interactive tool decisions. The executor owns command
 // validation, policy, display ordering, and execution.
 type Approver interface {
-	Approve(ctx context.Context, args UniversalCommandArgs) (bool, error)
+	Approve(ctx context.Context, args UniversalCommandArgs) (Approval, error)
 	// ApproveImage asks whether the file a view_image call loaded may be sent
 	// to the provider. image is the block as read and sniffed, so the question
 	// names the type and size of what will actually be sent rather than what
 	// the path suggested.
-	ApproveImage(ctx context.Context, args ViewImageArgs, image ImageBlock) (bool, error)
+	ApproveImage(ctx context.Context, args ViewImageArgs, image ImageBlock) (Approval, error)
 	// ApproveMCP asks whether an MCP tool may be called with the arguments
 	// the model gave, which the review line above the prompt has shown.
-	ApproveMCP(ctx context.Context, call MCPCall) (bool, error)
+	ApproveMCP(ctx context.Context, call MCPCall) (Approval, error)
 	// ApproveToolRoundLimitReset grants another block of maxRounds tool-call rounds.
 	ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error)
 	// ApproveRerun asks whether to run again a call an earlier run started
 	// without recording its outcome. Policy cannot answer this question: a
 	// whitelist or -tool-auto-approve says the command may run, not that
 	// running it twice is safe, so only a person can say yes.
-	ApproveRerun(ctx context.Context, call ToolCall) (bool, error)
+	ApproveRerun(ctx context.Context, call ToolCall) (Approval, error)
 }

@@ -93,6 +93,7 @@ func NewTestLogger(debugEnabled bool) *TestLogger {
 // TestApprover is a mock that implements Approver interface for testing
 type TestApprover struct {
 	DefaultApproval bool
+	DefaultReason   string
 	ApprovalCalls   []UniversalCommandArgs
 	// ImageApprovalCalls records each view_image prompt; DefaultApproval
 	// answers it, the same as a command.
@@ -106,39 +107,40 @@ type TestApprover struct {
 	// RerunResponses answers questions about rerunning an uncertain call in
 	// order; an exhausted or empty queue declines. RerunCalls records each.
 	RerunResponses []bool
+	RerunReasons   []string
 	RerunCalls     []ToolCall
 	mu             sync.Mutex
 }
 
-func (a *TestApprover) ApproveImage(ctx context.Context, args ViewImageArgs, _ ImageBlock) (bool, error) {
+func (a *TestApprover) ApproveImage(ctx context.Context, args ViewImageArgs, _ ImageBlock) (Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Approval{}, err
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	a.ImageApprovalCalls = append(a.ImageApprovalCalls, args)
-	return a.DefaultApproval, nil
+	return Approval{Approved: a.DefaultApproval, Reason: a.DefaultReason}, nil
 }
 
-func (a *TestApprover) ApproveMCP(ctx context.Context, call MCPCall) (bool, error) {
+func (a *TestApprover) ApproveMCP(ctx context.Context, call MCPCall) (Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Approval{}, err
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	a.MCPApprovalCalls = append(a.MCPApprovalCalls, call)
-	return a.DefaultApproval, nil
+	return Approval{Approved: a.DefaultApproval, Reason: a.DefaultReason}, nil
 }
 
-func (a *TestApprover) Approve(ctx context.Context, args UniversalCommandArgs) (bool, error) {
+func (a *TestApprover) Approve(ctx context.Context, args UniversalCommandArgs) (Approval, error) {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return Approval{}, ctx.Err()
 	default:
 	}
 
@@ -146,7 +148,7 @@ func (a *TestApprover) Approve(ctx context.Context, args UniversalCommandArgs) (
 	defer a.mu.Unlock()
 
 	a.ApprovalCalls = append(a.ApprovalCalls, args)
-	return a.DefaultApproval, nil
+	return Approval{Approved: a.DefaultApproval, Reason: a.DefaultReason}, nil
 }
 
 func (a *TestApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
@@ -166,21 +168,25 @@ func (a *TestApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds
 	return approved, nil
 }
 
-func (a *TestApprover) ApproveRerun(ctx context.Context, call ToolCall) (bool, error) {
+func (a *TestApprover) ApproveRerun(ctx context.Context, call ToolCall) (Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Approval{}, err
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	a.RerunCalls = append(a.RerunCalls, call)
-	if len(a.RerunResponses) == 0 {
-		return false, nil
+	var approval Approval
+	if len(a.RerunResponses) > 0 {
+		approval.Approved = a.RerunResponses[0]
+		a.RerunResponses = a.RerunResponses[1:]
 	}
-	approved := a.RerunResponses[0]
-	a.RerunResponses = a.RerunResponses[1:]
-	return approved, nil
+	if len(a.RerunReasons) > 0 {
+		approval.Reason = a.RerunReasons[0]
+		a.RerunReasons = a.RerunReasons[1:]
+	}
+	return approval, nil
 }
 
 // DeclineNonCommandApprovals is the round-limit and image halves of Approver
@@ -195,25 +201,25 @@ func (DeclineNonCommandApprovals) ApproveToolRoundLimitReset(ctx context.Context
 	return false, nil
 }
 
-func (DeclineNonCommandApprovals) ApproveImage(ctx context.Context, _ ViewImageArgs, _ ImageBlock) (bool, error) {
+func (DeclineNonCommandApprovals) ApproveImage(ctx context.Context, _ ViewImageArgs, _ ImageBlock) (Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Approval{}, err
 	}
-	return false, nil
+	return Approval{}, nil
 }
 
-func (DeclineNonCommandApprovals) ApproveMCP(ctx context.Context, _ MCPCall) (bool, error) {
+func (DeclineNonCommandApprovals) ApproveMCP(ctx context.Context, _ MCPCall) (Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Approval{}, err
 	}
-	return false, nil
+	return Approval{}, nil
 }
 
-func (DeclineNonCommandApprovals) ApproveRerun(ctx context.Context, _ ToolCall) (bool, error) {
+func (DeclineNonCommandApprovals) ApproveRerun(ctx context.Context, _ ToolCall) (Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Approval{}, err
 	}
-	return false, nil
+	return Approval{}, nil
 }
 
 // NewTestApprover creates a TestApprover with default approval

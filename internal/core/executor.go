@@ -478,15 +478,15 @@ func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, 
 		return false
 	}
 
-	var approved bool
+	var approval Approval
 	var err error
 	switch {
 	case exec.image != nil:
-		approved, err = e.approver.ApproveImage(ctx, exec.image.args, exec.image.block)
+		approval, err = e.approver.ApproveImage(ctx, exec.image.args, exec.image.block)
 	case exec.mcp != nil:
-		approved, err = e.approver.ApproveMCP(ctx, exec.mcp.call)
+		approval, err = e.approver.ApproveMCP(ctx, exec.mcp.call)
 	default:
-		approved, err = e.approver.Approve(ctx, *exec.args)
+		approval, err = e.approver.Approve(ctx, *exec.args)
 	}
 	switch {
 	case err != nil && ctx.Err() != nil:
@@ -496,11 +496,11 @@ func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, 
 		result.Error = fmt.Sprintf("approval failed: %v", err)
 		result.Code = errors.ErrCodeApprovalError
 		return false
-	case !approved:
+	case !approval.Approved:
 		// Reason alone. That the command never ran is stated once, by
 		// notRunStatement, for every refusal rather than by this one in wording
 		// of its own.
-		result.Reason = "user denied permission"
+		result.Reason = approval.DenialReason()
 		result.Error = result.Reason
 		result.Code = errors.ErrCodeNotApproved
 		return false

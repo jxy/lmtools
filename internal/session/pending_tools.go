@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
+	"strings"
 )
 
 type PendingToolMode int
@@ -139,11 +140,11 @@ func ResolvePendingToolCalls(ctx context.Context, sess *Session, cfg core.Reques
 			toRun = append(toRun, i)
 		default:
 			reason := uncertainCallReason(state, legacy[i])
-			asked, rerun, err := askRerun(ctx, cfg, approver, ui, call, reason)
+			asked, approval, err := askRerun(ctx, cfg, approver, ui, call, reason)
 			if err != nil {
 				return resolution, err
 			}
-			if rerun {
+			if approval.Approved {
 				toRun = append(toRun, i)
 				continue
 			}
@@ -151,6 +152,10 @@ func ResolvePendingToolCalls(ctx context.Context, sess *Session, cfg core.Reques
 				notifier.Infof("Tool call %s was not run again: %s", describePendingCall(call), reason)
 			}
 			results[i] = outcomeUnknownResult(call, reason)
+			if asked && strings.TrimSpace(approval.Reason) != "" {
+				results[i].Reason = approval.DenialReason()
+				results[i].Error += "; " + results[i].Reason
+			}
 			if err := claim.Finished(call, results[i]); err != nil {
 				recordErrs = append(recordErrs, fmt.Errorf("record the outcome of tool call %s: %w", call.ID, err))
 			}
@@ -218,19 +223,19 @@ func endsWithToolResults(refs []lineageMessageRef) (bool, error) {
 // nobody is asked and the answer is no. The UI shows the call and the reason
 // on the stream the question uses, which newOperatorToolSurface picks for
 // both, so the operator never answers about a call they were not shown.
-func askRerun(ctx context.Context, cfg core.RequestOptions, approver core.Approver, ui core.ToolUI, call core.ToolCall, reason string) (asked, rerun bool, err error) {
+func askRerun(ctx context.Context, cfg core.RequestOptions, approver core.Approver, ui core.ToolUI, call core.ToolCall, reason string) (asked bool, approval core.Approval, err error) {
 	if approver == nil || cfg.ToolNonInteractive || ui == nil {
-		return false, false, nil
+		return false, core.Approval{}, nil
 	}
 	ui.ShowRerun(call, reason)
-	approved, err := approver.ApproveRerun(ctx, call)
+	approval, err = approver.ApproveRerun(ctx, call)
 	if err != nil {
 		if ctx.Err() != nil {
-			return true, false, ctx.Err()
+			return true, core.Approval{}, ctx.Err()
 		}
-		return true, false, lmerrors.WrapError("ask whether to run a tool call again", err)
+		return true, core.Approval{}, lmerrors.WrapError("ask whether to run a tool call again", err)
 	}
-	return true, approved, nil
+	return true, approval, nil
 }
 
 func uncertainCallReason(state invocationState, legacy bool) string {

@@ -157,7 +157,7 @@ sent:
 - A call that may already have run is not run again automatically. That is
   a call that started without recording an outcome, or one saved by an
   older `lmc`, which recorded nothing. Interactive `lmc` shows the call and
-  asks `Run universal_command again? It may already have run. [y/N]`.
+  asks `Run universal_command again? It may already have run. [y/N or reason; /ed to edit]`.
   Neither `-tool-auto-approve` nor a whitelist answers that question.
   Without a terminal, or with `-tool-non-interactive`, the model is told
   the outcome is unknown.
@@ -290,6 +290,23 @@ argument vector directly with `execvpe`-style semantics, without a shell. A
 whitelist match is already an approval: the matching command runs without a
 prompt, and `-tool-auto-approve` is not needed.
 
+At a tool approval prompt, `y` or `yes` approves; `n`, `no`, or an empty
+reply denies. Any other reply denies the call and supplies a reason, for
+example `This is a read-only review; do not change files.` The model receives
+an explicit user denial with the text labeled as a reason provided by the
+user, and the same result is saved in the session. This works for command,
+image, MCP, and uncertain-rerun approvals.
+
+Approval input uses the normal 10 MiB turn limit and continuation rules: end
+a line with `\` to continue, or `\\` for a literal trailing backslash. Use
+`/ed` to edit the current answer with `$EDITOR` (or `ed`). In a REPL, `/ed N`
+and `/ed REGEX` can also select retained prompt history. After the editor
+exits, review the draft and press Enter to submit, type to append, or use
+`/ed` again. Editor exit and queued input do not submit the answer. The final
+text is interpreted the same way whether typed or edited: `y`/`yes` approves,
+`n`/`no`/empty denies, and other text becomes the user-provided denial reason.
+Use `//ed` when the literal text `/ed` should be part of the reason.
+
 `-tool` also enables `view_image`, which lets the model look at an image file:
 a plot a command just wrote, or a screenshot named in the prompt. The model
 calls it with a `path` and an optional `detail` hint. `lmc` reads the file,
@@ -306,7 +323,7 @@ Sending a file to the provider is disclosure, so a `view_image` call is
 approved the way a command is. A whitelist rule naming the tool and the file
 or its directory admits it without a prompt, a blacklist rule naming them
 refuses it, and otherwise interactive `lmc` shows the path and asks `Send
-shot.png (image/png, 48213 bytes) to the model? [y/N]`, `-tool-auto-approve`
+shot.png (image/png, 48213 bytes) to the model? [y/N or reason; /ed to edit]`, `-tool-auto-approve`
 approves it, and when no prompt can be answered it is denied; a denial prints
 the rule that would have allowed it. The image is saved once, inside the tool
 result in the session, and `-show` lists it under the result without printing
@@ -489,12 +506,12 @@ arrays:
 >>> Tools requested: 2
 
 [1/2] Command: ["git","status","--short"]
-      Allow execution? [y/N]: y
+      Allow execution? [y/N or reason; /ed to edit]: y
 
 [2/2] Command: ["go","test","./internal/core"]
-      Allow execution? [y/N]: y
+      Allow execution? [y/N or reason; /ed to edit]: y
 
->>> Running 2 commands in parallel...
+>>> Running 2 tools in parallel...
 
 >>> Results:
 
@@ -612,7 +629,7 @@ HTTP server is whatever `headers` carries; `lmc` does not run an OAuth flow.
 An MCP call is approved the way a command is. A whitelist rule naming the
 server, or the server and tool, admits it without a prompt, a blacklist rule
 refuses it, and otherwise interactive `lmc` shows the server, tool, and
-arguments and asks `Call github/list_issues? [y/N]`; `-tool-auto-approve`
+arguments and asks `Call github/list_issues? [y/N or reason; /ed to edit]`; `-tool-auto-approve`
 approves it, and when no prompt can be answered it is denied with the rule
 that would have allowed it. The result's text reaches the model as the tool
 output. Images in the result are attached the way `view_image` attaches a

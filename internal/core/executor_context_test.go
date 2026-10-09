@@ -113,7 +113,7 @@ type blockingApprover struct {
 	mu        sync.Mutex
 }
 
-func (a *blockingApprover) Approve(ctx context.Context, _ UniversalCommandArgs) (bool, error) {
+func (a *blockingApprover) Approve(ctx context.Context, _ UniversalCommandArgs) (Approval, error) {
 	// Signal that we've reached the approval prompt
 	a.mu.Lock()
 	if a.readyChan != nil {
@@ -124,8 +124,8 @@ func (a *blockingApprover) Approve(ctx context.Context, _ UniversalCommandArgs) 
 
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return Approval{}, ctx.Err()
 	case <-a.blockChan:
-		return true, nil
+		return Approval{Approved: true}, nil
 	}
 }

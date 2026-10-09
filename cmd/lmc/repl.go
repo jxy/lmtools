@@ -291,6 +291,12 @@ const (
 // show displays a prompt, note reports a discarded turn, and consumed hears
 // of every line read, sent or not.
 func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), note func(format string, args ...interface{}), consumed func(), allowEmpty bool) (string, turnRead, error) {
+	return readTextTurn(ctx, input.readLineUnder, input.terminal, show, note, consumed, allowEmpty)
+}
+
+// readTextTurn is shared by normal prompts and tool approval input. The caller
+// owns any initial approval flush and the decision to submit the completed text.
+func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLine, error), terminal bool, show func(string), note func(string, ...interface{}), consumed func(), allowEmpty bool) (string, turnRead, error) {
 	var lines []string
 	// size is the length of the turn so far: its lines and the newlines
 	// between them.
@@ -304,7 +310,7 @@ func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), 
 		show(prompt)
 		// Room for a backslash that continues the turn and a carriage
 		// return, which are not part of the turn.
-		line, err := input.readLineUnder(ctx, maxTurnBytes+2)
+		line, err := read(ctx, maxTurnBytes+2)
 		if err != nil {
 			if errors.Is(context.Cause(ctx), errInterrupted) {
 				if lines != nil || discarding {
@@ -321,7 +327,7 @@ func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), 
 			return "", readEnd, nil
 		}
 		consumed()
-		if input.terminal && lines != nil && !discarding && !line.tooLong && strings.TrimSuffix(line.text, "\r") == "/ed" {
+		if terminal && lines != nil && !discarding && !line.tooLong && strings.TrimSuffix(line.text, "\r") == "/ed" {
 			return strings.Join(lines, "\n"), readEdit, nil
 		}
 
@@ -432,6 +438,10 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		diag:     diag,
 		terminal: input.terminal,
 		images:   opts.Images,
+	}
+	if approver, ok := env.approver.(*cliApprover); ok {
+		approver.history = &loop.history
+		approver.stop = signals.endProcess
 	}
 	if isTerminalFile(os.Stdout) {
 		env.stdout = screen.writer(os.Stdout, true)

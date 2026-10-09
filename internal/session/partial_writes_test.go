@@ -42,13 +42,13 @@ type rerunApprover struct {
 	log *eventLog
 }
 
-func (a rerunApprover) Approve(context.Context, core.UniversalCommandArgs) (bool, error) {
-	return true, nil
+func (a rerunApprover) Approve(context.Context, core.UniversalCommandArgs) (core.Approval, error) {
+	return core.Approval{Approved: true}, nil
 }
 
-func (a rerunApprover) ApproveRerun(_ context.Context, call core.ToolCall) (bool, error) {
+func (a rerunApprover) ApproveRerun(_ context.Context, call core.ToolCall) (core.Approval, error) {
 	a.log.add("question " + call.ID)
-	return false, nil
+	return core.Approval{}, nil
 }
 
 // The call an operator is asked about is shown on the tool UI, the surface
@@ -90,8 +90,8 @@ type failOutcomeWriteApprover struct {
 	entryDir string
 }
 
-func (a failOutcomeWriteApprover) Approve(context.Context, core.UniversalCommandArgs) (bool, error) {
-	return true, os.MkdirAll(filepath.Join(a.entryDir, journalOutcomeName), 0o700)
+func (a failOutcomeWriteApprover) Approve(context.Context, core.UniversalCommandArgs) (core.Approval, error) {
+	return core.Approval{Approved: true}, os.MkdirAll(filepath.Join(a.entryDir, journalOutcomeName), 0o700)
 }
 
 // An outcome the journal could not record does not stop the results from

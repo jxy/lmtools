@@ -21,18 +21,18 @@ type MockApprover struct {
 	approvalError error
 }
 
-func (m *MockApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) (bool, error) {
+func (m *MockApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) (core.Approval, error) {
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return core.Approval{}, ctx.Err()
 	default:
 	}
 
 	if m.approvalError != nil {
-		return false, m.approvalError
+		return core.Approval{}, m.approvalError
 	}
-	return m.shouldApprove, nil
+	return core.Approval{Approved: m.shouldApprove}, nil
 }
 
 // MockLogger implements the core.Logger interface for testing

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"lmtools/internal/core"
 	"lmtools/internal/limitio"
 	"os"
 	"os/exec"
@@ -110,6 +111,74 @@ func readEditorDraft(path string, maxBytes int) (string, error) {
 	return string(data), nil
 }
 
+// editInputDraft returns a reviewed draft without submitting it. The caller
+// owns cancellation and the hint that explains how to submit the draft.
+func editInputDraft(ctx context.Context, input *inputOwner, notifier core.Notifier, seed string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if input == nil || !input.terminal || input.term == nil {
+		return "", errors.New("editor requires terminal input")
+	}
+	if len(seed) > maxTurnBytes {
+		return "", fmt.Errorf("draft is longer than %d bytes", maxTurnBytes)
+	}
+	dir, err := os.MkdirTemp("", "lmc-draft-*")
+	if err != nil {
+		return "", fmt.Errorf("create editor draft: %w", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			notifier.Warnf("Remove editor draft: %v", err)
+		}
+	}()
+	path := filepath.Join(dir, "draft.txt")
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create editor draft: %w", err)
+	}
+	_, err = file.WriteString(seed)
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", fmt.Errorf("write editor draft: %w", err)
+	}
+	configured := os.Getenv("EDITOR")
+	cmd := editorCommand(configured, path)
+	err = input.runEditor(ctx, cmd, func(discarded bool) {
+		if discarded {
+			notifier.Infof("Discarded input queued before the editor opened.")
+		}
+		notifier.Infof("Opening editor; exit the editor to review the draft.")
+	})
+	notifier.Promptf("\n")
+	if err != nil {
+		return "", err
+	}
+	draft, err := readEditorDraft(path, maxTurnBytes)
+	if err != nil {
+		return "", fmt.Errorf("read editor draft: %w", err)
+	}
+	preview := draft
+	if len(preview) > maxEditorPreviewBytes {
+		end := maxEditorPreviewBytes
+		for !utf8.RuneStart(preview[end]) {
+			end--
+		}
+		preview = preview[:end]
+	}
+	notifier.Promptf("Draft (%d bytes): %q\n", len(draft), preview)
+	if preview != draft {
+		notifier.Infof("Draft preview truncated to %d bytes; /ed reopens the complete text.", len(preview))
+	}
+	if _, err := input.discardTerminalInput(); err != nil {
+		return "", fmt.Errorf("%w: clear input after draft review: %w", errEditorTerminal, err)
+	}
+	return draft, nil
+}
+
 func (l *replLoop) editDraft(argument string) {
 	if !l.terminal || l.input.term == nil {
 		l.env.notifier.Errorf("/ed requires terminal input.")
@@ -120,47 +189,14 @@ func (l *replLoop) editDraft(argument string) {
 		l.env.notifier.Errorf("Select editor draft; kept the existing draft: %v", err)
 		return
 	}
-	dir, err := os.MkdirTemp("", "lmc-draft-*")
-	if err != nil {
-		l.env.notifier.Errorf("Create editor draft: %v", err)
-		return
-	}
-	defer func() {
-		if err := os.RemoveAll(dir); err != nil {
-			l.env.notifier.Warnf("Remove editor draft: %v", err)
-		}
-	}()
-	path := filepath.Join(dir, "draft.txt")
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		l.env.notifier.Errorf("Create editor draft: %v", err)
-		return
-	}
-	_, err = file.WriteString(seed)
-	closeErr := file.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		l.env.notifier.Errorf("Write editor draft: %v", err)
-		return
-	}
 	ctx, end := l.signals.begin()
-	configured := os.Getenv("EDITOR")
-	cmd := editorCommand(configured, path)
-	err = l.input.runEditor(ctx, cmd, func(discarded bool) {
-		if discarded {
-			l.env.notifier.Infof("Discarded input queued before the editor opened.")
-		}
-		l.env.notifier.Infof("Opening editor; exit the editor to review the draft.")
-	})
+	draft, err := editInputDraft(ctx, l.input, l.env.notifier, seed)
 	end()
 	if err == nil && errors.Is(context.Cause(ctx), errInterrupted) {
 		// An interrupt after handback belongs to draft review, where the
 		// next prompt discards the draft instead of losing the interrupt.
 		l.signals.interrupt()
 	}
-	l.env.notifier.Promptf("\n")
 	if err != nil {
 		if errors.Is(err, errEditorTerminal) {
 			l.signals.endProcess(err)
@@ -176,28 +212,7 @@ func (l *replLoop) editDraft(argument string) {
 		}
 		return
 	}
-	draft, err := readEditorDraft(path, maxTurnBytes)
-	if err != nil {
-		l.env.notifier.Errorf("Read editor draft; kept the existing draft: %v", err)
-		return
-	}
 	l.draft = draft
-	preview := draft
-	if len(preview) > maxEditorPreviewBytes {
-		end := maxEditorPreviewBytes
-		for !utf8.RuneStart(preview[end]) {
-			end--
-		}
-		preview = preview[:end]
-	}
-	l.env.notifier.Promptf("Draft (%d bytes): %q\n", len(draft), preview)
-	if preview != draft {
-		l.env.notifier.Infof("Draft preview truncated to %d bytes; /ed reopens the complete text.", len(preview))
-	}
-	if _, err := l.input.discardTerminalInput(); err != nil {
-		l.signals.endProcess(fmt.Errorf("clear input after draft review: %w", err))
-		return
-	}
 	if strings.TrimSpace(draft) == "" && len(l.images) == 0 {
 		l.env.notifier.Infof("Draft is empty; type text or use /ed to revise.")
 	} else {

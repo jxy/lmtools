@@ -8,13 +8,10 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/limitio"
 	"os"
-	"strings"
 	"sync"
 )
 
-// maxAnswerBytes bounds the answer to a question. The longest answer that
-// approves is "yes"; a longer line is refused as a denial, and the rest of
-// it is read away, so it cannot answer a later question or become a prompt.
+// Simple confirmations remain bounded; tool answers use the normal input limit.
 const maxAnswerBytes = 64
 
 // inputLine is one line read from standard input.
@@ -79,7 +76,8 @@ func (b *lineBuilder) line(eof bool) inputLine {
 // appeared drops it first, and tells show whether a complete line was among
 // what it dropped.
 type answerSource interface {
-	answer(ctx context.Context, show func(discardedLine bool)) (inputLine, error)
+	answer(ctx context.Context, bound int, show func(discardedLine bool)) (inputLine, error)
+	readLineUnder(ctx context.Context, bound int) (inputLine, error)
 }
 
 // terminalInput is the owner's own open of the terminal on standard input.
@@ -169,7 +167,7 @@ func (o *inputOwner) discardTerminalInput() (bool, error) {
 // what the terminal holds, then shows the question, then reads, so nothing
 // typed before the question appeared can answer it: a line typed while the
 // model was generating, or a keystroke not yet ended by Enter.
-func (o *inputOwner) answer(ctx context.Context, show func(discardedLine bool)) (inputLine, error) {
+func (o *inputOwner) answer(ctx context.Context, bound int, show func(discardedLine bool)) (inputLine, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.term == nil {
@@ -180,7 +178,7 @@ func (o *inputOwner) answer(ctx context.Context, show func(discardedLine bool)) 
 		return inputLine{}, err
 	}
 	show(discarded)
-	return o.term.readLine(ctx, maxAnswerBytes)
+	return o.term.readLine(ctx, bound)
 }
 
 // answers returns where the approver reads answers: the owner's terminal,
@@ -292,29 +290,21 @@ func newStreamAnswers(input io.Reader) *streamAnswers {
 	return &streamAnswers{reader: bufio.NewReader(input)}
 }
 
-func (s *streamAnswers) answer(ctx context.Context, show func(discardedLine bool)) (inputLine, error) {
+func (s *streamAnswers) answer(ctx context.Context, bound int, show func(discardedLine bool)) (inputLine, error) {
 	show(false)
-	type readResult struct {
-		line string
-		err  error
-	}
-	results := make(chan readResult, 1)
+	return s.readLineUnder(ctx, bound)
+}
+
+func (s *streamAnswers) readLineUnder(ctx context.Context, bound int) (inputLine, error) {
+	results := make(chan lineResult, 1)
 	go func() {
-		line, err := s.reader.ReadString('\n')
-		results <- readResult{line: line, err: err}
+		line, err := readStreamLine(s.reader, bound)
+		results <- lineResult{line: line, err: err}
 	}()
 	select {
 	case <-ctx.Done():
 		return inputLine{}, ctx.Err()
 	case result := <-results:
-		switch {
-		case errors.Is(result.err, io.EOF):
-			// An answer and the end of input arrive together when the
-			// operator types y and then Ctrl-D.
-			return inputLine{text: result.line, eof: true}, nil
-		case result.err != nil:
-			return inputLine{}, result.err
-		}
-		return inputLine{text: strings.TrimSuffix(result.line, "\n")}, nil
+		return result.line, result.err
 	}
 }

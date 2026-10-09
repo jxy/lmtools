@@ -16,6 +16,8 @@ import (
 type cliApprover struct {
 	notifier core.Notifier
 	answers  answerSource
+	history  *replHistory
+	stop     context.CancelCauseFunc
 }
 
 // newOperatorToolSurface builds the operator-facing half of tool execution:
@@ -75,13 +77,15 @@ func newCLIApproverWithReader(notifier core.Notifier, input io.Reader) *cliAppro
 // input typed before the question that was discarded.
 type question struct {
 	prompt, eofNotice, cancelNotice, discardedNotice string
+	compose                                          bool
 }
 
 // toolQuestion is a question under a tool's review block, aligned with the
 // block's detail column.
 func toolQuestion(prompt, eofNotice, cancelNotice string) question {
 	return question{
-		prompt:          tools.DetailIndent + prompt,
+		compose:         true,
+		prompt:          tools.DetailIndent + prompt + toolApprovalChoices,
 		eofNotice:       "\n" + tools.DetailIndent + eofNotice + "\n",
 		cancelNotice:    "\n" + tools.DetailIndent + cancelNotice + "\n",
 		discardedNotice: tools.DetailIndent + discardedInputNotice + "\n",
@@ -92,12 +96,14 @@ func toolQuestion(prompt, eofNotice, cancelNotice string) question {
 // question appeared and dropped, so it could not answer the question.
 const discardedInputNotice = "Discarded input typed before this question."
 
-func (a *cliApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) (bool, error) {
+const toolApprovalChoices = "[y/N or reason; /ed to edit]: "
+
+func (a *cliApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) (core.Approval, error) {
 	// The tool UI renders the command through this same notifier immediately
 	// above this prompt — newOperatorToolSurface hands both halves one stream —
 	// so the question and its outcomes line up under that block's detail column.
 	return a.ask(ctx, toolQuestion(
-		"Allow execution? [y/N]: ",
+		"Allow execution? ",
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
 	))
@@ -106,9 +112,9 @@ func (a *cliApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) 
 // ApproveImage asks about the file a view_image call read. The review line
 // above it showed the path the model asked for; the question names the type
 // and size of what was actually read, which is what will be sent.
-func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, image core.ImageBlock) (bool, error) {
+func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, image core.ImageBlock) (core.Approval, error) {
 	return a.ask(ctx, toolQuestion(
-		fmt.Sprintf("Send %s to the model? [y/N]: ", core.DescribeImageBlock(image)),
+		fmt.Sprintf("Send %s to the model? ", core.DescribeImageBlock(image)),
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
 	))
@@ -117,9 +123,9 @@ func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, im
 // ApproveMCP asks about a call to an MCP tool. The review line above it
 // showed the server, the tool, and the arguments; the question names the
 // server and tool the way a rule would.
-func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (bool, error) {
+func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (core.Approval, error) {
 	return a.ask(ctx, toolQuestion(
-		fmt.Sprintf("Call %s/%s? [y/N]: ", call.Server, call.Tool),
+		fmt.Sprintf("Call %s/%s? ", call.Server, call.Tool),
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
 	))
@@ -129,65 +135,103 @@ func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (bool, 
 // its outcome. The notice above it named the call and its arguments; running
 // it again may repeat whatever it already did, which is why the answer
 // defaults to no and no policy can give it.
-func (a *cliApprover) ApproveRerun(ctx context.Context, call core.ToolCall) (bool, error) {
+func (a *cliApprover) ApproveRerun(ctx context.Context, call core.ToolCall) (core.Approval, error) {
 	return a.ask(ctx, toolQuestion(
-		fmt.Sprintf("Run %s again? It may already have run. [y/N]: ", call.Name),
+		fmt.Sprintf("Run %s again? It may already have run. ", call.Name),
 		"No interactive input available; not running it again.",
 		"Rerun prompt cancelled.",
 	))
 }
 
 func (a *cliApprover) ApproveToolRoundLimitReset(ctx context.Context, maxRounds int) (bool, error) {
-	return a.ask(ctx, question{
+	approval, err := a.ask(ctx, question{
 		prompt:          fmt.Sprintf("\nTool-call round limit reached (%d). Reset it and continue? [y/N]: ", maxRounds),
 		eofNotice:       "\nNo interactive input available; keeping the tool-call round limit.\n",
 		cancelNotice:    "\nTool-call round prompt cancelled.\n",
 		discardedNotice: "\n" + discardedInputNotice,
 	})
+	return approval.Approved, err
 }
 
-// ask holds the yes/no conversation every question shares: refuse a
+// ask holds the approval conversation every question shares: refuse a
 // question that is already cancelled, show it, and read the answer. The
 // answer source shows the question once it has dropped what was typed
 // before, and says whether that held a complete line, which the notice
 // reports above the question.
-func (a *cliApprover) ask(ctx context.Context, q question) (bool, error) {
+func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return core.Approval{}, err
 	}
-	got, err := a.answers.answer(ctx, func(discardedLine bool) {
+	bound := maxAnswerBytes
+	readBound := bound
+	if q.compose {
+		bound = maxTurnBytes
+		readBound = bound + 2 // Continuation marker and carriage return.
+	}
+	got, err := a.answers.answer(ctx, readBound, func(discardedLine bool) {
 		if discardedLine {
 			a.notifier.Promptf("%s", q.discardedNotice)
 		}
 		a.notifier.Promptf("%s", q.prompt)
 	})
+	if err == nil && q.compose && !got.eof {
+		got, err = a.composeAnswer(ctx, got)
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			a.notifier.Promptf("%s", q.cancelNotice)
-			return false, ctxErr
+			return core.Approval{}, ctxErr
 		}
-		return false, errors.WrapError("read response", err)
+		return core.Approval{}, errors.WrapError("read response", err)
 	}
 	if got.eof {
+		if q.compose {
+			text, continues := continuationMarker(strings.TrimSuffix(got.text, "\r"))
+			command, _ := splitREPLCommand(text)
+			if continues || command == "/ed" {
+				a.notifier.Infof("Unsubmitted approval draft discarded.")
+				got.text = ""
+			} else {
+				got.text = text
+				if strings.HasPrefix(text, "//") {
+					got.text = text[1:]
+				}
+			}
+		}
 		// An answer and the end of input arrive together when the operator
 		// types y and then Ctrl-D; reading only the end would turn their
 		// approval into a denial. The absence of an answer is an empty line,
 		// which keeps the fail-safe denial the [y/N] default promises.
 		if got.text == "" && !got.tooLong {
 			a.notifier.Promptf("%s", q.eofNotice)
-			return false, nil
+			return core.Approval{}, nil
 		}
 		// Nothing terminated the answer, so nothing terminated the echo of
 		// it either; close the prompt line the way a typed newline would.
 		a.notifier.Promptf("\n")
 	}
-	// An answer past the bound is refused, whatever it begins with.
-	return !got.tooLong && isAffirmativeAnswer(got.text), nil
+	if got.tooLong || len(got.text) > bound {
+		a.notifier.Warnf("Approval response is too long; denying without a reason.")
+		return core.Approval{}, nil
+	}
+	return parseApprovalAnswer(got.text), nil
 }
 
-// isAffirmativeAnswer reads one typed answer. Only an explicit yes approves,
-// which is what makes the advertised [y/N] default the answer to everything
-// else.
+func parseApprovalAnswer(line string) core.Approval {
+	text := strings.TrimSpace(line)
+	if isAffirmativeAnswer(text) {
+		return core.Approval{Approved: true}
+	}
+	if text == "" || strings.EqualFold(text, "n") || strings.EqualFold(text, "no") {
+		return core.Approval{}
+	}
+	return core.Approval{Reason: text}
+}
+
+// Only a complete y or yes approves; every other reply denies permission.
 func isAffirmativeAnswer(line string) bool {
 	switch strings.TrimSpace(strings.ToLower(line)) {
 	case "y", "yes":

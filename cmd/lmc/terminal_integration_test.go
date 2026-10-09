@@ -137,7 +137,7 @@ func TestTerminalSingleRunDropsInputTypedDuringGeneration(t *testing.T) {
 			}
 			typeEchoed(t, pty, screen, "yes\n")
 			close(provider.release)
-			for _, want := range []string{discardedInputNotice, "Allow execution? [y/N]: "} {
+			for _, want := range []string{discardedInputNotice, "Allow execution? [y/N or reason; /ed to edit]: "} {
 				if err := screen.Expect(want, 20*time.Second); err != nil {
 					t.Fatal(err)
 				}

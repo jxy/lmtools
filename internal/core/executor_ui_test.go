@@ -51,12 +51,12 @@ type recordingLifecycleApprover struct {
 	err      error
 }
 
-func (a *recordingLifecycleApprover) Approve(_ context.Context, args UniversalCommandArgs) (bool, error) {
+func (a *recordingLifecycleApprover) Approve(_ context.Context, args UniversalCommandArgs) (Approval, error) {
 	a.recorder.add("approve:" + args.Command[len(args.Command)-1])
 	if a.err != nil {
-		return false, a.err
+		return Approval{}, a.err
 	}
-	return a.approve, nil
+	return Approval{Approved: a.approve}, nil
 }
 
 // The batch is built so that BeforeRun's three counts are three different

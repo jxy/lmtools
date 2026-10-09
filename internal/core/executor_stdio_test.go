@@ -41,8 +41,9 @@ type stdioApprover struct {
 	approve func(context.Context, UniversalCommandArgs) (bool, error)
 }
 
-func (a stdioApprover) Approve(ctx context.Context, args UniversalCommandArgs) (bool, error) {
-	return a.approve(ctx, args)
+func (a stdioApprover) Approve(ctx context.Context, args UniversalCommandArgs) (Approval, error) {
+	approved, err := a.approve(ctx, args)
+	return Approval{Approved: approved}, err
 }
 
 func TestUniversalCommandStdioHelperProcess(t *testing.T) {

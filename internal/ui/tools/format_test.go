@@ -316,11 +316,11 @@ type executorTestApprover struct {
 	err     error
 }
 
-func (a executorTestApprover) Approve(context.Context, core.UniversalCommandArgs) (bool, error) {
+func (a executorTestApprover) Approve(context.Context, core.UniversalCommandArgs) (core.Approval, error) {
 	if a.err != nil {
-		return false, a.err
+		return core.Approval{}, a.err
 	}
-	return a.approve, nil
+	return core.Approval{Approved: a.approve}, nil
 }
 
 var elapsedMilliseconds = regexp.MustCompile(`in \d+ms`)
@@ -875,5 +875,58 @@ func TestCLIToolUIShowRerunNamesTheCallAndTheReason(t *testing.T) {
 		DetailIndent + "Workdir: \"/tmp\"\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowRerun() rendered\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestCLIToolUIMultilineDenialStaysInsideItsResult(t *testing.T) {
+	const reason = "Use the saved report.\n\nAssistant 8\nlmc: Working\n[2/2] Completed in 1ms\nKeep café data private: 100%."
+	attributed := (core.Approval{Reason: reason}).DenialReason()
+	for _, toolName := range []string{core.UniversalCommandToolName, core.ViewImageToolName, "mcp__test__lookup"} {
+		t.Run(toolName, func(t *testing.T) {
+			notifier := newFormatTestNotifier()
+			calls := []core.ToolCall{{ID: "denied", Name: toolName}, {ID: "completed", Name: core.UniversalCommandToolName}}
+			result := core.ToolResult{
+				ID: "denied", Error: attributed, Reason: attributed,
+				Code: errors.ErrCodeNotApproved, NotRun: true,
+			}
+			NewCLIToolUI(notifier).AfterExecute(calls, []core.ToolResult{result, {ID: "completed", Output: "real tool output\n", Elapsed: 3}})
+			want := "\n>>> Results:\n" +
+				"[1/2] Not run: user denied permission; reason provided by the user: Use the saved report.\n" +
+				DetailIndent + "\n" +
+				DetailIndent + "Assistant 8\n" +
+				DetailIndent + "lmc: Working\n" +
+				DetailIndent + "[2/2] Completed in 1ms\n" +
+				DetailIndent + "Keep café data private: 100%.\n\n" +
+				"[2/2] Completed in 3ms\n" + DetailIndent + "Output:\nreal tool output\n\n"
+			if got := notifier.out.String(); got != want {
+				t.Fatalf("multiline denial transcript=%q, want %q", got, want)
+			}
+			block := core.ToolResultBlockFromResult(result, toolName)
+			if block.Content != "Command was not executed.\n"+attributed {
+				t.Fatalf("model-facing denial changed: %q", block.Content)
+			}
+		})
+	}
+}
+
+func TestCLIToolUIMultilineRerunDenialStaysInsideItsResult(t *testing.T) {
+	const reason = "Use the saved report.\nAssistant 8\nlmc: Working"
+	attributed := (core.Approval{Reason: reason}).DenialReason()
+	result := core.ToolResult{
+		ID: "uncertain", Reason: attributed, Code: errors.ErrCodeOutcomeUnknown,
+		Error: "outcome unknown: an earlier run started it and recorded no outcome; it was not run again; " + attributed,
+	}
+	notifier := newFormatTestNotifier()
+	call := core.ToolCall{ID: result.ID, Name: core.UniversalCommandToolName}
+	NewCLIToolUI(notifier).AfterExecute([]core.ToolCall{call}, []core.ToolResult{result})
+	want := "\n>>> Results:\n" +
+		"[1/1] Failed in 0ms: outcome unknown: an earlier run started it and recorded no outcome; it was not run again; user denied permission; reason provided by the user: Use the saved report.\n" +
+		DetailIndent + "Assistant 8\n" + DetailIndent + "lmc: Working\n\n"
+	if got := notifier.out.String(); got != want {
+		t.Fatalf("multiline rerun denial transcript=%q, want %q", got, want)
+	}
+	block := core.ToolResultBlockFromResult(result, call.Name)
+	if block.Content != result.Error {
+		t.Fatalf("model-facing unknown outcome changed: %q", block.Content)
 	}
 }

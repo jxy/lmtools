@@ -184,16 +184,12 @@ func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCa
 	if len(details) > 0 {
 		status += " (" + strings.Join(details, "; ") + ")"
 	}
-	notifier.Promptf("%s %s\n", prefix, status)
+	writeToolLines(notifier, status, prefix+" ", DetailIndent)
 	for _, hint := range hints {
-		lines := strings.Split(hint, "\n")
-		notifier.Promptf("%sHint: %s\n", DetailIndent, lines[0])
 		// Continuation lines are indented by len("Hint: ") so a multi-line hint
 		// reads as one hint under the detail column rather than as stray
 		// unindented output.
-		for _, line := range lines[1:] {
-			notifier.Promptf("%s      %s\n", DetailIndent, line)
-		}
+		writeToolLines(notifier, hint, DetailIndent+"Hint: ", DetailIndent+"      ")
 	}
 
 	if result.Output == "" {
@@ -205,6 +201,21 @@ func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCa
 	}
 	notifier.Promptf("%s%s:\n", DetailIndent, label)
 	writeToolOutput(notifier, result.Output)
+}
+
+// writeToolLines keeps every continuation under its tool result, including
+// blank lines and text that happens to look like another speaker's label.
+func writeToolLines(notifier core.Notifier, text, firstPrefix, continuationPrefix string) {
+	prefix := firstPrefix
+	for {
+		line, rest, more := strings.Cut(text, "\n")
+		notifier.Promptf("%s%s\n", prefix, line)
+		if !more {
+			return
+		}
+		text = rest
+		prefix = continuationPrefix
+	}
 }
 
 // commandCallArgs decodes a universal_command call's arguments, and returns nil

@@ -81,7 +81,8 @@ func (n *questionNotifier) Warnf(format string, args ...interface{})  { n.record
 func (n *questionNotifier) Errorf(format string, args ...interface{}) { n.record(format, args...) }
 
 func (n *questionNotifier) Promptf(format string, args ...interface{}) {
-	if strings.HasSuffix(n.record(format, args...), "[y/N]: ") {
+	message := n.record(format, args...)
+	if strings.HasSuffix(message, "[y/N]: ") || strings.HasSuffix(message, toolApprovalChoices) {
 		n.shown <- struct{}{}
 	}
 }
@@ -103,6 +104,7 @@ func (n *questionNotifier) said(want string) bool {
 
 type approval struct {
 	approved bool
+	reason   string
 	err      error
 }
 
@@ -110,11 +112,13 @@ type approval struct {
 // returns once the question has appeared, with a channel for the outcome.
 func askApproval(t *testing.T, ctx context.Context, owner *inputOwner, notifier *questionNotifier) <-chan approval {
 	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
 	approver := &cliApprover{notifier: notifier, answers: owner}
 	outcome := make(chan approval, 1)
 	go func() {
 		approved, err := approver.Approve(ctx, core.UniversalCommandArgs{})
-		outcome <- approval{approved: approved, err: err}
+		outcome <- approval{approved: approved.Approved, reason: approved.Reason, err: err}
 	}()
 	select {
 	case <-notifier.shown:
@@ -215,25 +219,37 @@ func TestTerminalAnswerSplitAcrossReads(t *testing.T) {
 	}
 }
 
+func TestTerminalApprovalPreservesFreshDenialReason(t *testing.T) {
+	owner, pty, screen := terminalOwner(t)
+	typeEchoed(t, pty, screen, "This queued text must not become the denial reason.\n")
+	notifier := newQuestionNotifier()
+	outcome := askApproval(t, context.Background(), owner, notifier)
+	reason := "Read-only review: inspect the diff without changing files."
+	typeKeys(t, pty, reason+"\n")
+	result := awaitApproval(t, outcome)
+	if result.err != nil || result.approved || result.reason != reason {
+		t.Fatalf("approval=%+v, want fresh denial reason %q", result, reason)
+	}
+	if !notifier.said(discardedInputNotice) {
+		t.Fatal("queued input was not reported as discarded")
+	}
+}
+
 // An answer past the bound is refused, even one that is yes once its spaces
 // are trimmed, and the rest of its line is read away, so a prompt after it
 // reads only the next line.
 func TestTerminalAnswerPastTheBound(t *testing.T) {
-	defer func(size int) { terminalReadSize = size }(terminalReadSize)
-	terminalReadSize = 16
+	defer func(size int) { maxTurnBytes = size }(maxTurnBytes)
+	maxTurnBytes = 128
 	owner, pty, _ := terminalOwner(t)
-	outcome := askApproval(t, context.Background(), owner, newQuestionNotifier())
-	typeKeys(t, pty, "yes"+strings.Repeat(" ", 4*maxAnswerBytes)+"\n")
-	if result := awaitApproval(t, outcome); result.err != nil || result.approved {
-		t.Fatalf("Approve() = %v, %v; want a denial", result.approved, result.err)
+	notifier := newQuestionNotifier()
+	outcome := askApproval(t, context.Background(), owner, notifier)
+	typeKeys(t, pty, "yes"+strings.Repeat(" ", maxTurnBytes)+"\nn\n")
+	if result := awaitApproval(t, outcome); result.err != nil || result.approved || result.reason != "" {
+		t.Fatalf("Approve() = %+v; want oversized answer discarded, then denial", result)
 	}
-
-	typeKeys(t, pty, "next\n")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	line, err := owner.readLine(ctx)
-	if err != nil || line.text != "next" || line.eof || line.tooLong {
-		t.Fatalf("readLine() = %+v, %v; want the next line", line, err)
+	if !notifier.said("Discarded a turn longer than") {
+		t.Fatal("oversized input was not explained")
 	}
 }
 

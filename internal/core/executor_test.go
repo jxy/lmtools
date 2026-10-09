@@ -606,7 +606,7 @@ type gateApprover struct {
 	mu    sync.Mutex
 }
 
-func (a *gateApprover) Approve(ctx context.Context, args UniversalCommandArgs) (bool, error) {
+func (a *gateApprover) Approve(ctx context.Context, args UniversalCommandArgs) (Approval, error) {
 	a.mu.Lock()
 	call := args.Command[3]
 	a.calls = append(a.calls, call)
@@ -617,15 +617,15 @@ func (a *gateApprover) Approve(ctx context.Context, args UniversalCommandArgs) (
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return Approval{}, ctx.Err()
 		case <-timer.C:
 		}
 		if err := os.WriteFile(a.gate, []byte("approved"), constants.FilePerm); err != nil {
-			return false, err
+			return Approval{}, err
 		}
 	}
 
-	return true, nil
+	return Approval{Approved: true}, nil
 }
 
 func TestExecutorParallelApprovesSequentiallyBeforeLaunch(t *testing.T) {

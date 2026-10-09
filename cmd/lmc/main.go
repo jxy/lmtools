@@ -277,7 +277,15 @@ func run(notifier core.Notifier) error {
 	}
 
 	env := newTurnEnv(&cfg, notifier, logDir, input)
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	if approver, ok := env.approver.(*cliApprover); ok {
+		approver.stop = stop
+	}
 	_, err = runTurn(ctx, env, opts, turnInput{text: inputStr, isRegeneration: isRegeneration})
+	if cause := context.Cause(ctx); stdErrors.Is(cause, errEditorTerminal) {
+		return cause
+	}
 	return err
 }
 
