@@ -93,7 +93,7 @@ func TestMCPOutcomesRenderThroughTheCLI(t *testing.T) {
 		"[1/3] MCP tool: github/list_issues\n      Arguments: {\"repo\":\"a/b\"}\n\n" +
 		"[2/3] MCP tool: github/delete_repo\n      Arguments: {}\n\n" +
 		"[3/3] MCP tool: github/create_issue\n      Arguments: {\"title\":\"x\"}\n" +
-		"\n>>> Running 1 of 3 commands...\n" +
+		"\n>>> Running 1 of 3 tools...\n" +
 		"\n>>> Results:\n" +
 		"[1/3] Completed in Nms (1 image(s) attached)\n      Output:\n#1 open\n\n" +
 		"[2/3] Not run: blacklisted\n\n" +

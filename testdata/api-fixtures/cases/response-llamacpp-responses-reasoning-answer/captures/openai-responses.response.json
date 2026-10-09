@@ -1,0 +1,43 @@
+{
+  "id": "resp_fixture",
+  "object": "response",
+  "created_at": 1791569413,
+  "status": "completed",
+  "model": "gemma-4-26b-a4b",
+  "output": [
+    {
+      "id": "rs_fixture_0",
+      "summary": [],
+      "type": "reasoning",
+      "content": [
+        {
+          "text": "The user wants to know the result of the multiplication $19 \\times 23$.\n    The instruction specifies to reply with *only* the integer.\n\n    Method 1: Standard multiplication\n    $19 \\times 23 = (20 - 1) \\times 23$\n    $= 20 \\times 23 - 1 \\times 23$\n    $= 460 - 23$\n    $= 437$\n\n    Method 2: Algebraic identity $(a-b)(a+b) = a^2 - b^2$\n    $19 = 21 - 2$\n    $23 = 21 + 2$\n    $19 \\times 23 = (21 - 2)(21 + 2) = 21^2 - 2^2$\n    $21^2 = 441$\n    $2^2 = 4$\n    $441 - 4 = 437$\n\n    Method 3: $19 \\times 23 = 19 \\times (20 + 3)$\n    $= 19 \\times 20 + 19 \\times 3$\n    $= 380 + 57$\n    $= 437$\n\n    Result: 437.\n    Constraint check: Reply with *only* the integer.\n\n    Integer: 437.",
+          "type": "reasoning_text"
+        }
+      ],
+      "encrypted_content": ""
+    },
+    {
+      "type": "message",
+      "status": "completed",
+      "id": "msg_fixture_1",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "437"
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "usage": {
+    "input_tokens": 38,
+    "output_tokens": 337,
+    "total_tokens": 375,
+    "input_tokens_details": {
+      "cached_tokens": 33
+    }
+  }
+}

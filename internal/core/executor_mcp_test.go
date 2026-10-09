@@ -242,7 +242,7 @@ func TestMCPResultMapping(t *testing.T) {
 			name:       "image on the legacy Argo wire becomes a note",
 			cfg:        RequestOptions{ArgoLegacy: true},
 			result:     mcp.CallToolResult{Content: []mcp.Content{{Type: "image", MimeType: "image/png", Data: png}}},
-			wantOutput: "[image omitted: image/png, 12 bytes; view_image is not available with -argo-legacy]",
+			wantOutput: "[image omitted: image/png, " + FormatByteCount(len(pngBytes)) + "; view_image is not available with -argo-legacy]",
 		},
 		{
 			name:       "bytes that are not an image become a note",
@@ -267,7 +267,7 @@ func TestMCPResultMapping(t *testing.T) {
 				{Type: "resource", Resource: &mcp.ResourceContents{URI: "file:///c.bin", MimeType: "application/octet-stream", Blob: png}},
 				{Type: "resource"},
 			}},
-			wantOutput: "[resource: file:///a.txt]\nhello\n[resource: file:///b.jpg attached as an image]\n[resource omitted: file:///c.bin, application/octet-stream, 12 bytes of binary data]\n[resource omitted: no contents]",
+			wantOutput: "[resource: file:///a.txt]\nhello\n[resource: file:///b.jpg attached as an image]\n[resource omitted: file:///c.bin, application/octet-stream, " + FormatByteCount(len(pngBytes)) + " of binary data]\n[resource omitted: no contents]",
 			wantImages: []ImageBlock{{URL: ImageDataURL("image/jpeg", mcpJPEGBytes), Name: "file:///b.jpg"}},
 		},
 		{

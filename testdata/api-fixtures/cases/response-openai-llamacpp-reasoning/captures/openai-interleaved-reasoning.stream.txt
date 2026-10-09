@@ -1,0 +1,7 @@
+data: {"choices":[{"index":0,"delta":{"reasoning_content":"First reasoning."}},{"index":1,"delta":{"reasoning_content":"Second reasoning."}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"First answer."},"finish_reason":"stop"},{"index":1,"delta":{"reasoning_content":" More."}}]}
+
+data: {"choices":[{"index":1,"delta":{"content":"Second answer."},"finish_reason":"stop"}]}
+
+data: [DONE]

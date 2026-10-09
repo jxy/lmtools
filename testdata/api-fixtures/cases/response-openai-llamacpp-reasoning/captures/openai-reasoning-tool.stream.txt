@@ -1,0 +1,7 @@
+data: {"choices":[{"index":0,"delta":{"reasoning_content":"Use the tool."}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_fixture","type":"function","function":{"name":"inspect","arguments":"{\"value\":"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"9007199254740993}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]

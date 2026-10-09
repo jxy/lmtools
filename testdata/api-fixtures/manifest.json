@@ -355,6 +355,34 @@
       "kinds": [
         "stream"
       ]
+    },
+    {
+      "id": "response-openai-llamacpp-reasoning",
+      "description": "llama.cpp Chat Completions readable reasoning kept separately from the answer",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-openai-llamacpp-length",
+      "description": "llama.cpp Chat Completions token limit stops inside readable reasoning",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-llamacpp-responses-reasoning-tool",
+      "description": "llama.cpp Responses reasoning followed by one image tool call without output indices",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
+      "id": "response-llamacpp-responses-reasoning-answer",
+      "description": "llama.cpp Responses readable reasoning and answer without output indices",
+      "kinds": [
+        "response"
+      ]
     }
   ]
 }

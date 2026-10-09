@@ -1,0 +1,8 @@
+{
+  "id": "response-llamacpp-responses-reasoning-tool",
+  "description": "llama.cpp Responses reasoning followed by one image tool call without output indices",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai-responses"
+}

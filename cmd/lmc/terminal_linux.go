@@ -10,7 +10,10 @@ import (
 	"syscall"
 )
 
-const terminalReadTermios = syscall.TCGETS
+const (
+	terminalReadTermios  = syscall.TCGETS
+	terminalWriteTermios = syscall.TCSETS
+)
 
 // terminalPendingRequest counts the bytes a terminal holds for reading;
 // in canonical mode, the bytes of complete lines alone.

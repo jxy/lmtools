@@ -1,0 +1,2 @@
+# SSE captures retain the blank line that terminates the final event.
+testdata/api-fixtures/cases/**/captures/*.stream.txt whitespace=-blank-at-eof

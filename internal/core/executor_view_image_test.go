@@ -186,7 +186,7 @@ func TestViewImageRejectsFilesItCannotSend(t *testing.T) {
 		{name: "directory", path: dir, want: "not a regular file"},
 		{name: "not an image", path: writeTestImage(t, "shot.bmp", bmpBytes), want: "content is not " + SupportedImageMediaTypesText},
 		{name: "empty", path: empty, want: "file is empty"},
-		{name: "over the cap", path: valid, maxBytes: len(pngBytes) - 1, want: "larger than the 11 bytes limit; resize or compress the image with a command"},
+		{name: "over the cap", path: valid, maxBytes: len(pngBytes) - 1, want: "larger than the " + FormatByteCount(len(pngBytes)-1) + " limit; resize or compress the image with a command"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

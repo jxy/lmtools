@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package mcp
+package processwait
 
 import "syscall"
 

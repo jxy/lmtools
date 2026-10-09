@@ -569,8 +569,12 @@ func TestOpenAIResponsesStreamState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseLine(item done) error = %v", err)
 	}
-	if done || len(calls) != 1 {
-		t.Fatalf("item done calls = %+v done = %v", calls, done)
+	if done || len(calls) != 0 {
+		t.Fatalf("item done calls = %+v done = %v, want no early calls", calls, done)
+	}
+	_, calls, done, err = state.ParseLine(`data: {"type":"response.completed"}`)
+	if err != nil || !done || len(calls) != 1 {
+		t.Fatalf("completed calls = %+v done = %v error = %v", calls, done, err)
 	}
 	if got := string(calls[0].Args); got != `{"city":"Chicago"}` {
 		t.Fatalf("stream args = %s", got)
@@ -636,7 +640,7 @@ func TestOpenAIResponsesStreamStateTopLevelErrorEventIsFatal(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesStreamStateIncompleteFinalizesBufferedToolCall(t *testing.T) {
+func TestOpenAIResponsesStreamStateIncompleteDoesNotFinalizeBufferedToolCall(t *testing.T) {
 	state := NewOpenAIResponsesStreamState()
 
 	lines := []string{
@@ -657,14 +661,11 @@ func TestOpenAIResponsesStreamStateIncompleteFinalizesBufferedToolCall(t *testin
 	if !done {
 		t.Fatal("ParseLine(response.incomplete) done = false, want true")
 	}
-	if len(calls) != 1 {
-		t.Fatalf("tool calls = %+v, want one finalized call", calls)
+	if len(calls) != 0 {
+		t.Fatalf("tool calls = %+v, want no incomplete calls", calls)
 	}
-	if calls[0].ID != "call_1" || calls[0].Name != "lookup" {
-		t.Fatalf("tool call = %+v, want call_1 lookup", calls[0])
-	}
-	if got := string(calls[0].Args); got != `{"city":"Chicago"}` {
-		t.Fatalf("tool call args = %s, want Chicago JSON", got)
+	if got := state.IncompleteReason(); got != "max_output_tokens" {
+		t.Fatalf("IncompleteReason() = %q, want max_output_tokens", got)
 	}
 }
 

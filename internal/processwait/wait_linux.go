@@ -1,4 +1,4 @@
-package mcp
+package processwait
 
 import (
 	"runtime"
@@ -7,13 +7,10 @@ import (
 	"unsafe"
 )
 
-// waitsUnreaped reports whether waitUnreaped works on this platform.
-const waitsUnreaped = true
-
-// waitUnreaped blocks until the child pid has exited and returns its wait
+// WaitUnreaped blocks until the child pid has exited and returns its wait
 // status, leaving it unreaped: waitid with WNOWAIT, the wait the os package
 // makes before it reaps.
-func waitUnreaped(pid int) (syscall.WaitStatus, error) {
+func WaitUnreaped(pid int) (syscall.WaitStatus, error) {
 	const pPID = 1
 	// siginfo_t is 128 bytes: si_signo, si_errno, and si_code, which MIPS
 	// puts before si_errno, and then for a child, after padding to eight

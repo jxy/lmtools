@@ -1,0 +1,8 @@
+{
+  "id": "response-llamacpp-responses-reasoning-answer",
+  "description": "llama.cpp Responses readable reasoning and answer without output indices",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai-responses"
+}

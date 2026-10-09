@@ -2,19 +2,19 @@ package core
 
 import (
 	"encoding/base64"
+	"lmtools/internal/imagetest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// Minimal byte prefixes that net/http's content sniffer classifies as each
-// image type. LoadImageFile trusts the sniffer, never the file name.
+// Complete images exercise attachment loaders; sniff tests also cover prefixes.
 var (
-	pngBytes  = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
-	jpegBytes = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0}
-	gifBytes  = []byte("GIF89a\x00\x00")
-	webpBytes = []byte("RIFF\x00\x00\x00\x00WEBPVP8 ")
+	pngBytes  = imagetest.PNG
+	jpegBytes = imagetest.JPEG
+	gifBytes  = imagetest.GIF
+	webpBytes = imagetest.WebP
 	bmpBytes  = []byte("BM\x00\x00\x00\x00\x00\x00")
 )
 
@@ -181,8 +181,8 @@ func TestDescribeImageBlock(t *testing.T) {
 		block ImageBlock
 		want  string
 	}{
-		{name: "named data URL", block: ImageBlock{URL: data, Name: "shot.png"}, want: "shot.png (image/png, 12 bytes)"},
-		{name: "anonymous data URL", block: ImageBlock{URL: data}, want: "image/png, 12 bytes"},
+		{name: "named data URL", block: ImageBlock{URL: data, Name: "shot.png"}, want: "shot.png (image/png, " + FormatByteCount(len(pngBytes)) + ")"},
+		{name: "anonymous data URL", block: ImageBlock{URL: data}, want: "image/png, " + FormatByteCount(len(pngBytes))},
 		{name: "remote URL", block: ImageBlock{URL: "https://example.com/a.png"}, want: "https://example.com/a.png"},
 		{name: "named remote URL", block: ImageBlock{URL: "https://example.com/a.png", Name: "a.png"}, want: "a.png (https://example.com/a.png)"},
 	}
@@ -236,5 +236,87 @@ func TestNewUserMessageMatchesNewTextMessageWithoutImages(t *testing.T) {
 	want := NewTextMessage(string(RoleUser), "hello")
 	if got.Role != want.Role || len(got.Blocks) != 1 || got.Blocks[0] != want.Blocks[0] {
 		t.Fatalf("NewUserMessage() = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadImageFilePreservesCompleteStaticAndAnimatedImages(t *testing.T) {
+	for _, fixture := range []struct {
+		name      string
+		data      []byte
+		mediaType string
+	}{
+		{"static.png", imagetest.PNG, "image/png"},
+		{"static.jpg", imagetest.JPEG, "image/jpeg"},
+		{"static.gif", imagetest.GIF, "image/gif"},
+		{"static.webp", imagetest.WebP, "image/webp"},
+		{"lossless.webp", imagetest.LosslessWebP, "image/webp"},
+		{"alpha.webp", imagetest.AlphaWebP, "image/webp"},
+		{"animated.gif", imagetest.AnimatedGIF, "image/gif"},
+		{"animated.webp", imagetest.AnimatedWebP, "image/webp"},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			for _, trailing := range []bool{false, true} {
+				data := append([]byte(nil), fixture.data...)
+				if trailing {
+					data = append(data, []byte("trailing metadata")...)
+				}
+				path := writeTestImage(t, fixture.name, data)
+				block, err := LoadImageFile(path, len(data))
+				if err != nil {
+					t.Fatalf("LoadImageFile() error = %v", err)
+				}
+				if block.URL != ImageDataURL(fixture.mediaType, data) {
+					t.Fatal("image bytes changed during validation")
+				}
+			}
+		})
+	}
+}
+
+func TestLoadImageFileRejectsTruncatedContainers(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		data []byte
+	}{
+		{"audited.png", imagetest.TruncatedPNG},
+		{"short.png", imagetest.PNG[:len(imagetest.PNG)-1]},
+		{"short.jpg", imagetest.JPEG[:len(imagetest.JPEG)-2]},
+		{"short.gif", imagetest.GIF[:len(imagetest.GIF)-1]},
+		{"short.webp", imagetest.WebP[:len(imagetest.WebP)-1]},
+		{"animation.gif", imagetest.AnimatedGIF[:len(imagetest.AnimatedGIF)-1]},
+		{"animation.webp", imagetest.AnimatedWebP[:len(imagetest.AnimatedWebP)-1]},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			path := writeTestImage(t, fixture.name, fixture.data)
+			_, err := LoadImageFile(path, 0)
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "invalid image/") {
+				t.Fatalf("error=%v, want filename-specific invalid image error", err)
+			}
+		})
+	}
+}
+
+func TestLoadImageFileAcceptsOrdinarySymlinks(t *testing.T) {
+	original := writeTestImage(t, "original.png", imagetest.PNG)
+	link := filepath.Join(t.TempDir(), "link.png")
+	if err := os.Symlink(original, link); err != nil {
+		t.Fatal(err)
+	}
+	block, err := LoadImageFile(link, 0)
+	if err != nil || block.Name != "link.png" || block.URL != ImageDataURL("image/png", imagetest.PNG) {
+		t.Fatalf("symlink block=%#v error=%v", block, err)
+	}
+}
+
+func TestDetectImageMediaTypeAcceptsPrefixesWithoutValidating(t *testing.T) {
+	for _, prefix := range [][]byte{
+		{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'},
+		{0xff, 0xd8, 0xff},
+		[]byte("GIF89a"),
+		[]byte("RIFF\x00\x00\x00\x00WEBPVP8 "),
+	} {
+		if _, ok := DetectImageMediaType(prefix); !ok {
+			t.Fatalf("prefix %q rejected by content sniffer", prefix)
+		}
 	}
 }

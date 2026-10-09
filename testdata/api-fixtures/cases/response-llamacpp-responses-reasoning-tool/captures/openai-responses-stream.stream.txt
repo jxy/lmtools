@@ -1,0 +1,446 @@
+data: {"type":"response.created","response":{"id":"resp_fixture","object":"response","status":"in_progress"}}
+
+data: {"type":"response.in_progress","response":{"id":"resp_fixture","object":"response","status":"in_progress"}}
+
+data: {"type":"response.output_item.added","item":{"id":"rs_fixture_0","summary":[],"type":"reasoning","content":[],"encrypted_content":"","status":"in_progress"}}
+
+data: {"type":"response.reasoning_text.delta","delta":"The","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" user","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" wants","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" me","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" to","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" count","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" number","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" of","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" red","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" circles","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" and","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" blue","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" squares","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" in","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" a","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" specific","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" image","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":":","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" `/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"private","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"tmp","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"l","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"mc","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"-","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"ll","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"amac","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"pp","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"-","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"2","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"2","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"6","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"1","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"9","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"1","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"mk","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"Ux","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"images","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"counts","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"png","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"`.","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"\n","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"I","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" need","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" to","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" use","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" `","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"view","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"_","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"image","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"`","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" tool","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" to","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" see","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" image","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" first","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"\n","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"After","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" seeing","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" image","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":",","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" I","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" will","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" count","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" red","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" circles","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" and","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" blue","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" squares","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" and","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" then","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" provide","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" answer","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" in","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" one","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" short","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" sentence","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"\n\n","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"1","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"  ","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"Call","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" `","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"view","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"_","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"image","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"`","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" with","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" path","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" `/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"private","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"tmp","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"l","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"mc","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"-","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"ll","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"amac","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"pp","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"-","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"2","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"2","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"6","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"1","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"9","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"1","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"mk","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"Ux","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"0","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"images","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"/","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"counts","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"png","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"`.","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"\n","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"2","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"  ","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"Inspect","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" image","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" (","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"once","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" tool","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" returns","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":").","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"\n","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"3","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"  ","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"Count","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" red","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" circles","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" and","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" blue","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" squares","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**.","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"\n","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"4","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"  ","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"Form","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"ulate","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" the","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" final","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":" response","item_id":"rs_fixture_0"}
+
+data: {"type":"response.reasoning_text.delta","delta":"**.","item_id":"rs_fixture_0"}
+
+data: {"type":"response.output_item.added","item":{"id":"fc_fixture_1","arguments":"","call_id":"call_fixture_1","name":"view_image","type":"function_call","status":"in_progress"}}
+
+data: {"type":"response.function_call_arguments.delta","delta":"{","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"\"path","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"\":","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"/","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"private","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"/","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"tmp","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"/","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"l","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"mc","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"-","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"ll","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"amac","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"pp","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"-","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"2","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"0","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"2","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"6","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"1","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"0","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"0","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"9","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":".","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"1","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"mk","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"Ux","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"0","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"/","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"images","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"/","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"counts","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":".","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"png","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_fixture_1"}
+
+data: {"type":"response.function_call_arguments.delta","delta":"}","item_id":"fc_fixture_1"}
+
+data: {"type":"response.output_item.done","item":{"id":"rs_fixture_0","summary":[],"type":"reasoning","content":[{"text":"The user wants me to count the number of red circles and blue squares in a specific image: `/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png`.\nI need to use the `view_image` tool to see the image first.\nAfter seeing the image, I will count the red circles and blue squares and then provide the answer in one short sentence.\n\n1.  **Call `view_image`** with the path `/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png`.\n2.  **Inspect the image** (once the tool returns).\n3.  **Count red circles and blue squares**.\n4.  **Formulate the final response**.","type":"reasoning_text"}],"encrypted_content":""}}
+
+data: {"type":"response.output_item.done","item":{"id":"fc_fixture_1","type":"function_call","status":"completed","arguments":"{\"path\":\"/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png\"}","call_id":"call_fixture_1","name":"view_image"}}
+
+data: {"type":"response.completed","response":{"id":"resp_fixture","object":"response","created_at":1791569777,"status":"completed","model":"gemma-4-26b-a4b","output":[{"id":"rs_fixture_0","summary":[],"type":"reasoning","content":[{"text":"The user wants me to count the number of red circles and blue squares in a specific image: `/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png`.\nI need to use the `view_image` tool to see the image first.\nAfter seeing the image, I will count the red circles and blue squares and then provide the answer in one short sentence.\n\n1.  **Call `view_image`** with the path `/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png`.\n2.  **Inspect the image** (once the tool returns).\n3.  **Count red circles and blue squares**.\n4.  **Formulate the final response**.","type":"reasoning_text"}],"encrypted_content":""},{"id":"fc_fixture_1","type":"function_call","status":"completed","arguments":"{\"path\":\"/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png\"}","call_id":"call_fixture_1","name":"view_image"}],"usage":{"input_tokens":283,"output_tokens":228,"total_tokens":511,"input_tokens_details":{"cached_tokens":278}}},"timings":{"cache_n":278,"prompt_n":5,"prompt_ms":43.817,"prompt_per_token_ms":8.7634,"prompt_per_second":114.11096149896159,"predicted_n":228,"predicted_ms":2072.099,"predicted_per_token_ms":9.128189427312776,"predicted_per_second":109.5507502295981,"draft_n":198,"draft_n_accepted":161}}
+

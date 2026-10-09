@@ -195,16 +195,20 @@ one left the session, so MCP servers start once and stay up across turns.
 
 - A line ending in `\` continues the turn on the next line; `\\` at the end
   of a line puts one backslash there and ends the turn. An empty line at the
-  prompt sends nothing. The turn is sent as typed, a turn larger than 10MB
+  prompt sends nothing unless images are pending, in which case it sends an
+  image-only turn. The turn is sent as typed, a turn larger than 10MB
   is discarded with a note, and pasted lines are read one turn per line like
   typed ones.
 - On a terminal the prompt is `> `, and `. ` on a continuation line. It goes
   to stderr, or to the terminal when stderr is redirected, with the notes,
   thinking summaries, tool transcript, and approval questions. Lines typed
   while a turn runs are read as the next turns, in order; an approval
-  question discards them, as a single run's does. There is no line editing
-  beyond what the terminal provides (erase, word erase, line kill), and no
-  history.
+  question discards them, as a single run's does. Startup shows the model,
+  API, and input hints. `User N` identifies submitted prompts, `lmc: Working`
+  indicates activity, and `Assistant N` labels each actual model response,
+  including after tool calls. The session ID appears once
+  established. The terminal provides erase, word erase, and line kill;
+  `/history` and `/ed` provide prompt recall and editing.
 - Ctrl-D at the prompt ends the loop. Ctrl-D inside an unfinished turn, a
   continuation or text ended by Ctrl-D without Enter, ends the loop without
   sending it, with a note. Ctrl-C during a turn cancels the turn and returns
@@ -235,6 +239,49 @@ one left the session, so MCP servers start once and stay up across turns.
   With a terminal on stdin it needs to open that terminal again by its
   name, and stops at startup, naming the terminal and the reason, when it
   cannot.
+
+REPL commands work with terminal and piped input:
+
+| Command | Effect |
+| --- | --- |
+| `/help` | Show input and command help. |
+| `/history` | List prompt text from this invocation, retaining at most 100 prompts and 10 MiB. |
+| `/ed` | Edit the current draft with `$EDITOR`, or `ed` when unset. |
+| `/ed N` | Edit retained prompt N as a new draft. |
+| `/ed REGEX` | Edit all matching retained prompts together, in history order. |
+| `/image PATH` | Queue an image for the next turn; the path is literal and may contain spaces. |
+| `/clear-images` | Remove pending attachments. |
+| `/developer TEXT` | Set a developer instruction for the next turn, replacing any pending instruction. |
+| `/clear-developer` | Remove the pending developer instruction. |
+| `/exit` | End the conversation. |
+
+`/ed` requires a terminal. It waits for the editor, shows a draft preview after
+a successful exit, and returns to input. Enter sends the draft; ordinary text
+extends it before sending, and a trailing backslash continues input as usual.
+Use `/ed` again to revise it. Failed edits keep the previous draft. Configure
+GUI editors to wait until editing is complete. Input queued before or during
+editing is discarded so accepting the edited draft requires a fresh Enter.
+
+An argument containing only digits selects a number from `/history`. Other arguments
+are Go regular expressions matched against the full retained prompt text.
+Matches are joined with blank lines into one draft. Use a pattern such as
+`[4]2` to search for numeric text rather than select history entry 42. Invalid
+expressions and no matches leave the pending draft intact.
+History selection recalls prompt text only. Text entered after editing is
+appended verbatim to the draft; include spacing or a continuation newline as
+needed. A bare `/ed` during continuation opens the unfinished text; `//ed`
+in that position inserts a literal `/ed` line.
+
+Start a prompt with `//` to send a literal leading `/`. Image paths in `/image`
+use no quotes, shell expansion, or escaping. Press Enter after attaching an
+image to send it without text. History recalls prompt text; it does not attach
+the earlier images again. New attachments remain pending until their user
+turn is saved, including across a failed request. The turn labels and activity
+messages appear only for terminal input; redirected stdout keeps the answers.
+Developer instructions can be added during the conversation. They are saved
+with the next text or image turn and replayed on resume; `/clear-developer`
+affects only an instruction that has not yet been sent. Use continuation lines
+for a developer instruction spanning multiple lines.
 
 ### Tool Use
 
@@ -645,6 +692,15 @@ Mode and model:
 Output controls:
 
 - `-s string`: System prompt.
+- `-developer string`: Add a developer instruction immediately before the
+  invocation's first new user turn. Supports `-provider openai` and Argo
+  `gpt*` with `-openai-responses`. The instruction is saved and replayed with
+  its developer role. On resume, supplying the flag adds another instruction;
+  omitting it keeps the saved instructions. In a REPL it is consumed once the
+  first user turn is committed. It requires prompt text or an image and cannot
+  accompany regeneration of an assistant answer. Other provider wires reject
+  developer instructions, including ones in resumed history; use `-s` to set
+  a system prompt on those providers.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`,
   `high`, `xhigh`, or `max`. On Anthropic-wire requests, any supported
   non-`none` effort also enables `thinking.type="adaptive"` with
@@ -660,6 +716,9 @@ Output controls:
   `--- end thinking (incomplete) ---`. If no visible block is returned, lmc
   says so explicitly. Anthropic's `summarized` display is its readable thinking
   mode; adaptive thinking may omit the block for a simple request.
+  Compatible Chat Completions servers' `reasoning_content` and Responses
+  reasoning text/summary events are supported and retained in session history.
+  A server may return thinking by default without an `-effort` flag.
 - `-reasoning-mode string`: Responses API reasoning mode: `standard` or `pro`
   (`pro` applies to GPT-5.6 only). `lmc` emits it only on an effective
   `-openai-responses` path and otherwise warns and ignores it.
@@ -669,9 +728,24 @@ Output controls:
 - `-max-tokens int`: Maximum output tokens. `0` (the default) uses the provider
   default. Anthropic-wire requests — the `anthropic` provider and Argo `claude*`
   models — always send a limit: `128000` for Opus models, `64000` for other
-  Claude models.
-- `-json`: Request JSON object output.
-- `-json-schema path`: Request schema-constrained JSON output. Does not combine with `-json`.
+  Claude models. OpenAI Chat Completions uses `max_completion_tokens`;
+  Responses uses `max_output_tokens`. Reported incomplete output returns an
+  error with a nonzero exit status; partial text and thinking are saved.
+  Incomplete tool calls are discarded and cannot execute on resume.
+- `-json`: Request a JSON object and validate the returned answer.
+- `-json-schema path`: Request JSON output matching the supplied schema and
+  check the returned JSON syntax. Does not combine with `-json`. The schema file
+  must contain a JSON object; the provider validates and enforces the schema.
+  Invalid returned JSON causes a nonzero exit status. Streamed answer bytes may
+  already have reached stdout when the error is reported; check the exit status.
+  In `-repl`, errors are reported per turn and the conversation loop continues.
+
+Chat Completions places the schema under `response_format.json_schema`;
+Responses places it under `text.format`.
+
+Token usage is shown on stderr when reported, including Chat Completions
+streaming usage. Separate reasoning-token counts are shown only when supplied
+by the provider.
 
 Images:
 
@@ -679,13 +753,16 @@ Images:
   several; they are sent in the order given, ahead of the prompt text. The
   type is sniffed from the content and must be PNG, JPEG, GIF, or WebP; each
   file may be at most 20 MiB, and the provider's own limits still apply.
+  Truncated or malformed image containers are rejected locally; decoding
+  compressed pixel data remains the provider's responsibility.
   The image is read when the flags are parsed, base64-encoded into the
   request, and saved inline in the session. Empty stdin is accepted when an
   image is attached. Not available in embed mode, with `-argo-legacy`, or
   with `-branch` from an assistant message, which regenerates that answer
   without a new user turn.
 - `-image-detail string`: OpenAI detail hint for every attached image: `auto`,
-  `low`, or `high`. Other providers ignore it.
+  `low`, or `high`. Requires `-image` or `-repl`; in a REPL it also applies to
+  later `/image` commands. Other providers ignore it.
 
 To let the model open an image itself, see `view_image` under Tool Use.
 

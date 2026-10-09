@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const toolResultRenderText = "Attached image shot.png (image/png, 12 bytes)."
+var toolResultRenderText = "Attached image shot.png (image/png, " + FormatByteCount(len(pngBytes)) + ")."
 
 // toolResultRound is one round with an image result: the prompt, the
 // assistant's view_image call, and the user message carrying the result and,

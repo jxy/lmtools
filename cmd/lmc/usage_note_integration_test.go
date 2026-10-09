@@ -217,7 +217,7 @@ func TestTokenUsageNotePrecedesToolReview(t *testing.T) {
 
 	firstNote := strings.Index(stderr, "Note: Token usage: input 120, output 30, total 150")
 	review := strings.Index(stderr, ">>> Tools requested: 1")
-	running := strings.Index(stderr, ">>> Running 1 command")
+	running := strings.Index(stderr, ">>> Running 1 tool")
 	results := strings.Index(stderr, ">>> Results:")
 	secondNote := strings.Index(stderr, "Note: Token usage: input 180, output 12, total 192")
 	for name, index := range map[string]int{

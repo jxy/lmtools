@@ -24,6 +24,8 @@ type ResponseStreamEvent struct {
 	Type          ResponseStreamEventType
 	Text          string
 	ReasoningType string
+	// Incomplete marks a reasoning block cut short by a provider limit.
+	Incomplete bool
 }
 
 // ResponseOutput receives live response events and the completed parsed

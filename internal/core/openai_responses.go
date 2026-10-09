@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"lmtools/internal/constants"
 	"lmtools/internal/providers"
 	"net/http"
@@ -45,6 +46,9 @@ func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interf
 		"model":  payload.Model,
 		"input":  OpenAIResponsesInput(payload.Messages),
 		"stream": payload.Stream,
+	}
+	if payload.MaxTokens > 0 {
+		reqMap["max_output_tokens"] = payload.MaxTokens
 	}
 	if payload.System != "" {
 		reqMap["instructions"] = payload.System
@@ -221,7 +225,7 @@ func OpenAIResponsesInputProjection(messages []TypedMessage) []OpenAIResponsesIn
 }
 
 func openAIResponsesReasoningItem(block ReasoningBlock) map[string]interface{} {
-	if block.Provider != "openai" {
+	if block.Provider != "openai" || block.Type == "reasoning_content" {
 		return nil
 	}
 	if len(block.Raw) > 0 {
@@ -453,7 +457,7 @@ func rawMessageToInterface(raw json.RawMessage) interface{} {
 		return nil
 	}
 	var decoded interface{}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	if err := decodeJSONNumbers(raw, &decoded); err != nil {
 		return raw
 	}
 	return decoded
@@ -464,10 +468,25 @@ func rawMessageToMap(raw json.RawMessage) map[string]interface{} {
 		return nil
 	}
 	var decoded map[string]interface{}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	if err := decodeJSONNumbers(raw, &decoded); err != nil {
 		return nil
 	}
 	return decoded
+}
+
+// decodeJSONNumbers preserves schema constants and provider metadata without
+// passing numbers through float64. Like json.Unmarshal, it rejects extra values.
+func decodeJSONNumbers(raw []byte, value interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("unexpected data after JSON value")
+	}
+	return nil
 }
 
 func parseOpenAIResponses(data []byte, isEmbed bool) (Response, error) {
@@ -475,7 +494,24 @@ func parseOpenAIResponses(data []byte, isEmbed bool) (Response, error) {
 		return parseOpenAIResponse(data, true)
 	}
 	text, toolCalls, blocks, err := parseOpenAIResponsesDetailed(data)
-	return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks}, err
+	response := Response{Text: text, ToolCalls: toolCalls, Blocks: blocks}
+	if err == nil {
+		var metadata struct {
+			openAIResponsesCompletion
+			Output []struct {
+				Status string `json:"status"`
+			} `json:"output"`
+		}
+		if err = json.Unmarshal(data, &metadata); err == nil {
+			response.IncompleteReason = metadata.incompleteReason()
+			for _, item := range metadata.Output {
+				if item.Status != "" && item.Status != "completed" && response.IncompleteReason == "" {
+					response.IncompleteReason = "incomplete"
+				}
+			}
+		}
+	}
+	return response, err
 }
 
 func parseOpenAIResponsesWithTools(data []byte) (string, []ToolCall, error) {
@@ -485,6 +521,7 @@ func parseOpenAIResponsesWithTools(data []byte) (string, []ToolCall, error) {
 
 func parseOpenAIResponsesDetailed(data []byte) (string, []ToolCall, []Block, error) {
 	var resp struct {
+		openAIResponsesCompletion
 		OutputText string            `json:"output_text"`
 		Output     []json.RawMessage `json:"output"`
 		Error      *struct {
@@ -504,89 +541,23 @@ func parseOpenAIResponsesDetailed(data []byte) (string, []ToolCall, []Block, err
 	var toolCalls []ToolCall
 	var blocks []Block
 	for _, rawItem := range resp.Output {
-		var item struct {
-			ID               string          `json:"id"`
-			Type             string          `json:"type"`
-			Status           string          `json:"status"`
-			CallID           string          `json:"call_id"`
-			Name             string          `json:"name"`
-			Arguments        string          `json:"arguments"`
-			Input            string          `json:"input"`
-			Summary          json.RawMessage `json:"summary"`
-			EncryptedContent string          `json:"encrypted_content"`
-			Content          []struct {
-				Type    string `json:"type"`
-				Text    string `json:"text"`
-				Refusal string `json:"refusal"`
-			} `json:"content"`
-		}
+		var item openAIResponsesOutputItem
 		if err := json.Unmarshal(rawItem, &item); err != nil {
 			return "", nil, nil, err
 		}
-		switch item.Type {
-		case "reasoning":
-			blocks = append(blocks, ReasoningBlock{
-				Provider:         "openai",
-				Type:             "reasoning",
-				ID:               item.ID,
-				Status:           item.Status,
-				Summary:          append(json.RawMessage(nil), item.Summary...),
-				EncryptedContent: item.EncryptedContent,
-				Raw:              append(json.RawMessage(nil), rawItem...),
-			})
-		case "message":
-			for _, content := range item.Content {
-				switch content.Type {
-				case "output_text", "text":
-					if content.Text != "" {
-						textParts = append(textParts, content.Text)
-						blocks = append(blocks, TextBlock{Text: content.Text})
-					}
-				case "refusal", "output_refusal":
-					text := content.Refusal
-					if text == "" {
-						text = content.Text
-					}
-					if text != "" {
-						textParts = append(textParts, text)
-						blocks = append(blocks, TextBlock{Text: text})
-					}
+		for _, block := range openAIResponsesOutputItemBlocks(rawItem) {
+			blocks = append(blocks, block)
+			switch value := block.(type) {
+			case TextBlock:
+				textParts = append(textParts, value.Text)
+			case ToolUseBlock:
+				if resp.incompleteReason() == "" && (item.Status == "" || item.Status == "completed") {
+					toolCalls = append(toolCalls, ToolCall{
+						ID: value.ID, Type: value.Type, Name: value.Name,
+						Args: value.Input, Input: value.InputString,
+					})
 				}
 			}
-		case "function_call":
-			id := item.CallID
-			if id == "" {
-				id = item.ID
-			}
-			toolCalls = append(toolCalls, ToolCall{
-				ID:   id,
-				Name: item.Name,
-				Args: NormalizeOpenAIResponsesArguments(item.Arguments),
-			})
-			blocks = append(blocks, ToolUseBlock{
-				ID:    id,
-				Name:  item.Name,
-				Input: NormalizeOpenAIResponsesArguments(item.Arguments),
-			})
-		case "custom_tool_call":
-			id := item.CallID
-			if id == "" {
-				id = item.ID
-			}
-			toolCalls = append(toolCalls, ToolCall{
-				ID:    id,
-				Type:  "custom",
-				Name:  item.Name,
-				Args:  jsonStringRawMessage(item.Input),
-				Input: item.Input,
-			})
-			blocks = append(blocks, ToolUseBlock{
-				ID:          id,
-				Type:        "custom",
-				Name:        item.Name,
-				Input:       jsonStringRawMessage(item.Input),
-				InputString: item.Input,
-			})
 		}
 	}
 	if len(textParts) == 0 && resp.OutputText != "" {
@@ -611,218 +582,25 @@ func NormalizeOpenAIResponsesArguments(arguments string) json.RawMessage {
 	return normalizeOpenAIToolArguments(encoded)
 }
 
-type OpenAIResponsesStreamState struct {
-	partialToolCalls map[int]*ToolCall
-	argumentBuffers  map[int]*bytes.Buffer
-	outputItems      map[int]json.RawMessage
-	outputOrder      []int
-	usage            *Usage
-}
-
-func NewOpenAIResponsesStreamState() *OpenAIResponsesStreamState {
-	return &OpenAIResponsesStreamState{
-		partialToolCalls: make(map[int]*ToolCall),
-		argumentBuffers:  make(map[int]*bytes.Buffer),
-		outputItems:      make(map[int]json.RawMessage),
-	}
-}
-
-func (s *OpenAIResponsesStreamState) ParseLine(line string) (string, []ToolCall, bool, error) {
-	if !strings.HasPrefix(line, "data: ") {
-		return "", nil, false, nil
-	}
-	data := strings.TrimPrefix(line, "data: ")
-	if data == "[DONE]" {
-		calls, done, err := s.finalizeToolCalls()
-		return "", calls, done, err
-	}
-
-	var event struct {
-		Type        string          `json:"type"`
-		Delta       string          `json:"delta"`
-		OutputIndex int             `json:"output_index"`
-		Item        json.RawMessage `json:"item"`
-		Response    struct {
-			Error *struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-				Code    string `json:"code"`
-			} `json:"error"`
-		} `json:"response"`
-		Error json.RawMessage `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(data), &event); err != nil {
-		return "", nil, false, err
-	}
-
-	if len(event.Error) > 0 && !bytes.Equal(event.Error, []byte("null")) {
-		return "", nil, false, newFatalStreamError(fmt.Errorf("upstream stream error: %s", formatOpenAIStreamError(event.Error)))
-	}
-
-	switch event.Type {
-	case "error":
-		return "", nil, false, newFatalStreamError(fmt.Errorf("OpenAI responses stream error"))
-	case "response.output_text.delta":
-		return event.Delta, nil, false, nil
-	case "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
-		if _, ok := s.argumentBuffers[event.OutputIndex]; !ok {
-			s.argumentBuffers[event.OutputIndex] = &bytes.Buffer{}
-		}
-		s.argumentBuffers[event.OutputIndex].WriteString(event.Delta)
-	case "response.output_item.added", "response.output_item.done":
-		if err := s.captureOutputItem(event.OutputIndex, event.Item); err != nil {
-			return "", nil, false, err
-		}
-		if event.Type == "response.output_item.done" {
-			if tc, ok := s.partialToolCalls[event.OutputIndex]; ok {
-				delete(s.partialToolCalls, event.OutputIndex)
-				delete(s.argumentBuffers, event.OutputIndex)
-				return "", []ToolCall{*tc}, false, nil
-			}
-		}
-	case "response.completed", "response.incomplete":
-		// The terminal events carry the full response snapshot, including
-		// response.usage; earlier events carry it as null.
-		s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
-		calls, done, err := s.finalizeToolCalls()
-		return "", calls, done, err
-	case "response.failed":
-		if event.Response.Error != nil {
-			raw, err := json.Marshal(event.Response.Error)
-			if err == nil {
-				return "", nil, false, newFatalStreamError(fmt.Errorf("API error: %s", formatOpenAIStreamError(raw)))
-			}
-			return "", nil, false, newFatalStreamError(fmt.Errorf("API error: %s (type: %s, code: %s)", event.Response.Error.Message, event.Response.Error.Type, event.Response.Error.Code))
-		}
-		return "", nil, false, newFatalStreamError(fmt.Errorf("OpenAI responses stream failed"))
-	}
-
-	return "", nil, false, nil
-}
-
-func (s *OpenAIResponsesStreamState) captureOutputItem(index int, raw json.RawMessage) error {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil
-	}
-	var item struct {
-		ID        string `json:"id"`
-		Type      string `json:"type"`
-		CallID    string `json:"call_id"`
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-		Input     string `json:"input"`
-	}
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return err
-	}
-	switch item.Type {
-	case "reasoning", "message", "function_call", "custom_tool_call":
-		if _, exists := s.outputItems[index]; !exists {
-			s.outputOrder = append(s.outputOrder, index)
-		}
-		s.outputItems[index] = append(json.RawMessage(nil), raw...)
-	}
-	if item.Type != "function_call" && item.Type != "custom_tool_call" {
-		return nil
-	}
-	if _, ok := s.partialToolCalls[index]; !ok {
-		s.partialToolCalls[index] = &ToolCall{}
-	}
-	tc := s.partialToolCalls[index]
-	if item.Type == "custom_tool_call" {
-		tc.Type = "custom"
-	}
-	if item.CallID != "" {
-		tc.ID = item.CallID
-	} else if item.ID != "" {
-		tc.ID = item.ID
-	}
-	if item.Name != "" {
-		tc.Name = item.Name
-	}
-	args := item.Arguments
-	if buf := s.argumentBuffers[index]; buf != nil && buf.Len() > 0 {
-		args = buf.String()
-	}
-	if args != "" {
-		if item.Type == "custom_tool_call" {
-			tc.Input = args
-			tc.Args = jsonStringRawMessage(args)
-		} else {
-			tc.Args = NormalizeOpenAIResponsesArguments(args)
-		}
-	} else if item.Input != "" {
-		tc.Input = item.Input
-		tc.Args = jsonStringRawMessage(item.Input)
-	}
-	return nil
-}
-
-func (s *OpenAIResponsesStreamState) finalizeToolCalls() ([]ToolCall, bool, error) {
-	var calls []ToolCall
-	for index, tc := range s.partialToolCalls {
-		if len(tc.Args) == 0 {
-			if buf := s.argumentBuffers[index]; buf != nil && buf.Len() > 0 {
-				if tc.Type == "custom" {
-					tc.Input = buf.String()
-					tc.Args = jsonStringRawMessage(buf.String())
-				} else {
-					tc.Args = NormalizeOpenAIResponsesArguments(buf.String())
-				}
-			}
-		}
-		if len(tc.Args) == 0 {
-			if tc.Type == "custom" {
-				tc.Args = jsonStringRawMessage(tc.Input)
-			} else {
-				tc.Args = json.RawMessage("{}")
-			}
-		}
-		calls = append(calls, *tc)
-	}
-	s.partialToolCalls = map[int]*ToolCall{}
-	s.argumentBuffers = map[int]*bytes.Buffer{}
-	return calls, true, nil
-}
-
-// Usage returns the token counts accumulated from the stream, nil when the
-// stream reported none.
-func (s *OpenAIResponsesStreamState) Usage() *Usage {
-	return s.usage
-}
-
-func (s *OpenAIResponsesStreamState) Blocks() []Block {
-	if len(s.outputOrder) == 0 {
-		return nil
-	}
-	blocks := make([]Block, 0, len(s.outputOrder))
-	for _, index := range s.outputOrder {
-		raw := s.outputItems[index]
-		if len(raw) == 0 {
-			continue
-		}
-		blocks = append(blocks, openAIResponsesOutputItemBlocks(raw)...)
-	}
-	return blocks
+type openAIResponsesOutputItem struct {
+	ID               string          `json:"id"`
+	Type             string          `json:"type"`
+	Status           string          `json:"status"`
+	CallID           string          `json:"call_id"`
+	Name             string          `json:"name"`
+	Arguments        string          `json:"arguments"`
+	Input            string          `json:"input"`
+	Summary          json.RawMessage `json:"summary"`
+	EncryptedContent string          `json:"encrypted_content"`
+	Content          []struct {
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Refusal string `json:"refusal"`
+	} `json:"content"`
 }
 
 func openAIResponsesOutputItemBlocks(rawItem json.RawMessage) []Block {
-	var item struct {
-		ID               string          `json:"id"`
-		Type             string          `json:"type"`
-		Status           string          `json:"status"`
-		CallID           string          `json:"call_id"`
-		Name             string          `json:"name"`
-		Arguments        string          `json:"arguments"`
-		Input            string          `json:"input"`
-		Summary          json.RawMessage `json:"summary"`
-		EncryptedContent string          `json:"encrypted_content"`
-		Content          []struct {
-			Type    string `json:"type"`
-			Text    string `json:"text"`
-			Refusal string `json:"refusal"`
-		} `json:"content"`
-	}
+	var item openAIResponsesOutputItem
 	if err := json.Unmarshal(rawItem, &item); err != nil {
 		return nil
 	}
@@ -835,14 +613,21 @@ func openAIResponsesOutputItemBlocks(rawItem json.RawMessage) []Block {
 			Status:           item.Status,
 			Summary:          append(json.RawMessage(nil), item.Summary...),
 			EncryptedContent: item.EncryptedContent,
+			Content:          openAIResponsesRawContent(rawItem),
 			Raw:              append(json.RawMessage(nil), rawItem...),
 		}}
 	case "message":
 		blocks := make([]Block, 0, len(item.Content))
 		for _, content := range item.Content {
-			text := content.Text
-			if text == "" {
+			var text string
+			switch content.Type {
+			case "output_text", "text":
+				text = content.Text
+			case "refusal", "output_refusal":
 				text = content.Refusal
+				if text == "" {
+					text = content.Text
+				}
 			}
 			if text != "" {
 				blocks = append(blocks, TextBlock{Text: text})
@@ -874,4 +659,14 @@ func openAIResponsesOutputItemBlocks(rawItem json.RawMessage) []Block {
 	default:
 		return nil
 	}
+}
+
+func openAIResponsesRawContent(raw json.RawMessage) json.RawMessage {
+	var item struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &item) != nil {
+		return nil
+	}
+	return item.Content
 }

@@ -78,6 +78,9 @@ func ResolvePendingToolCalls(ctx context.Context, sess *Session, cfg core.Reques
 			return lmerrors.WrapError("read session lineage", err)
 		}
 		sess.Head = head
+		if err := validateDeveloperLineage(cfg, refs); err != nil {
+			return err
+		}
 		if calls, holder, err = pendingToolCallsWithRef(ctx, refs); err != nil {
 			return lmerrors.WrapError("check pending tool calls", err)
 		}

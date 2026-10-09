@@ -26,10 +26,11 @@ type ParsedOpenAIStreamToolCall struct {
 }
 
 type ParsedOpenAIStreamChoice struct {
-	Index        int
-	FinishReason string
-	Content      string
-	ToolCalls    []ParsedOpenAIStreamToolCall
+	Index            int
+	FinishReason     string
+	Content          string
+	ReasoningContent string
+	ToolCalls        []ParsedOpenAIStreamToolCall
 }
 
 // ParsedOpenAIStreamChunk is the normalized shape of an OpenAI stream chunk.
@@ -104,8 +105,9 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 			Index        int    `json:"index"`
 			FinishReason string `json:"finish_reason"`
 			Delta        struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				ToolCalls        []struct {
 					Index    int    `json:"index"`
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -139,9 +141,10 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 	parsed.Choices = make([]ParsedOpenAIStreamChoice, 0, len(raw.Choices))
 	for _, rawChoice := range raw.Choices {
 		choice := ParsedOpenAIStreamChoice{
-			Index:        rawChoice.Index,
-			FinishReason: rawChoice.FinishReason,
-			Content:      rawChoice.Delta.Content,
+			Index:            rawChoice.Index,
+			FinishReason:     rawChoice.FinishReason,
+			Content:          rawChoice.Delta.Content,
+			ReasoningContent: rawChoice.Delta.ReasoningContent,
 		}
 		if len(rawChoice.Delta.ToolCalls) > 0 {
 			choice.ToolCalls = make([]ParsedOpenAIStreamToolCall, 0, len(rawChoice.Delta.ToolCalls))

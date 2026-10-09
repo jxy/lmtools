@@ -1,0 +1,3 @@
+data: {"choices":[{"index":0,"delta":{"reasoning_content":"Visible partial reasoning."}}]}
+
+data: {"error":{"message":"fixture upstream failed","type":"server_error","code":"fixture_error"}}

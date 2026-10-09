@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-llamacpp-length",
+  "description": "llama.cpp Chat Completions token limit stops inside readable reasoning",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai"
+}

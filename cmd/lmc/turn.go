@@ -32,6 +32,8 @@ type turnEnv struct {
 	// so a note must be kept off the end of an answer. A loop whose stdout is
 	// not a terminal sends answers elsewhere, and separates them itself.
 	answersOnScreen bool
+	// answerLabel identifies provider text on an interactive terminal.
+	answerLabel string
 }
 
 func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input *inputOwner) *turnEnv {
@@ -105,6 +107,9 @@ var afterTurnCommitForTest func(*session.Session)
 // handle the response. opts is the turn's own copy of the options; nothing
 // here mutates the caller's.
 func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in turnInput) (out turnOutcome, err error) {
+	if err := core.ValidateDeveloperTurn(opts, in.text, in.isRegeneration); err != nil {
+		return out, err
+	}
 	var resumed *session.Session
 	defer func() {
 		out.ConflictForks = collectConflictForks(resumed, out.Session)

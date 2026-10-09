@@ -1,0 +1,12 @@
+{
+  "text": "",
+  "tool_calls": [
+    {
+      "name": "view_image",
+      "id": "call_fixture_1",
+      "args": {
+        "path": "/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png"
+      }
+    }
+  ]
+}

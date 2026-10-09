@@ -569,7 +569,7 @@ func TestPendingToolsIntegration(t *testing.T) {
 	if !strings.Contains(stderr, `[1/1] Command: ["echo","hello from tool"]`) {
 		t.Error("Expected to see pending command")
 	}
-	if !strings.Contains(stderr, ">>> Running 1 command...") || !strings.Contains(stderr, ">>> Results:") {
+	if !strings.Contains(stderr, ">>> Running 1 tool...") || !strings.Contains(stderr, ">>> Results:") {
 		t.Error("Expected to see pending tool execution and results headers")
 	}
 

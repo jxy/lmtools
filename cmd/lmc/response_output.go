@@ -22,11 +22,14 @@ type responsePresenter struct {
 	answer       io.Writer
 	diagnostics  io.Writer
 	showThinking bool
+	answerLabel  string
 	// separate keeps a note off the end of an answer on the screen both
 	// share; newResponsePresenter sets it.
 	separate bool
 
 	thinkingActive       bool
+	thinkingEnded        bool
+	thinkingIncomplete   bool
 	thinkingHasText      bool
 	thinkingEndsNewline  bool
 	streamedThinking     bool
@@ -47,28 +50,36 @@ func newResponsePresenter(answer, diagnostics io.Writer, showThinking bool) *res
 func (p *responsePresenter) HandleStreamEvent(event core.ResponseStreamEvent) {
 	switch event.Type {
 	case core.ResponseStreamTextDelta:
-		p.finishThinking(true)
+		p.finishThinking(!p.thinkingEnded)
 		p.writeAnswer(event.Text)
 	case core.ResponseStreamReasoningStart:
 		p.streamedThinking = true
 		p.startThinking()
 	case core.ResponseStreamReasoningDelta:
 		p.streamedThinking = true
+		if p.thinkingEnded {
+			p.finishThinking(false)
+		}
 		p.writeThinking(event.Text)
 	case core.ResponseStreamReasoningEnd:
 		p.streamedThinking = true
-		p.finishThinking(false)
+		// The terminal response can still report a token limit. Defer the
+		// marker until the next block/answer or completion knows the outcome.
+		if p.thinkingActive {
+			p.thinkingEnded = true
+			p.thinkingIncomplete = event.Incomplete
+		}
 	}
 }
 
 func (p *responsePresenter) HandleResponseComplete(response core.Response) {
-	p.finishThinking(response.Streamed)
+	p.finishThinking((response.Streamed && !p.thinkingEnded) || response.IncompleteReason != "")
 	presentedThinking := p.streamedThinking
 	if p.showThinking && (!response.Streamed || !p.streamedThinking) {
 		if response.Streamed && p.answerWritten {
 			p.separateDiagnosticsFromAnswer()
 		}
-		presentedThinking = p.renderReasoningBlocks(response.Blocks) || presentedThinking
+		presentedThinking = p.renderReasoningBlocks(response.Blocks, response.IncompleteReason != "") || presentedThinking
 	}
 
 	if !response.Streamed {
@@ -86,7 +97,7 @@ func (p *responsePresenter) HandleResponseComplete(response core.Response) {
 	p.resetResponseState()
 }
 
-func (p *responsePresenter) renderReasoningBlocks(blocks []core.Block) bool {
+func (p *responsePresenter) renderReasoningBlocks(blocks []core.Block, incomplete bool) bool {
 	presented := false
 	for _, candidate := range blocks {
 		block, ok := candidate.(core.ReasoningBlock)
@@ -99,7 +110,7 @@ func (p *responsePresenter) renderReasoningBlocks(blocks []core.Block) bool {
 		}
 		p.startThinking()
 		p.writeThinking(text)
-		p.finishThinking(false)
+		p.finishThinking(incomplete)
 		presented = true
 	}
 	return presented
@@ -132,6 +143,9 @@ func (p *responsePresenter) writeThinking(text string) {
 func (p *responsePresenter) writeAnswer(text string) {
 	if text == "" {
 		return
+	}
+	if !p.answerWritten && p.answerLabel != "" {
+		_, _ = fmt.Fprintf(p.diagnostics, "%s:\n", p.answerLabel)
 	}
 	_, _ = fmt.Fprint(p.answer, text)
 	p.answerWritten = true
@@ -169,9 +183,11 @@ func (p *responsePresenter) resetResponseState() {
 
 func (p *responsePresenter) startThinking() {
 	if p.thinkingActive {
-		p.finishThinking(true)
+		p.finishThinking(!p.thinkingEnded)
 	}
 	p.thinkingActive = true
+	p.thinkingEnded = false
+	p.thinkingIncomplete = false
 	if p.showThinking {
 		_, _ = fmt.Fprintf(p.diagnostics, "%s\n", thinkingStartMarker)
 	}
@@ -188,17 +204,19 @@ func (p *responsePresenter) finishThinking(incomplete bool) {
 			_, _ = fmt.Fprint(p.diagnostics, "\n")
 		}
 		marker := thinkingEndMarker
-		if incomplete {
+		if incomplete || p.thinkingIncomplete {
 			marker = thinkingIncompleteEndMarker
 		}
 		_, _ = fmt.Fprintf(p.diagnostics, "%s\n\n", marker)
 	}
 	p.thinkingActive = false
+	p.thinkingEnded = false
+	p.thinkingIncomplete = false
 	p.thinkingHasText = false
 	p.thinkingEndsNewline = false
 }
 
 func (p *responsePresenter) Close() {
-	p.finishThinking(true)
+	p.finishThinking(!p.thinkingEnded)
 	p.separateDiagnosticsFromAnswer()
 }

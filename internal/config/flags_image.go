@@ -34,9 +34,13 @@ func (f imagePathsFlag) Set(value string) error {
 // the -image-detail hint; renderers that have no such field ignore it.
 func validateImageFlags(cfg *Config) error {
 	detail := strings.ToLower(strings.TrimSpace(cfg.ImageDetail))
+	if detail != "" && !isValidImageDetailFlag(detail) {
+		return fmt.Errorf("-image-detail must be one of: auto, low, high")
+	}
+	cfg.ImageDetail = detail
 	if len(cfg.ImagePaths) == 0 {
-		if detail != "" {
-			return fmt.Errorf("-image-detail requires -image")
+		if detail != "" && !cfg.REPL {
+			return fmt.Errorf("-image-detail requires -image or -repl")
 		}
 		return nil
 	}
@@ -47,10 +51,6 @@ func validateImageFlags(cfg *Config) error {
 	if cfg.ArgoLegacy {
 		return fmt.Errorf("invalid flag combination: -image is not supported with -argo-legacy")
 	}
-	if detail != "" && !isValidImageDetailFlag(detail) {
-		return fmt.Errorf("-image-detail must be one of: auto, low, high")
-	}
-
 	cfg.Images = make([]core.ImageBlock, 0, len(cfg.ImagePaths))
 	for _, path := range cfg.ImagePaths {
 		image, err := core.LoadImageFile(path, constants.MaxCLIImageBytes)

@@ -74,16 +74,31 @@ func buildBranchRequestMessages(ctx context.Context, branchRef string) (branchRe
 	}
 
 	sessionPath = manager.ResolveSessionPath(sessionPath)
-	anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
-	anchorPath = manager.ResolveSessionPath(anchorPath)
 
 	var request branchRequest
-	err := withTreeLock(ctx, anchorPath, func() error {
-		var err error
+	err := withTreeLock(ctx, sessionPath, func() error {
+		// A sibling reference bubbles to its original anchor. Validate the
+		// requested message first so that resolution cannot hide its role.
+		message, err := readMessage(sessionPath, messageID)
+		if err != nil {
+			return errors.WrapError("read branch message "+messageID, err)
+		}
+		if err := validateBranchMessageRole(message.Role); err != nil {
+			return err
+		}
+		anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
+		anchorPath = manager.ResolveSessionPath(anchorPath)
 		request, err = branchRequestLocked(ctx, manager, anchorPath, anchorID)
 		return err
 	})
 	return request, err
+}
+
+func validateBranchMessageRole(role core.Role) error {
+	if role == core.RoleDeveloper {
+		return fmt.Errorf("cannot branch at a developer instruction; choose a user or assistant message")
+	}
+	return nil
 }
 
 func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anchorID string) (branchRequest, error) {
@@ -105,6 +120,9 @@ func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anch
 	}
 
 	request.anchorRole = refs[anchorIdx].message.Role
+	if err := validateBranchMessageRole(request.anchorRole); err != nil {
+		return branchRequest{}, err
+	}
 	switch request.anchorRole {
 	case core.RoleAssistant:
 		refs = refs[:anchorIdx]
@@ -116,13 +134,7 @@ func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anch
 				break
 			}
 		}
-		if prevAssistantIdx == -1 {
-			// A branch at the first user message keeps the system prompt
-			// the lineage begins with, and nothing else.
-			refs = systemPrefix(refs)
-		} else {
-			refs = refs[:prevAssistantIdx+1]
-		}
+		refs = userBranchRefs(refs[:anchorIdx], prevAssistantIdx)
 	default:
 		return branchRequest{}, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", request.anchorRole, anchorID))
 	}
@@ -273,17 +285,16 @@ func scanLineage(manager *Manager, sessionPath string) (lineageScan, error) {
 			}
 
 			if prevAssistIdx != -1 {
-				lineage = append(lineage, refs[:prevAssistIdx+1]...)
+				lineage = append(lineage, userBranchRefs(refs[:branchIdx], prevAssistIdx)...)
 				prevAssistant := refs[prevAssistIdx]
 				lastAssistant = &prevAssistant
 				assistantAlreadyInLineage = true
-			} else if lastAssistant != nil && !assistantAlreadyInLineage {
-				lineage = append(lineage, *lastAssistant)
-				assistantAlreadyInLineage = true
-			} else if i == 0 {
-				// A branch at the root's first user message still
-				// continues under the root's system prompt.
-				lineage = append(lineage, systemPrefix(refs[:branchIdx])...)
+			} else {
+				if lastAssistant != nil && !assistantAlreadyInLineage {
+					lineage = append(lineage, *lastAssistant)
+					assistantAlreadyInLineage = true
+				}
+				lineage = append(lineage, userBranchRefs(refs[:branchIdx], -1)...)
 			}
 
 		default:

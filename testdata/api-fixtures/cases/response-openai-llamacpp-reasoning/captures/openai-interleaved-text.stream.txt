@@ -1,0 +1,5 @@
+data: {"choices":[{"index":0,"delta":{"content":"A"}},{"index":1,"delta":{"content":"B"}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"C"},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]

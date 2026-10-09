@@ -229,7 +229,7 @@ func TestMCPToolOnChatWireRunsAndTheSessionKeepsIt(t *testing.T) {
 	if !strings.Contains(shown, "  • "+toolName+" (ID: call_mcp)\n     MCP: fake/echo\n") {
 		t.Fatalf("-show output = %q, want the labelled call", shown)
 	}
-	if !strings.Contains(shown, "[image: image/png, 12 bytes]") {
+	if !strings.Contains(shown, "[image: image/png, "+core.FormatByteCount(len(integrationPNG))+"]") {
 		t.Fatalf("-show output = %q, want the image line under the result", shown)
 	}
 

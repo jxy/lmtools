@@ -19,9 +19,15 @@ import (
 )
 
 func TestMainHelpFlags(t *testing.T) {
-	// This tests that main doesn't panic with help flag
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
+	help, err := os.CreateTemp(t.TempDir(), "help-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = help
+	defer func() { os.Stderr = oldStderr; _ = help.Close() }()
 
 	tests := []struct {
 		name string
@@ -39,15 +45,14 @@ func TestMainHelpFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Capture panic if any
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("main() panicked with args %v: %v", tt.args, r)
-				}
-			}()
-
-			// Note: We can't actually test main() directly as it calls os.Exit
-			// This is more of a compilation test
+			os.Args = tt.args
+			notifier := core.NewTestNotifier()
+			if err := run(notifier); err != nil {
+				t.Fatalf("help failed: %v", err)
+			}
+			if len(notifier.ErrorMessages) != 0 || len(notifier.WarnMessages) != 0 {
+				t.Fatalf("help printed diagnostics: %+v", notifier)
+			}
 		})
 	}
 }
@@ -335,28 +340,6 @@ func TestFinishToolExecutionReturnsErrorWithoutPrinting(t *testing.T) {
 	}
 	if out != "" {
 		t.Fatalf("stdout = %q, want no output on error", out)
-	}
-}
-
-func TestWarnShowThinkingWithoutEffort(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfg      config.Config
-		wantWarn bool
-	}{
-		{name: "display disabled"},
-		{name: "missing effort", cfg: config.Config{ShowThinking: true}, wantWarn: true},
-		{name: "none effort", cfg: config.Config{ShowThinking: true, Effort: "none"}, wantWarn: true},
-		{name: "high effort", cfg: config.Config{ShowThinking: true, Effort: "high"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			notifier := core.NewTestNotifier()
-			warnShowThinkingWithoutEffort(tt.cfg, notifier)
-			if got := len(notifier.WarnMessages) > 0; got != tt.wantWarn {
-				t.Fatalf("warning present = %t, want %t; messages = %q", got, tt.wantWarn, notifier.WarnMessages)
-			}
-		})
 	}
 }
 

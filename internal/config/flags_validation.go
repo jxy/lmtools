@@ -129,7 +129,7 @@ func validateOutputFlags(cfg *Config) error {
 	if !json.Valid(data) {
 		return fmt.Errorf("-json-schema file must contain valid JSON")
 	}
-	var schema map[string]interface{}
+	var schema map[string]json.RawMessage
 	if err := json.Unmarshal(data, &schema); err != nil {
 		return fmt.Errorf("-json-schema file must contain a JSON object: %w", err)
 	}

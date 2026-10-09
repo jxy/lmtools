@@ -66,6 +66,9 @@ func (p *RequestPlan) Commit(ctx context.Context) (*Session, error) {
 
 // PrepareRequest builds request messages without committing new session state.
 func (c *requestPreparer) PrepareRequest(ctx context.Context, inputStr string, isRegeneration bool, pendingTools PendingToolMode) (*RequestPlan, error) {
+	if err := core.ValidateDeveloperTurn(c.cfg, inputStr, isRegeneration); err != nil {
+		return nil, err
+	}
 	if resume := c.cfg.Resume; resume != "" {
 		if !IsSessionResume(resume) {
 			return c.prepareMessageResumeRequest(ctx, resume, inputStr, isRegeneration)
@@ -98,6 +101,7 @@ func (c *requestPreparer) prepareNewRequest(inputStr string, isRegeneration bool
 	if system := c.cfg.GetEffectiveSystem(); system != "" {
 		messages = append(messages, core.NewTextMessage(string(core.RoleSystem), system))
 	}
+	messages = c.appendPlannedDeveloperMessage(messages)
 	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
@@ -145,6 +149,9 @@ func PrepareRequestAt(ctx context.Context, cfg core.RequestOptions, notifier cor
 // placeholders for -print-curl, and must otherwise have been resolved first
 // by ResolvePendingToolCalls.
 func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, head *MessageRef, inputStr string, isRegeneration bool, pendingTools PendingToolMode) (*RequestPlan, error) {
+	if err := core.ValidateDeveloperTurn(c.cfg, inputStr, isRegeneration); err != nil {
+		return nil, err
+	}
 	var (
 		pending  pendingToolResolution
 		decision ResumeForkDecision
@@ -156,6 +163,9 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 			return errors.WrapError("build session messages", err)
 		}
 		sess.Head = pinned
+		if err := validateDeveloperLineage(c.cfg, refs); err != nil {
+			return err
+		}
 
 		if pending, err = c.previewPendingTools(ctx, refs, isRegeneration, pendingTools); err != nil {
 			return err
@@ -173,6 +183,7 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 	}
 	messages = applyPlannedSystemDecision(messages, decision)
 	messages = appendPendingToolPreviewResults(messages, pending)
+	messages = c.appendPlannedDeveloperMessage(messages)
 	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
@@ -214,6 +225,7 @@ func (c *requestPreparer) prepareMessageResumeRequest(ctx context.Context, resum
 
 	decision := DecideResumeFork(request.system, c.cfg)
 	messages := applyPlannedSystemDecision(request.messages, decision)
+	messages = c.appendPlannedDeveloperMessage(messages)
 	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
@@ -244,7 +256,8 @@ func (c *requestPreparer) prepareBranchRequest(ctx context.Context, branchRef, i
 		return nil, err
 	}
 	head := request.head
-	messages := appendPlannedUserMessage(request.messages, inputStr, c.cfg.Images, isRegeneration)
+	messages := c.appendPlannedDeveloperMessage(request.messages)
+	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
@@ -449,7 +462,7 @@ func (c *requestPreparer) saveUserMessage(ctx context.Context, sess *Session, in
 		Timestamp: time.Now(),
 	}
 
-	result, err := AppendMessageWithBlocks(ctx, sess, userMsg, nil, nil, blocks)
+	result, err := c.appendUserTurn(ctx, sess, userMsg, blocks)
 	if err != nil {
 		return errors.WrapError("save user message", err)
 	}

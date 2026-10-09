@@ -27,12 +27,25 @@ func NewMemorySessionStore(system, userInput string) *MemorySessionStore {
 // a user turn given as blocks, so a -no-session run carries -image attachments
 // through the tool loop exactly as a saved session would.
 func NewMemorySessionStoreWithUserBlocks(system string, userBlocks []Block) *MemorySessionStore {
+	return newMemorySessionStore(system, "", userBlocks)
+}
+
+// NewMemorySessionStoreForRequest seeds tool follow-ups with the same system,
+// developer instruction, and user blocks as the initial request.
+func NewMemorySessionStoreForRequest(cfg RequestOptions, input string) *MemorySessionStore {
+	return newMemorySessionStore(cfg.GetEffectiveSystem(), cfg.Developer, UserMessageBlocks(input, cfg.Images))
+}
+
+func newMemorySessionStore(system, developer string, userBlocks []Block) *MemorySessionStore {
 	store := &MemorySessionStore{
 		path:     memorySessionPath,
 		toolName: make(map[string]string),
 	}
 	if system != "" {
 		store.messages = append(store.messages, NewTextMessage(string(RoleSystem), system))
+	}
+	if developer != "" {
+		store.messages = append(store.messages, NewTextMessage(string(RoleDeveloper), developer))
 	}
 	if len(userBlocks) > 0 {
 		store.messages = append(store.messages, TypedMessage{

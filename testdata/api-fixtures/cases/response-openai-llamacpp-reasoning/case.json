@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-llamacpp-reasoning",
+  "description": "llama.cpp Chat Completions readable reasoning kept separately from the answer",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai"
+}

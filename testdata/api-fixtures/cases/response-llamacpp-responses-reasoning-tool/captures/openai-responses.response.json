@@ -1,0 +1,37 @@
+{
+  "id": "resp_fixture",
+  "object": "response",
+  "created_at": 1791569777,
+  "status": "completed",
+  "model": "gemma-4-26b-a4b",
+  "output": [
+    {
+      "id": "rs_fixture_0",
+      "summary": [],
+      "type": "reasoning",
+      "content": [
+        {
+          "text": "The user wants me to count the number of red circles and blue squares in a specific image: `/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png`.\nI need to use the `view_image` tool to see the image first.\nAfter seeing the image, I will count the red circles and blue squares and then provide the answer in one short sentence.\n\n1.  **Call `view_image`** with the path `/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png`.\n2.  **Inspect the image** (once the tool returns).\n3.  **Count red circles and blue squares**.\n4.  **Formulate the final response**.",
+          "type": "reasoning_text"
+        }
+      ],
+      "encrypted_content": ""
+    },
+    {
+      "id": "fc_fixture_1",
+      "type": "function_call",
+      "status": "completed",
+      "arguments": "{\"path\":\"/private/tmp/lmc-llamacpp-20261009.1mkUx0/images/counts.png\"}",
+      "call_id": "call_fixture_1",
+      "name": "view_image"
+    }
+  ],
+  "usage": {
+    "input_tokens": 283,
+    "output_tokens": 228,
+    "total_tokens": 511,
+    "input_tokens_details": {
+      "cached_tokens": 278
+    }
+  }
+}

@@ -13,7 +13,7 @@ func toolResultTestImage() ImageBlock {
 
 func TestToolResultBlockFromResultCarriesImages(t *testing.T) {
 	image := toolResultTestImage()
-	result := ToolResult{ID: "img", Output: "Attached image shot.png (image/png, 12 bytes).", Images: []ImageBlock{image}}
+	result := ToolResult{ID: "img", Output: "Attached image shot.png (image/png, " + FormatByteCount(len(pngBytes)) + ").", Images: []ImageBlock{image}}
 
 	block := ToolResultBlockFromResult(result, ViewImageToolName)
 
@@ -39,7 +39,7 @@ func TestToolResultsMessageBlocksKeepsImagesInPlace(t *testing.T) {
 	image := toolResultTestImage()
 	blocks := ToolResultsMessageBlocks([]ToolResult{
 		{ID: "cmd", Output: "hi\n"},
-		{ID: "img", Output: "Attached image shot.png (image/png, 12 bytes).", Images: []ImageBlock{image}},
+		{ID: "img", Output: "Attached image shot.png (image/png, " + FormatByteCount(len(pngBytes)) + ").", Images: []ImageBlock{image}},
 	}, "Note: x\n", map[string]string{"img": ViewImageToolName})
 
 	if len(blocks) != 3 {

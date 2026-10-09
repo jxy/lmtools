@@ -11,6 +11,9 @@ func openAIRequestMap(payload PreparedRequestPayload) map[string]interface{} {
 		"messages": marshalOpenAITypedMessages(payload.Messages, false),
 		"stream":   payload.Stream,
 	}
+	if payload.Stream {
+		reqMap["stream_options"] = map[string]interface{}{"include_usage": true}
+	}
 	addToolFields(reqMap, payload)
 	addOpenAIOutputFields(reqMap, payload)
 	return reqMap

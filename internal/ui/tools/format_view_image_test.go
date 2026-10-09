@@ -1,14 +1,22 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/png"
 	"lmtools/internal/core"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-var viewImagePNG = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
+var viewImagePNG = func() []byte {
+	var out bytes.Buffer
+	_ = png.Encode(&out, image.NewRGBA(image.Rect(0, 0, 1, 1)))
+	return out.Bytes()
+}()
 
 func viewImageCall(t *testing.T, id string, args core.ViewImageArgs) core.ToolCall {
 	t.Helper()
@@ -65,18 +73,18 @@ func TestViewImageOutcomesRenderThroughTheCLI(t *testing.T) {
 		t.Fatalf("write whitelist: %v", err)
 	}
 
-	attached := `
+	attached := fmt.Sprintf(`
 >>> Tools requested: 1
 [1/1] View image: "<TMP>/shot.png"
 
->>> Running 1 command...
+>>> Running 1 tool...
 
 >>> Results:
 [1/1] Completed in NNms
       Output:
-Attached image shot.png (image/png, 12 bytes).
+Attached image shot.png (image/png, %d bytes).
 
-`
+`, len(viewImagePNG))
 	scenarios := []executorScenario{
 		{
 			name:     "auto-approved",
@@ -102,7 +110,7 @@ Attached image shot.png (image/png, 12 bytes).
 [1/1] View image: "<TMP>/shot.png"
       Detail: low
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: user denied permission
@@ -118,7 +126,7 @@ Attached image shot.png (image/png, 12 bytes).
 >>> Tools requested: 1
 [1/1] View image: "<TMP>/notes.txt"
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: read image "<TMP>/notes.txt": content is not PNG, JPEG, GIF, or WebP
@@ -134,7 +142,7 @@ Attached image shot.png (image/png, 12 bytes).
 >>> Tools requested: 1
 [1/1] View image: "<TMP>/shot.png"
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: approval disabled by -tool-non-interactive
@@ -161,7 +169,7 @@ Attached image shot.png (image/png, 12 bytes).
 >>> Tools requested: 1
 [1/1] View image: "<TMP>/shot.png"
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: not in whitelist

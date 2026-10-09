@@ -36,6 +36,7 @@ type Config struct {
 	providerconfig.Options
 	System              string        // system prompt for chat
 	SystemExplicitlySet bool          // whether -s flag was explicitly provided
+	Developer           string        // pending developer instruction for the first new user turn
 	Timeout             time.Duration // HTTP request timeout
 	Retries             int           // number of retry attempts
 	Resume              string        // session ID or path to continue
@@ -121,6 +122,9 @@ func ParseFlags(args []string) (Config, error) {
 	if err := cfg.Normalize(); err != nil {
 		return cfg, err
 	}
+	if err := validateDeveloperFlags(cfg); err != nil {
+		return cfg, err
+	}
 
 	if err := validateProviderCredentials(cfg); err != nil {
 		return cfg, err
@@ -153,12 +157,13 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.BoolVar(&cfg.ShowThinking, "show-thinking", false, "print provider-returned thinking summaries to stderr (does not enable reasoning)")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
+	fs.StringVar(&cfg.Developer, "developer", "", "developer instruction saved before the first new user turn (OpenAI or Argo gpt* with -openai-responses)")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
 	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "Responses API reasoning mode: standard, pro (requires -openai-responses; pro is GPT-5.6 only)")
 	fs.StringVar(&cfg.ReasoningContext, "reasoning-context", "", "Responses API reasoning context: auto, current_turn, all_turns (requires -openai-responses)")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "maximum output tokens (0 uses provider default; Claude defaults to 128000 for Opus, 64000 otherwise)")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
-	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file for structured output")
+	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file passed to the provider for structured output")
 	fs.Var(imagePathsFlag{paths: &cfg.ImagePaths}, "image", "attach an image file ("+core.SupportedImageMediaTypesText+") to the prompt; repeatable")
 	fs.StringVar(&cfg.ImageDetail, "image-detail", "", "OpenAI detail hint for every -image: auto, low, high")
 
@@ -270,6 +275,7 @@ func (c Config) RequestOptions() core.RequestOptions {
 		System:              c.System,
 		EffectiveSystem:     effectiveSystem,
 		SystemExplicitlySet: c.SystemExplicitlySet,
+		Developer:           c.Developer,
 		Env:                 argoEnv,
 		ArgoLegacy:          c.ArgoLegacy,
 		Embed:               c.Embed,

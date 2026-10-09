@@ -70,6 +70,9 @@ func getProviderWithDefault(cfg RequestOptions, defaultProvider string) string {
 
 // BuildRequest builds an HTTP request based on configuration and input
 func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
+	if err := ValidateDeveloperTurn(cfg, input, false); err != nil {
+		return nil, nil, err
+	}
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)
 
 	// Handle embed mode separately
@@ -84,6 +87,9 @@ func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, erro
 	system := resolvedSystemPrompt(cfg, "")
 	if system != "" && !providerUsesOutOfBandSystemPrompt(provider) {
 		messages = append(messages, NewTextMessage("system", system))
+	}
+	if cfg.Developer != "" {
+		messages = append(messages, NewTextMessage(string(RoleDeveloper), cfg.Developer))
 	}
 
 	// Add user message: the prompt and any -image attachments.
@@ -186,6 +192,10 @@ type Response struct {
 	Blocks           []Block
 	ThoughtSignature string
 	Streamed         bool
+	// IncompleteReason names why the provider stopped before completing the
+	// response, such as max_output_tokens or content_filter. Partial content
+	// remains available for presentation and persistence.
+	IncompleteReason string
 	// Usage carries the token counts the provider reported, nil when it
 	// reported none. Display-only: session stores decompose Response
 	// field-by-field and never persist it.
@@ -249,6 +259,7 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	}
 
 	response.Streamed = streamed
+	response = prepareResponseCompletion(cfg, response)
 	AnnotateMCPToolCalls(response.ToolCalls, opts.ToolDefs)
 	if output != nil {
 		output.HandleResponseComplete(response)
@@ -322,7 +333,7 @@ func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http
 		if len(blocks) == 0 {
 			blocks = responseBlocksFromParts(text, toolCalls, "")
 		}
-		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks, Usage: state.Usage()}, err
+		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks, Usage: state.Usage(), IncompleteReason: state.IncompleteReason()}, err
 	}
 
 	spec, err := providerSpecForName(provider)

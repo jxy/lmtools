@@ -60,6 +60,13 @@ func ToOpenAITyped(messages []TypedMessage) []OpenAIMessage {
 			content, toolCalls := ConvertBlocksToOpenAIContentTyped(msg.Blocks)
 			openAIMsg.Content = content
 			openAIMsg.ToolCalls = toolCalls
+			var reasoning strings.Builder
+			for _, block := range msg.Blocks {
+				if b, ok := block.(ReasoningBlock); ok && b.Provider == "openai" && b.Type == openAIChatReasoningType {
+					reasoning.WriteString(b.Text)
+				}
+			}
+			openAIMsg.ReasoningContent = reasoning.String()
 
 		case string(RoleUser):
 			var hasToolResults bool
@@ -121,6 +128,9 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 			}
 
 		default:
+			if msg.Role == "assistant" && msg.ReasoningContent != "" {
+				typed.Blocks = append(typed.Blocks, openAIChatReasoningBlock(msg.ReasoningContent))
+			}
 			if msg.Content.Text != nil && *msg.Content.Text != "" {
 				typed.Blocks = append(typed.Blocks, TextBlock{Text: *msg.Content.Text})
 			} else if len(msg.Content.Contents) > 0 {
@@ -284,6 +294,9 @@ func MarshalOpenAIMessagesForRequest(messages []OpenAIMessage) []interface{} {
 
 		if len(msg.ToolCalls) > 0 {
 			msgMap["tool_calls"] = msg.ToolCalls
+		}
+		if msg.Role == "assistant" && msg.ReasoningContent != "" {
+			msgMap["reasoning_content"] = msg.ReasoningContent
 		}
 		if msg.ToolCallID != "" {
 			msgMap["tool_call_id"] = msg.ToolCallID

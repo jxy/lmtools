@@ -1,0 +1,6 @@
+{
+  "target": "openai-responses-stream",
+  "status_code": 200,
+  "source": "llama.cpp b11537-8e2d31e0e, gemma-4-26b-a4b; captured 2026-10-09",
+  "url": "http://localhost:9931/v1/responses"
+}

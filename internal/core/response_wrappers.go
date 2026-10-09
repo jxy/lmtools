@@ -1,8 +1,7 @@
 package core
 
 func parseOpenAIResponse(data []byte, isEmbed bool) (Response, error) {
-	text, toolCalls, err := parseOpenAIResponseWithTools(data, isEmbed)
-	return Response{Text: text, ToolCalls: toolCalls, Blocks: responseBlocksFromParts(text, toolCalls, "")}, err
+	return parseOpenAIResponseDetailed(data, isEmbed)
 }
 
 func parseAnthropicResponse(data []byte, isEmbed bool) (Response, error) {

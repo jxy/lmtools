@@ -22,6 +22,13 @@ func normalizeOpenAIToolArguments(raw json.RawMessage) json.RawMessage {
 
 // parseOpenAIResponseWithTools parses OpenAI responses that may contain tool calls
 func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall, error) {
+	response, err := parseOpenAIResponseDetailed(data, isEmbed)
+	return response.Text, response.ToolCalls, err
+}
+
+// parseOpenAIResponseDetailed keeps Chat reasoning outside the assistant answer
+// and retains the provider's reason for ending an unfinished response.
+func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 	if isEmbed {
 		// Parse embedding response
 		var embedResp struct {
@@ -30,26 +37,29 @@ func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(data, &embedResp); err != nil {
-			return "", nil, fmt.Errorf("failed to unmarshal OpenAI embed response: %w", err)
+			return Response{}, fmt.Errorf("failed to unmarshal OpenAI embed response: %w", err)
 		}
 		if len(embedResp.Data) == 0 {
-			return "", nil, fmt.Errorf("empty embedding response")
+			return Response{}, fmt.Errorf("empty embedding response")
 		}
 		if len(embedResp.Data[0].Embedding) == 0 {
-			return "[]", nil, nil
+			return Response{Text: "[]", Blocks: []Block{TextBlock{Text: "[]"}}}, nil
 		}
 		embeddingJSON, err := json.Marshal(embedResp.Data[0].Embedding)
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to marshal embedding: %w", err)
+			return Response{}, fmt.Errorf("failed to marshal embedding: %w", err)
 		}
-		return string(embeddingJSON), nil, nil
+		text := string(embeddingJSON)
+		return Response{Text: text, Blocks: []Block{TextBlock{Text: text}}}, nil
 	}
 
 	var resp struct {
 		Choices []struct {
-			Message struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
 					Function struct {
@@ -71,16 +81,16 @@ func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall
 	}
 
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return "", nil, fmt.Errorf("failed to decode response: %w", err)
+		return Response{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if resp.Error != nil {
-		return "", nil, fmt.Errorf("API error: %s (type: %s, code: %s)",
+		return Response{}, fmt.Errorf("API error: %s (type: %s, code: %s)",
 			resp.Error.Message, resp.Error.Type, resp.Error.Code)
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", nil, fmt.Errorf("no choices in response")
+		return Response{}, fmt.Errorf("no choices in response")
 	}
 
 	msg := resp.Choices[0].Message
@@ -105,5 +115,32 @@ func parseOpenAIResponseWithTools(data []byte, isEmbed bool) (string, []ToolCall
 		})
 	}
 
-	return msg.Content, toolCalls, nil
+	var blocks []Block
+	if msg.ReasoningContent != "" {
+		blocks = append(blocks, openAIChatReasoningBlock(msg.ReasoningContent))
+	}
+	blocks = append(blocks, responseBlocksFromParts(msg.Content, toolCalls, "")...)
+	return Response{
+		Text:             msg.Content,
+		ToolCalls:        toolCalls,
+		Blocks:           blocks,
+		IncompleteReason: openAIChatIncompleteReason(resp.Choices[0].FinishReason),
+	}, nil
+}
+
+const openAIChatReasoningType = "reasoning_content"
+
+func openAIChatReasoningBlock(text string) ReasoningBlock {
+	return ReasoningBlock{Provider: "openai", Type: openAIChatReasoningType, Text: text}
+}
+
+func openAIChatIncompleteReason(finishReason string) string {
+	switch finishReason {
+	case "length":
+		return "max_output_tokens"
+	case "content_filter":
+		return "content_filter"
+	default:
+		return ""
+	}
 }

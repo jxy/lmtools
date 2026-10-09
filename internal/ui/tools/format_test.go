@@ -70,7 +70,7 @@ func TestCLIToolUIFormatsReviewedParallelBatch(t *testing.T) {
       Workdir: "/workspace/lmtools"
       Environ: {"GOCACHE":"/tmp/lmtools-cache"}
 
->>> Running 2 of 3 commands in parallel...
+>>> Running 2 of 3 tools in parallel...
 
 >>> Results:
 [1/3] Completed in 58ms
@@ -271,7 +271,7 @@ func TestWriteToolOutputUsesBoundedWritesWithoutIndenting(t *testing.T) {
 func TestCLIToolUIBeforeRunWithNoApprovedCommands(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	NewCLIToolUI(notifier).BeforeRun(2, 0, 0)
-	if got, want := notifier.out.String(), "\n>>> No commands will be run.\n"; got != want {
+	if got, want := notifier.out.String(), "\n>>> No tools will be run.\n"; got != want {
 		t.Fatalf("BeforeRun() = %q, want %q", got, want)
 	}
 }
@@ -394,7 +394,7 @@ func TestExecutorOutcomesRenderTheSameThroughTheCLI(t *testing.T) {
 >>> Tools requested: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> Running 1 command...
+>>> Running 1 tool...
 
 >>> Results:
 [1/1] Completed in NNms
@@ -412,7 +412,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/sh","-c","exit 3"]
 
->>> Running 1 command...
+>>> Running 1 tool...
 
 >>> Results:
 [1/1] Failed in NNms: exit status 3
@@ -429,7 +429,7 @@ hi
 [1/1] Command: ["/bin/sleep","5"]
       Timeout: 1s
 
->>> Running 1 command...
+>>> Running 1 tool...
 
 >>> Results:
 [1/1] Timed out in NNms
@@ -445,7 +445,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/rm","-rf","/"]
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: blacklisted
@@ -462,7 +462,7 @@ hi
 [1/1] Command: ["/bin/cat"]
       Stdin: "x"
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: not in whitelist (stdin provided)
@@ -482,7 +482,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: no terminal available for approval
@@ -502,7 +502,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: approval disabled by -tool-non-interactive
@@ -522,7 +522,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: user denied permission
@@ -538,7 +538,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: approval failed: read response: input/output error
@@ -555,7 +555,7 @@ hi
 [1/1] Tool: other_tool
       Arguments: {}
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: unsupported tool: other_tool
@@ -572,7 +572,7 @@ hi
 [1/1] Tool: universal_command
       Arguments: {"command":[]}
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: command array cannot be empty
@@ -595,7 +595,7 @@ hi
 [2/2] Command: ["/bin/echo","b"]
       Stdout file: "<TMP>/shared.log"
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/2] Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
@@ -614,7 +614,7 @@ hi
 >>> Tools requested: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No commands will be run.
+>>> No tools will be run.
 
 >>> Results:
 [1/1] Not run: execution cancelled

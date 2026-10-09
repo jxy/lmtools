@@ -22,11 +22,12 @@ import (
 
 // OpenAIMessage represents a message in OpenAI format
 type OpenAIMessage struct {
-	Role       string             `json:"role"`
-	Content    OpenAIContentUnion `json:"content,omitempty"` // string or []OpenAIContent
-	ToolCalls  []OpenAIToolCall   `json:"tool_calls,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"` // For tool response messages
-	Name       string             `json:"name,omitempty"`
+	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	Role             string             `json:"role"`
+	Content          OpenAIContentUnion `json:"content,omitempty"` // string or []OpenAIContent
+	ToolCalls        []OpenAIToolCall   `json:"tool_calls,omitempty"`
+	ToolCallID       string             `json:"tool_call_id,omitempty"` // For tool response messages
+	Name             string             `json:"name,omitempty"`
 }
 
 // OpenAIContentUnion represents content that can be string or []OpenAIContent

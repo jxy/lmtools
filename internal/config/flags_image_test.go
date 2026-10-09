@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"lmtools/internal/core"
+	"lmtools/internal/imagetest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +12,8 @@ import (
 )
 
 var (
-	testPNGBytes  = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
-	testJPEGBytes = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0}
+	testPNGBytes  = imagetest.PNG
+	testJPEGBytes = imagetest.JPEG
 )
 
 func writeImageFixture(t *testing.T, name string, data []byte) string {

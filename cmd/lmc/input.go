@@ -155,6 +155,16 @@ func (o *inputOwner) readLineUnder(ctx context.Context, bound int) (inputLine, e
 	return o.lines.next(ctx)
 }
 
+// discardTerminalInput establishes a fresh-input boundary after draft review.
+func (o *inputOwner) discardTerminalInput() (bool, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.term == nil {
+		return false, errors.New("standard input is not a terminal this process opened")
+	}
+	return o.term.flush()
+}
+
 // answer reads the answer to a question on the owner's terminal. It drops
 // what the terminal holds, then shows the question, then reads, so nothing
 // typed before the question appeared can answer it: a line typed while the

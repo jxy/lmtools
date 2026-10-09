@@ -155,7 +155,7 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 	apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
 	sessionsDir := t.TempDir()
 	wantURL := core.ImageDataURL("image/png", integrationPNG)
-	wantText := "Attached image plot.png (image/png, 12 bytes)."
+	wantText := "Attached image plot.png (image/png, " + core.FormatByteCount(len(integrationPNG)) + ")."
 
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
 		[]string{
@@ -219,7 +219,7 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 	}
 
 	sessionID, shown := showSession(t, lmcBin, sessionsDir)
-	if !strings.Contains(shown, "     "+wantText+"\n     [image: plot.png (image/png, 12 bytes)]\n") {
+	if !strings.Contains(shown, "     "+wantText+"\n     [image: plot.png (image/png, "+core.FormatByteCount(len(integrationPNG))+")]\n") {
 		t.Fatalf("-show output = %q, want the result text followed by the image line", shown)
 	}
 	if strings.Contains(shown, "base64,") {
@@ -276,7 +276,7 @@ func TestViewImageToolOnAnthropicWireNestsTheImageInTheToolResult(t *testing.T) 
 	imagePath := writeIntegrationImage(t, "plot.png")
 	server := newViewImageServer(t, "anthropic", imagePath)
 	apiKeyFile := writeTestAPIKeyFile(t, "test-anthropic-key")
-	wantText := "Attached image plot.png (image/png, 12 bytes)."
+	wantText := "Attached image plot.png (image/png, " + core.FormatByteCount(len(integrationPNG)) + ")."
 
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
 		[]string{

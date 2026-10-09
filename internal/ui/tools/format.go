@@ -122,18 +122,18 @@ func imageCallArgs(call core.ToolCall) *core.ViewImageArgs {
 // BeforeRun announces execution after every approval has resolved.
 func (ui *CLIToolUI) BeforeRun(total, runnable, parallel int) {
 	if runnable == 0 {
-		ui.notifier.Promptf("\n>>> No commands will be run.\n")
+		ui.notifier.Promptf("\n>>> No tools will be run.\n")
 		return
 	}
 
 	var count string
 	switch {
 	case runnable != total:
-		count = fmt.Sprintf("%d of %d commands", runnable, total)
+		count = fmt.Sprintf("%d of %d tools", runnable, total)
 	case runnable == 1:
-		count = "1 command"
+		count = "1 tool"
 	default:
-		count = fmt.Sprintf("%d commands", runnable)
+		count = fmt.Sprintf("%d tools", runnable)
 	}
 	parallelText := ""
 	if parallel > 1 {

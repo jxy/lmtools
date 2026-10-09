@@ -33,6 +33,10 @@ type replUnderTerminal struct {
 // startREPLUnderTerminal starts lmc -repl against the provider at url, on a
 // pseudo terminal, with stdout redirected to stdout when it is not nil.
 func startREPLUnderTerminal(t *testing.T, url string, stdout *os.File, extra ...string) *replUnderTerminal {
+	return startREPLUnderTerminalStreams(t, url, stdout, nil, extra...)
+}
+
+func startREPLUnderTerminalStreams(t *testing.T, url string, stdout, stderr *os.File, extra ...string) *replUnderTerminal {
 	t.Helper()
 	pty, err := ptytest.Open()
 	if err != nil {
@@ -53,6 +57,9 @@ func startREPLUnderTerminal(t *testing.T, url string, stdout *os.File, extra ...
 	r.cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
 	if stdout != nil {
 		r.cmd.Stdout = stdout
+	}
+	if stderr != nil {
+		r.cmd.Stderr = stderr
 	}
 	if err := pty.Start(r.cmd); err != nil {
 		t.Fatalf("start lmc -repl: %v", err)
@@ -135,13 +142,18 @@ func TestTerminalREPLTurnsAndCtrlD(t *testing.T) {
 	defer server.Close()
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 
+	r.expect(t, `lmc REPL | model: "gpt-test" | API: Chat Completions (buffered)`)
+	r.expect(t, "/help for commands; Ctrl-C cancels, Ctrl-D or /exit exits.")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "first question\n")
-	r.expect(t, "answer 1\r\n\r\n"+freshPrompt)
+	r.expect(t, "Assistant 1:\r\n")
+	r.expect(t, "answer 1\r\n\r\nNote: Session: ")
+	r.expect(t, freshPrompt)
 	if r.nonblocking(t) {
 		t.Fatal("standard input's description became nonblocking")
 	}
 	r.typeKeys(t, "par"+ptytest.EndOfInput+"tial\n")
+	r.expect(t, "Assistant 2:\r\n")
 	r.expect(t, "answer 2")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, ptytest.EndOfInput)
@@ -164,7 +176,10 @@ func TestTerminalREPLPaste(t *testing.T) {
 
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "one\ntwo\nthree\n")
-	r.expect(t, "answer 3")
+	for i, prompt := range []string{"one", "two", "three"} {
+		r.expect(t, fmt.Sprintf("User %d: %q\r\nlmc: Working on turn %d...", i+1, prompt, i+1))
+		r.expect(t, fmt.Sprintf("answer %d", i+1))
+	}
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, ptytest.EndOfInput)
 	if code := r.wait(t); code != 0 {
@@ -342,5 +357,176 @@ func TestTerminalREPLCtrlCDuringStartup(t *testing.T) {
 	}
 	if len(server.GetRequests()) != 0 {
 		t.Fatal("the provider got a request")
+	}
+}
+
+// Canonical terminal editing stays available. Commands in a paste are handled
+// in order, and the former direct resend command explains the review step.
+func TestTerminalREPLCommandsAndEditing(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	r := startREPLUnderTerminal(t, server.URL(), nil)
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "discard this\x15kept wrong\x17wordx\x7f\n")
+	r.expect(t, `User 1: "kept word"`)
+	r.expect(t, "answer 1")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/help\n/history\n/again 1\n/exit\n")
+	r.expect(t, "REPL commands:")
+	r.expect(t, `1: "kept word"`)
+	r.expect(t, "Use /ed N to edit a history prompt")
+	if code := r.wait(t); code != 0 {
+		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())
+	}
+	requests := server.GetRequests()
+	if len(requests) != 1 || !strings.Contains(requests[0].Body, `"kept word"`) {
+		t.Fatalf("requests = %v, want only the edited prompt", requests)
+	}
+	if strings.Count(r.screen.String(), "Note: Session: ") != 1 {
+		t.Fatalf("the session ID was not shown once: %q", r.screen.String())
+	}
+}
+
+// REPL diagnostics still use the controlling terminal when both output streams
+// are redirected. Enter with an attached image sends a turn without text.
+func TestTerminalREPLImageOnlyWithRedirectedStreams(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	dir := t.TempDir()
+	image := filepath.Join(dir, "picture with spaces.png")
+	if err := os.WriteFile(image, replPNG, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath, stderrPath := filepath.Join(dir, "answers"), filepath.Join(dir, "diagnostics")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdout.Close()
+	stderr, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderr.Close()
+	r := startREPLUnderTerminalStreams(t, server.URL(), stdout, stderr)
+	r.expect(t, "lmc REPL")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/image "+image+"\n")
+	r.expect(t, "1 image(s) pending for the next turn.")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "\n")
+	r.expect(t, `User 1: "" (1 image(s))`)
+	r.expect(t, "lmc: Working on turn 1...")
+	r.expect(t, "Note: Session: ")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/help\n/exit\n")
+	r.expect(t, "REPL commands:")
+	if code := r.wait(t); code != 0 {
+		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())
+	}
+	answers, err := os.ReadFile(stdoutPath)
+	if err != nil || string(answers) != "answer 1\n" {
+		t.Fatalf("stdout = %q (err %v), want answer bytes alone", answers, err)
+	}
+	diagnostics, err := os.ReadFile(stderrPath)
+	if err != nil || len(diagnostics) != 0 {
+		t.Fatalf("stderr = %q (err %v), want REPL diagnostics on the terminal", diagnostics, err)
+	}
+	requests := server.GetRequests()
+	if len(requests) != 1 || strings.Count(requests[0].Body, "data:image/png") != 1 {
+		t.Fatalf("requests = %v, want one image-only turn", requests)
+	}
+	if strings.Contains(r.screen.String(), "answer 1") {
+		t.Fatalf("the answer appeared on the terminal: %q", r.screen.String())
+	}
+}
+
+// A cancelled prompt remains available for recall while its uncommitted turn
+// remains absent from the session that the recalled prompt starts.
+func TestTerminalREPLRecallAfterCancellation(t *testing.T) {
+	var mu sync.Mutex
+	attempts := 0
+	requested := make(chan struct{}, 1)
+	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(r *http.Request) (interface{}, int, error) {
+		mu.Lock()
+		attempts++
+		attempt := attempts
+		mu.Unlock()
+		if attempt == 1 {
+			requested <- struct{}{}
+			<-r.Context().Done()
+			return nil, http.StatusServiceUnavailable, errors.New("cancelled")
+		}
+		return openAITextResponse("recalled answer"), http.StatusOK, nil
+	}))
+	defer server.Close()
+	r := startREPLUnderTerminal(t, server.URL(), nil)
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "slow question\n")
+	select {
+	case <-requested:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the first request never started")
+	}
+	r.typeKeys(t, ptytest.Interrupt)
+	r.expect(t, "Turn cancelled; nothing was saved.")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/history\nslow question\n/exit\n")
+	r.expect(t, `1: "slow question"`)
+	r.expect(t, "recalled answer")
+	if code := r.wait(t); code != 0 {
+		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())
+	}
+	requests := server.GetRequests()
+	if len(requests) != 2 || strings.Count(requests[1].Body, `"slow question"`) != 1 {
+		t.Fatalf("requests = %v, want the recalled prompt without the cancelled turn", requests)
+	}
+	if count := sessionDirCount(t, r.sessionsDir); count != 1 {
+		t.Fatalf("%d sessions, want only the recalled turn's session", count)
+	}
+}
+
+func TestTerminalREPLDeveloperCommands(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	r := startREPLUnderTerminal(t, server.URL(), nil, "-developer", "Startup instruction")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "initial\n")
+	r.expect(t, "answer 1")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/developer old\n/developer New line\\\nSecond line\n/history\n")
+	r.expect(t, "Developer instruction queued for the next turn.")
+	r.expect(t, "Developer instruction queued for the next turn.")
+	r.expect(t, `1: "initial"`)
+	r.expect(t, freshPrompt)
+	if requests := server.GetRequests(); len(requests) != 1 {
+		t.Fatalf("commands caused inference: %v", requests)
+	}
+	r.typeKeys(t, "second\n")
+	r.expect(t, "answer 2")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/developer discarded\n/clear-developer\n//developer literal\n/exit\n")
+	r.expect(t, "Cleared pending developer instruction.")
+	r.expect(t, `User 3: "/developer literal"`)
+	r.expect(t, "answer 3")
+	if code := r.wait(t); code != 0 {
+		t.Fatalf("exit code %d; terminal=%q", code, r.screen.String())
+	}
+	requests := server.GetRequests()
+	if len(requests) != 3 {
+		t.Fatalf("%d requests, want the three text turns", len(requests))
+	}
+	for i, request := range requests {
+		instructions := replRequestDeveloperTexts(t, request.Body)
+		wantCount := 1
+		if i > 0 {
+			wantCount = 2
+		}
+		if len(instructions) != wantCount || instructions[0] != "Startup instruction" || (i > 0 && instructions[1] != "New line\nSecond line") {
+			t.Fatalf("request %d instructions=%q, want prior instructions once in order", i+1, instructions)
+		}
+	}
+	if strings.Count(r.screen.String(), "Note: Session: ") != 1 || sessionDirCount(t, r.sessionsDir) != 1 {
+		t.Fatalf("developer updates did not continue one session: %q", r.screen.String())
 	}
 }

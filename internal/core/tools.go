@@ -227,7 +227,7 @@ func ResponseHasContent(response Response) bool {
 func handleToolExecutionLoop(tc ToolContext) ToolExecutionResult {
 	maxRounds := tc.Cfg.GetMaxToolRounds()
 
-	response := tc.InitialResponse
+	response := prepareResponseCompletion(tc.Cfg, tc.InitialResponse)
 	finalText := response.Text
 	finalStreamed := response.Streamed
 	// presentedUnsaved is true while the response the loop holds has been
@@ -243,6 +243,15 @@ func handleToolExecutionLoop(tc ToolContext) ToolExecutionResult {
 		return result
 	}
 
+	if err := ValidateResponse(tc.Cfg, response); err != nil {
+		if ResponseHasContent(response) {
+			if saveErr := persistAssistantRound(tc.Ctx, tc.ExecCfg.Store, response, tc.ExecCfg.ActualModel, tc.Logger); saveErr != nil {
+				return finish(stdErrors.Join(err, saveErr))
+			}
+			presentedUnsaved = false
+		}
+		return finish(err)
+	}
 	executor, err := NewExecutor(tc.Cfg, tc.Logger, tc.Approver)
 	if err != nil {
 		return finish(fmt.Errorf("failed to create executor: %w", err))
@@ -344,6 +353,9 @@ func handleToolExecutionLoop(tc ToolContext) ToolExecutionResult {
 				return finish(err)
 			}
 			presentedUnsaved = false
+		}
+		if err := ValidateResponse(tc.Cfg, response); err != nil {
+			return finish(err)
 		}
 	}
 

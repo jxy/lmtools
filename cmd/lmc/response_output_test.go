@@ -105,6 +105,54 @@ func TestResponsePresenterReportsMissingVisibleThinking(t *testing.T) {
 	}
 }
 
+func TestResponsePresenterUsesFinalCompletionForThinkingMarker(t *testing.T) {
+	for _, reason := range []string{"", "max_output_tokens"} {
+		t.Run(reason, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			presenter := newResponsePresenter(&stdout, &stderr, true)
+			presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningStart})
+			presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningDelta, Text: "Partial thought"})
+			presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningEnd})
+			presenter.HandleResponseComplete(core.Response{Streamed: true, IncompleteReason: reason})
+			presenter.Close()
+			marker := thinkingEndMarker
+			if reason != "" {
+				marker = thinkingIncompleteEndMarker
+			}
+			if want := thinkingStartMarker + "\nPartial thought\n" + marker + "\n\n"; stderr.String() != want {
+				t.Fatalf("thinking = %q, want %q", stderr.String(), want)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("thinking reached stdout: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestResponsePresenterLabelsEachAnswerWithoutChangingStdout(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newResponsePresenter(&stdout, &stderr, true)
+	presenter.answerLabel = "Assistant 2"
+	presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningStart})
+	presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningDelta, Text: "Check"})
+	presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningEnd})
+	presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamTextDelta, Text: "First"})
+	presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamTextDelta, Text: " part"})
+	presenter.HandleResponseComplete(core.Response{Streamed: true, ToolCalls: []core.ToolCall{{ID: "call_1"}}})
+	// The same presenter handles the answer after the tool round.
+	presenter.HandleResponseComplete(core.Response{Text: "Last"})
+	presenter.Close()
+	if stdout.String() != "First partLast" {
+		t.Fatalf("model answer bytes changed: %q", stdout.String())
+	}
+	if strings.Count(stderr.String(), "Assistant 2:\n") != 2 {
+		t.Fatalf("want one label per response on diagnostics: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), thinkingEndMarker+"\n\nAssistant 2:\n") {
+		t.Fatalf("answer label did not follow thinking: %q", stderr.String())
+	}
+}
+
 func TestResponsePresenterSeparatesDiagnosticsWithoutChangingAnswer(t *testing.T) {
 	tests := []struct {
 		name string
@@ -168,7 +216,7 @@ Note: Token usage: input 10, output 3
 >>> Tools requested: 1
 [1/1] Command: ["date"]
 
->>> Running 1 command...
+>>> Running 1 tool...
 
 >>> Results:
 [1/1] Completed in 3ms

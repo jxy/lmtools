@@ -86,7 +86,7 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 	for _, want := range []string{
 		">>> Tools requested: 1",
 		`[1/1] Command: ["echo","memory-loop-ok"]`,
-		">>> Running 1 command...",
+		">>> Running 1 tool...",
 		">>> Results:",
 		"[1/1] Completed in ",
 		"      Output:\nmemory-loop-ok",

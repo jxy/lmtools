@@ -124,6 +124,9 @@ func buildToolAwareRequest(cfg RequestOptions, provider string, typedMessages []
 // buildChatRequestFromTyped builds a unified chat request from typed messages
 // This function handles both initial requests and tool result follow-ups
 func buildChatRequestFromTyped(cfg RequestOptions, typedMessages []TypedMessage, model string, system string, systemExplicit bool, toolDefs []ToolDefinition, toolChoice *ToolChoice, stream bool) (*http.Request, []byte, error) {
+	if err := validateDeveloperMessages(cfg, model, typedMessages); err != nil {
+		return nil, nil, err
+	}
 	if model == "" {
 		return nil, nil, fmt.Errorf("model is required for building request")
 	}

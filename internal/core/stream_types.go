@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -261,114 +260,6 @@ func (s *AnthropicStreamState) drainResponseStreamEvents() []ResponseStreamEvent
 // Usage returns the token counts accumulated from the stream, nil when the
 // stream reported none.
 func (s *AnthropicStreamState) Usage() *Usage {
-	return s.usage
-}
-
-type openAIStreamToolCallKey struct {
-	choiceIndex int
-	toolIndex   int
-}
-
-// OpenAIStreamState tracks streaming state with tool support for OpenAI
-type OpenAIStreamState struct {
-	partialToolCalls map[openAIStreamToolCallKey]*ToolCall
-	usage            *Usage
-}
-
-// NewOpenAIStreamState creates a new OpenAI stream state
-func NewOpenAIStreamState() *OpenAIStreamState {
-	return &OpenAIStreamState{
-		partialToolCalls: make(map[openAIStreamToolCallKey]*ToolCall),
-	}
-}
-
-// ParseLine implements StreamState for OpenAI SSE format
-func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, error) {
-	// Handle data lines
-	if data, ok := streamFieldValue(line, "data"); ok {
-		if data == "[DONE]" {
-			// Stream is complete - finalize any partial tool calls
-			var toolCalls []ToolCall
-			keys := make([]openAIStreamToolCallKey, 0, len(s.partialToolCalls))
-			for key := range s.partialToolCalls {
-				keys = append(keys, key)
-			}
-			sort.Slice(keys, func(i, j int) bool {
-				if keys[i].choiceIndex != keys[j].choiceIndex {
-					return keys[i].choiceIndex < keys[j].choiceIndex
-				}
-				return keys[i].toolIndex < keys[j].toolIndex
-			})
-			for _, key := range keys {
-				tc := s.partialToolCalls[key]
-				// Validate JSON arguments before adding to final tool calls
-				if tc.Type != "custom" && len(tc.Args) > 0 {
-					var v interface{}
-					if err := json.Unmarshal(tc.Args, &v); err != nil {
-						return "", nil, false, fmt.Errorf("invalid JSON in tool call choice %d index %d arguments: %w", key.choiceIndex, key.toolIndex, err)
-					}
-					// Re-marshal to ensure clean JSON
-					normalized, _ := json.Marshal(v)
-					tc.Args = json.RawMessage(normalized)
-				}
-				toolCalls = append(toolCalls, *tc)
-			}
-			return "", toolCalls, true, nil
-		}
-
-		parsed, err := ParseOpenAIStreamChunk([]byte(data))
-		if err != nil {
-			// Return error to be logged
-			return "", nil, false, err
-		}
-
-		// ParsedStreamUsage says whether this chunk carried usage but not the
-		// detail counts, so the at-most-one chunk that did is decoded again in
-		// full.
-		if parsed.Usage.InputTokens != nil || parsed.Usage.OutputTokens != nil || parsed.Usage.TotalTokens != nil {
-			s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
-		}
-
-		textContent := ""
-		for _, choice := range parsed.Choices {
-			textContent += choice.Content
-			for _, tc := range choice.ToolCalls {
-				key := openAIStreamToolCallKey{choiceIndex: tc.ChoiceIndex, toolIndex: tc.Index}
-				if _, exists := s.partialToolCalls[key]; !exists {
-					s.partialToolCalls[key] = &ToolCall{}
-				}
-				partial := s.partialToolCalls[key]
-				if tc.ID != "" {
-					partial.ID = tc.ID
-				}
-				if tc.Type != "" {
-					partial.Type = tc.Type
-				}
-				if tc.Name != "" {
-					partial.Name = tc.Name
-				}
-				if tc.Type == "custom" {
-					if tc.Input != "" {
-						partial.Input += tc.Input
-					}
-					continue
-				}
-				if tc.Arguments != "" {
-					currentArgs := string(partial.Args)
-					partial.Args = json.RawMessage(currentArgs + tc.Arguments)
-				}
-			}
-		}
-
-		return textContent, nil, false, nil
-	}
-
-	return "", nil, false, nil
-}
-
-// Usage returns the token counts accumulated from the stream, nil when the
-// stream reported none.
-func (s *OpenAIStreamState) Usage() *Usage {
 	return s.usage
 }
 

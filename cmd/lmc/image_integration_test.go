@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"lmtools/internal/core"
+	"lmtools/internal/imagetest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"testing"
 )
 
-var integrationPNG = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
+var integrationPNG = imagetest.PNG
 
 // imageRecordingServer answers OpenAI Chat Completions with a fixed reply and
 // keeps every request body it saw.
@@ -166,7 +167,7 @@ func TestImageFlagSendsDataURLAndSessionReplaysIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show failed: %v\nstderr:\n%s", err, stderr)
 	}
-	if !strings.Contains(shown, "What is this?\n[image: shot.png (image/png, 12 bytes)]\n") {
+	if !strings.Contains(shown, "What is this?\n[image: shot.png (image/png, "+core.FormatByteCount(len(integrationPNG))+")]\n") {
 		t.Fatalf("-show output = %q, want the prompt followed by the image line", shown)
 	}
 	if strings.Contains(shown, "base64,") {

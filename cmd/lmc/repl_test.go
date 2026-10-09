@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/mockserver"
@@ -105,7 +107,7 @@ func readTurnsFrom(t *testing.T, input string) ([]string, turnRead, []string) {
 	for {
 		turn, how, err := readTurn(ctx, owner, func(string) {}, func(format string, args ...interface{}) {
 			notes = append(notes, fmt.Sprintf(format, args...))
-		}, func() {})
+		}, func() {}, false)
 		if err != nil {
 			t.Fatalf("readTurn() error = %v", err)
 		}
@@ -223,7 +225,7 @@ func TestReadTurnInterrupted(t *testing.T) {
 			prompts := make(chan string, 4)
 			results := make(chan turnRead, 1)
 			go func() {
-				_, how, _ := readTurn(ctx, owner, func(prompt string) { prompts <- prompt }, func(string, ...interface{}) {}, func() {})
+				_, how, _ := readTurn(ctx, owner, func(prompt string) { prompts <- prompt }, func(string, ...interface{}) {}, func() {}, false)
 				results <- how
 			}()
 			nextPrompt := func() string {
@@ -389,8 +391,12 @@ func TestREPLFailedTurnKeepsTheStartingPoint(t *testing.T) {
 	}
 }
 
-// replPNG is a PNG header, enough for -image to take the file as a PNG.
-var replPNG = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
+// replPNG is a complete image, so attachment tests cover the file loader too.
+var replPNG = func() []byte {
+	var out bytes.Buffer
+	_ = png.Encode(&out, image.NewRGBA(image.Rect(0, 0, 1, 1)))
+	return out.Bytes()
+}()
 
 // A resumed session holds a pending call. Before the first prompt the loop
 // runs it and commits its result, and the request that follows fails. The

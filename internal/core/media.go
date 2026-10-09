@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 func ParseBase64DataURL(raw string) (mediaType string, data string, ok bool) {
@@ -110,7 +111,7 @@ func (e ImageTooLargeError) Error() string {
 // a size the file reported beforehand, so a file that grows after the check
 // cannot be read whole.
 func LoadImageFile(path string, maxBytes int) (ImageBlock, error) {
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return ImageBlock{}, fmt.Errorf("read image %q: %w", path, err)
 	}
@@ -120,7 +121,7 @@ func LoadImageFile(path string, maxBytes int) (ImageBlock, error) {
 }
 
 // ReadImageFile is the half of LoadImageFile after the open: the regular-file
-// check on the descriptor, the bounded read, and the sniff. It is separate so
+// check on the descriptor, bounded read, and image validation. It is separate so
 // the tool path can open the file under its own rules and still read it under
 // the flag's.
 func ReadImageFile(file *os.File, path string, maxBytes int) (ImageBlock, error) {
@@ -150,6 +151,10 @@ func ReadImageFile(file *os.File, path string, maxBytes int) (ImageBlock, error)
 	mediaType, ok := DetectImageMediaType(data)
 	if !ok {
 		return ImageBlock{}, fmt.Errorf("read image %q: content is not %s", path, SupportedImageMediaTypesText)
+	}
+
+	if err := validateImageContainer(data, mediaType); err != nil {
+		return ImageBlock{}, fmt.Errorf("read image %q: invalid %s image: %w", path, mediaType, err)
 	}
 
 	return ImageBlock{

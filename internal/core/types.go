@@ -28,6 +28,7 @@ type RequestOptions struct {
 	System              string
 	EffectiveSystem     string
 	SystemExplicitlySet bool
+	Developer           string // pending instruction for the first new user turn
 	Env                 string
 	ArgoLegacy          bool
 	Embed               bool

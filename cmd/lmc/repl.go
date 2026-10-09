@@ -274,6 +274,8 @@ const (
 	// readInterruptedInsideTurn is an interrupt that discarded an
 	// unfinished turn.
 	readInterruptedInsideTurn
+	// readEdit stages an unfinished terminal turn for /ed.
+	readEdit
 )
 
 // readTurn reads one turn under the input contract. A line ending in a
@@ -281,13 +283,14 @@ const (
 // with one literal backslash. An empty line at a fresh prompt sends nothing
 // and prompts again; inside a continuation it is an empty line of the turn.
 // The turn is the lines as typed, joined by newlines; one that is all
-// whitespace is not sent. A turn is capped at maxTurnBytes, the size a
+// whitespace is not sent unless allowEmpty admits an image-only turn.
+// A turn is capped at maxTurnBytes, the size a
 // single run accepts: a longer one is discarded once it ends, and the loop
 // prompts again; a line longer than that keeps its tail, so the end of the
 // turn is still found. Pasted text is read line by line like typed text.
 // show displays a prompt, note reports a discarded turn, and consumed hears
 // of every line read, sent or not.
-func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), note func(format string, args ...interface{}), consumed func()) (string, turnRead, error) {
+func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), note func(format string, args ...interface{}), consumed func(), allowEmpty bool) (string, turnRead, error) {
 	var lines []string
 	// size is the length of the turn so far: its lines and the newlines
 	// between them.
@@ -318,11 +321,17 @@ func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), 
 			return "", readEnd, nil
 		}
 		consumed()
+		if input.terminal && lines != nil && !discarding && !line.tooLong && strings.TrimSuffix(line.text, "\r") == "/ed" {
+			return strings.Join(lines, "\n"), readEdit, nil
+		}
 
 		// A line too long keeps its tail, where the marker is.
 		raw := line.text
 		if line.tooLong {
 			raw = line.tail
+		}
+		if lines != nil && strings.HasPrefix(raw, "//") {
+			raw = raw[1:]
 		}
 		text, continues := continuationMarker(strings.TrimSuffix(raw, "\r"))
 		grown := len(text)
@@ -340,7 +349,7 @@ func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), 
 			}
 			continue
 		}
-		if lines == nil && !continues && strings.TrimSpace(text) == "" {
+		if !allowEmpty && lines == nil && !continues && strings.TrimSpace(text) == "" {
 			continue
 		}
 		lines = append(lines, text)
@@ -351,6 +360,9 @@ func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), 
 		turn := strings.Join(lines, "\n")
 		lines, size = nil, 0
 		if strings.TrimSpace(turn) == "" {
+			if allowEmpty {
+				return "", readTurnText, nil
+			}
 			continue
 		}
 		return turn, readTurnText, nil
@@ -378,6 +390,9 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 	screen := &replScreen{}
 	diag := screen.writer(stream, false)
 	notifier := ui.NewNotifierWithWriter(diag)
+	if input.terminal && len(cfg.MCPServers) > 0 {
+		notifier.Infof("Connecting %d MCP server(s)...", len(cfg.MCPServers))
+	}
 
 	// The servers' tools are applied to the options once; each turn takes
 	// a copy of the result.
@@ -457,6 +472,14 @@ type replLoop struct {
 	// armed reports that the last thing that happened was an interrupt, so
 	// another at an idle prompt ends the loop.
 	armed bool
+	// history holds prompt text from this invocation; image bytes remain in
+	// the session or in images until the next committed user turn.
+	history replHistory
+	turn    int
+	// shownSession suppresses repeated notes as the session head advances.
+	shownSession string
+	// draft is text returned by /ed, held until an explicit submission.
+	draft string
 }
 
 // run holds the conversation: a regeneration first, when -branch names an
@@ -464,6 +487,7 @@ type replLoop struct {
 // turn for every line read, until the end of input or a second interrupt at
 // an idle prompt. It returns an error when the loop cannot go on.
 func (l *replLoop) run(isRegeneration bool) error {
+	l.showStartup()
 	if isRegeneration {
 		out, err := l.runTurn(turnInput{isRegeneration: true}, nil)
 		if err != nil && out.Session == nil {
@@ -493,6 +517,9 @@ func (l *replLoop) run(isRegeneration bool) error {
 		switch how {
 		case readEnd:
 			l.closePromptLine()
+			if l.draft != "" {
+				l.env.notifier.Infof("Input ended with a draft, which was not sent.")
+			}
 			return nil
 		case readEndInsideTurn:
 			l.closePromptLine()
@@ -500,6 +527,7 @@ func (l *replLoop) run(isRegeneration bool) error {
 			return nil
 		case readInterruptedInsideTurn:
 			l.closePromptLine()
+			l.draft = ""
 			l.env.notifier.Infof("Discarded the unfinished turn.")
 			l.armed = false
 			continue
@@ -508,15 +536,50 @@ func (l *replLoop) run(isRegeneration bool) error {
 				return err
 			}
 			l.closePromptLine()
+			if l.draft != "" {
+				l.draft, l.armed = "", false
+				l.env.notifier.Infof("Discarded the draft.")
+				continue
+			}
 			if l.armed {
 				return nil
 			}
 			l.armed = true
 			l.env.notifier.Infof("Press Ctrl-C again at the prompt, or Ctrl-D, to exit.")
 			continue
+		case readEdit:
+			l.closePromptLine()
+			if len(l.draft)+len(text) > maxTurnBytes {
+				l.env.notifier.Errorf("Draft plus input is longer than %d bytes; kept the existing draft.", maxTurnBytes)
+				continue
+			}
+			l.draft += text
+			l.editDraft("")
+			continue
 		}
+		// Pasted lines may already have been echoed before this prompt.
+		// End the prompt line before showing the submitted turn or a command's
+		// output, so both remain clear with queued input.
+		l.closePromptLine()
 		l.armed = false
-		out, err := l.runTurn(turnInput{text: text}, l.images)
+		action := l.interpretInput(text)
+		if action.exit {
+			return nil
+		}
+		if !action.send {
+			continue
+		}
+		if len(l.draft)+len(action.text) > maxTurnBytes {
+			l.env.notifier.Errorf("Draft plus input is longer than %d bytes; kept the existing draft.", maxTurnBytes)
+			continue
+		}
+		action.text = l.draft + action.text
+		l.draft = ""
+		if strings.TrimSpace(action.text) == "" && len(l.images) == 0 {
+			continue
+		}
+		l.history.add(action.text)
+		out, err := l.runTurn(turnInput{text: action.text}, l.images)
 		if stop := l.finishTurn(out, err); stop != nil {
 			return stop
 		}
@@ -527,7 +590,7 @@ func (l *replLoop) readTurn() (string, turnRead, error) {
 	ctx, end := l.signals.begin()
 	defer end()
 	// Every line read disarms an interrupt, whether it is sent or not.
-	return readTurn(ctx, l.input, l.showPrompt, l.env.notifier.Infof, func() { l.armed = false })
+	return readTurn(ctx, l.input, l.showPrompt, l.env.notifier.Infof, func() { l.armed = false }, len(l.images) > 0 || strings.TrimSpace(l.draft) != "")
 }
 
 func (l *replLoop) showPrompt(prompt string) {
@@ -553,13 +616,16 @@ func (l *replLoop) closePromptLine() {
 // does, and sends their results. A failure is reported and leaves the
 // session for the first prompt to resolve again.
 func (l *replLoop) recoverPendingTools() error {
-	if !session.IsSessionResume(l.base.Resume) {
+	// A new developer instruction belongs to the first new user turn.
+	// That turn also resolves pending tools through the existing turn path.
+	if l.base.Developer != "" || !session.IsSessionResume(l.base.Resume) {
 		return nil
 	}
 	ctx, end := l.signals.begin()
 	sess, err := session.OpenSession(ctx, l.base.Resume)
 	var calls []core.ToolCall
 	if err == nil {
+		l.showSession(sess)
 		calls, err = session.CheckForPendingToolCalls(ctx, sess.Path)
 	}
 	end()
@@ -575,6 +641,7 @@ func (l *replLoop) recoverPendingTools() error {
 // the loop holds once there is one, and records what the turn left: the
 // session to continue from, and whether the images went with it.
 func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome, error) {
+	l.showTurn(in, images)
 	opts := l.base
 	opts.Images = images
 	if l.from != nil {
@@ -595,8 +662,11 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 	if out.Session != nil {
 		l.from = out.Session
 	}
-	if out.PlanCommitted && len(images) > 0 {
-		l.images = nil
+	if out.PlanCommitted {
+		l.base.Developer = ""
+		if len(images) > 0 {
+			l.images = nil
+		}
 	}
 	return out, err
 }
@@ -605,6 +675,9 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 // must stop: the process is stopping, or the turn showed an answer the
 // session does not hold, which the next turn would continue without.
 func (l *replLoop) finishTurn(out turnOutcome, err error) error {
+	if err != nil {
+		l.separateAnswer()
+	}
 	switch {
 	case err == nil:
 	case errors.Is(err, errInterrupted):
@@ -621,6 +694,7 @@ func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 			l.env.notifier.Infof("The turn failed after it saved to the session; %s.", describeSaved(out))
 		}
 	}
+	l.showSession(out.Session)
 	if out.UnsavedAnswer != nil {
 		return fmt.Errorf("stopping, since the next turn would continue from a session without the answer shown: %w", out.UnsavedAnswer)
 	}

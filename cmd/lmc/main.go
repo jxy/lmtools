@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	stdErrors "errors"
+	"flag"
 	"fmt"
 	"io"
 	"lmtools/internal/config"
@@ -58,6 +59,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	}
 	presenter := newResponsePresenter(env.stdout, env.stderr, env.cfg.ShowThinking)
 	presenter.separate = env.answersOnScreen
+	presenter.answerLabel = env.answerLabel
 	defer presenter.Close()
 
 	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), env.notifier, core.ResponseParseOptions{
@@ -95,6 +97,10 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		}
 	}
 
+	if err := core.ValidateResponse(opts, response); err != nil {
+		out.UnsavedAnswer = persistAssistantOnly(ctx, response, out.Session, env.cfg, env.notifier, rb.Model)
+		return out, err
+	}
 	if len(response.ToolCalls) > 0 {
 		logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
 		tc := newToolContext(ctx, env, opts, out.Session, &response, rb, inputStr, presenter)
@@ -145,7 +151,7 @@ func createToolStoreAndMessageBuilder(ctx context.Context, opts core.RequestOpti
 		return session.NewStore(sess, logger.From(ctx)), createMessageBuilder(ctx, sess)
 	}
 
-	store := core.NewMemorySessionStoreWithUserBlocks(opts.GetEffectiveSystem(), core.UserMessageBlocks(inputStr, opts.Images))
+	store := core.NewMemorySessionStoreForRequest(opts, inputStr)
 	return store, store.Messages
 }
 
@@ -171,13 +177,16 @@ func main() {
 	notifier := ui.NewNotifier()
 
 	if err := run(notifier); err != nil {
-		notifier.Errorf("Error: %v", err)
+		notifier.Errorf("%v", err)
 		os.Exit(getExitCode(err))
 	}
 }
 
 func run(notifier core.Notifier) error {
 	cfg, err := config.ParseFlags(os.Args[1:])
+	if stdErrors.Is(err, flag.ErrHelp) {
+		return nil
+	}
 	if err != nil {
 		return errors.WrapError("parse flags", err)
 	}
@@ -207,7 +216,6 @@ func run(notifier core.Notifier) error {
 	opts := cfg.RequestOptions()
 
 	warnUnusedReasoningControls(cfg, notifier)
-	warnShowThinkingWithoutEffort(cfg, notifier)
 
 	// Initialize logging
 	logDir, err := setupLogging(cfg, notifier)
@@ -285,17 +293,6 @@ func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
 		return
 	}
 	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API-only controls; ignoring them because the request does not use -openai-responses on a Responses-capable provider and model")
-}
-
-func warnShowThinkingWithoutEffort(cfg config.Config, notifier core.Notifier) {
-	if !cfg.ShowThinking {
-		return
-	}
-	effort := strings.ToLower(strings.TrimSpace(cfg.Effort))
-	if effort != "" && effort != "none" {
-		return
-	}
-	notifier.Warnf("-show-thinking displays provider-returned summaries but does not request reasoning; add -effort high (or another non-none effort) to request it")
 }
 
 // connectMCPServers starts the servers -mcp-config names and attaches their

@@ -295,6 +295,49 @@ func TestParseFlagsOutputOptions(t *testing.T) {
 	}
 }
 
+func TestParseFlagsOutputSchemaPreservesExactNumbers(t *testing.T) {
+	for _, test := range []struct {
+		name, number string
+	}{
+		{"exact large integer", "9007199254740993"},
+		{"beyond float64 range", "1e309"},
+		{"huge positive exponent", "1e2147483648"},
+		{"huge negative exponent", "1e-2147483648"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := `{"type":"object","properties":{"answer":{"const":` + test.number + `}},"required":["answer"]}`
+			path := t.TempDir() + "/schema.json"
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := ParseFlags([]string{"-argo-user", "alice", "-json-schema", path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(cfg.JSONSchema) != raw || string(cfg.RequestOptions().JSONSchema) != raw {
+				t.Fatal("exact schema was not retained")
+			}
+		})
+	}
+}
+
+func TestParseFlagsLeavesSchemaSemanticsToProvider(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"provider-specific"}`,
+		`{"$ref":"https://example.invalid/schema.json"}`,
+		`{"$ref":"file:///example/schema.json"}`,
+	} {
+		path := t.TempDir() + "/schema.json"
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := ParseFlags([]string{"-argo-user", "alice", "-json-schema", path})
+		if err != nil || string(cfg.JSONSchema) != raw {
+			t.Fatalf("schema=%s error=%v, want unchanged %s", cfg.JSONSchema, err, raw)
+		}
+	}
+}
+
 func TestParseFlagsShowThinkingIsPresentationOnly(t *testing.T) {
 	base, err := ParseFlags([]string{"-argo-user", "alice"})
 	if err != nil {

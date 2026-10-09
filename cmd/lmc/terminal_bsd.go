@@ -4,4 +4,7 @@ package main
 
 import "syscall"
 
-const terminalReadTermios = syscall.TIOCGETA
+const (
+	terminalReadTermios  = syscall.TIOCGETA
+	terminalWriteTermios = syscall.TIOCSETA
+)
