@@ -29,20 +29,6 @@ func OnWriteSlotForTest(fn func()) func() {
 	return func() { afterSlotForTest = nil }
 }
 
-// SignalWritesForTest makes each stdio transport started from now on send on
-// the returned channel when a write takes the write slot, and returns a
-// function that stops it.
-func SignalWritesForTest() (<-chan struct{}, func()) {
-	writes := make(chan struct{}, 64)
-	stop := OnWriteSlotForTest(func() {
-		select {
-		case writes <- struct{}{}:
-		default:
-		}
-	})
-	return writes, stop
-}
-
 // HoldReapingForTest makes each stdio transport started from now on wait
 // before it reaps its server, until the returned function is called.
 func HoldReapingForTest() func() {

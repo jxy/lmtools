@@ -169,25 +169,20 @@ func TestStdioServerSurvivesAnInterruptToItsClientsGroup(t *testing.T) {
 	expectLine(t, lines, "result ok")
 }
 
-// stalledServer dials a server that stops reading its stdin once it has
-// answered the discovery probe, and returns the client, the server's
-// process ID, and a channel that receives a value when a write takes the
-// write slot, drained of the writes dialing made.
-func stalledServer(t *testing.T) (*mcp.Client, int, <-chan struct{}) {
+// stalledServer dials a server that answers discovery, reads one byte of
+// the next request, then stops reading. It returns the client and the path
+// where the server writes its PID after that byte, so a test can wait for
+// a partial write before cancelling or closing.
+func stalledServer(t *testing.T) (*mcp.Client, string) {
 	t.Helper()
-	writes, stop := mcp.SignalWritesForTest()
-	t.Cleanup(stop)
-	pidPath := filepath.Join(t.TempDir(), "server.pid")
+	readPath := filepath.Join(t.TempDir(), "stall-read.pid")
 	client, _ := dialStdio(t, "stalled", mcptest.Scenario{
-		Era:        mcptest.EraModern,
-		Tools:      []mcp.Tool{echoTool()},
-		StallAfter: "server/discover",
-		PIDPath:    pidPath,
+		Era:           mcptest.EraModern,
+		Tools:         []mcp.Tool{echoTool()},
+		StallAfter:    "server/discover",
+		StallReadPath: readPath,
 	}, mcp.DialOptions{})
-	for len(writes) > 0 {
-		<-writes
-	}
-	return client, readPID(t, pidPath), writes
+	return client, readPath
 }
 
 // pastAnyPipe is call arguments larger than a pipe's buffer, so writing them
@@ -201,7 +196,7 @@ var pastAnyPipe = json.RawMessage(`{"text":"` + strings.Repeat("x", 4<<20) + `"}
 // transport shuts the server down on its own, and Close then finds the
 // process group gone.
 func TestStdioCancellationReturnsWhileTheServerStopsReading(t *testing.T) {
-	client, pid, writes := stalledServer(t)
+	client, readPath := stalledServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	returned := make(chan error, 1)
@@ -209,11 +204,7 @@ func TestStdioCancellationReturnsWhileTheServerStopsReading(t *testing.T) {
 		_, err := client.CallTool(ctx, "echo", pastAnyPipe, nil)
 		returned <- err
 	}()
-	select {
-	case <-writes:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the call never took the write slot")
-	}
+	pid := readPID(t, readPath)
 	cancelled := time.Now()
 	cancel()
 	select {
@@ -600,17 +591,13 @@ func TestHostReportsAServerExitOnceAndKeepsItsTools(t *testing.T) {
 // server's stdin ends that write, the call returns its error, and Close
 // finishes within the shutdown deadline rather than the write's own bound.
 func TestStdioCloseEndsAWriteInProgress(t *testing.T) {
-	client, pid, writes := stalledServer(t)
+	client, readPath := stalledServer(t)
 	returned := make(chan error, 1)
 	go func() {
 		_, err := client.CallTool(context.Background(), "echo", pastAnyPipe, nil)
 		returned <- err
 	}()
-	select {
-	case <-writes:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the call never took the write slot")
-	}
+	pid := readPID(t, readPath)
 
 	started := time.Now()
 	if err := client.Close(); err != nil {

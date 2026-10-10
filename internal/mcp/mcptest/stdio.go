@@ -106,6 +106,21 @@ func Serve(scn Scenario, stdin io.Reader, stdout, stderr io.Writer) error {
 					for _, r := range s.handleRequest(&msg, "stdio") {
 						emit(r.msg)
 					}
+					if scn.StallReadPath != "" {
+						// Read one byte to prove the next write has started.
+						// Avoid refilling the large buffer when it is empty.
+						next := stdin
+						if reader.Buffered() > 0 {
+							next = reader
+						}
+						var first [1]byte
+						if _, err := io.ReadFull(next, first[:]); err != nil {
+							return fmt.Errorf("read before stalling: %w", err)
+						}
+						if err := writePID(scn.StallReadPath, os.Getpid()); err != nil {
+							return err
+						}
+					}
 					// Never read stdin again.
 					stayAlive()
 				default:

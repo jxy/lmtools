@@ -64,6 +64,10 @@ type Scenario struct {
 	// server stops reading its stdin and stays alive, the way a server
 	// that has stopped reading does.
 	StallAfter string `json:"stallAfter,omitempty"`
+	// StallReadPath, when set with StallAfter, receives the subprocess's
+	// process ID after it reads one byte of the next request, before it
+	// stops reading. A test can then interrupt a write that has started.
+	StallReadPath string `json:"stallReadPath,omitempty"`
 	// SpawnDescendant, for the subprocess, is a file that receives the
 	// process ID of a sleep the server starts in its own process group and
 	// leaves running when it exits, the way a launcher such as npx can.
