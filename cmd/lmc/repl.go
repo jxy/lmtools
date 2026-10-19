@@ -489,14 +489,20 @@ type replLoop struct {
 	// shownSession suppresses repeated notes as the session head advances.
 	shownSession string
 	// draft is text returned by /ed, held until an explicit submission.
-	draft string
+	draft       string
+	failedTurns int
 }
 
 // run holds the conversation: a regeneration first, when -branch names an
 // assistant message, or the pending tool calls of a resumed session; then a
 // turn for every line read, until the end of input or a second interrupt at
 // an idle prompt. It returns an error when the loop cannot go on.
-func (l *replLoop) run(isRegeneration bool) error {
+func (l *replLoop) run(isRegeneration bool) (err error) {
+	defer func() {
+		if err == nil && !l.terminal && l.failedTurns > 0 {
+			err = fmt.Errorf("%d REPL turn(s) failed; see diagnostics above", l.failedTurns)
+		}
+	}()
 	l.showStartup()
 	if isRegeneration {
 		out, err := l.runTurn(turnInput{isRegeneration: true}, nil)
@@ -686,6 +692,7 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 // session does not hold, which the next turn would continue without.
 func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 	if err != nil {
+		l.failedTurns++
 		l.separateAnswer()
 	}
 	switch {

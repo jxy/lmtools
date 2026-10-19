@@ -372,8 +372,8 @@ func TestREPLFailedTurnKeepsTheStartingPoint(t *testing.T) {
 	loop, w, notifier := newTestLoop(t, te)
 	typeTurns(t, w, "first try\nsecond try\n", true)
 
-	if err := loop.run(false); err != nil {
-		t.Fatalf("run() error = %v", err)
+	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+		t.Fatalf("run() error = %v, want aggregate failure", err)
 	}
 	if notifier.count("Error: ") != 1 {
 		t.Fatalf("messages = %q, want the failure reported once", notifier.all())
@@ -446,7 +446,7 @@ func TestREPLStartupRecoveryKeepsTheImagesForThePrompt(t *testing.T) {
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "what is in the picture?\n", true)
 
-	if err := loop.run(false); err != nil {
+	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatalf("run() error = %v", err)
 	}
 	requests := server.GetRequests()
@@ -494,7 +494,7 @@ func TestREPLSeparatesAnswersOnARedirectedStdout(t *testing.T) {
 	te.env.answersOnScreen = false
 	typeTurns(t, w, "a\nb\nc\nd\n", true)
 
-	if err := loop.run(false); err != nil {
+	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatalf("run() error = %v", err)
 	}
 	if got, want := file.String(), "one\n\ntwo\n\nthree\n\n"; got != want {
@@ -550,8 +550,8 @@ func TestREPLInterruptCancelsTheTurnAndASecondExits(t *testing.T) {
 	loop.signals.interrupt()
 	select {
 	case err := <-result:
-		if err != nil {
-			t.Fatalf("run() error = %v, want the loop ended by the second interrupt", err)
+		if err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+			t.Fatalf("run() error = %v, want the cancelled pipe turn to fail", err)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the second interrupt did not end the loop")
@@ -845,5 +845,22 @@ func TestREPLRegenerationLeavesTheImagesForThePrompt(t *testing.T) {
 		if !strings.Contains(requests[1].Body, want) {
 			t.Fatalf("the prompt's request lacks %q: %s", want, requests[1].Body)
 		}
+	}
+}
+
+func TestREPLInteractiveFailureStillAllowsCleanExit(t *testing.T) {
+	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
+		return nil, http.StatusBadRequest, errors.New("provider refused")
+	}))
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	loop, w, _ := newTestLoop(t, te)
+	loop.terminal = true
+	typeTurns(t, w, "first\n/exit\n", true)
+	if err := loop.run(false); err != nil {
+		t.Fatalf("interactive exit: %v", err)
+	}
+	if loop.failedTurns != 1 {
+		t.Fatalf("failedTurns=%d", loop.failedTurns)
 	}
 }

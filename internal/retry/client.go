@@ -158,7 +158,7 @@ func (c *Client) retryer(provider string) *Retryer {
 // Note what this costs a non-idempotent request. Whenever the body can be
 // rewound, a 429 or 5xx resubmits the request up to MaxRetries more times —
 // repeat inference, on a POST the client made once — and once the attempts run
-// out the caller gets a generic failure in place of the provider's own status.
+// out the caller receives the final HTTP response, with its body still open.
 // GetBody makes a body rewindable at any size, and http.NewRequest sets it for
 // every in-memory body, so most requests in this repository retry. A body
 // without GetBody is read into memory below maxRetryBodySize precisely so it

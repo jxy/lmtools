@@ -218,6 +218,10 @@ one left the session, so MCP servers start once and stay up across turns.
   `lmc` starts and connects MCP servers, Ctrl-C ends the run with status
   130. SIGTERM or a hangup cancels the turn and exits once it has saved what
   it must.
+- With piped input, failed, cancelled, or incomplete turns are reported and
+  later turns still run. At EOF or `/exit`, the process exits nonzero if any
+  turn failed. Interactive sessions can recover from a failed turn and exit
+  normally.
 - With stdout a terminal, it carries the answers alone, and the prompt starts
   below an answer after an empty line. With stdout redirected, each answer
   ends with a newline and an empty line separates it from the next. This is
@@ -755,10 +759,16 @@ Output controls:
   must contain a JSON object; the provider validates and enforces the schema.
   Invalid returned JSON causes a nonzero exit status. Streamed answer bytes may
   already have reached stdout when the error is reported; check the exit status.
-  In `-repl`, errors are reported per turn and the conversation loop continues.
+  In `-repl`, errors are reported per turn and the conversation loop continues;
+  with piped input, any failed turn makes the final exit status nonzero.
 
 Chat Completions places the schema under `response_format.json_schema`;
 Responses places it under `text.format`.
+
+Thinking chunks stay separate from the answer and are retained in session
+history; add `-show-thinking` to display them. A malformed Chat Completions
+stream stops the turn with an error and retains already received text and
+thinking. Pending tool calls from that response cannot run.
 
 Token usage is shown on stderr when reported, including Chat Completions
 streaming usage. Separate reasoning-token counts are shown only when supplied

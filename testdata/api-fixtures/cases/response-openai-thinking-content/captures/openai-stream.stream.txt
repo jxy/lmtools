@@ -1,0 +1,42 @@
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421108,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","index":0,"content":""},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":"The"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" user wants"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" me to reply exactly \""}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":"AUDIT_OK\"."}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" This appears"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" to be some"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" kind of test"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" or audit request. This"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" is a benign"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" request - just asking"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" me to output"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" a specific string. There"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":"'s nothing harmful about this."}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" I should comply with the exact"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" formatting"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":" requested."}],"closed":true},{"type":"text","text":"AUD"}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":"IT_OK"},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"1f597ccd8c25413ababb44359868f086","object":"chat.completion.chunk","created":1792421122,"model":"test-model","choices":[{"index":0,"delta":{"index":0,"content":""},"finish_reason":"stop","logprobs":null,"response_error":{"format_error":null,"content_validation":["valid_think_chunk","valid_text_chunk"],"tool_calls_validation":[],"extra_tags":[]}}],"usage":{"prompt_tokens":25,"total_tokens":85,"completion_tokens":60,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":55}}}
+
+data: [DONE]
+

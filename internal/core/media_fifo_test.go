@@ -29,7 +29,7 @@ func TestLoadImageFileRejectsPeerlessFIFOWithoutBlocking(t *testing.T) {
 		if err == nil {
 			_ = writer.Close()
 		}
-		<-result
-		t.Fatal("image open blocked on a FIFO without a writer")
+		err = <-result
+		t.Fatalf("image open blocked on a FIFO without a writer; after release: %v", err)
 	}
 }

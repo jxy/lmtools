@@ -140,6 +140,10 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 						if item.Text != "" {
 							typed.Blocks = append(typed.Blocks, TextBlock{Text: item.Text})
 						}
+					case openAIThinkingChunkType:
+						if blocks, err := parseOpenAIChatContent(append(append([]byte{'['}, item.Raw...), ']')); err == nil {
+							typed.Blocks = append(typed.Blocks, blocks...)
+						}
 					case "image_url":
 						if item.ImageURL != nil {
 							typed.Blocks = append(typed.Blocks, ImageBlock{
@@ -322,6 +326,12 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 				Type: "text",
 				Text: v.Text,
 			})
+
+		case ReasoningBlock:
+			if v.Provider == "openai" && v.Type == openAIThinkingChunkType {
+				hasNonText = true
+				parts = append(parts, openAIThinkingContent(v))
+			}
 
 		case ImageBlock:
 			hasNonText = true

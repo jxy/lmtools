@@ -182,8 +182,8 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 		}
 
 		// Check if response is retryable
-		if !r.shouldRetryResponse(resp) {
-			// Success or non-retryable error
+		if !r.shouldRetryResponse(resp) || attempt == r.config.MaxRetries {
+			// Return final HTTP failures intact as well; the caller owns the body.
 			return resp, nil
 		}
 
@@ -248,7 +248,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 		// Check if we should retry
 		if err == nil && resp != nil {
 			// Check if the response indicates we should retry
-			if !r.shouldRetryResponse(resp) {
+			if !r.shouldRetryResponse(resp) || attempt == r.config.MaxRetries {
 				return resp, nil
 			}
 			// Log error response for debugging

@@ -334,7 +334,10 @@ func TestArgoStreamingPingOnTimeout(t *testing.T) {
 
 	// Wait for parser to complete or timeout
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("parser failed: %v", err)
+		}
 		// Parser completed - now safe to read the buffer
 		response := w.Body.String()
 		pingCount := strings.Count(response, `event: ping`)

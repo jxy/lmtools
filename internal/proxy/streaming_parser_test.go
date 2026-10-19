@@ -785,3 +785,33 @@ func TestConvertAnthropicStreamToOpenAI_WarnsOnUnknownFieldsAndEvents(t *testing
 		}
 	}
 }
+
+func TestOpenAIStreamParserThinkingContentTransitionKeepsAnswer(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	handler, err := NewAnthropicStreamHandler(recorder, "test-model", context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureAnthropicTextPreamble(handler); err != nil {
+		t.Fatal(err)
+	}
+	stream := `data: {"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"private thinking"}],"closed":true},{"type":"text","text":"AUD"}]}}]}
+
+data: {"choices":[{"delta":{"content":"IT_OK"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+	if err := NewOpenAIStreamParser(handler).Parse(strings.NewReader(stream)); err != nil {
+		t.Fatal(err)
+	}
+	body := recorder.Body.String()
+	for _, text := range []string{`"text":"AUD"`, `"text":"IT_OK"`, `event: message_stop`} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("missing %s in %s", text, body)
+		}
+	}
+	if strings.Contains(body, "private thinking") {
+		t.Fatalf("thinking leaked into text: %s", body)
+	}
+}

@@ -196,6 +196,8 @@ type Response struct {
 	// response, such as max_output_tokens or content_filter. Partial content
 	// remains available for presentation and persistence.
 	IncompleteReason string
+	// CompletionError explains an invalid stream whose partial content is retained.
+	CompletionError error
 	// Usage carries the token counts the provider reported, nil when it
 	// reported none. Display-only: session stores decompose Response
 	// field-by-field and never persist it.
@@ -255,7 +257,13 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	}
 
 	if err != nil {
-		return Response{}, err
+		if response.IncompleteReason != "invalid_stream" {
+			return Response{}, err
+		}
+		// Save and present partial content through the same path as token
+		// exhaustion. ValidateResponse reports the decoding error before any
+		// tools execute; a completed marker cannot clear it.
+		response.CompletionError = err
 	}
 
 	response.Streamed = streamed
@@ -499,10 +507,12 @@ func RunStream(ctx context.Context, body io.ReadCloser, logFile *os.File, output
 			return false, nil
 		}
 
-		emitPendingResponseStreamEvents(state, output)
+		emittedText := emitPendingResponseStreamEvents(state, output)
 
 		if content != "" {
-			output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: content})
+			if !emittedText {
+				output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: content})
+			}
 			accumulated.WriteString(content)
 		}
 
@@ -541,9 +551,8 @@ scanLoop:
 				continue
 			}
 
-			if strings.HasPrefix(line, "data: ") {
-				// Accumulate data line (strip "data: " prefix)
-				sseBuf = append(sseBuf, strings.TrimPrefix(line, "data: "))
+			if data, ok := streamFieldValue(line, "data"); ok {
+				sseBuf = append(sseBuf, data)
 				continue
 			}
 
@@ -567,9 +576,11 @@ scanLoop:
 						}
 					}
 				}
-				emitPendingResponseStreamEvents(state, output)
+				emittedText := emitPendingResponseStreamEvents(state, output)
 				if content != "" {
-					output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: content})
+					if !emittedText {
+						output.HandleStreamEvent(ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: content})
+					}
 					accumulated.WriteString(content)
 				}
 				// Accumulate tool calls if any

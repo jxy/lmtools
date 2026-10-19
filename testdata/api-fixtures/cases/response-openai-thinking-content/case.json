@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-thinking-content",
+  "description": "Thinking content arrays and mixed thinking/text transition content (live stream; synthetic buffered equivalent)",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai"
+}

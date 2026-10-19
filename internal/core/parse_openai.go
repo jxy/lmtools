@@ -57,8 +57,8 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
 			Message      struct {
-				Content          string `json:"content"`
-				ReasoningContent string `json:"reasoning_content"`
+				Content          json.RawMessage `json:"content"`
+				ReasoningContent string          `json:"reasoning_content"`
 				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -119,9 +119,14 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 	if msg.ReasoningContent != "" {
 		blocks = append(blocks, openAIChatReasoningBlock(msg.ReasoningContent))
 	}
-	blocks = append(blocks, responseBlocksFromParts(msg.Content, toolCalls, "")...)
+	content, err := parseOpenAIChatContent(msg.Content)
+	if err != nil {
+		return Response{}, fmt.Errorf("failed to decode response content: %w", err)
+	}
+	blocks = append(blocks, content...)
+	blocks = append(blocks, responseBlocksFromParts("", toolCalls, "")...)
 	return Response{
-		Text:             msg.Content,
+		Text:             openAIChatContentText(content),
 		ToolCalls:        toolCalls,
 		Blocks:           blocks,
 		IncompleteReason: openAIChatIncompleteReason(resp.Choices[0].FinishReason),

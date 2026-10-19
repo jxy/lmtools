@@ -1214,3 +1214,25 @@ func TestOpenAIErrorHandling(t *testing.T) {
 		t.Errorf("Expected status 400, got %d", w.Code)
 	}
 }
+
+func TestOpenAIEndpointPreservesExhaustedProviderError(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, `{"error":{"message":"audit provider explanation","type":"provider_error"}}`)
+			}))
+			defer backend.Close()
+			server, cleanup := NewTestServer(t, &Config{Provider: constants.ProviderOpenAI, ProviderURL: backend.URL + "/v1", ProviderKeySet: ProviderKeySet{OpenAIAPIKey: "test-key"}})
+			t.Cleanup(cleanup)
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hi"}]}`))
+			request.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, request)
+			if w.Code != status || !strings.Contains(w.Body.String(), "audit provider explanation") {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}

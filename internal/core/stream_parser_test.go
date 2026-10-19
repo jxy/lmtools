@@ -263,9 +263,8 @@ data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890
 
 data: [DONE]
 `,
-			expectWarning:  true, // OpenAI parser returns errors for malformed JSON
-			warningPattern: "Multiple streaming parse errors detected",
-			expectedText:   "Hello world",
+			expectWarning: false,
+			expectedText:  "Hello",
 		},
 	}
 
@@ -303,6 +302,11 @@ data: [DONE]
 			}
 
 			// Check response text
+			if tt.provider == "openai" && strings.Contains(tt.responseBody, "{b") {
+				if err := ValidateResponse(cfg, response); err == nil || !strings.Contains(err.Error(), "invalid stream event") {
+					t.Fatalf("damaged stream validation = %v", err)
+				}
+			}
 			if response.Text != tt.expectedText {
 				t.Errorf("Expected text '%s', got '%s'", tt.expectedText, response.Text)
 			}
@@ -381,7 +385,7 @@ data: {"id":"chat-123","choices":[{"delta":{"content":" End"}}]}
 
 data: [DONE]
 `,
-			expectedText: "Start End",
+			expectedText: "Start",
 		},
 	}
 
@@ -414,6 +418,11 @@ data: [DONE]
 				t.Errorf("Unexpected error: %v", err)
 			}
 
+			if tt.provider == "openai" && strings.Contains(tt.responseBody, "{b") {
+				if err := ValidateResponse(cfg, response); err == nil || !strings.Contains(err.Error(), "invalid stream event") {
+					t.Fatalf("damaged stream validation = %v", err)
+				}
+			}
 			if response.Text != tt.expectedText {
 				t.Errorf("Expected text '%s', got '%s'", tt.expectedText, response.Text)
 			}
@@ -578,6 +587,11 @@ data: [DONE]
 				t.Errorf("Unexpected error: %v", err)
 			}
 
+			if tt.provider == "openai" && strings.Contains(tt.responseBody, "{b") {
+				if err := ValidateResponse(cfg, response); err == nil || !strings.Contains(err.Error(), "invalid stream event") {
+					t.Fatalf("damaged stream validation = %v", err)
+				}
+			}
 			if response.Text != tt.expectedText {
 				t.Errorf("Expected text '%s', got '%s'", tt.expectedText, response.Text)
 			}

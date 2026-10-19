@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -69,6 +70,8 @@ func (c *OpenAIContentUnion) UnmarshalJSON(data []byte) error {
 
 // OpenAIContent represents content in OpenAI multimodal format
 type OpenAIContent struct {
+	// Raw retains provider-specific thinking chunks for lossless history replay.
+	Raw        json.RawMessage `json:"-"`
 	Type       string          `json:"type"` // "text", "image_url", "input_audio", "file"
 	Text       string          `json:"text,omitempty"`
 	ImageURL   *OpenAIImageURL `json:"image_url,omitempty"`
@@ -76,8 +79,32 @@ type OpenAIContent struct {
 	File       *FileData       `json:"file,omitempty"`
 }
 
+func (c *OpenAIContent) UnmarshalJSON(data []byte) error {
+	type plain OpenAIContent
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*c = OpenAIContent(value)
+	if c.Type == openAIThinkingChunkType {
+		if _, err := parseOpenAIChatContent(append(append([]byte{'['}, data...), ']')); err != nil {
+			return err
+		}
+		c.Raw = append(json.RawMessage(nil), data...)
+	}
+	return nil
+}
+
 // ToMap converts OpenAIContent to map[string]interface{} for request marshaling
 func (c OpenAIContent) ToMap() map[string]interface{} {
+	if c.Type == openAIThinkingChunkType && len(c.Raw) > 0 {
+		var raw map[string]interface{}
+		decoder := json.NewDecoder(bytes.NewReader(c.Raw))
+		decoder.UseNumber()
+		if decoder.Decode(&raw) == nil {
+			return raw
+		}
+	}
 	m := map[string]interface{}{"type": c.Type}
 
 	if c.Text != "" {

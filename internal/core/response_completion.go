@@ -54,6 +54,11 @@ func ValidateResponse(cfg RequestOptions, response Response) error {
 		return fmt.Errorf("response incomplete: output token limit reached; partial answer retained; increase -max-tokens to allow a longer answer")
 	case "content_filter":
 		return fmt.Errorf("response incomplete: the provider stopped generation because of its content filter")
+	case "invalid_stream":
+		if response.CompletionError != nil {
+			return fmt.Errorf("response incomplete: invalid stream event; partial content retained: %w", response.CompletionError)
+		}
+		return fmt.Errorf("response incomplete: invalid stream event; partial content retained")
 	case "stream_interrupted":
 		return fmt.Errorf("response incomplete: stream ended before the provider completed the response; partial content retained")
 	default:

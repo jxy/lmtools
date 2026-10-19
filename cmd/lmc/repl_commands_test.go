@@ -116,7 +116,7 @@ func TestREPLImageCommandsRetainUntilCommit(t *testing.T) {
 	loop, w, notes := newTestLoop(t, te)
 	input := fmt.Sprintf("/image %s\n/image %s\n/image %s\n\n\nfollow-up\n/exit\n", image, filepath.Join(dir, "missing.png"), invalid)
 	typeTurns(t, w, input, true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -238,7 +238,7 @@ func TestREPLDeveloperInstructionIsCommittedOnce(t *testing.T) {
 	te := newTurnTestEnv(t, server, "-developer", "Use short answers.")
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "failed\nfirst\nsecond\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -386,7 +386,7 @@ func TestREPLDeveloperCommandPersistsWithNextTurnAfterRetry(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "first\n/developer stale\n/developer First line\\\nSecond line\nfailed\nfailed\nthird\n/developer throwaway\n/clear-developer\n//developer literal\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()

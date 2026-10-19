@@ -30,14 +30,19 @@ type responseStreamEventSource interface {
 	drainResponseStreamEvents() []ResponseStreamEvent
 }
 
-func emitPendingResponseStreamEvents(state StreamState, output ResponseOutput) {
+// The return value reports whether the source emitted text itself, in order
+// with reasoning. Callers still accumulate ParseLine's text but must not print
+// it twice.
+func emitPendingResponseStreamEvents(state StreamState, output ResponseOutput) (emittedText bool) {
 	source, ok := state.(responseStreamEventSource)
 	if !ok {
 		return
 	}
 	for _, event := range source.drainResponseStreamEvents() {
 		output.HandleStreamEvent(event)
+		emittedText = emittedText || event.Type == ResponseStreamTextDelta
 	}
+	return emittedText
 }
 
 // AnthropicStreamState tracks event type and tool accumulation for Anthropic streams

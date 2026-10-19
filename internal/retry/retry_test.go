@@ -2,11 +2,9 @@ package retry
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -300,18 +298,16 @@ func TestRetry(t *testing.T) {
 			BackoffFactor:  2.0,
 		}
 		retryer := NewRetryer(config, nil)
-		_, err := retryer.Do(context.Background(), client, req, nil)
-		if err == nil {
-			t.Fatal("Expected error after exhausting attempts")
+		resp, err := retryer.Do(context.Background(), client, req, nil)
+		if err != nil {
+			t.Fatalf("expected final HTTP response, got %v", err)
 		}
-
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
 		if atomic.LoadInt32(&attempts) != 3 {
-			t.Errorf("Expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
-		}
-
-		expectedMsg := "all 3 attempts failed for GET"
-		if !strings.Contains(fmt.Sprintf("%v", err), expectedMsg) {
-			t.Errorf("Expected error message to contain %q, got %q", expectedMsg, err)
+			t.Fatalf("attempts = %d", attempts)
 		}
 	})
 

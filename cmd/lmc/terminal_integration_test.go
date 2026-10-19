@@ -125,7 +125,9 @@ func TestTerminalSingleRunDropsInputTypedDuringGeneration(t *testing.T) {
 			defer func() {
 				if !waited {
 					_ = cmd.Process.Kill()
-					<-exited
+					if err := <-exited; err != nil {
+						t.Logf("subprocess exit during cleanup: %v", err)
+					}
 				}
 			}()
 

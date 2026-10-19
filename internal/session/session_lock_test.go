@@ -145,8 +145,10 @@ func TestWithSessionLock_Timeout(t *testing.T) {
 
 	// Wait for the goroutine to complete
 	select {
-	case <-lockErr:
-		// Goroutine completed
+	case err := <-lockErr:
+		if err != nil {
+			t.Fatalf("lock holder failed: %v", err)
+		}
 	case <-time.After(500 * time.Millisecond):
 		// Don't fail the test, but log it
 		t.Log("Warning: lock holder goroutine did not complete in time")

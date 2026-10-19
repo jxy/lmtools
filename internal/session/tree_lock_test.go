@@ -221,8 +221,8 @@ func TestContinuationsWaitForADeletionInProgress(t *testing.T) {
 			select {
 			case err := <-done:
 				close(resume)
-				<-deleted
-				t.Fatalf("continued while a deletion held the tree's lock: error = %v", err)
+				deleteErr := <-deleted
+				t.Fatalf("continued while a deletion held the tree's lock: error = %v; deletion error = %v", err, deleteErr)
 			case <-time.After(200 * time.Millisecond):
 			}
 			close(resume)

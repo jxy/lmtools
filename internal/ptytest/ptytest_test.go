@@ -82,7 +82,10 @@ func TestStartMakesTheSlaveTheControllingTerminal(t *testing.T) {
 	t.Cleanup(func() {
 		if !waited {
 			_ = cmd.Process.Kill()
-			<-exited
+			if err := <-exited; err != nil {
+				// Killing the process during cleanup normally returns an exit error.
+				t.Logf("subprocess exit during cleanup: %v", err)
+			}
 		}
 	})
 

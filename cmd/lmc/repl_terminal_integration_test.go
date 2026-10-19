@@ -66,11 +66,15 @@ func startREPLUnderTerminalStreams(t *testing.T, url string, stdout, stderr *os.
 	}
 	go func() { r.exited <- r.cmd.Wait() }()
 	t.Cleanup(func() {
+		var exitErr error
 		select {
-		case <-r.exited:
+		case exitErr = <-r.exited:
 		default:
 			_ = r.cmd.Process.Kill()
-			<-r.exited
+			exitErr = <-r.exited
+		}
+		if exitErr != nil {
+			t.Logf("subprocess exit during cleanup: %v", exitErr)
 		}
 	})
 	return r

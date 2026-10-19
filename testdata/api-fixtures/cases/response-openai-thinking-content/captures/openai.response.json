@@ -1,0 +1,28 @@
+{
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": [
+              {
+                "type": "text",
+                "text": "The user wants me to reply exactly \"AUDIT_OK\". This appears to be some kind of test or audit request. This is a benign request - just asking me to output a specific string. There's nothing harmful about this. I should comply with the exact formatting requested."
+              }
+            ],
+            "closed": true
+          },
+          {
+            "type": "text",
+            "text": "AUDIT_OK"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -14,8 +14,11 @@ type openAIStreamToolCallKey struct {
 }
 
 type openAIStreamBlock struct {
-	reasoning bool
-	text      strings.Builder
+	reasoning     bool
+	reasoningType string
+	metadata      map[string]json.RawMessage
+	thinkingParts []json.RawMessage
+	text          strings.Builder
 }
 
 type openAIStreamChoiceState struct {
@@ -28,16 +31,18 @@ type openAIStreamChoiceState struct {
 // separate buffers. A finish reason completes a choice; [DONE] completes the
 // stream, including compatibility backends that omit finish reasons.
 type OpenAIStreamState struct {
-	partialToolCalls    map[openAIStreamToolCallKey]*ToolCall
-	choices             map[int]*openAIStreamChoiceState
-	blocks              []*openAIStreamBlock
-	toolBlocks          []Block
-	streamEvents        []ResponseStreamEvent
-	reasoningOpen       bool
-	reasoningIncomplete bool
-	terminal            bool
-	toolsFinalized      bool
-	usage               *Usage
+	partialToolCalls     map[openAIStreamToolCallKey]*ToolCall
+	choices              map[int]*openAIStreamChoiceState
+	blocks               []*openAIStreamBlock
+	toolBlocks           []Block
+	streamEvents         []ResponseStreamEvent
+	reasoningOpen        bool
+	reasoningDisplayType string
+	reasoningIncomplete  bool
+	terminal             bool
+	failed               bool
+	toolsFinalized       bool
+	usage                *Usage
 }
 
 func NewOpenAIStreamState() *OpenAIStreamState {
@@ -50,7 +55,7 @@ func NewOpenAIStreamState() *OpenAIStreamState {
 // ParseLine implements StreamState for OpenAI SSE format.
 func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, error) {
 	data, ok := streamFieldValue(line, "data")
-	if !ok {
+	if !ok || strings.TrimSpace(data) == "" {
 		return "", nil, false, nil
 	}
 	if data == "[DONE]" {
@@ -62,44 +67,75 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 
 	parsed, err := ParseOpenAIStreamChunk([]byte(data))
 	if err != nil {
-		return "", nil, false, err
+		if !isFatalStreamError(err) {
+			s.failed = true
+		}
+		return "", nil, false, newFatalStreamError(fmt.Errorf("invalid OpenAI stream event: %w", err))
 	}
 	if parsed.Usage.InputTokens != nil || parsed.Usage.OutputTokens != nil || parsed.Usage.TotalTokens != nil {
 		s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
 	}
 
 	var text strings.Builder
-	var hasAnswerOrTool bool
 	for _, choice := range parsed.Choices {
 		state := s.choiceState(choice.Index)
+		blocks := choice.Blocks
 		if choice.ReasoningContent != "" {
-			if state.reasoning == nil || s.blocks[len(s.blocks)-1] != state.reasoning {
-				state.text = nil
-				state.reasoning = &openAIStreamBlock{reasoning: true}
-				s.blocks = append(s.blocks, state.reasoning)
-			}
-			if !s.reasoningOpen {
-				s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
-					Type: ResponseStreamReasoningStart, ReasoningType: openAIChatReasoningType,
-				})
-				s.reasoningOpen = true
-			}
-			state.reasoning.text.WriteString(choice.ReasoningContent)
-			s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
-				Type: ResponseStreamReasoningDelta, ReasoningType: openAIChatReasoningType, Text: choice.ReasoningContent,
-			})
+			blocks = append([]Block{openAIChatReasoningBlock(choice.ReasoningContent)}, blocks...)
 		}
-		if choice.Content != "" || len(choice.ToolCalls) > 0 {
+		for _, block := range blocks {
+			switch b := block.(type) {
+			case ReasoningBlock:
+				if state.reasoning == nil || s.blocks[len(s.blocks)-1] != state.reasoning || state.reasoning.reasoningType != b.Type {
+					state.text = nil
+					state.reasoning = &openAIStreamBlock{reasoning: true, reasoningType: b.Type}
+					s.blocks = append(s.blocks, state.reasoning)
+				}
+				if len(b.Raw) > 0 {
+					if state.reasoning.metadata == nil {
+						state.reasoning.metadata = make(map[string]json.RawMessage)
+					}
+					var fields map[string]json.RawMessage
+					_ = json.Unmarshal(b.Raw, &fields)
+					var parts []json.RawMessage
+					_ = json.Unmarshal(fields["thinking"], &parts)
+					state.reasoning.thinkingParts = append(state.reasoning.thinkingParts, parts...)
+					for key, value := range fields {
+						if key != "thinking" {
+							state.reasoning.metadata[key] = value
+						}
+					}
+				}
+				if b.Text != "" {
+					if s.reasoningOpen && s.reasoningDisplayType != b.Type {
+						s.closeReasoningDisplay(false)
+					}
+					if !s.reasoningOpen {
+						s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningStart, ReasoningType: b.Type})
+						s.reasoningOpen = true
+						s.reasoningDisplayType = b.Type
+					}
+					state.reasoning.text.WriteString(b.Text)
+					s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningDelta, ReasoningType: b.Type, Text: b.Text})
+				}
+			case TextBlock:
+				if b.Text == "" {
+					continue
+				}
+				state.reasoning = nil
+				s.closeReasoningDisplay(false)
+				if state.text == nil || s.blocks[len(s.blocks)-1] != state.text {
+					state.text = &openAIStreamBlock{}
+					s.blocks = append(s.blocks, state.text)
+				}
+				state.text.text.WriteString(b.Text)
+				text.WriteString(b.Text)
+				s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamTextDelta, Text: b.Text})
+			}
+		}
+		if len(choice.ToolCalls) > 0 {
 			state.reasoning = nil
-			hasAnswerOrTool = true
-		}
-		if choice.Content != "" {
-			if state.text == nil || s.blocks[len(s.blocks)-1] != state.text {
-				state.text = &openAIStreamBlock{}
-				s.blocks = append(s.blocks, state.text)
-			}
-			state.text.text.WriteString(choice.Content)
-			text.WriteString(choice.Content)
+			s.closeReasoningDisplay(false)
 		}
 		for _, delta := range choice.ToolCalls {
 			s.appendToolCall(delta)
@@ -112,10 +148,9 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 			state.reasoning = nil
 		}
 	}
-	// ResponseStreamEvent carries no choice identity. Present interleaved
-	// reasoning in one section, closing it before the chunk's answer is
-	// emitted, while retaining a separate canonical block for each choice.
-	if hasAnswerOrTool || !s.hasActiveReasoning() {
+	// Text and tool transitions close the display in order above. A chunk
+	// ending with more thinking leaves that section open for later deltas.
+	if !s.hasActiveReasoning() {
 		s.closeReasoningDisplay(false)
 	}
 	return text.String(), nil, false, nil
@@ -158,7 +193,7 @@ func (s *OpenAIStreamState) closeReasoningDisplay(incomplete bool) {
 		return
 	}
 	s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
-		Type: ResponseStreamReasoningEnd, ReasoningType: openAIChatReasoningType, Incomplete: incomplete || s.reasoningIncomplete,
+		Type: ResponseStreamReasoningEnd, ReasoningType: s.reasoningDisplayType, Incomplete: incomplete || s.reasoningIncomplete,
 	})
 	s.reasoningOpen = false
 	s.reasoningIncomplete = false
@@ -192,6 +227,9 @@ func (s *OpenAIStreamState) choiceIndexes() []int {
 // IncompleteReason reports provider truncation or a stream that has not reached
 // completion. A valid finish reason also permits clean EOF without [DONE].
 func (s *OpenAIStreamState) IncompleteReason() string {
+	if s.failed {
+		return "invalid_stream"
+	}
 	complete := len(s.choices) > 0
 	for _, index := range s.choiceIndexes() {
 		choice := s.choices[index]
@@ -237,6 +275,7 @@ func (s *OpenAIStreamState) finalizeToolCalls() ([]ToolCall, error) {
 			// can contain integers that exceed its exact range.
 			var compacted bytes.Buffer
 			if err := json.Compact(&compacted, call.Args); err != nil {
+				s.failed = true
 				return nil, newFatalStreamError(fmt.Errorf("invalid JSON in tool call choice %d index %d arguments: %w", key.choiceIndex, key.toolIndex, err))
 			}
 			call.Args = json.RawMessage(compacted.Bytes())
@@ -252,7 +291,16 @@ func (s *OpenAIStreamState) Blocks() []Block {
 	blocks := make([]Block, 0, len(s.blocks)+len(s.toolBlocks))
 	for _, block := range s.blocks {
 		if block.reasoning {
-			blocks = append(blocks, openAIChatReasoningBlock(block.text.String()))
+			reasoning := ReasoningBlock{Provider: "openai", Type: block.reasoningType, Text: block.text.String()}
+			if block.reasoningType == openAIThinkingChunkType {
+				fields := make(map[string]json.RawMessage, len(block.metadata)+1)
+				for key, value := range block.metadata {
+					fields[key] = value
+				}
+				fields["thinking"], _ = json.Marshal(block.thinkingParts)
+				reasoning.Raw, _ = json.Marshal(fields)
+			}
+			blocks = append(blocks, reasoning)
 		} else {
 			blocks = append(blocks, TextBlock{Text: block.text.String()})
 		}
