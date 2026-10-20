@@ -29,6 +29,16 @@ func (o *inputOwner) runEditor(ctx context.Context, cmd *exec.Cmd, show func(boo
 	if !processwait.Supported {
 		return errors.New("editor terminal handoff is not supported on this platform")
 	}
+	if t, ok := o.term.(*terminalReader); ok && t.editor != nil {
+		if err := t.pauseEditing(); err != nil {
+			return fmt.Errorf("%w: %w", errEditorTerminal, err)
+		}
+		defer func() {
+			if restoreErr := t.resumeEditing(); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("%w: %w", errEditorTerminal, restoreErr))
+			}
+		}()
+	}
 	name, err := terminalName(int(o.stdin.Fd()))
 	if err != nil {
 		return err

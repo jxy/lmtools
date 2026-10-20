@@ -41,7 +41,7 @@ func TestREPLCommandsAndLiteralSlash(t *testing.T) {
 	if got := strings.Join(sessionLines(t, loop.from), "|"); !strings.HasSuffix(got, want) {
 		t.Fatalf("session = %q, want suffix %q", got, want)
 	}
-	for _, text := range []string{"REPL commands:", "No prompt text", "Unknown REPL command", "Use /ed N", "/exit takes no arguments", `1: "first\nsecond"`} {
+	for _, text := range []string{"REPL commands:", "No prompt text", "Unknown REPL command", "Use /ed N", "/exit takes no arguments", `1: first / second`} {
 		if notes.count(text) != 1 {
 			t.Fatalf("notes = %q, want %q once", notes.all(), text)
 		}
@@ -176,7 +176,7 @@ func TestREPLPresentationStaysOnDiagnostics(t *testing.T) {
 	if err := loop.run(false); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{`model: "gpt-test"`, "API: Chat Completions (buffered)", "/help for commands", `User 1: "one"`, `User 2: "two"`, "lmc: Working on turn 1...", "lmc: Working on turn 2...", "Session: "} {
+	for _, text := range []string{"model: gpt-test", "buffered | thinking off", "/help commands", "  one\n", "  two\n", "Session: "} {
 		if notes.count(text) != 1 {
 			t.Fatalf("notes = %q, want %q once", notes.all(), text)
 		}

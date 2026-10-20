@@ -144,6 +144,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 				backoff = overrideBackoff
 				overrideBackoff = 0 // Reset after use
 			}
+			reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1, Delay: backoff})
 
 			// Try to get request logger from context first
 			logger := r.getLogger(ctx)
@@ -159,6 +160,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			}
 		}
 
+		reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1})
 		// Clone request with fresh body
 		reqClone := req.Clone(ctx)
 		if len(bodyBytes) > 0 {
@@ -228,6 +230,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 				backoff = overrideBackoff
 				overrideBackoff = 0
 			}
+			reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1, Delay: backoff})
 
 			// Try to get request logger from context first
 			if logger != nil {
@@ -243,6 +246,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 		}
 
 		// Execute the function
+		reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1})
 		resp, err := fn()
 
 		// Check if we should retry

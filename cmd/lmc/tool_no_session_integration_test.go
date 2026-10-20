@@ -78,17 +78,17 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 	if !strings.Contains(stdout, "final saw memory-loop-ok") {
 		t.Fatalf("stdout missing final response: %q", stdout)
 	}
-	for _, unwanted := range []string{">>> Tools requested:", ">>> Running", ">>> Results:", "Completed in"} {
+	for _, unwanted := range []string{"Tools:", "Running", "Tool results:", "Completed in"} {
 		if strings.Contains(stdout, unwanted) {
 			t.Fatalf("stdout contains tool transcript marker %q: %q", unwanted, stdout)
 		}
 	}
 	for _, want := range []string{
-		">>> Tools requested: 1",
+		"Tools: 1",
 		`[1/1] Command: ["echo","memory-loop-ok"]`,
-		">>> Running 1 tool...",
-		">>> Results:",
-		"[1/1] Completed in ",
+		"Running 1 tool...",
+		"Tool results:",
+		`[1/1] "echo": Completed in `,
 		"      Output:\nmemory-loop-ok",
 	} {
 		if !strings.Contains(stderr, want) {
@@ -196,7 +196,7 @@ func assertOpenAIToolFollowupFromMemory(t *testing.T, body map[string]interface{
 	if err != nil {
 		t.Fatalf("marshal follow-up request: %v", err)
 	}
-	for _, uiText := range []string{"Completed in", ">>> Results:", "[1/1]", "Output:"} {
+	for _, uiText := range []string{"Completed in", "Tool results:", "[1/1]", "Output:"} {
 		if strings.Contains(string(encoded), uiText) {
 			t.Fatalf("follow-up request leaked terminal UI text %q: %s", uiText, encoded)
 		}

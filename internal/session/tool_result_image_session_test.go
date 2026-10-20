@@ -116,7 +116,7 @@ func TestShowListsToolResultImagesUnderTheResult(t *testing.T) {
 	}
 	msgID := saveViewImageRound(t, ctx, sess, sessionTestImage())
 	notifier := core.NewTestNotifier()
-	want := "     Attached image shot.png (image/png, 12 bytes).\n     [image: shot.png (image/png, 12 bytes)]\n"
+	want := "Attached image shot.png (image/png, 12 bytes).\n      End output.\n      [image: shot.png (image/png, 12 bytes)]\n"
 
 	conversation, err := captureDisplayStdout(t, func() error { return ShowConversation(sess.Path, notifier) })
 	if err != nil {

@@ -563,13 +563,13 @@ func TestPendingToolsIntegration(t *testing.T) {
 	t.Logf("stderr (first 500 chars): %.500s", stderr)
 
 	// Pending tools use the same ordered transcript as new tool rounds.
-	if !strings.Contains(stderr, ">>> Tools requested: 1") {
+	if !strings.Contains(stderr, "Tools: 1") {
 		t.Error("Expected to see pending tool review header")
 	}
 	if !strings.Contains(stderr, `[1/1] Command: ["echo","hello from tool"]`) {
 		t.Error("Expected to see pending command")
 	}
-	if !strings.Contains(stderr, ">>> Running 1 tool...") || !strings.Contains(stderr, ">>> Results:") {
+	if !strings.Contains(stderr, "Running 1 tool...") || !strings.Contains(stderr, "Tool results:") {
 		t.Error("Expected to see pending tool execution and results headers")
 	}
 

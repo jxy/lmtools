@@ -253,7 +253,7 @@ func TestUsageMergedWith(t *testing.T) {
 	}
 }
 
-func TestUsageSummary(t *testing.T) {
+func TestUsageDisplaySummary(t *testing.T) {
 	tests := []struct {
 		name  string
 		usage *Usage
@@ -262,7 +262,7 @@ func TestUsageSummary(t *testing.T) {
 		{
 			name:  "input and output only",
 			usage: &Usage{InputTokens: intPtr(100), OutputTokens: intPtr(19)},
-			want:  "input 100, output 19",
+			want:  "input 100 | output 19",
 		},
 		{
 			name: "zero details are omitted",
@@ -274,7 +274,7 @@ func TestUsageSummary(t *testing.T) {
 				CacheCreationInputTokens: intPtr(0),
 				ReasoningTokens:          intPtr(0),
 			},
-			want: "input 9, output 14, total 23",
+			want: "input 9 | output 14 | total 23",
 		},
 		{
 			name: "non-zero details are reported",
@@ -286,12 +286,12 @@ func TestUsageSummary(t *testing.T) {
 				CacheCreationInputTokens: intPtr(64),
 				ReasoningTokens:          intPtr(20),
 			},
-			want: "input 1234, cache read 512, cache write 64, output 56, reasoning 20, total 1290",
+			want: "input 1234 | output 56 | cache read 512 | cache write 64 | reasoning 20 | total 1290",
 		},
 		{
 			name:  "reported zero main counts still show",
 			usage: &Usage{InputTokens: intPtr(0), OutputTokens: intPtr(0)},
-			want:  "input 0, output 0",
+			want:  "input 0 | output 0",
 		},
 		{
 			name:  "nil usage renders empty",
@@ -302,8 +302,8 @@ func TestUsageSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.usage.Summary(); got != tt.want {
-				t.Fatalf("Summary() = %q, want %q", got, tt.want)
+			if got := tt.usage.DisplaySummary(); got != tt.want {
+				t.Fatalf("DisplaySummary() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -433,13 +433,13 @@ func TestHandleResponseNotifiesTokenUsage(t *testing.T) {
 			cfg:  RequestOptions{Provider: "anthropic", Model: "claude-sonnet-5"},
 			body: `{"content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":19,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens_details":{"thinking_tokens":12}}}`,
 
-			wantNote: "Token usage: input 10, output 19, reasoning 12",
+			wantNote: "Tokens: input 10 | output 19 (reasoning 12)",
 		},
 		{
 			name:     "openai reports totals",
 			cfg:      RequestOptions{Provider: "openai", Model: "gpt-5"},
 			body:     `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":9,"completion_tokens":14,"total_tokens":23}}`,
-			wantNote: "Token usage: input 9, output 14, total 23",
+			wantNote: "Tokens: input 9 | output 14 | total 23",
 		},
 		{
 			name:     "response without usage stays quiet",
@@ -463,7 +463,7 @@ func TestHandleResponseNotifiesTokenUsage(t *testing.T) {
 
 			var usageNotes []string
 			for _, note := range notifier.infos {
-				if strings.HasPrefix(note, "Token usage: ") {
+				if strings.HasPrefix(note, "Tokens: ") {
 					usageNotes = append(usageNotes, note)
 				}
 			}

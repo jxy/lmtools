@@ -28,6 +28,11 @@ type inputLine struct {
 	// a marker there, such as a backslash that continues a turn, is still
 	// known.
 	tail string
+	// literal preserves pasted and recalled text without continuation escapes.
+	literal bool
+	// escapedSlash identifies the leading slash added by history recall.
+	// Pasted text has no such escape to remove on a continued line.
+	escapedSlash bool
 }
 
 // lineTailBytes is how much of the end of a line too long is kept: enough
@@ -101,6 +106,7 @@ type inputOwner struct {
 	stdin *os.File
 	// terminal reports whether standard input is a terminal.
 	terminal bool
+	editing  bool
 	// term reads the terminal. It is nil when standard input is not one,
 	// or when the terminal could not be reopened, which termErr explains.
 	term    terminalInput
@@ -137,6 +143,14 @@ func (o *inputOwner) readAll(ctx context.Context, limit int64) ([]byte, error) {
 // read in order, as they would be from a pipe.
 func (o *inputOwner) readLine(ctx context.Context) (inputLine, error) {
 	return o.readLineUnder(ctx, constants.MaxCLIInputSize)
+}
+
+func (o *inputOwner) setPrompt(prompt string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if t, ok := o.term.(interface{ setPrompt(string) }); ok {
+		t.setPrompt(prompt)
+	}
 }
 
 // readLineUnder reads one line at a prompt under bound. Input that is not a

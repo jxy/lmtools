@@ -243,13 +243,18 @@ func TestTerminalAnswerPastTheBound(t *testing.T) {
 	maxTurnBytes = 128
 	owner, pty, _ := terminalOwner(t)
 	notifier := newQuestionNotifier()
-	outcome := askApproval(t, context.Background(), owner, notifier)
-	typeKeys(t, pty, "yes"+strings.Repeat(" ", maxTurnBytes)+"\nn\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	outcome := askApproval(t, ctx, owner, notifier)
+	typeKeys(t, pty, "yes"+strings.Repeat(" ", maxTurnBytes)+"\nyes\n")
 	if result := awaitApproval(t, outcome); result.err != nil || result.approved || result.reason != "" {
-		t.Fatalf("Approve() = %+v; want oversized answer discarded, then denial", result)
+		t.Fatalf("Approve() = %+v; want oversized answer denied", result)
 	}
-	if !notifier.said("Discarded a turn longer than") {
+	if !notifier.said("Approval response is too long; denying without a reason.") {
 		t.Fatal("oversized input was not explained")
+	}
+	if next, err := owner.readLineUnder(ctx, maxTurnBytes); err != nil || next.text != "yes" {
+		t.Fatalf("next independent answer=%+v err=%v", next, err)
 	}
 }
 

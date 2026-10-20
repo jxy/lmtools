@@ -211,7 +211,7 @@ func TestRunTurnReportsAnAnswerItCouldNotSave(t *testing.T) {
 	if got := te.stdout.String(); !strings.Contains(got, "pong from the mock") {
 		t.Fatalf("stdout = %q, want the answer shown before the failed save", got)
 	}
-	if len(te.notifier.WarnMessages) == 0 || !strings.Contains(te.notifier.WarnMessages[0], "failed to save response to session") {
+	if len(te.notifier.WarnMessages) == 0 || !strings.Contains(te.notifier.WarnMessages[0], "Failed to save response to session") {
 		t.Fatalf("warnings = %q, want the save failure warning a single run has always printed", te.notifier.WarnMessages)
 	}
 }

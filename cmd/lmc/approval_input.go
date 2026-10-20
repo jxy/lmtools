@@ -24,17 +24,23 @@ func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine) (inp
 	}
 	show := func(prompt string) {
 		if first == nil { // The initial approval question was already shown.
+			if owner != nil {
+				owner.setPrompt(tools.DetailIndent + prompt)
+			}
 			a.notifier.Promptf("%s%s", tools.DetailIndent, prompt)
 		}
 	}
 	var draft string
 	for {
-		text, how, err := readTextTurn(ctx, read, terminal, show, a.notifier.Warnf, func() {}, true)
+		text, how, err := readTextTurn(ctx, read, terminal, show, func() {}, true)
 		if err != nil {
 			return inputLine{}, err
 		}
 		if err := ctx.Err(); err != nil {
 			return inputLine{}, err
+		}
+		if how == readTooLong {
+			return inputLine{tooLong: true}, nil
 		}
 		if how == readEnd || how == readEndInsideTurn {
 			if draft != "" || how == readEndInsideTurn {

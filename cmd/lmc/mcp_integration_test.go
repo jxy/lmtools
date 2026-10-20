@@ -226,7 +226,7 @@ func TestMCPToolOnChatWireRunsAndTheSessionKeepsIt(t *testing.T) {
 	}
 
 	sessionID, shown := showSession(t, lmcBin, sessionsDir)
-	if !strings.Contains(shown, "  • "+toolName+" (ID: call_mcp)\n     MCP: fake/echo\n") {
+	if !strings.Contains(shown, "[1/1] MCP tool: fake/echo\n      Arguments: {\"text\":\"hi\"}\n") || !strings.Contains(shown, `[1/1] "fake/echo": Completed`) {
 		t.Fatalf("-show output = %q, want the labelled call", shown)
 	}
 	if !strings.Contains(shown, "[image: image/png, "+core.FormatByteCount(len(integrationPNG))+"]") {

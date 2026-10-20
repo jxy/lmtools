@@ -3,6 +3,7 @@ package main
 import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -10,30 +11,6 @@ import (
 const (
 	maxREPLHistoryEntries = 100
 	maxREPLHistoryBytes   = constants.MaxCLIInputSize
-
-	replHelp = `REPL commands:
-  /help             Show this help.
-  /history          List prompt text from this invocation (up to 100 entries).
-  /ed [N|REGEX]     Edit the draft, history prompt N, or all prompts matching REGEX.
-  /image PATH       Attach an image to the next turn; spaces in PATH are accepted.
-  /clear-images     Remove pending images.
-  /developer TEXT   Set a developer instruction for the next turn.
-  /clear-developer  Remove the pending developer instruction.
-  /exit             Exit the conversation.
-Commands except /ed also work in piped -repl input. Start with // to send a literal /.
-Image paths are literal, without quotes or shell expansion. Press Enter with pending
-images to send an image-only turn. History recalls text; it does not recall images.
-After /ed, Enter sends the draft, typed text appends, and /ed edits it again.
-Ctrl-C at the prompt discards a draft. Editor changes are kept only after success.
-/ed uses $EDITOR as a shell command with the file passed separately; default: ed.
-Digits select positive history IDs; other arguments are Go regexps.
-Matching prompts appear in order with blank lines. Use [4]2 to search for 42.
-Use bare /ed during continuation to edit unfinished text, or //ed for a literal line.
-Draft previews are bounded; /ed reopens complete text. Ctrl-Z resumes the editor.
-End a line with \ to continue; use \\ for a literal trailing \.
-Terminal editing: Backspace erases, Ctrl-W erases a word, Ctrl-U clears the line.
-Ctrl-C cancels the current turn; Ctrl-D or /exit exits.
-`
 )
 
 type replPrompt struct {
@@ -89,7 +66,7 @@ func (l *replLoop) interpretInput(text string) replAction {
 	}
 	command, argument := splitREPLCommand(text)
 	switch command {
-	case "/help", "/history", "/clear-images", "/clear-developer", "/exit":
+	case "/info", "/show", "/images", "/clear-images", "/clear-developer", "/exit":
 		if argument != "" {
 			l.env.notifier.Errorf("%s takes no arguments. Use /help for commands.", command)
 			return replAction{}
@@ -97,14 +74,25 @@ func (l *replLoop) interpretInput(text string) replAction {
 	}
 	switch command {
 	case "/help":
-		l.env.notifier.Promptf("%s", replHelp)
+		l.showHelp(argument)
+	case "/info":
+		l.showInfo()
+	case "/show":
+		l.showConversation()
+	case "/thinking", "/usage":
+		l.setDisplay(command, argument)
 	case "/history":
-		if len(l.history.entries) == 0 {
-			l.env.notifier.Infof("No prompt text in this invocation's history yet.")
+		l.showHistory(argument)
+	case "/images":
+		l.showImages()
+	case "/remove-image":
+		n, err := strconv.Atoi(argument)
+		if err != nil || n < 1 || n > len(l.images) {
+			l.env.notifier.Errorf("Use /images for pending image numbers, then /remove-image N.")
+			return replAction{}
 		}
-		for _, entry := range l.history.entries {
-			l.env.notifier.Promptf("%d: %q\n", entry.id, replPromptPreview(entry.text))
-		}
+		l.images = append(l.images[:n-1], l.images[n:]...)
+		l.env.notifier.Infof("Removed image %d; %d pending.", n, len(l.images))
 	case "/ed":
 		l.editDraft(argument)
 	case "/again":
@@ -120,7 +108,7 @@ func (l *replLoop) interpretInput(text string) replAction {
 		}
 		image, err := core.LoadImageFile(argument, constants.MaxCLIImageBytes)
 		if err != nil {
-			l.env.notifier.Errorf("%v", err)
+			l.env.notifier.Errorf("%v. Image paths are literal: omit shell quotes and use a full path instead of ~.", err)
 			return replAction{}
 		}
 		image.Detail = strings.ToLower(strings.TrimSpace(l.env.cfg.ImageDetail))
@@ -141,10 +129,10 @@ func (l *replLoop) interpretInput(text string) replAction {
 			return replAction{}
 		}
 		l.base.Developer = argument
-		l.env.notifier.Infof("Developer instruction queued for the next turn.")
+		l.env.notifier.Infof("Developer instruction queued for the next turn; it will remain in saved conversation history.")
 	case "/clear-developer":
 		l.base.Developer = ""
-		l.env.notifier.Infof("Cleared pending developer instruction.")
+		l.env.notifier.Infof("Cleared pending developer instruction; saved instructions are unchanged.")
 	case "/exit":
 		return replAction{exit: true}
 	default:

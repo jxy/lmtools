@@ -200,6 +200,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*h
 		} else if contentLength == 0 || contentLength > maxRetryBodySize {
 			// Large body without GetBody: single attempt only (can't retry)
 			// This is a limitation when GetBody is not available
+			reportProgress(ctx, Progress{Attempt: 1, Total: 1})
 			return c.client.Do(req)
 		}
 	}

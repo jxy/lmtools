@@ -1,11 +1,14 @@
 package session
 
 import (
+	"context"
 	stdErrors "errors"
 	"fmt"
+	"io"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
-	"lmtools/internal/format"
+	"lmtools/internal/ui"
+	"lmtools/internal/ui/tools"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +24,10 @@ func FormatRole(role, model string) string {
 
 // ShowMessageWithManager displays a single message with its metadata using the provided manager.
 func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.Notifier) error {
+	return showMessageTo(os.Stdout, manager, messagePath, notifier)
+}
+
+func showMessageTo(w io.Writer, manager *Manager, messagePath string, notifier core.Notifier) error {
 	if manager == nil {
 		manager = DefaultManager()
 	}
@@ -41,17 +48,17 @@ func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.
 	}
 
 	// Print message details
-	fmt.Printf("Message: %s\n", relPath)
-	fmt.Printf("Type: %s\n", FormatRole(string(msg.Role), msg.Model))
-	fmt.Printf("Created: %s\n", msg.Timestamp.Format("2006-01-02 15:04:05"))
-	fmt.Printf("Size: %d bytes\n", len(msg.Content))
+	fmt.Fprintf(w, "Message: %s\n", relPath)
+	fmt.Fprintf(w, "Type: %s\n", FormatRole(string(msg.Role), msg.Model))
+	fmt.Fprintf(w, "Created: %s\n", msg.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(w, "Size: %d bytes\n", len(msg.Content))
 
 	// Print message content if present
 	if msg.Content != "" {
-		fmt.Printf("\n%s\n", msg.Content)
+		fmt.Fprintf(w, "\n%s\n", msg.Content)
 	}
 	images := loadDisplayImages(dir, msgID, notifier)
-	printImageLines("", images.user)
+	printImageLinesTo(w, "", images.user)
 
 	// Load and display tool interactions if present
 	toolInteraction, err := LoadToolInteraction(dir, msgID)
@@ -61,7 +68,7 @@ func ShowMessageWithManager(manager *Manager, messagePath string, notifier core.
 			notifier.Warnf("Failed to load tool interactions: %v", err)
 		}
 	} else if toolInteraction != nil {
-		printToolInteraction(toolInteraction, images)
+		printToolInteractionTo(w, toolInteraction, images, nil)
 	}
 
 	return nil
@@ -167,129 +174,74 @@ func loadDisplayImages(msgDir, msgID string, notifier core.Notifier) displayImag
 
 // printImageLines lists images one line each, in the one form the user turn
 // and the tool results share.
-func printImageLines(indent string, images []core.ImageBlock) {
+func printImageLinesTo(w io.Writer, indent string, images []core.ImageBlock) {
 	for _, image := range images {
-		fmt.Printf("%s[image: %s]\n", indent, core.DescribeImageBlock(image))
+		fmt.Fprintf(w, "%s[image: %s]\n", indent, core.DescribeImageBlock(image))
 	}
 }
 
 // printToolInteraction renders a message's tool calls and results. A result's
 // text comes from .tools.json and its images from the blocks file, printed
 // under the output they arrived with.
-func printToolInteraction(toolInteraction *core.ToolInteraction, images displayImages) {
-	// Display tool calls if present
-	if len(toolInteraction.Calls) > 0 {
-		fmt.Println("\n>>> Tool Calls:")
-		for _, call := range toolInteraction.Calls {
-			// Pretty print the arguments
-			args := format.PrettyJSONArgs(call.Args, "     ")
-			fmt.Printf("  • %s (ID: %s)\n", call.Name, call.ID)
-			if call.MCPServer != "" {
-				fmt.Printf("     MCP: %s/%s\n", call.MCPServer, call.MCPTool)
-			}
-			if args != "" {
-				fmt.Printf("     Args: %s\n", args)
-			}
-		}
+func printToolInteractionTo(w io.Writer, interaction *core.ToolInteraction, images displayImages, byID map[string]core.ToolCall) {
+	renderer := tools.NewCLIToolUI(ui.NewNotifierWithWriter(w))
+	if byID == nil {
+		byID = make(map[string]core.ToolCall, len(interaction.Calls))
 	}
-
-	// Display tool results if present
-	if len(toolInteraction.Results) > 0 {
-		fmt.Println("\n>>> Tool Results:")
-		for _, result := range toolInteraction.Results {
-			if result.Error != "" {
-				fmt.Printf("  [ERROR] (ID: %s): %s\n", result.ID, result.Error)
-				continue
+	for i, call := range interaction.Calls {
+		renderer.ShowCall(i, len(interaction.Calls), call, nil)
+		byID[call.ID] = call
+	}
+	if len(interaction.Results) > 0 {
+		calls := make([]core.ToolCall, len(interaction.Results))
+		for i, result := range interaction.Results {
+			calls[i] = byID[result.ID]
+			if calls[i].Name == "" {
+				calls[i].Name = result.ID
 			}
-			// Truncate long output for display
-			output := format.Truncate(result.Output, format.MaxToolOutputDisplay)
-			status := "[OK]"
-			if result.Truncated {
-				status = "[TRUNCATED]"
-			}
-			fmt.Printf("  %s Result (ID: %s, %dms):\n", status, result.ID, result.Elapsed)
-			// Indent the output
-			lines := strings.Split(output, "\n")
-			for _, line := range lines {
-				if line != "" {
-					fmt.Printf("     %s\n", line)
-				}
-			}
-			printImageLines("     ", images.byResult[result.ID])
 		}
+		results := append([]core.ToolResult(nil), interaction.Results...)
+		for i := range results {
+			results[i].Images = images.byResult[results[i].ID]
+		}
+		renderer.AfterExecute(calls, results)
 	}
 }
 
 // ShowConversation shows a full conversation or branch
 func ShowConversation(sessionPath string, notifier core.Notifier) error {
-	// Read all messages in the conversation
-	messages, err := GetLineage(sessionPath)
-	if err != nil {
-		return errors.WrapError("read conversation", err)
-	}
-
-	if len(messages) == 0 {
-		fmt.Println("No messages in conversation.")
-		return nil
-	}
-
-	// Build index of message locations for O(1) lookups
-	messageIndex, err := indexMessageDirectories(sessionPath)
-	if err != nil {
-		return errors.WrapError("index message directories", err)
-	}
-
-	// Get session info for the header
-	sessionID := GetSessionID(sessionPath)
-	fmt.Printf("Conversation %s:\n\n", sessionID)
-
-	// Print each message with tool interactions
-	for i, msg := range messages {
-		// Print separator between messages (except for first)
-		if i > 0 {
-			fmt.Println("\n---")
-		}
-
-		// Display the message with tool interactions
-		if err := displayMessageWithTools(sessionPath, msg, messageIndex, notifier); err != nil {
-			// Fall back to simple display on error
-			roleDisplay := FormatRole(string(msg.Role), msg.Model)
-			fmt.Printf("[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
-			fmt.Println(msg.Content)
-		}
-	}
-
-	return nil
+	return ShowConversationTo(os.Stdout, sessionPath, notifier)
 }
 
-// displayMessageWithTools displays a message with any associated tool interactions
-func displayMessageWithTools(sessionPath string, msg Message, messageIndex map[string]string, notifier core.Notifier) error {
+// ShowConversationTo renders saved history on the requested surface.
+func ShowConversationTo(w io.Writer, sessionPath string, notifier core.Notifier) error {
+	return ShowSessionTo(context.Background(), w, &Session{Path: sessionPath}, notifier)
+}
+
+// displayMessageWithToolsTo reads sidecars from the message's own directory.
+// IDs are local to a directory; branches routinely reuse their ancestors' IDs.
+func displayMessageWithToolsTo(w io.Writer, ref lineageMessageRef, notifier core.Notifier, knownCalls map[string]core.ToolCall) error {
+	msg := ref.message
 	// Print message header
 	roleDisplay := FormatRole(string(msg.Role), msg.Model)
-	fmt.Printf("[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(w, "[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
 
 	// Print message content if present
 	if msg.Content != "" {
-		fmt.Println(msg.Content)
+		fmt.Fprintln(w, msg.Content)
 	}
 
-	// Determine the directory containing this message
-	msgDir := messageIndex[msg.ID]
-	if msgDir == "" {
-		// Fallback to session path if not found in index
-		msgDir = sessionPath
-	}
-	images := loadDisplayImages(msgDir, msg.ID, notifier)
-	printImageLines("", images.user)
+	images := loadDisplayImages(ref.path, msg.ID, notifier)
+	printImageLinesTo(w, "", images.user)
 
 	// Load and display tool interactions if present
-	toolInteraction, err := LoadToolInteraction(msgDir, msg.ID)
+	toolInteraction, err := LoadToolInteraction(ref.path, msg.ID)
 	if err != nil {
 		return err
 	}
 
 	if toolInteraction != nil {
-		printToolInteraction(toolInteraction, images)
+		printToolInteractionTo(w, toolInteraction, images, knownCalls)
 	}
 
 	return nil

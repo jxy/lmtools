@@ -57,7 +57,7 @@ func TestHandleResponseCompletesPresentationBeforeUsageNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleResponseWithOptions() error = %v", err)
 	}
-	want := []string{"response complete", "Token usage: input 3, output 2, total 5"}
+	want := []string{"response complete", "Tokens: input 3 | output 2 | total 5"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("event order = %#v, want %#v", order, want)
 	}

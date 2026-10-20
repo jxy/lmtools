@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"strings"
+	"time"
 )
 
 const (
@@ -33,7 +34,7 @@ func NewCLIToolUI(notifier core.Notifier) *CLIToolUI {
 // as one past the per-round cap, arrive nil and are decoded here for display.
 func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.UniversalCommandArgs) {
 	if index == 0 {
-		ui.notifier.Promptf("\n>>> Tools requested: %d\n", total)
+		ui.notifier.Promptf("\nTools: %d\n", total)
 	}
 	if index > 0 {
 		ui.notifier.Promptf("\n")
@@ -47,7 +48,7 @@ func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.U
 // it again. It renders through the notifier the approval question uses, the
 // way ShowCall does for a new call.
 func (ui *CLIToolUI) ShowRerun(call core.ToolCall, reason string) {
-	ui.notifier.Promptf("\n>>> Outcome unknown: %s\n", reason)
+	ui.notifier.Promptf("\nOutcome unknown: %s\n", reason)
 	ui.showCallLines("[rerun]", call, nil)
 }
 
@@ -59,12 +60,12 @@ func (ui *CLIToolUI) showCallLines(prefix string, call core.ToolCall, args *core
 	}
 
 	if args != nil && len(args.Command) > 0 {
-		ui.notifier.Promptf("%s Command: %s\n", prefix, core.MarshalJSONForDisplay(args.Command))
+		ui.showJSON(prefix+" Command", core.MarshalJSONForDisplay(args.Command))
 		if args.Workdir != "" {
 			ui.notifier.Promptf("%sWorkdir: %s\n", DetailIndent, core.MarshalJSONForDisplay(args.Workdir))
 		}
 		if len(args.Environ) > 0 {
-			ui.notifier.Promptf("%sEnviron: %s\n", DetailIndent, core.MarshalJSONForDisplay(args.Environ))
+			ui.showJSON(DetailIndent+"Environ", core.MarshalJSONForDisplay(args.Environ))
 		}
 		if args.Stdin != nil {
 			ui.notifier.Promptf("%sStdin: %s\n", DetailIndent, core.MarshalJSONForDisplay(*args.Stdin))
@@ -97,12 +98,25 @@ func (ui *CLIToolUI) showCallLines(prefix string, call core.ToolCall, args *core
 		// tool name; the qualified name the model used is what a rule
 		// would not name, so the line reads the way a rule does.
 		ui.notifier.Promptf("%s MCP tool: %s/%s\n", prefix, call.MCPServer, call.MCPTool)
-		ui.notifier.Promptf("%sArguments: %s\n", DetailIndent, compactToolArguments(call.Args))
+		ui.showJSON(DetailIndent+"Arguments", compactToolArguments(call.Args))
 		return
 	}
 
 	ui.notifier.Promptf("%s Tool: %s\n", prefix, call.Name)
-	ui.notifier.Promptf("%sArguments: %s\n", DetailIndent, compactToolArguments(call.Args))
+	ui.showJSON(DetailIndent+"Arguments", compactToolArguments(call.Args))
+}
+
+// Long objects and argument vectors get one field per line. JSON indentation
+// preserves strings and numeric spelling; approval values are never shortened.
+func (ui *CLIToolUI) showJSON(label, value string) {
+	if len(label)+len(value) > 100 && (strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[")) {
+		var pretty bytes.Buffer
+		if json.Indent(&pretty, []byte(value), DetailIndent, "  ") == nil {
+			ui.notifier.Promptf("%s:\n%s%s\n", label, DetailIndent, pretty.String())
+			return
+		}
+	}
+	ui.notifier.Promptf("%s: %s\n", label, value)
 }
 
 // imageCallArgs decodes a view_image call's arguments for display, and
@@ -122,7 +136,7 @@ func imageCallArgs(call core.ToolCall) *core.ViewImageArgs {
 // BeforeRun announces execution after every approval has resolved.
 func (ui *CLIToolUI) BeforeRun(total, runnable, parallel int) {
 	if runnable == 0 {
-		ui.notifier.Promptf("\n>>> No tools will be run.\n")
+		ui.notifier.Promptf("\nNo tools will be run.\n")
 		return
 	}
 
@@ -139,7 +153,7 @@ func (ui *CLIToolUI) BeforeRun(total, runnable, parallel int) {
 	if parallel > 1 {
 		parallelText = " in parallel"
 	}
-	ui.notifier.Promptf("\n>>> Running %s%s...\n", count, parallelText)
+	ui.notifier.Promptf("\nRunning %s%s...\n", count, parallelText)
 }
 
 // AfterExecute displays results in their original request order. It decodes
@@ -150,7 +164,7 @@ func (ui *CLIToolUI) BeforeRun(total, runnable, parallel int) {
 // the end of every round is state to keep aligned for a decode that costs one
 // pass over arguments the round has already printed in full.
 func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResult) {
-	ui.notifier.Promptf("\n>>> Results:\n")
+	ui.notifier.Promptf("\nTool results:\n")
 	total := len(calls)
 
 	for i, result := range results {
@@ -158,6 +172,9 @@ func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResu
 			ui.notifier.Promptf("\n")
 		}
 		formatToolResult(ui.notifier, i, total, calls[i], result)
+		for _, image := range result.Images {
+			ui.notifier.Promptf("%s[image: %s]\n", DetailIndent, core.DescribeImageBlock(image))
+		}
 	}
 	ui.notifier.Promptf("\n")
 }
@@ -165,6 +182,16 @@ func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResu
 func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCall, result core.ToolResult) {
 	args := commandCallArgs(call)
 	prefix := fmt.Sprintf("[%d/%d]", index+1, total)
+	name := call.Name
+	if call.MCPServer != "" {
+		name = call.MCPServer + "/" + call.MCPTool
+	}
+	if args != nil && len(args.Command) > 0 {
+		name = args.Command[0]
+	}
+	if name != "" {
+		prefix += " " + core.MarshalJSONForDisplay(name) + ":"
+	}
 	status, hints := toolResultStatus(result)
 	details := toolResultDetails(args)
 	if call.MCPServer != "" && len(result.Images) > 0 {
@@ -196,11 +223,12 @@ func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCa
 		return
 	}
 	label := "Output"
-	if result.Code == errors.ErrCodeTimeout {
+	if result.Error != "" {
 		label = "Partial output"
 	}
 	notifier.Promptf("%s%s:\n", DetailIndent, label)
 	writeToolOutput(notifier, result.Output)
+	notifier.Promptf("%sEnd output.\n", DetailIndent)
 }
 
 // writeToolLines keeps every continuation under its tool result, including
@@ -278,16 +306,23 @@ func toolResultStatus(result core.ToolResult) (string, []string) {
 	}
 
 	if result.Error == "" {
-		return fmt.Sprintf("Completed in %dms", result.Elapsed), nil
+		return fmt.Sprintf("Completed in %s", toolDuration(result.Elapsed)), nil
 	}
 
 	switch result.Code {
 	case errors.ErrCodeTimeout:
-		return fmt.Sprintf("Timed out in %dms", result.Elapsed), nil
+		return fmt.Sprintf("Timed out in %s", toolDuration(result.Elapsed)), nil
 	case errors.ErrCodeCancelled:
-		return fmt.Sprintf("Cancelled in %dms", result.Elapsed), nil
+		return fmt.Sprintf("Cancelled in %s", toolDuration(result.Elapsed)), nil
 	}
-	return fmt.Sprintf("Failed in %dms: %s", result.Elapsed, result.Error), nil
+	return fmt.Sprintf("Failed in %s: %s", toolDuration(result.Elapsed), result.Error), nil
+}
+
+func toolDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
 }
 
 func compactToolArguments(args json.RawMessage) string {

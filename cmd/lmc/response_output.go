@@ -19,10 +19,12 @@ const (
 // rendering provider-visible reasoning summaries on stderr. A single instance
 // is reused for the initial response and every tool follow-up round.
 type responsePresenter struct {
-	answer       io.Writer
-	diagnostics  io.Writer
-	showThinking bool
-	answerLabel  string
+	answer         io.Writer
+	diagnostics    io.Writer
+	showThinking   bool
+	answerLabel    string
+	onOutput       func()
+	lastIncomplete bool
 	// separate keeps a note off the end of an answer on the screen both
 	// share; newResponsePresenter sets it.
 	separate bool
@@ -34,6 +36,7 @@ type responsePresenter struct {
 	thinkingEndsNewline  bool
 	streamedThinking     bool
 	answerWritten        bool
+	answerLabelNeeded    bool
 	answerNewlines       int
 	diagnosticsSeparated bool
 }
@@ -48,6 +51,9 @@ func newResponsePresenter(answer, diagnostics io.Writer, showThinking bool) *res
 }
 
 func (p *responsePresenter) HandleStreamEvent(event core.ResponseStreamEvent) {
+	if p.onOutput != nil && (event.Type == core.ResponseStreamTextDelta || p.showThinking) {
+		p.onOutput()
+	}
 	switch event.Type {
 	case core.ResponseStreamTextDelta:
 		p.finishThinking(!p.thinkingEnded)
@@ -73,16 +79,21 @@ func (p *responsePresenter) HandleStreamEvent(event core.ResponseStreamEvent) {
 }
 
 func (p *responsePresenter) HandleResponseComplete(response core.Response) {
+	p.lastIncomplete = response.IncompleteReason != ""
+	if p.onOutput != nil {
+		p.onOutput()
+	}
 	p.finishThinking((response.Streamed && !p.thinkingEnded) || response.IncompleteReason != "")
 	presentedThinking := p.streamedThinking
+	answerInBlocks := p.showThinking && !response.Streamed && answerBlocksMatch(response)
 	if p.showThinking && (!response.Streamed || !p.streamedThinking) {
 		if response.Streamed && p.answerWritten {
 			p.separateDiagnosticsFromAnswer()
 		}
-		presentedThinking = p.renderReasoningBlocks(response.Blocks, response.IncompleteReason != "") || presentedThinking
+		presentedThinking = p.renderResponseBlocks(response, answerInBlocks) || presentedThinking
 	}
 
-	if !response.Streamed {
+	if !response.Streamed && !answerInBlocks {
 		p.writeAnswer(response.Text)
 	}
 
@@ -97,21 +108,39 @@ func (p *responsePresenter) HandleResponseComplete(response core.Response) {
 	p.resetResponseState()
 }
 
-func (p *responsePresenter) renderReasoningBlocks(blocks []core.Block, incomplete bool) bool {
+// Ordered blocks can preserve buffered text/thinking transitions only if their
+// text reproduces the answer exactly. Legacy projections still use Text.
+func answerBlocksMatch(response core.Response) bool {
+	text := response.Text
+	for _, block := range response.Blocks {
+		if block, ok := block.(core.TextBlock); ok {
+			if !strings.HasPrefix(text, block.Text) {
+				return false
+			}
+			text = text[len(block.Text):]
+		}
+	}
+	return len(response.Blocks) > 0 && text == ""
+}
+
+func (p *responsePresenter) renderResponseBlocks(response core.Response, includeAnswer bool) bool {
 	presented := false
-	for _, candidate := range blocks {
-		block, ok := candidate.(core.ReasoningBlock)
-		if !ok {
-			continue
+	for _, candidate := range response.Blocks {
+		switch block := candidate.(type) {
+		case core.TextBlock:
+			if includeAnswer {
+				p.writeAnswer(block.Text)
+			}
+		case core.ReasoningBlock:
+			text := core.ReasoningTextForDisplay(block)
+			if text == "" && !shouldPresentEmptyReasoning(block) {
+				continue
+			}
+			p.startThinking()
+			p.writeThinking(text)
+			p.finishThinking(response.IncompleteReason != "")
+			presented = true
 		}
-		text := core.ReasoningTextForDisplay(block)
-		if text == "" && !shouldPresentEmptyReasoning(block) {
-			continue
-		}
-		p.startThinking()
-		p.writeThinking(text)
-		p.finishThinking(incomplete)
-		presented = true
 	}
 	return presented
 }
@@ -144,9 +173,10 @@ func (p *responsePresenter) writeAnswer(text string) {
 	if text == "" {
 		return
 	}
-	if !p.answerWritten && p.answerLabel != "" {
+	if (!p.answerWritten || p.answerLabelNeeded) && p.answerLabel != "" {
 		_, _ = fmt.Fprintf(p.diagnostics, "%s:\n", p.answerLabel)
 	}
+	p.answerLabelNeeded = false
 	_, _ = fmt.Fprint(p.answer, text)
 	p.answerWritten = true
 	p.diagnosticsSeparated = false
@@ -189,7 +219,9 @@ func (p *responsePresenter) startThinking() {
 	p.thinkingEnded = false
 	p.thinkingIncomplete = false
 	if p.showThinking {
+		p.separateDiagnosticsFromAnswer()
 		_, _ = fmt.Fprintf(p.diagnostics, "%s\n", thinkingStartMarker)
+		p.answerLabelNeeded = true
 	}
 }
 

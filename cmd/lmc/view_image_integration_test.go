@@ -219,7 +219,7 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 	}
 
 	sessionID, shown := showSession(t, lmcBin, sessionsDir)
-	if !strings.Contains(shown, "     "+wantText+"\n     [image: plot.png (image/png, "+core.FormatByteCount(len(integrationPNG))+")]\n") {
+	if !strings.Contains(shown, wantText+"\n      End output.\n      [image: plot.png (image/png, "+core.FormatByteCount(len(integrationPNG))+")]\n") {
 		t.Fatalf("-show output = %q, want the result text followed by the image line", shown)
 	}
 	if strings.Contains(shown, "base64,") {

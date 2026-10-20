@@ -34,6 +34,7 @@ type turnEnv struct {
 	answersOnScreen bool
 	// answerLabel identifies provider text on an interactive terminal.
 	answerLabel string
+	progress    *turnProgress
 }
 
 func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input *inputOwner) *turnEnv {
@@ -90,6 +91,7 @@ type turnOutcome struct {
 	// PlanCommitted reports that the request plan's writes landed, the
 	// turn's user message and its images among them.
 	PlanCommitted bool
+	PartialAnswer bool
 }
 
 // Committed reports whether the turn wrote anything to the session.
@@ -168,6 +170,7 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 	}
 	out.UnsavedAnswer = executed.UnsavedAnswer
 	out.PlanCommitted = executed.PlanCommitted
+	out.PartialAnswer = executed.PartialAnswer
 	return out, err
 }
 

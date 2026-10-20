@@ -46,8 +46,9 @@ const fdSetSize = 1024
 // the readiness can be withdrawn before the read: an interrupt or a flush
 // empties the queue.
 type terminalReader struct {
-	fd   int
-	name string
+	editor *terminalEditor
+	fd     int
+	name   string
 	// wakeR and wakeW are a pipe. A request whose context ends writes to
 	// wakeW, which ends a wait on wakeR.
 	wakeR, wakeW int
@@ -59,6 +60,9 @@ type terminalReader struct {
 	// afterReady and beforeWake are the test hooks, copied when the reader
 	// opens.
 	afterReady, beforeWake func()
+	// onWake runs only on the reader's path, allowing a resize to repaint
+	// without interrupting a partially decoded key or reading input elsewhere.
+	onWake func()
 }
 
 // openTerminalReader names the terminal on standard input, opens it again
@@ -195,6 +199,9 @@ func (t *terminalReader) wait(ctx context.Context) error {
 		}
 		if woken {
 			t.drainWake()
+			if ctx.Err() == nil && t.onWake != nil {
+				t.onWake()
+			}
 		}
 		if ready {
 			return ctx.Err()
@@ -261,6 +268,9 @@ func (t *terminalReader) read(ctx context.Context) ([]byte, error) {
 // read's buffer filled, so they are kept until the line ends. A request
 // that ends early drops its fragments.
 func (t *terminalReader) readLine(ctx context.Context, bound int) (inputLine, error) {
+	if t.editor != nil && t.editor.active {
+		return t.readEditedLine(ctx, bound)
+	}
 	b := lineBuilder{bound: bound}
 	for {
 		chunk, err := t.read(ctx)
@@ -314,11 +324,15 @@ func (t *terminalReader) flush() (bool, error) {
 	if err := flushInput(t.fd); err != nil {
 		return false, fmt.Errorf("flush the input %s holds: %w", t.name, err)
 	}
+	if t.editor != nil {
+		// A fresh answer cannot complete a CRLF from the discarded input.
+		t.editor.skipLF = false
+	}
 	return discarded, nil
 }
 
 func (t *terminalReader) close() error {
-	err := syscall.Close(t.fd)
+	err := errors.Join(t.pauseEditing(), syscall.Close(t.fd))
 	_ = syscall.Close(t.wakeR)
 	_ = syscall.Close(t.wakeW)
 	return err

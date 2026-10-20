@@ -34,7 +34,7 @@ func TestCLIToolUIShowCallRendersViewImage(t *testing.T) {
 	ui.ShowCall(0, 2, viewImageCall(t, "img", core.ViewImageArgs{Path: "plots/out.png", Detail: "high"}), nil)
 	ui.ShowCall(1, 2, viewImageCall(t, "plain", core.ViewImageArgs{Path: "shot.png"}), nil)
 
-	want := "\n>>> Tools requested: 2\n[1/2] View image: \"plots/out.png\"\n      Detail: high\n\n[2/2] View image: \"shot.png\"\n"
+	want := "\nTools: 2\n[1/2] View image: \"plots/out.png\"\n      Detail: high\n\n[2/2] View image: \"shot.png\"\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() output = %q, want %q", got, want)
 	}
@@ -46,7 +46,7 @@ func TestCLIToolUIShowCallFallsBackForAnUndecodableViewImage(t *testing.T) {
 
 	ui.ShowCall(0, 1, core.ToolCall{ID: "img", Name: core.ViewImageToolName, Args: json.RawMessage(`{}`)}, nil)
 
-	want := "\n>>> Tools requested: 1\n[1/1] Tool: view_image\n      Arguments: {}\n"
+	want := "\nTools: 1\n[1/1] Tool: view_image\n      Arguments: {}\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() output = %q, want %q", got, want)
 	}
@@ -74,17 +74,19 @@ func TestViewImageOutcomesRenderThroughTheCLI(t *testing.T) {
 	}
 
 	attached := fmt.Sprintf(`
->>> Tools requested: 1
+Tools: 1
 [1/1] View image: "<TMP>/shot.png"
 
->>> Running 1 tool...
+Running 1 tool...
 
->>> Results:
-[1/1] Completed in NNms
+Tool results:
+[1/1] "view_image": Completed in NNms
       Output:
 Attached image shot.png (image/png, %d bytes).
+      End output.
+      [image: shot.png (image/png, %d bytes)]
 
-`, len(viewImagePNG))
+`, len(viewImagePNG), len(viewImagePNG))
 	scenarios := []executorScenario{
 		{
 			name:     "auto-approved",
@@ -106,14 +108,14 @@ Attached image shot.png (image/png, %d bytes).
 			approver: core.NewTestApprover(false),
 			calls:    []core.ToolCall{viewImageCall(t, "a", core.ViewImageArgs{Path: image, Detail: "low"})},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] View image: "<TMP>/shot.png"
       Detail: low
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: user denied permission
+Tool results:
+[1/1] "view_image": Not run: user denied permission
 
 `,
 		},
@@ -123,13 +125,13 @@ Attached image shot.png (image/png, %d bytes).
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{viewImageCall(t, "a", core.ViewImageArgs{Path: notes})},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] View image: "<TMP>/notes.txt"
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: read image "<TMP>/notes.txt": content is not PNG, JPEG, GIF, or WebP
+Tool results:
+[1/1] "view_image": Not run: read image "<TMP>/notes.txt": content is not PNG, JPEG, GIF, or WebP
 
 `,
 		},
@@ -139,13 +141,13 @@ Attached image shot.png (image/png, %d bytes).
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{viewImageCall(t, "a", core.ViewImageArgs{Path: image})},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] View image: "<TMP>/shot.png"
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: approval disabled by -tool-non-interactive
+Tool results:
+[1/1] "view_image": Not run: approval disabled by -tool-non-interactive
       Hint: Allow via one of:
               - Run interactively without -tool-non-interactive
               - Use -tool-auto-approve
@@ -166,13 +168,13 @@ Attached image shot.png (image/png, %d bytes).
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{viewImageCall(t, "a", core.ViewImageArgs{Path: image})},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] View image: "<TMP>/shot.png"
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: not in whitelist
+Tool results:
+[1/1] "view_image": Not run: not in whitelist
       Hint: Whitelist file: <TMP>/commands.txt
       Hint: To allow this image, either:
               1. Add {"tool":"view_image","path":"<TMP>/shot.png"} to your whitelist file and use -tool-whitelist <file>

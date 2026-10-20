@@ -521,7 +521,7 @@ func TestREPLStopsAfterAnAnswerItCouldNotSave(t *testing.T) {
 	typeTurns(t, w, "first\nsecond\n", true)
 
 	err := loop.run(false)
-	if err == nil || !strings.Contains(err.Error(), "without the answer shown") {
+	if err == nil || !strings.Contains(err.Error(), "answer could not be saved") {
 		t.Fatalf("run() error = %v, want the loop stopped over the unsaved answer", err)
 	}
 	if requests := server.GetRequests(); len(requests) != 1 {

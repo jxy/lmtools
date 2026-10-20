@@ -299,6 +299,29 @@ func TestApproverContinuedInputUsesFinalText(t *testing.T) {
 	}
 }
 
+func TestApproverOversizedSubmissionDoesNotConsumeNextAnswer(t *testing.T) {
+	defer func(limit int) { maxTurnBytes = limit }(maxTurnBytes)
+	maxTurnBytes = 10
+	for _, input := range []string{
+		"0123456789abcdef\n",
+		"0123456789abcdef\\\nyes\n",
+		"0123456789abcdef\\\\\n",
+		"123456\\\n123456\\\nyes\n",
+	} {
+		t.Run(input, func(t *testing.T) {
+			a := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(input+"yes\n"))
+			decision, err := a.Approve(context.Background(), core.UniversalCommandArgs{})
+			if err != nil || decision.Approved || decision.Reason != "" {
+				t.Fatalf("oversized submission=%+v err=%v", decision, err)
+			}
+			next, err := a.Approve(context.Background(), core.UniversalCommandArgs{})
+			if err != nil || !next.Approved {
+				t.Fatalf("next independent answer=%+v err=%v", next, err)
+			}
+		})
+	}
+}
+
 func TestApproverLiteralInputIsIndependentOfLineEnding(t *testing.T) {
 	for _, entry := range approverEntryPoints() {
 		if entry.name == "ApproveToolRoundLimitReset" {

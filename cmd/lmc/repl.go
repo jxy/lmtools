@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // The prompts a loop shows when standard input is a terminal: one for a
@@ -35,9 +36,9 @@ var errInterrupted = errors.New("interrupted")
 
 // replSignals turns the signals a loop handles into ends of contexts, and
 // stays installed across turns. SIGINT ends the phase the loop is in, a
-// turn or a prompt, and the loop goes on. SIGTERM and SIGHUP end the
-// process's context, which ends the phase too, and the loop stops once the
-// turn has written what it must.
+// turn or a prompt, and the loop goes on. SIGTERM, SIGHUP, and SIGQUIT end the
+// process's context. This ends the phase too, and the loop stops once the turn
+// has written what it must.
 type replSignals struct {
 	process    context.Context
 	endProcess context.CancelCauseFunc
@@ -61,10 +62,11 @@ func newREPLSignals() *replSignals {
 	return s
 }
 
-// watchREPLSignals installs the handler for SIGINT, SIGTERM, and SIGHUP.
+// watchREPLSignals catches interrupts and termination before terminal editing
+// starts. In particular, SIGQUIT must unwind the terminal's deferred cleanup.
 func watchREPLSignals() *replSignals {
 	s := newREPLSignals()
-	signal.Notify(s.signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	signal.Notify(s.signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	go func() {
 		for {
 			select {
@@ -207,7 +209,11 @@ func (a *separatedAnswers) endTurn() {
 // answer, with an empty line between them, as the presenter keeps a note
 // off an answer. The answers themselves pass unchanged.
 type replScreen struct {
-	mu sync.Mutex
+	mu           sync.Mutex
+	statusOut    io.Writer
+	statusLine   terminalLine
+	inlineStatus bool
+	columns      func() int
 	// answerLast reports that an answer was shown last, and newlines counts
 	// the newlines what was shown last ends with, up to two.
 	answerLast bool
@@ -239,10 +245,12 @@ type screenWriter struct {
 }
 
 func (w screenWriter) Write(p []byte) (int, error) {
+	s := w.screen
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearStatusLocked()
 	n, err := w.w.Write(p)
 	if n > 0 {
-		s := w.screen
-		s.mu.Lock()
 		if s.answerLast != w.answer {
 			s.answerLast, s.newlines = w.answer, 0
 		}
@@ -253,7 +261,6 @@ func (w screenWriter) Write(p []byte) (int, error) {
 				s.newlines++
 			}
 		}
-		s.mu.Unlock()
 	}
 	return n, err
 }
@@ -276,6 +283,8 @@ const (
 	readInterruptedInsideTurn
 	// readEdit stages an unfinished terminal turn for /ed.
 	readEdit
+	// readTooLong reports a complete oversized submission, continuations drained.
+	readTooLong
 )
 
 // readTurn reads one turn under the input contract. A line ending in a
@@ -291,12 +300,18 @@ const (
 // show displays a prompt, note reports a discarded turn, and consumed hears
 // of every line read, sent or not.
 func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), note func(format string, args ...interface{}), consumed func(), allowEmpty bool) (string, turnRead, error) {
-	return readTextTurn(ctx, input.readLineUnder, input.terminal, show, note, consumed, allowEmpty)
+	for {
+		text, how, err := readTextTurn(ctx, input.readLineUnder, input.terminal, show, consumed, allowEmpty)
+		if err != nil || how != readTooLong {
+			return text, how, err
+		}
+		note("Discarded a turn longer than %d bytes.", maxTurnBytes)
+	}
 }
 
 // readTextTurn is shared by normal prompts and tool approval input. The caller
-// owns any initial approval flush and the decision to submit the completed text.
-func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLine, error), terminal bool, show func(string), note func(string, ...interface{}), consumed func(), allowEmpty bool) (string, turnRead, error) {
+// owns any initial approval flush and decides whether to reprompt after rejection.
+func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLine, error), terminal bool, show func(string), consumed func(), allowEmpty bool) (string, turnRead, error) {
 	var lines []string
 	// size is the length of the turn so far: its lines and the newlines
 	// between them.
@@ -313,7 +328,7 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 		line, err := read(ctx, maxTurnBytes+2)
 		if err != nil {
 			if errors.Is(context.Cause(ctx), errInterrupted) {
-				if lines != nil || discarding {
+				if lines != nil || discarding || line.text != "" || line.tooLong {
 					return "", readInterruptedInsideTurn, nil
 				}
 				return "", readInterrupted, nil
@@ -327,7 +342,7 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 			return "", readEnd, nil
 		}
 		consumed()
-		if terminal && lines != nil && !discarding && !line.tooLong && strings.TrimSuffix(line.text, "\r") == "/ed" {
+		if terminal && lines != nil && !discarding && !line.tooLong && !line.literal && strings.TrimSuffix(line.text, "\r") == "/ed" {
 			return strings.Join(lines, "\n"), readEdit, nil
 		}
 
@@ -336,13 +351,20 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 		if line.tooLong {
 			raw = line.tail
 		}
-		if lines != nil && strings.HasPrefix(raw, "//") {
+		if lines != nil && (!line.literal || line.escapedSlash) && strings.HasPrefix(raw, "//") {
 			raw = raw[1:]
 		}
 		text, continues := continuationMarker(strings.TrimSuffix(raw, "\r"))
+		if line.literal {
+			text, continues = raw, false
+		}
 		grown := len(text)
 		if lines != nil {
 			grown += size + 1
+		} else if line.escapedSlash && strings.HasPrefix(text, "//") {
+			// Keep history's escape for command interpretation, but do
+			// not count that synthetic byte toward the prompt's limit.
+			grown--
 		}
 		if line.tooLong || grown > maxTurnBytes {
 			discarding = true
@@ -350,8 +372,7 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 		}
 		if discarding {
 			if !continues {
-				note("Discarded a turn longer than %d bytes.", maxTurnBytes)
-				discarding = false
+				return "", readTooLong, nil
 			}
 			continue
 		}
@@ -390,12 +411,18 @@ func continuationMarker(text string) (string, bool) {
 
 // runREPL connects the MCP servers, sets up the loop's streams, ends the
 // startup phase, and holds the conversation.
-func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *config.Config, opts core.RequestOptions, input *inputOwner, logDir string, isRegeneration bool) error {
+func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *config.Config, opts core.RequestOptions, input *inputOwner, logDir string, isRegeneration bool) (retErr error) {
 	stream, closeDiag := replDiagnostics(input.terminal)
 	defer closeDiag()
 	screen := &replScreen{}
+	if input.terminal {
+		screen.statusOut = stream
+	}
 	diag := screen.writer(stream, false)
-	notifier := ui.NewNotifierWithWriter(diag)
+	notifier := ui.NewREPLNotifier(diag)
+	// Run after terminal/host cleanup, but before closing the selected stream.
+	// The caller may have a redirected stderr and must not report this again.
+	defer func() { retErr = reportError(notifier, retErr) }()
 	if input.terminal && len(cfg.MCPServers) > 0 {
 		notifier.Infof("Connecting %d MCP server(s)...", len(cfg.MCPServers))
 	}
@@ -439,6 +466,25 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		terminal: input.terminal,
 		images:   opts.Images,
 	}
+	if input.terminal {
+		env.progress = &turnProgress{screen: screen}
+	}
+	if f, ok := stream.(*os.File); ok && input.terminal && isTerminalFile(f) {
+		if _, err := input.enableEditing(diag, &loop.history); err != nil {
+			return fmt.Errorf("enable terminal editing: %w", err)
+		}
+		// Restore while the diagnostic terminal is still open, including when
+		// stderr was redirected and replDiagnostics opened /dev/tty.
+		defer func() {
+			if err := input.disableEditing(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("restore terminal: %w", err))
+			}
+		}()
+		if terminal, ok := input.term.(interface{ columns() int }); ok {
+			screen.columns = terminal.columns
+		}
+	}
+	screen.inlineStatus = input.editing
 	if approver, ok := env.approver.(*cliApprover); ok {
 		approver.history = &loop.history
 		approver.stop = signals.endProcess
@@ -485,12 +531,12 @@ type replLoop struct {
 	// history holds prompt text from this invocation; image bytes remain in
 	// the session or in images until the next committed user turn.
 	history replHistory
-	turn    int
 	// shownSession suppresses repeated notes as the session head advances.
 	shownSession string
 	// draft is text returned by /ed, held until an explicit submission.
 	draft       string
 	failedTurns int
+	hideUsage   bool
 }
 
 // run holds the conversation: a regeneration first, when -branch names an
@@ -533,13 +579,12 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 		switch how {
 		case readEnd:
 			l.closePromptLine()
-			if l.draft != "" {
-				l.env.notifier.Infof("Input ended with a draft, which was not sent.")
-			}
+			l.reportUnsent()
 			return nil
 		case readEndInsideTurn:
 			l.closePromptLine()
 			l.env.notifier.Infof("Input ended inside an unfinished turn, which was not sent.")
+			l.reportUnsent()
 			return nil
 		case readInterruptedInsideTurn:
 			l.closePromptLine()
@@ -558,6 +603,7 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 				continue
 			}
 			if l.armed {
+				l.reportUnsent()
 				return nil
 			}
 			l.armed = true
@@ -580,6 +626,7 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 		l.armed = false
 		action := l.interpretInput(text)
 		if action.exit {
+			l.reportUnsent()
 			return nil
 		}
 		if !action.send {
@@ -603,6 +650,11 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 }
 
 func (l *replLoop) readTurn() (string, turnRead, error) {
+	if l.terminal {
+		if pending := l.pendingDescription(); pending != "" {
+			l.env.notifier.Promptf("Pending: %s\n", pending)
+		}
+	}
 	ctx, end := l.signals.begin()
 	defer end()
 	// Every line read disarms an interrupt, whether it is sent or not.
@@ -616,6 +668,7 @@ func (l *replLoop) showPrompt(prompt string) {
 	if l.screen != nil {
 		l.screen.separateAnswer(l.diag)
 	}
+	l.input.setPrompt(prompt)
 	_, _ = io.WriteString(l.diag, prompt)
 }
 
@@ -657,6 +710,9 @@ func (l *replLoop) recoverPendingTools() error {
 // the loop holds once there is one, and records what the turn left: the
 // session to continue from, and whether the images went with it.
 func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome, error) {
+	if notifier, ok := l.env.notifier.(interface{ BeginTurn() }); ok {
+		notifier.BeginTurn()
+	}
 	l.showTurn(in, images)
 	opts := l.base
 	opts.Images = images
@@ -691,6 +747,10 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 // must stop: the process is stopping, or the turn showed an answer the
 // session does not hold, which the next turn would continue without.
 func (l *replLoop) finishTurn(out turnOutcome, err error) error {
+	if out.UnsavedAnswer != nil {
+		l.separateAnswer()
+		return fmt.Errorf("answer could not be saved; stopped to keep the next turn from losing context: %w", out.UnsavedAnswer)
+	}
 	if err != nil {
 		l.failedTurns++
 		l.separateAnswer()
@@ -698,6 +758,9 @@ func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 	switch {
 	case err == nil:
 	case errors.Is(err, errInterrupted):
+		if l.input.editing {
+			l.env.notifier.Promptf("^C")
+		}
 		// The terminal echoed ^C where the interrupt found the cursor.
 		l.closePromptLine()
 		l.armed = true
@@ -708,13 +771,10 @@ func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 	default:
 		l.env.notifier.Errorf("%v", err)
 		if out.Session != nil {
-			l.env.notifier.Infof("The turn failed after it saved to the session; %s.", describeSaved(out))
+			l.env.notifier.Infof("%s.", describeSaved(out))
 		}
 	}
 	l.showSession(out.Session)
-	if out.UnsavedAnswer != nil {
-		return fmt.Errorf("stopping, since the next turn would continue from a session without the answer shown: %w", out.UnsavedAnswer)
-	}
 	return l.signals.ended()
 }
 
@@ -724,7 +784,16 @@ func describeSaved(out turnOutcome) string {
 		return "nothing was saved"
 	}
 	if head := out.Session.Head; head != nil && head.ID != "" {
-		return fmt.Sprintf("the session holds what it saved, through message %s/%s", session.GetSessionID(head.Path), head.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		kind, err := session.SavedHeadKind(ctx, out.Session)
+		if err != nil {
+			return fmt.Sprintf("saved through message %s/%s (details unavailable: %v)", session.GetSessionID(head.Path), head.ID, err)
+		}
+		if out.PartialAnswer && kind == "assistant response" {
+			kind = "partial assistant response"
+		}
+		return fmt.Sprintf("%s saved through message %s/%s", kind, session.GetSessionID(head.Path), head.ID)
 	}
-	return fmt.Sprintf("the session holds what it saved, in %s", session.GetSessionID(out.Session.Path))
+	return fmt.Sprintf("records saved in session %s", session.GetSessionID(out.Session.Path))
 }

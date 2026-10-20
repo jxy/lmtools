@@ -38,6 +38,11 @@ func startREPLUnderTerminal(t *testing.T, url string, stdout *os.File, extra ...
 
 func startREPLUnderTerminalStreams(t *testing.T, url string, stdout, stderr *os.File, extra ...string) *replUnderTerminal {
 	t.Helper()
+	return startREPLWithTerminalType(t, url, stdout, stderr, "xterm", extra...)
+}
+
+func startREPLWithTerminalType(t *testing.T, url string, stdout, stderr *os.File, terminalType string, extra ...string) *replUnderTerminal {
+	t.Helper()
 	pty, err := ptytest.Open()
 	if err != nil {
 		t.Fatalf("ptytest.Open() error = %v", err)
@@ -54,7 +59,7 @@ func startREPLUnderTerminalStreams(t *testing.T, url string, stdout, stderr *os.
 		"-log-dir", t.TempDir(),
 	}, extra...)
 	r.cmd = exec.Command(getLmcBinary(t), args...)
-	r.cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	r.cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "TERM="+terminalType)
 	if stdout != nil {
 		r.cmd.Stdout = stdout
 	}
@@ -139,25 +144,24 @@ func requestsContaining(server *mockserver.MockServer, want string) int {
 // On a terminal the loop prompts, and each line is a turn. An answer is
 // shown as it came, and the next prompt starts below it after an empty line.
 // The description behind standard input and output stays blocking. Ctrl-D
-// after text delivers the text, and Enter then ends the line, which is one
-// turn. Ctrl-D at a fresh prompt exits with success.
+// at a fresh prompt exits with success; cursor edits are sent on Enter.
 func TestTerminalREPLTurnsAndCtrlD(t *testing.T) {
 	server := mockserver.NewMockServer(numberedAnswers())
 	defer server.Close()
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 
-	r.expect(t, `lmc REPL | model: "gpt-test" | API: Chat Completions (buffered)`)
-	r.expect(t, "/help for commands; Ctrl-C cancels, Ctrl-D or /exit exits.")
+	r.expect(t, `lmc | model: gpt-test | buffered | thinking off`)
+	r.expect(t, "/help commands | /info settings | Ctrl-C cancel | Ctrl-D exit")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "first question\n")
-	r.expect(t, "Assistant 1:\r\n")
-	r.expect(t, "answer 1\r\n\r\nNote: Session: ")
+	r.expect(t, "Assistant:\r\n")
+	r.expect(t, "answer 1\r\n\r\nSession: ")
 	r.expect(t, freshPrompt)
 	if r.nonblocking(t) {
 		t.Fatal("standard input's description became nonblocking")
 	}
-	r.typeKeys(t, "par"+ptytest.EndOfInput+"tial\n")
-	r.expect(t, "Assistant 2:\r\n")
+	r.typeKeys(t, "partal\x1b[D\x1b[Di\x05\n")
+	r.expect(t, "Assistant:\r\n")
 	r.expect(t, "answer 2")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, ptytest.EndOfInput)
@@ -181,7 +185,7 @@ func TestTerminalREPLPaste(t *testing.T) {
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "one\ntwo\nthree\n")
 	for i, prompt := range []string{"one", "two", "three"} {
-		r.expect(t, fmt.Sprintf("User %d: %q\r\nlmc: Working on turn %d...", i+1, prompt, i+1))
+		r.expect(t, freshPrompt+prompt)
 		r.expect(t, fmt.Sprintf("answer %d", i+1))
 	}
 	r.expect(t, freshPrompt)
@@ -250,7 +254,7 @@ func TestTerminalREPLCtrlC(t *testing.T) {
 		t.Fatalf("no request; the terminal showed %q", r.screen.String())
 	}
 	r.typeKeys(t, ptytest.Interrupt)
-	r.expect(t, "^C\r\nNote: Turn cancelled; nothing was saved.\r\n"+freshPrompt)
+	r.expect(t, "^C\r\nTurn cancelled; nothing was saved.\r\n"+freshPrompt)
 	r.typeKeys(t, ptytest.Interrupt)
 	if code := r.wait(t); code != 0 {
 		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())
@@ -260,10 +264,17 @@ func TestTerminalREPLCtrlC(t *testing.T) {
 	}
 }
 
-// A hangup while a tool runs cancels the turn, and the process exits only
+// Termination while a tool runs cancels the turn, and the process exits only
 // once the outcome of the interrupted call is on disk: the session holds no
 // pending call afterwards.
-func TestTerminalREPLHangupDuringAToolRun(t *testing.T) {
+func TestTerminalREPLTerminationDuringAToolRun(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGHUP, syscall.SIGQUIT} {
+		t.Run(sig.String(), func(t *testing.T) { testTerminalREPLTerminationDuringAToolRun(t, sig) })
+	}
+}
+
+func testTerminalREPLTerminationDuringAToolRun(t *testing.T, sig syscall.Signal) {
+	t.Helper()
 	marker := filepath.Join(t.TempDir(), "started")
 	var mu sync.Mutex
 	count := 0
@@ -291,12 +302,13 @@ func TestTerminalREPLHangupDuringAToolRun(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err := r.cmd.Process.Signal(syscall.SIGHUP); err != nil {
-		t.Fatalf("send SIGHUP: %v", err)
+	if err := r.cmd.Process.Signal(sig); err != nil {
+		t.Fatalf("send %s: %v", sig, err)
 	}
-	if code := r.wait(t); code == 0 {
-		t.Fatalf("exit code 0 after a hangup; the terminal showed %q", r.screen.String())
+	if code := r.wait(t); code != 130 {
+		t.Fatalf("exit code %d after %s; the terminal showed %q", code, sig, r.screen.String())
 	}
+	r.expect(t, "\x1b[?2004l")
 
 	defer func(dir string) { session.SetSessionsDir(dir) }(session.GetSessionsDir())
 	session.SetSessionsDir(r.sessionsDir)
@@ -316,7 +328,7 @@ func TestTerminalREPLHangupDuringAToolRun(t *testing.T) {
 	path := filepath.Join(r.sessionsDir, sessions[0])
 	pending, err := session.CheckForPendingToolCalls(context.Background(), path)
 	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending calls after the hangup = %v (err %v), want the interrupted call's outcome recorded", pending, err)
+		t.Fatalf("pending calls after termination = %v (err %v), want the interrupted call's outcome recorded", pending, err)
 	}
 	messages, err := session.BuildMessagesWithToolInteractions(context.Background(), path)
 	if err != nil {
@@ -364,7 +376,7 @@ func TestTerminalREPLCtrlCDuringStartup(t *testing.T) {
 	}
 }
 
-// Canonical terminal editing stays available. Commands in a paste are handled
+// Interactive terminal editing stays available. Commands in a paste are handled
 // in order, and the former direct resend command explains the review step.
 func TestTerminalREPLCommandsAndEditing(t *testing.T) {
 	server := mockserver.NewMockServer(numberedAnswers())
@@ -372,12 +384,12 @@ func TestTerminalREPLCommandsAndEditing(t *testing.T) {
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "discard this\x15kept wrong\x17wordx\x7f\n")
-	r.expect(t, `User 1: "kept word"`)
+	r.expect(t, freshPrompt+"kept word")
 	r.expect(t, "answer 1")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/help\n/history\n/again 1\n/exit\n")
 	r.expect(t, "REPL commands:")
-	r.expect(t, `1: "kept word"`)
+	r.expect(t, "1: kept word")
 	r.expect(t, "Use /ed N to edit a history prompt")
 	if code := r.wait(t); code != 0 {
 		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())
@@ -386,7 +398,7 @@ func TestTerminalREPLCommandsAndEditing(t *testing.T) {
 	if len(requests) != 1 || !strings.Contains(requests[0].Body, `"kept word"`) {
 		t.Fatalf("requests = %v, want only the edited prompt", requests)
 	}
-	if strings.Count(r.screen.String(), "Note: Session: ") != 1 {
+	if strings.Count(r.screen.String(), "Session: ") != 1 {
 		t.Fatalf("the session ID was not shown once: %q", r.screen.String())
 	}
 }
@@ -413,15 +425,14 @@ func TestTerminalREPLImageOnlyWithRedirectedStreams(t *testing.T) {
 	}
 	defer stderr.Close()
 	r := startREPLUnderTerminalStreams(t, server.URL(), stdout, stderr)
-	r.expect(t, "lmc REPL")
+	r.expect(t, "lmc | model:")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/image "+image+"\n")
 	r.expect(t, "1 image(s) pending for the next turn.")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "\n")
-	r.expect(t, `User 1: "" (1 image(s))`)
-	r.expect(t, "lmc: Working on turn 1...")
-	r.expect(t, "Note: Session: ")
+	r.expect(t, "Sending 1 image(s).")
+	r.expect(t, "Session: ")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/help\n/exit\n")
 	r.expect(t, "REPL commands:")
@@ -476,7 +487,7 @@ func TestTerminalREPLRecallAfterCancellation(t *testing.T) {
 	r.expect(t, "Turn cancelled; nothing was saved.")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/history\nslow question\n/exit\n")
-	r.expect(t, `1: "slow question"`)
+	r.expect(t, "1: slow question")
 	r.expect(t, "recalled answer")
 	if code := r.wait(t); code != 0 {
 		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())
@@ -499,9 +510,9 @@ func TestTerminalREPLDeveloperCommands(t *testing.T) {
 	r.expect(t, "answer 1")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/developer old\n/developer New line\\\nSecond line\n/history\n")
-	r.expect(t, "Developer instruction queued for the next turn.")
-	r.expect(t, "Developer instruction queued for the next turn.")
-	r.expect(t, `1: "initial"`)
+	r.expect(t, "Developer instruction queued for the next turn; it will remain in saved conversation history.")
+	r.expect(t, "Developer instruction queued for the next turn; it will remain in saved conversation history.")
+	r.expect(t, "1: initial")
 	r.expect(t, freshPrompt)
 	if requests := server.GetRequests(); len(requests) != 1 {
 		t.Fatalf("commands caused inference: %v", requests)
@@ -510,8 +521,8 @@ func TestTerminalREPLDeveloperCommands(t *testing.T) {
 	r.expect(t, "answer 2")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/developer discarded\n/clear-developer\n//developer literal\n/exit\n")
-	r.expect(t, "Cleared pending developer instruction.")
-	r.expect(t, `User 3: "/developer literal"`)
+	r.expect(t, "Cleared pending developer instruction; saved instructions are unchanged.")
+	r.expect(t, freshPrompt+"//developer literal")
 	r.expect(t, "answer 3")
 	if code := r.wait(t); code != 0 {
 		t.Fatalf("exit code %d; terminal=%q", code, r.screen.String())
@@ -530,7 +541,7 @@ func TestTerminalREPLDeveloperCommands(t *testing.T) {
 			t.Fatalf("request %d instructions=%q, want prior instructions once in order", i+1, instructions)
 		}
 	}
-	if strings.Count(r.screen.String(), "Note: Session: ") != 1 || sessionDirCount(t, r.sessionsDir) != 1 {
+	if strings.Count(r.screen.String(), "Session: ") != 1 || sessionDirCount(t, r.sessionsDir) != 1 {
 		t.Fatalf("developer updates did not continue one session: %q", r.screen.String())
 	}
 }

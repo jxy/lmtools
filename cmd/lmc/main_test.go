@@ -74,7 +74,7 @@ func TestPersistAssistantOnlyWarnsButDoesNotFailOnSaveError(t *testing.T) {
 	if len(notifier.WarnMessages) == 0 {
 		t.Fatal("persistAssistantOnly() warning count = 0, want save failure warning")
 	}
-	if !strings.Contains(notifier.WarnMessages[0], "failed to save response to session") {
+	if !strings.Contains(notifier.WarnMessages[0], "Failed to save response to session") {
 		t.Fatalf("warning = %q, want save failure warning", notifier.WarnMessages[0])
 	}
 }

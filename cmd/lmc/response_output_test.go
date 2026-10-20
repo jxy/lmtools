@@ -198,7 +198,7 @@ func TestResponsePresenterAndToolUIProduceCompactCombinedTranscript(t *testing.T
 		ToolCalls: []core.ToolCall{call},
 		Usage:     &core.Usage{},
 	})
-	notifier.Infof("Token usage: input 10, output 3")
+	notifier.Promptf("Tokens: input 10 | output 3\n")
 	tools.ShowCall(0, 1, call, nil)
 	tools.BeforeRun(1, 1, 1)
 	tools.AfterExecute([]core.ToolCall{call}, []core.ToolResult{{
@@ -207,25 +207,26 @@ func TestResponsePresenterAndToolUIProduceCompactCombinedTranscript(t *testing.T
 		Elapsed: 3,
 	}})
 	presenter.HandleResponseComplete(core.Response{Text: "Final answer.", Usage: &core.Usage{}})
-	notifier.Infof("Token usage: input 20, output 4")
+	notifier.Promptf("Tokens: input 20 | output 4\n")
 
 	want := `I'll check.
 
-Note: Token usage: input 10, output 3
+Tokens: input 10 | output 3
 
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["date"]
 
->>> Running 1 tool...
+Running 1 tool...
 
->>> Results:
-[1/1] Completed in 3ms
+Tool results:
+[1/1] "date": Completed in 3ms
       Output:
 Wed Aug 26
+      End output.
 
 Final answer.
 
-Note: Token usage: input 20, output 4
+Tokens: input 20 | output 4
 `
 	if got := transcript.String(); got != want {
 		t.Fatalf("combined transcript mismatch\n--- got ---\n%s--- want ---\n%s", got, want)

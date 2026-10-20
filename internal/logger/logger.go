@@ -388,6 +388,13 @@ func (r *RequestLogger) Errorf(format string, args ...interface{}) {
 	r.logfWithRequestID(LevelError, r.requestID, format, args...)
 }
 
+// FileErrorf records a failure at ERROR in the configured file log when the
+// caller owns its terminal diagnostic. It preserves the normal level filters
+// and request identity without changing routing for other records.
+func (r *RequestLogger) FileErrorf(format string, args ...interface{}) {
+	r.logToSinks(LevelError, r.requestID, false, format, args...)
+}
+
 // From returns a logger with request ID from context
 // This is the preferred method for getting a logger instance as it provides
 // request-scoped logging with automatic request ID propagation.
@@ -435,6 +442,10 @@ func (l *Logger) IsWarnEnabled() bool {
 
 // logInternal is the unified internal logging implementation
 func (l *Logger) logInternal(level int, requestID string, format string, args ...interface{}) {
+	l.logToSinks(level, requestID, true, format, args...)
+}
+
+func (l *Logger) logToSinks(level int, requestID string, allowStderr bool, format string, args ...interface{}) {
 	if l == nil || level < l.level {
 		return
 	}
@@ -477,7 +488,7 @@ func (l *Logger) logInternal(level int, requestID string, format string, args ..
 	defer l.mu.Unlock()
 
 	// Write to stderr if enabled and level meets threshold
-	if l.toStderr && level >= l.stderrMinLevel {
+	if allowStderr && l.toStderr && level >= l.stderrMinLevel {
 		if _, err := os.Stderr.Write(buf); err != nil {
 			atomic.AddInt64(&l.writeErrors, 1)
 		}

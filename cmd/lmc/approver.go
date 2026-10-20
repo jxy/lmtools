@@ -168,6 +168,10 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		bound = maxTurnBytes
 		readBound = bound + 2 // Continuation marker and carriage return.
 	}
+	if owner, ok := a.answers.(*inputOwner); ok && owner.editing {
+		q.prompt = strings.TrimSpace(q.prompt) + "\n" + tools.DetailIndent + "> "
+		owner.setPrompt(tools.DetailIndent + "> ")
+	}
 	got, err := a.answers.answer(ctx, readBound, func(discardedLine bool) {
 		if discardedLine {
 			a.notifier.Promptf("%s", q.discardedNotice)
@@ -188,6 +192,15 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		return core.Approval{}, errors.WrapError("read response", err)
 	}
 	if got.eof {
+		if owner, ok := a.answers.(*inputOwner); ok && owner.editing {
+			// The REPL editor uses Ctrl-D to discard, including pasted input.
+			// Only Enter submits an editable approval; retain the canonical
+			// single-run reader's existing text-plus-EOF behavior below.
+			if got.text != "" || got.tooLong {
+				a.notifier.Infof("Unsubmitted approval draft discarded.")
+			}
+			got = inputLine{eof: true}
+		}
 		if q.compose {
 			text, continues := continuationMarker(strings.TrimSuffix(got.text, "\r"))
 			command, _ := splitREPLCommand(text)

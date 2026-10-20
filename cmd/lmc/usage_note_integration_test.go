@@ -72,8 +72,8 @@ func TestTokenUsageNoteOnPlainChat(t *testing.T) {
 	if stdout != "plain answer" {
 		t.Fatalf("stdout = %q, want the model text alone", stdout)
 	}
-	wantNote := "Note: Token usage: input 100, output 7, total 107"
-	if got := strings.Count(stderr, "Note: Token usage:"); got != 1 {
+	wantNote := "Tokens: input 100 | output 7 | total 107"
+	if got := strings.Count(stderr, "Tokens:"); got != 1 {
 		t.Fatalf("stderr carries %d usage notes, want 1:\n%s", got, stderr)
 	}
 	if !strings.Contains(stderr, wantNote) {
@@ -135,7 +135,7 @@ data: {"type":"message_stop"}`,
 	if !strings.Contains(stdout, "streamed answer") {
 		t.Fatalf("stdout missing streamed text: %q", stdout)
 	}
-	wantNote := "Note: Token usage: input 100, output 19, reasoning 12"
+	wantNote := "Tokens: input 100 | output 19 (reasoning 12)"
 	if !strings.Contains(stderr, wantNote) {
 		t.Fatalf("stderr missing %q:\n%s", wantNote, stderr)
 	}
@@ -215,11 +215,11 @@ func TestTokenUsageNotePrecedesToolReview(t *testing.T) {
 		t.Fatalf("stdout = %q, want both assistant messages in response order", stdout)
 	}
 
-	firstNote := strings.Index(stderr, "Note: Token usage: input 120, output 30, total 150")
-	review := strings.Index(stderr, ">>> Tools requested: 1")
-	running := strings.Index(stderr, ">>> Running 1 tool")
-	results := strings.Index(stderr, ">>> Results:")
-	secondNote := strings.Index(stderr, "Note: Token usage: input 180, output 12, total 192")
+	firstNote := strings.Index(stderr, "Tokens: input 120 | output 30 | total 150")
+	review := strings.Index(stderr, "Tools: 1")
+	running := strings.Index(stderr, "Running 1 tool")
+	results := strings.Index(stderr, "Tool results:")
+	secondNote := strings.Index(stderr, "Tokens: input 180 | output 12 | total 192")
 	for name, index := range map[string]int{
 		"first usage note":  firstNote,
 		"tool review":       review,
@@ -242,8 +242,8 @@ func TestTokenUsageNotePrecedesToolReview(t *testing.T) {
 		t.Fatalf("follow-up usage note (%d) must follow the results banner (%d):\n%s", secondNote, results, stderr)
 	}
 	for _, looseHeader := range []string{
-		">>> Tools requested: 1\n\n[1/1]",
-		">>> Results:\n\n[1/1]",
+		"Tools: 1\n\n[1/1]",
+		"Tool results:\n\n[1/1]",
 	} {
 		if strings.Contains(stderr, looseHeader) {
 			t.Fatalf("tool transcript retained unnecessary blank line %q:\n%s", looseHeader, stderr)

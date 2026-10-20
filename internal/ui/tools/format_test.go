@@ -18,6 +18,20 @@ import (
 	"time"
 )
 
+func TestLongApprovalArgumentsAreIndentedWithoutChangingValues(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	args := `{"text":"` + strings.Repeat("value", 30) + `","number":9007199254740993,"escaped":"line\nend\\"}`
+	NewCLIToolUI(notifier).ShowCall(0, 1, core.ToolCall{Name: "custom", Args: json.RawMessage(args)}, nil)
+	_, displayed, ok := strings.Cut(notifier.out.String(), "      Arguments:\n")
+	if !ok || !strings.Contains(displayed, "\n        \"number\": 9007199254740993") {
+		t.Fatalf("long arguments are not readable: %q", notifier.out.String())
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(displayed)); err != nil || compact.String() != args {
+		t.Fatalf("approval changed JSON: %q (%v)", displayed, err)
+	}
+}
+
 // formatTestNotifier captures what the real CLI notifier would print, so these
 // golden transcripts stay pinned to StdNotifier's own formatting instead of to
 // a second copy of it.
@@ -60,7 +74,7 @@ func TestCLIToolUIFormatsReviewedParallelBatch(t *testing.T) {
 	ui.AfterExecute(calls, results)
 
 	want := `
->>> Tools requested: 3
+Tools: 3
 [1/3] Command: ["git","status","--short","--branch"]
 
 [2/3] Command: ["git","show","--stat","--oneline","--summary","HEAD"]
@@ -70,19 +84,21 @@ func TestCLIToolUIFormatsReviewedParallelBatch(t *testing.T) {
       Workdir: "/workspace/lmtools"
       Environ: {"GOCACHE":"/tmp/lmtools-cache"}
 
->>> Running 2 of 3 tools in parallel...
+Running 2 of 3 tools in parallel...
 
->>> Results:
-[1/3] Completed in 58ms
+Tool results:
+[1/3] "git": Completed in 58ms
       Output:
 ## main...origin/main [ahead 1]
 ?? docs/
+      End output.
 
-[2/3] Failed in 44ms: exit status 1
-      Output:
+[2/3] "git": Failed in 44ms: exit status 1
+      Partial output:
 failing output
+      End output.
 
-[3/3] Not run: user denied permission
+[3/3] "git": Not run: user denied permission
 
 `
 	if got := notifier.out.String(); got != want {
@@ -108,7 +124,7 @@ func TestCLIToolUIShowCallUsesCompactJSONArgv(t *testing.T) {
 	NewCLIToolUI(notifier).ShowCall(0, 1, call, nil)
 
 	want := `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["printf","a b","line\nnext","quote\"","back\\slash"]
 `
 	if got := notifier.out.String(); got != want {
@@ -127,7 +143,7 @@ func TestCLIToolUIShowCallDisplaysStdioSettings(t *testing.T) {
 	NewCLIToolUI(notifier).ShowCall(0, 1, call, nil)
 
 	want := `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["sort"]
       Stdin: "beta\nalpha\n"
       Stdout file: "sorted.txt"
@@ -148,7 +164,7 @@ func TestCLIToolUIShowCallDisplaysStdinFile(t *testing.T) {
 	NewCLIToolUI(notifier).ShowCall(0, 1, call, nil)
 
 	want := `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["sort"]
       Workdir: "/workspace"
       Stdin file: "inputs/data.txt"
@@ -219,12 +235,12 @@ func TestCLIToolUIAfterExecuteReportsStdioDestinations(t *testing.T) {
 
 	got := notifier.out.String()
 	for _, want := range []string{
-		`[1/6] Completed in 11ms (stdin provided; stdout file "sorted.txt")`,
-		`[2/6] Completed in 12ms (stdout file "build.log"; stderr file "build.log")`,
-		`[3/6] Completed in 13ms (stdout file "result.txt"; stderr file "errors.txt")`,
-		`[4/6] Completed in 14ms (stdin provided; no captured output)`,
-		`[5/6] Completed in 15ms (stdin file "input.txt"; no captured output)`,
-		`[6/6] Completed in 16ms (stdin provided; no captured output)`,
+		`[1/6] "sort": Completed in 11ms (stdin provided; stdout file "sorted.txt")`,
+		`[2/6] "build": Completed in 12ms (stdout file "build.log"; stderr file "build.log")`,
+		`[3/6] "check": Completed in 13ms (stdout file "result.txt"; stderr file "errors.txt")`,
+		`[4/6] "consume": Completed in 14ms (stdin provided; no captured output)`,
+		`[5/6] "consume": Completed in 15ms (stdin file "input.txt"; no captured output)`,
+		`[6/6] "consume": Completed in 16ms (stdin provided; no captured output)`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tool results missing %q:\n%s", want, got)
@@ -245,7 +261,7 @@ func TestCLIToolUIAfterExecuteReportsStdioSettingsOnFailure(t *testing.T) {
 
 	NewCLIToolUI(notifier).AfterExecute(calls, results)
 
-	want := `[1/1] Failed in 9ms: exit status 1 (stdin file "input.txt"; stdout file "output.txt"; stderr file "errors.txt")`
+	want := `[1/1] "sort": Failed in 9ms: exit status 1 (stdin file "input.txt"; stdout file "output.txt"; stderr file "errors.txt")`
 	if got := notifier.out.String(); !strings.Contains(got, want) {
 		t.Fatalf("tool result missing %q:\n%s", want, got)
 	}
@@ -271,7 +287,7 @@ func TestWriteToolOutputUsesBoundedWritesWithoutIndenting(t *testing.T) {
 func TestCLIToolUIBeforeRunWithNoApprovedCommands(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	NewCLIToolUI(notifier).BeforeRun(2, 0, 0)
-	if got, want := notifier.out.String(), "\n>>> No tools will be run.\n"; got != want {
+	if got, want := notifier.out.String(), "\nNo tools will be run.\n"; got != want {
 		t.Fatalf("BeforeRun() = %q, want %q", got, want)
 	}
 }
@@ -323,7 +339,7 @@ func (a executorTestApprover) Approve(context.Context, core.UniversalCommandArgs
 	return core.Approval{Approved: a.approve}, nil
 }
 
-var elapsedMilliseconds = regexp.MustCompile(`in \d+ms`)
+var elapsedMilliseconds = regexp.MustCompile(`in [0-9][0-9.hms]*`)
 
 type executorScenario struct {
 	name     string
@@ -391,15 +407,16 @@ func TestExecutorOutcomesRenderTheSameThroughTheCLI(t *testing.T) {
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> Running 1 tool...
+Running 1 tool...
 
->>> Results:
-[1/1] Completed in NNms
+Tool results:
+[1/1] "/bin/echo": Completed in NNms
       Output:
 hi
+      End output.
 
 `,
 		},
@@ -409,13 +426,13 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/sh","-c","exit 3"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/sh","-c","exit 3"]
 
->>> Running 1 tool...
+Running 1 tool...
 
->>> Results:
-[1/1] Failed in NNms: exit status 3
+Tool results:
+[1/1] "/bin/sh": Failed in NNms: exit status 3
 
 `,
 		},
@@ -425,14 +442,14 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/sleep","5"],"timeout":1}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/sleep","5"]
       Timeout: 1s
 
->>> Running 1 tool...
+Running 1 tool...
 
->>> Results:
-[1/1] Timed out in NNms
+Tool results:
+[1/1] "/bin/sleep": Timed out in NNms
 
 `,
 		},
@@ -442,13 +459,13 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/rm","-rf","/"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/rm","-rf","/"]
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: blacklisted
+Tool results:
+[1/1] "/bin/rm": Not run: blacklisted
 
 `,
 		},
@@ -458,14 +475,14 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/cat"],"stdin":"x"}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/cat"]
       Stdin: "x"
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: not in whitelist (stdin provided)
+Tool results:
+[1/1] "/bin/cat": Not run: not in whitelist (stdin provided)
       Hint: Whitelist file: <TMP>/wl.txt
       Hint: To allow this command, either:
               1. Add {"command":["/bin/cat"],"stdin":true} to your whitelist file and use -tool-whitelist <file>
@@ -479,13 +496,13 @@ hi
 			approver: nil,
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: no terminal available for approval
+Tool results:
+[1/1] "/bin/echo": Not run: no terminal available for approval
       Hint: Allow via one of:
               - Run from a terminal so commands can be approved
               - Use -tool-auto-approve
@@ -499,13 +516,13 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: approval disabled by -tool-non-interactive
+Tool results:
+[1/1] "/bin/echo": Not run: approval disabled by -tool-non-interactive
       Hint: Allow via one of:
               - Run interactively without -tool-non-interactive
               - Use -tool-auto-approve
@@ -519,13 +536,13 @@ hi
 			approver: executorTestApprover{approve: false},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: user denied permission
+Tool results:
+[1/1] "/bin/echo": Not run: user denied permission
 
 `,
 		},
@@ -535,13 +552,13 @@ hi
 			approver: executorTestApprover{err: fmt.Errorf("read response: input/output error")},
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: approval failed: read response: input/output error
+Tool results:
+[1/1] "/bin/echo": Not run: approval failed: read response: input/output error
 
 `,
 		},
@@ -551,14 +568,14 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{{ID: "a", Name: "other_tool", Args: json.RawMessage(`{}`)}},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Tool: other_tool
       Arguments: {}
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: unsupported tool: other_tool
+Tool results:
+[1/1] "other_tool": Not run: unsupported tool: other_tool
 
 `,
 		},
@@ -568,14 +585,14 @@ hi
 			approver: executorTestApprover{approve: true},
 			calls:    []core.ToolCall{universalCall("a", `{"command":[]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Tool: universal_command
       Arguments: {"command":[]}
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: command array cannot be empty
+Tool results:
+[1/1] "universal_command": Not run: command array cannot be empty
 
 `,
 		},
@@ -588,19 +605,19 @@ hi
 				universalCall("b", fmt.Sprintf(`{"command":["/bin/echo","b"],"stdout_file":%q}`, filepath.Join(dir, "./shared.log"))),
 			},
 			want: `
->>> Tools requested: 2
+Tools: 2
 [1/2] Command: ["/bin/echo","a"]
       Stdout file: "<TMP>/shared.log"
 
 [2/2] Command: ["/bin/echo","b"]
       Stdout file: "<TMP>/shared.log"
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/2] Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
+Tool results:
+[1/2] "/bin/echo": Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
 
-[2/2] Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
+[2/2] "/bin/echo": Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
 
 `,
 		},
@@ -611,13 +628,13 @@ hi
 			cancel:   true,
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
 			want: `
->>> Tools requested: 1
+Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
 
->>> No tools will be run.
+No tools will be run.
 
->>> Results:
-[1/1] Not run: execution cancelled
+Tool results:
+[1/1] "/bin/echo": Not run: execution cancelled
 
 `,
 		},
@@ -650,22 +667,22 @@ func TestCommandThatNeverStartedIsNotRenderedAsAFailure(t *testing.T) {
 		{
 			name:  "missing workdir with a redirection",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["/bin/echo","hi"],"workdir":"/no/such/dir","stdout_file":%q}`, filepath.Join(dir, "out.log")))},
-			want:  `[1/1] Not run: chdir /no/such/dir: no such file or directory (stdout file "<TMP>/out.log")`,
+			want:  `[1/1] "/bin/echo": Not run: chdir /no/such/dir: no such file or directory (stdout file "<TMP>/out.log")`,
 		},
 		{
 			name:  "missing workdir with no redirection",
 			calls: []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"],"workdir":"/no/such/dir"}`)},
-			want:  `[1/1] Not run: chdir /no/such/dir: no such file or directory`,
+			want:  `[1/1] "/bin/echo": Not run: chdir /no/such/dir: no such file or directory`,
 		},
 		{
 			name:  "executable that does not exist",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["./biuld.sh"],"stdout_file":%q}`, filepath.Join(dir, "out.log")))},
-			want:  `[1/1] Not run: fork/exec ./biuld.sh: no such file or directory (stdout file "<TMP>/out.log")`,
+			want:  `[1/1] "./biuld.sh": Not run: fork/exec ./biuld.sh: no such file or directory (stdout file "<TMP>/out.log")`,
 		},
 		{
 			name:  "redirection that cannot be opened",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["/bin/echo","hi"],"stdout_file":%q}`, notARegularFile))},
-			want:  `[1/1] Not run: open stdout file "<TMP>/adirectory": "<TMP>/adirectory" is neither a regular file nor one of ` + constants.PermittedCommandDevicesText + ` (stdout file "<TMP>/adirectory")`,
+			want:  `[1/1] "/bin/echo": Not run: open stdout file "<TMP>/adirectory": "<TMP>/adirectory" is neither a regular file nor one of ` + constants.PermittedCommandDevicesText + ` (stdout file "<TMP>/adirectory")`,
 		},
 	}
 
@@ -870,7 +887,7 @@ func TestCLIToolUIShowRerunNamesTheCallAndTheReason(t *testing.T) {
 
 	ui.ShowRerun(call, "an earlier run started it and recorded no outcome")
 
-	want := "\n>>> Outcome unknown: an earlier run started it and recorded no outcome\n" +
+	want := "\nOutcome unknown: an earlier run started it and recorded no outcome\n" +
 		"[rerun] Command: [\"touch\",\"marker\"]\n" +
 		DetailIndent + "Workdir: \"/tmp\"\n"
 	if got := notifier.out.String(); got != want {
@@ -890,14 +907,14 @@ func TestCLIToolUIMultilineDenialStaysInsideItsResult(t *testing.T) {
 				Code: errors.ErrCodeNotApproved, NotRun: true,
 			}
 			NewCLIToolUI(notifier).AfterExecute(calls, []core.ToolResult{result, {ID: "completed", Output: "real tool output\n", Elapsed: 3}})
-			want := "\n>>> Results:\n" +
-				"[1/2] Not run: user denied permission; reason provided by the user: Use the saved report.\n" +
+			want := "\nTool results:\n" +
+				"[1/2] " + core.MarshalJSONForDisplay(toolName) + ": Not run: user denied permission; reason provided by the user: Use the saved report.\n" +
 				DetailIndent + "\n" +
 				DetailIndent + "Assistant 8\n" +
 				DetailIndent + "lmc: Working\n" +
 				DetailIndent + "[2/2] Completed in 1ms\n" +
 				DetailIndent + "Keep café data private: 100%.\n\n" +
-				"[2/2] Completed in 3ms\n" + DetailIndent + "Output:\nreal tool output\n\n"
+				"[2/2] \"universal_command\": Completed in 3ms\n" + DetailIndent + "Output:\nreal tool output\n" + DetailIndent + "End output.\n\n"
 			if got := notifier.out.String(); got != want {
 				t.Fatalf("multiline denial transcript=%q, want %q", got, want)
 			}
@@ -919,8 +936,8 @@ func TestCLIToolUIMultilineRerunDenialStaysInsideItsResult(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	call := core.ToolCall{ID: result.ID, Name: core.UniversalCommandToolName}
 	NewCLIToolUI(notifier).AfterExecute([]core.ToolCall{call}, []core.ToolResult{result})
-	want := "\n>>> Results:\n" +
-		"[1/1] Failed in 0ms: outcome unknown: an earlier run started it and recorded no outcome; it was not run again; user denied permission; reason provided by the user: Use the saved report.\n" +
+	want := "\nTool results:\n" +
+		"[1/1] \"universal_command\": Failed in 0ms: outcome unknown: an earlier run started it and recorded no outcome; it was not run again; user denied permission; reason provided by the user: Use the saved report.\n" +
 		DetailIndent + "Assistant 8\n" + DetailIndent + "lmc: Working\n\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("multiline rerun denial transcript=%q, want %q", got, want)

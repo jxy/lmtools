@@ -276,12 +276,12 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	return response, nil
 }
 
-// effectiveChatModel resolves the model a chat request is actually built with:
+// EffectiveChatModel resolves the model a chat request is actually built with:
 // the configured model, or the provider default when -model was not given.
 // Response parsing sees only cfg, so it must resolve the model exactly the way
 // BuildChatRequest does; otherwise an Argo request built for the default gpt5
 // model would be parsed as if no model had been chosen.
-func effectiveChatModel(cfg RequestOptions) string {
+func EffectiveChatModel(cfg RequestOptions) string {
 	if cfg.Model != "" {
 		return cfg.Model
 	}
@@ -308,7 +308,7 @@ func effectiveResponseProvider(cfg RequestOptions) string {
 		return constants.ProviderArgo
 	}
 
-	return providers.DetermineArgoModelProvider(effectiveChatModel(cfg))
+	return providers.DetermineArgoModelProvider(EffectiveChatModel(cfg))
 }
 
 func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *http.Response) bool {
@@ -325,7 +325,7 @@ func shouldHandleStreamingResponse(cfg RequestOptions, provider string, resp *ht
 
 // handleStreamingResponse handles streaming responses and returns accumulated content
 func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier, output ResponseOutput) (Response, error) {
-	if usesOpenAIResponsesWire(cfg, effectiveChatModel(cfg)) {
+	if usesOpenAIResponsesWire(cfg, EffectiveChatModel(cfg)) {
 		f, path, err := logger.CreateLogFile(logger.GetLogDir(), "stream_chat_output")
 		if err != nil {
 			return Response{}, fmt.Errorf("failed to create log file: %w", err)
@@ -392,7 +392,7 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 		})
 		return attachUsage(Response{Text: text, ToolCalls: toolCalls}, err)
 	}
-	if usesOpenAIResponsesWire(cfg, effectiveChatModel(cfg)) {
+	if usesOpenAIResponsesWire(cfg, EffectiveChatModel(cfg)) {
 		return attachUsage(parseOpenAIResponses(data, cfg.Embed))
 	}
 	return attachUsage(spec.parseResponseData(data, cfg.Embed))
@@ -427,7 +427,7 @@ func BuildChatRequest(cfg RequestOptions, typedMessages []TypedMessage, opts Cha
 	// Determine the model
 	model := opts.ModelOverride
 	if model == "" {
-		model = effectiveChatModel(cfg)
+		model = EffectiveChatModel(cfg)
 	}
 
 	// Determine system prompt

@@ -103,7 +103,7 @@ func TestTerminalREPLEditorDraftReopenAppendAndCleanup(t *testing.T) {
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/ed\n")
-	r.expect(t, `Draft (5 bytes): "draft"`)
+	r.expect(t, "Draft (5 bytes):\r\n  draft\r\nEnd draft.")
 	editorReviewPrompt(t, r)
 	h.cleaned(t)
 	if len(server.GetRequests()) != 0 {
@@ -111,7 +111,7 @@ func TestTerminalREPLEditorDraftReopenAppendAndCleanup(t *testing.T) {
 	}
 	h.mode(t, "append")
 	r.typeKeys(t, "/ed\n")
-	r.expect(t, `"draft[reopened]"`)
+	r.expect(t, "  draft[reopened]\r\nEnd draft.")
 	editorReviewPrompt(t, r)
 	if h.seed(t) != "draft" || r.nonblocking(t) {
 		t.Fatal("editor did not reopen the draft or changed stdin's blocking description")
@@ -141,7 +141,7 @@ func TestTerminalREPLEditorHistoryRegexRequiresFreshEnter(t *testing.T) {
 	r.expect(t, "answer 2")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/ed ^match \n\nqueued prompt\n")
-	r.expect(t, `"match first\n\nmatch second"`)
+	r.expect(t, "  match first\r\n  \r\n  match second\r\nEnd draft.")
 	editorReviewPrompt(t, r)
 	if len(server.GetRequests()) != 2 || h.seed(t) != "match first\n\nmatch second" {
 		t.Fatalf("queued input bypassed review or wrong seed: requests=%v, seed=%q", server.GetRequests(), h.seed(t))
@@ -150,7 +150,7 @@ func TestTerminalREPLEditorHistoryRegexRequiresFreshEnter(t *testing.T) {
 	r.typeKeys(t, "/ed 1\n")
 	r.expect(t, "EDITOR_HOLD")
 	r.typeKeys(t, "\nqueued during editor\n")
-	r.expect(t, `Draft (4 bytes): "held"`)
+	r.expect(t, "Draft (4 bytes):\r\n  held\r\nEnd draft.")
 	editorReviewPrompt(t, r)
 	if len(server.GetRequests()) != 2 {
 		t.Fatal("input typed during the editor caused inference")
@@ -165,7 +165,7 @@ func TestTerminalREPLEditorHistoryRegexRequiresFreshEnter(t *testing.T) {
 	r.expect(t, freshPrompt)
 	h.mode(t, "identity")
 	r.typeKeys(t, "unfinished\\\n/ed\n")
-	r.expect(t, `"unfinished"`)
+	r.expect(t, "  unfinished\r\nEnd draft.")
 	editorReviewPrompt(t, r)
 	if h.seed(t) != "unfinished" {
 		t.Fatalf("continuation editor seed=%q", h.seed(t))
@@ -199,7 +199,7 @@ func TestTerminalREPLEditorFailuresKeepDraftAndRestoreTerminal(t *testing.T) {
 			r.expect(t, "kept the existing draft")
 			r.expect(t, freshPrompt)
 			h.cleaned(t)
-			r.typeKeys(t, "x\x7f\n") // Erase and echo require restored canonical mode.
+			r.typeKeys(t, "x\x7f\n") // Erase requires the REPL editor to be restored.
 			r.expect(t, "answer 1")
 			r.expect(t, freshPrompt)
 			r.typeKeys(t, "/exit\n")
@@ -284,6 +284,13 @@ func TestTerminalREPLEditorFallbackEdAndLiteralContinuation(t *testing.T) {
 }
 
 func TestTerminalREPLEditorRedirectedStreamsAndTermination(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGQUIT} {
+		t.Run(sig.String(), func(t *testing.T) { testTerminalREPLEditorRedirectedStreamsAndTermination(t, sig) })
+	}
+}
+
+func testTerminalREPLEditorRedirectedStreamsAndTermination(t *testing.T, sig syscall.Signal) {
+	t.Helper()
 	h := newTestEditor(t)
 	h.mode(t, "wait")
 	server := mockserver.NewMockServer(numberedAnswers())
@@ -319,15 +326,15 @@ func TestTerminalREPLEditorRedirectedStreamsAndTermination(t *testing.T) {
 	r.typeKeys(t, "redirected draft\n")
 	editorReviewPrompt(t, r)
 	r.typeKeys(t, "\n")
-	r.expect(t, "Note: Session:")
+	r.expect(t, "Session:")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/ed\n")
 	r.expect(t, "EDITOR_WAIT")
-	if err := r.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := r.cmd.Process.Signal(sig); err != nil {
 		t.Fatal(err)
 	}
-	if code := r.wait(t); code == 0 {
-		t.Fatal("SIGTERM ended with success")
+	if code := r.wait(t); code != 130 {
+		t.Fatalf("%s exit=%d, want 130", sig, code)
 	}
 	h.cleaned(t)
 	answer, err := os.ReadFile(stdoutPath)

@@ -43,9 +43,12 @@ const (
 // commits once the response parses, then either the tool loop or the answer
 // save writes the rest. The outcome records how far the writes got on every
 // exit.
-func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, inputStr string, plan *session.RequestPlan) (turnOutcome, error) {
-	var out turnOutcome
+func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, inputStr string, plan *session.RequestPlan) (out turnOutcome, err error) {
 	ctx = logger.WithNewRequestCounter(ctx)
+	if env.progress != nil {
+		ctx = retry.WithProgress(ctx, env.progress.report)
+		defer env.progress.stop()
+	}
 
 	rb, err := buildHTTPRequest(ctx, env.cfg, opts, plan, inputStr)
 	if err != nil {
@@ -60,7 +63,11 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	presenter := newResponsePresenter(env.stdout, env.stderr, env.cfg.ShowThinking)
 	presenter.separate = env.answersOnScreen
 	presenter.answerLabel = env.answerLabel
+	if env.progress != nil {
+		presenter.onOutput = env.progress.stop
+	}
 	defer presenter.Close()
+	defer func() { out.PartialAnswer = presenter.lastIncomplete }()
 
 	response, err := core.HandleResponseWithOptions(ctx, opts, resp, logger.From(ctx), env.notifier, core.ResponseParseOptions{
 		ArgoLegacy: opts.ArgoLegacy,
@@ -177,9 +184,24 @@ func main() {
 	notifier := ui.NewNotifier()
 
 	if err := run(notifier); err != nil {
-		notifier.Errorf("%v", err)
+		_ = reportError(notifier, err)
 		os.Exit(getExitCode(err))
 	}
+}
+
+// reportedError keeps the cause available for exit-code selection while the
+// layer that owns the diagnostic stream takes responsibility for displaying it.
+type reportedError struct{ error }
+
+func (e reportedError) Unwrap() error { return e.error }
+
+func reportError(notifier core.Notifier, err error) error {
+	var reported reportedError
+	if err == nil || stdErrors.As(err, &reported) {
+		return err
+	}
+	notifier.Errorf("%v", err)
+	return reportedError{err}
 }
 
 func run(notifier core.Notifier) error {
@@ -620,7 +642,8 @@ func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (
 			// to put on the terminal.
 			logger.From(ctx).Infof("Request cancelled after %v: %v", time.Since(startTime), err)
 		} else {
-			logger.From(ctx).Errorf("Request failed after %v: %v", time.Since(startTime), err)
+			// The caller reports the returned error on its diagnostic stream.
+			logger.From(ctx).FileErrorf("Request failed after %v: %v", time.Since(startTime), err)
 		}
 		return nil, err
 	}
@@ -694,7 +717,9 @@ func persistAssistantOnly(ctx context.Context, response core.Response, sess *ses
 	forksBefore := len(sess.ConflictForks)
 	path, messageID, err := store.SaveAssistantResponse(ctx, response, model)
 	if err != nil {
-		notifier.Warnf("Warning: failed to save response to session: %v", err)
+		if !cfg.REPL {
+			notifier.Warnf("Failed to save response to session: %v", err)
+		}
 		return err
 	}
 	// A move to a conflict fork is reported by the turn, as a fork.

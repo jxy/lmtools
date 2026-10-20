@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"lmtools/internal/mockserver"
 	"os"
 	"path/filepath"
@@ -10,6 +11,33 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRequestFailureLoggedOnce(t *testing.T) {
+	lmcBin := getLmcBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	for _, repl := range []bool{false, true} {
+		t.Run(fmt.Sprintf("repl=%v", repl), func(t *testing.T) {
+			logDir := t.TempDir()
+			args := []string{
+				"-provider", "openai", "-provider-url", "unsupported://example.test/v1",
+				"-model", "test-model", "-api-key-file", writeTestAPIKeyFile(t, "test-key"),
+				"-sessions-dir", t.TempDir(), "-log-level", "ERROR", "-retries", "0",
+			}
+			if repl {
+				args = append(args, "-repl")
+			}
+			stdout, stderr, err := runLmcCommand(t, lmcBin, args, "question\n", WithLogDir(logDir))
+			if err == nil || stdout != "" || strings.Count(stderr, `unsupported protocol scheme "unsupported"`) != 1 {
+				t.Fatalf("exit=%v stdout=%q stderr=%q", err, stdout, stderr)
+			}
+			logged := readProcessLog(t, logDir)
+			if strings.Count(logged, "Request failed") != 1 || !strings.Contains(logged, "[ERROR]") ||
+				!strings.Contains(logged, "[#1]") {
+				t.Fatalf("missing request failure log: %q", logged)
+			}
+		})
+	}
+}
 
 func TestLoggingIntegration(t *testing.T) {
 	// Get lmc binary

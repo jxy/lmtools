@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/providers"
 	"lmtools/internal/session"
+	"strings"
 )
 
 func (l *replLoop) showStartup() {
@@ -13,15 +14,15 @@ func (l *replLoop) showStartup() {
 		return
 	}
 	mode := "buffered"
-	if l.base.StreamChat {
+	if replStreaming(l.base) {
 		mode = "streaming"
 	}
-	l.env.notifier.Promptf("lmc REPL | model: %q | API: %s (%s)\n", l.base.Model, replAPIName(l.base), mode)
-	l.env.notifier.Promptf("End a line with \\ to continue; use \\\\ for a literal trailing \\.\n")
-	l.env.notifier.Promptf("/help for commands; Ctrl-C cancels, Ctrl-D or /exit exits.\n")
+	l.env.notifier.Promptf("lmc | model: %s | %s | thinking %s\n", core.EffectiveChatModel(l.base), mode, onOff(l.env.cfg.ShowThinking))
+	l.env.notifier.Promptf("/help commands | /info settings | Ctrl-C cancel | Ctrl-D exit\n")
 }
 
 func replAPIName(opts core.RequestOptions) string {
+	opts.Model = core.EffectiveChatModel(opts)
 	if providers.UsesResponsesAPIWire(opts.Provider, opts.Model, opts.OpenAIResponses, opts.ArgoLegacy) {
 		return "Responses"
 	}
@@ -48,32 +49,61 @@ func (l *replLoop) separateAnswer() {
 	}
 }
 
-// showTurn identifies the submitted text even when several pasted lines were
-// echoed before the first answer. A plain status line signals activity without
-// a background writer competing with answer, thinking, or approval output.
+func replStreaming(opts core.RequestOptions) bool {
+	return opts.StreamChat && (!opts.ArgoLegacy || !opts.ToolEnabled)
+}
+
+// showTurn identifies non-text submissions and sets the answer heading. With
+// application-owned echo, ordinary input is already visible above the response.
 func (l *replLoop) showTurn(in turnInput, images []core.ImageBlock) {
 	l.env.answerLabel = ""
 	if !l.terminal {
 		return
 	}
-	l.turn++
 	if l.env.answersOnScreen {
-		l.env.answerLabel = fmt.Sprintf("Assistant %d", l.turn)
+		l.env.answerLabel = "Assistant"
 	}
 	l.separateAnswer()
 	switch {
 	case in.isRegeneration:
-		l.env.notifier.Promptf("Turn %d: Regenerating the selected answer.\n", l.turn)
+		l.env.notifier.Promptf("Regenerating the selected answer.\n")
 	case in.text == "" && len(images) == 0:
-		l.env.notifier.Promptf("Turn %d: Recovering pending tools.\n", l.turn)
+		l.env.notifier.Promptf("Recovering pending tools.\n")
 	default:
-		l.env.notifier.Promptf("User %d: %q", l.turn, replPromptPreview(in.text))
-		if len(images) > 0 {
-			l.env.notifier.Promptf(" (%d image(s))", len(images))
+		if !l.input.editing {
+			showTextPreview(l.env.notifier, "Submitted prompt", in.text, maxEditorPreviewBytes)
 		}
-		l.env.notifier.Promptf("\n")
+		if len(images) > 0 {
+			l.env.notifier.Promptf("Sending %d image(s).\n", len(images))
+		}
 	}
-	l.env.notifier.Promptf("lmc: Working on turn %d... (Ctrl-C to cancel)\n", l.turn)
+}
+
+func onOff(value bool) string {
+	if value {
+		return "on"
+	}
+	return "off"
+}
+
+func (l *replLoop) pendingDescription() string {
+	var parts []string
+	if l.draft != "" {
+		parts = append(parts, "draft")
+	}
+	if len(l.images) > 0 {
+		parts = append(parts, fmt.Sprintf("%d image(s)", len(l.images)))
+	}
+	if l.base.Developer != "" {
+		parts = append(parts, "developer instruction")
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (l *replLoop) reportUnsent() {
+	if pending := l.pendingDescription(); pending != "" {
+		l.env.notifier.Infof("Not sent: %s.", pending)
+	}
 }
 
 func (l *replLoop) showSession(sess *session.Session) {

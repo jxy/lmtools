@@ -89,13 +89,15 @@ the response is handled — in tool mode that is before any approval prompt or
 command execution, and again after each follow-up round:
 
 ```text
-Note: Token usage: input 100, output 19
+Tokens: input 100 (cached 40) | output 19 (reasoning 12) | total 119
 ```
 
 Cache and reasoning counts appear when the provider reports a non-zero value;
-total counts appear whenever reported. Responses that carry no counts (legacy
-Argo, OpenAI streaming without usage enabled) print nothing. Stdout stays the
-model output alone, so piped output is unaffected.
+total counts appear whenever reported. Parentheses identify counts explicitly
+reported within input or output token details; separate counts keep their reported
+scope. Counts are not added together to invent a total. Responses without counts
+print nothing. REPL tool follow-ups are labeled `Tokens (response N)`, and
+`/usage off` hides the counts. Stdout stays the model output alone.
 
 ### Sessions
 
@@ -195,20 +197,29 @@ one left the session, so MCP servers start once and stay up across turns.
 
 - A line ending in `\` continues the turn on the next line; `\\` at the end
   of a line puts one backslash there and ends the turn. An empty line at the
-  prompt sends nothing unless images are pending, in which case it sends an
-  image-only turn. The turn is sent as typed, a turn larger than 10MB
-  is discarded with a note, and pasted lines are read one turn per line like
-  typed ones.
+  prompt sends nothing unless a draft or images are pending. A turn larger
+  than 10 MiB (10,485,760 UTF-8 bytes, including newlines) is discarded with a note.
+  In terminals supporting bracketed paste,
+  pasted text is one editable multiline draft; Enter sends it, including literal
+  trailing backslashes. Pasted CRLF and CR line endings become LF before the
+  size check, so each newline counts as one byte.
+  Unbracketed pasted lines and piped input remain one
+  turn per line. Pasting into a continuation preserves leading `//` and treats
+  `/ed` as text.
 - On a terminal the prompt is `> `, and `. ` on a continuation line. It goes
   to stderr, or to the terminal when stderr is redirected, with the notes,
-  thinking summaries, tool transcript, and approval questions. Lines typed
-  while a turn runs are read as the next turns, in order; an approval
-  question discards them, as a single run's does. Startup shows the model,
-  API, and input hints. `User N` identifies submitted prompts, `lmc: Working`
-  indicates activity, and `Assistant N` labels each actual model response,
-  including after tool calls. The session ID appears once
-  established. The terminal provides erase, word erase, and line kill;
-  `/history` and `/ed` provide prompt recall and editing.
+  thinking summaries, tool transcript, approval questions, and fatal errors.
+  With terminal editing enabled, lines typed while a turn runs stay hidden until
+  the next prompt; approval questions discard them. Startup shows the configured
+  model and display settings.
+  `Assistant:` labels answers, and thinking has explicit start/end markers.
+  A waiting message appears only after a short delay; retries show their delay
+  and attempt count. With terminal editing enabled, progress messages clear when
+  output starts. The session ID appears once established. `/info` shows the
+  endpoint, API, session, tools, and settings.
+  All UI text is plain: no colors or styling. Cursor controls are used only
+  on an interactive terminal; `TERM=dumb` keeps basic line input and prints
+  waiting and retry notices as ordinary lines.
 - Ctrl-D at the prompt ends the loop. Ctrl-D inside an unfinished turn, a
   continuation or text ended by Ctrl-D without Enter, ends the loop without
   sending it, with a note. Ctrl-C during a turn cancels the turn and returns
@@ -244,20 +255,44 @@ one left the session, so MCP servers start once and stay up across turns.
   name, and stops at startup, naming the terminal and the reason, when it
   cannot.
 
+Left/Right move the cursor; Home/End or Ctrl-A/Ctrl-E move to line ends.
+Backspace/Delete erase, Ctrl-W erases a word, Ctrl-U clears input, and Ctrl-K
+erases from the cursor to the end of the draft. Up/Down recall prompts and
+restore an unsent draft when returning past the newest prompt. Ctrl-R searches
+history: type or paste a query, and press Ctrl-R again to find an older match.
+Enter accepts a match for editing, then another Enter sends it; Escape restores
+the draft and cursor. Oversized queries leave the previous query unchanged.
+Recall accepts prompts through the same 10 MiB limit as their original submission;
+the protective slash added to recalled literal `/` input does not count.
+If a draft exceeds the input limit, Ctrl-U clears it so you can start again;
+Enter discards the oversized submission, including its continuation lines.
+A multiline draft shows its current line while editing. Resizing the terminal
+repaints the input, including history search and approval answers, without
+changing or submitting it. Ctrl-C discards unfinished input without sending it.
+This also discards unread input already buffered by the editor, so a cancelled
+draft cannot reappear as a new prompt.
+Ctrl-\ exits after cancelling active work and restoring the terminal.
+
 REPL commands work with terminal and piped input:
 
 | Command | Effect |
 | --- | --- |
-| `/help` | Show input and command help. |
-| `/history` | List prompt text from this invocation, retaining at most 100 prompts and 10 MiB. |
+| `/help [input\|history\|tools]` | Show commands or help for a topic. |
+| `/info` | Show the connection, display settings, tools, session, logs, and pending input. |
+| `/history [N]` | List retained prompts, or show prompt N in full; keeps up to 100 prompts and 10 MiB. |
+| `/show` | Show the saved conversation through the current message. |
 | `/ed` | Edit the current draft with `$EDITOR`, or `ed` when unset. |
 | `/ed N` | Edit retained prompt N as a new draft. |
 | `/ed REGEX` | Edit all matching retained prompts together, in history order. |
 | `/image PATH` | Queue an image for the next turn; the path is literal and may contain spaces. |
-| `/clear-images` | Remove pending attachments. |
+| `/images` | List pending attachments with numbers. |
+| `/remove-image N` | Remove one pending attachment. |
+| `/clear-images` | Remove all pending attachments. |
 | `/developer TEXT` | Set a developer instruction for the next turn, replacing any pending instruction. |
 | `/clear-developer` | Remove the pending developer instruction. |
-| `/exit` | End the conversation. |
+| `/thinking on\|off` | Show or hide returned thinking; does not enable reasoning. |
+| `/usage on\|off` | Show or hide reported token counts. |
+| `/exit` | End the conversation and report unsent drafts, images, or instructions. |
 
 `/ed` requires a terminal. It waits for the editor, shows a draft preview after
 a successful exit, and returns to input. Enter sends the draft; ordinary text
@@ -280,12 +315,18 @@ Start a prompt with `//` to send a literal leading `/`. Image paths in `/image`
 use no quotes, shell expansion, or escaping. Press Enter after attaching an
 image to send it without text. History recalls prompt text; it does not attach
 the earlier images again. New attachments remain pending until their user
-turn is saved, including across a failed request. The turn labels and activity
-messages appear only for terminal input; redirected stdout keeps the answers.
+turn is saved, including across a failed request. Pending state appears above
+the prompt. Conversation inspection and all UI messages use diagnostics;
+redirected stdout keeps the answers.
 Developer instructions can be added during the conversation. They are saved
 with the next text or image turn and replayed on resume; `/clear-developer`
 affects only an instruction that has not yet been sent. Use continuation lines
 for a developer instruction spanning multiple lines.
+
+Saved conversations and live tool turns use the same tool/result labels,
+readable durations, and explicit output boundaries. Failed calls retain their
+partial output. `/show` does not shorten saved tool output; any truncation done
+during execution is identified separately.
 
 ### Tool Use
 
@@ -295,7 +336,8 @@ whitelist match is already an approval: the matching command runs without a
 prompt, and `-tool-auto-approve` is not needed.
 
 At a tool approval prompt, `y` or `yes` approves; `n`, `no`, or an empty
-reply denies. Any other reply denies the call and supplies a reason, for
+reply denies. In the REPL editor, Enter submits the answer; Ctrl-D discards
+an unfinished approval. Any other reply denies the call and supplies a reason, for
 example `This is a read-only review; do not change files.` The model receives
 an explicit user denial with the text labeled as a reason provided by the
 user, and the same result is saved in the session. This works for command,
@@ -310,6 +352,8 @@ exits, review the draft and press Enter to submit, type to append, or use
 text is interpreted the same way whether typed or edited: `y`/`yes` approves,
 `n`/`no`/empty denies, and other text becomes the user-provided denial reason.
 Use `//ed` when the literal text `/ed` should be part of the reason.
+An oversized approval answer is discarded through its last continuation line
+and denies the call without a reason.
 
 `-tool` also enables `view_image`, which lets the model look at an image file:
 a plot a command just wrote, or a screenshot named in the prompt. The model

@@ -124,7 +124,7 @@ func TestMCPToolCallsKeepTheirLabelsInTheSessionAndShow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShowConversation() error = %v", err)
 	}
-	if !strings.Contains(output, "  • mcp__github__list_issues (ID: mcp-1)\n     MCP: github/list_issues\n") {
+	if !strings.Contains(output, "[1/1] MCP tool: github/list_issues\n      Arguments: {\"repo\":\"a/b\"}\n") || !strings.Contains(output, `[1/1] "github/list_issues": Completed`) {
 		t.Fatalf("-show output = %q", output)
 	}
 }

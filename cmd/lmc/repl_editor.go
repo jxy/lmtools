@@ -161,18 +161,7 @@ func editInputDraft(ctx context.Context, input *inputOwner, notifier core.Notifi
 	if err != nil {
 		return "", fmt.Errorf("read editor draft: %w", err)
 	}
-	preview := draft
-	if len(preview) > maxEditorPreviewBytes {
-		end := maxEditorPreviewBytes
-		for !utf8.RuneStart(preview[end]) {
-			end--
-		}
-		preview = preview[:end]
-	}
-	notifier.Promptf("Draft (%d bytes): %q\n", len(draft), preview)
-	if preview != draft {
-		notifier.Infof("Draft preview truncated to %d bytes; /ed reopens the complete text.", len(preview))
-	}
+	showTextPreview(notifier, "Draft", draft, maxEditorPreviewBytes)
 	if _, err := input.discardTerminalInput(); err != nil {
 		return "", fmt.Errorf("%w: clear input after draft review: %w", errEditorTerminal, err)
 	}

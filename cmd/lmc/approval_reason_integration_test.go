@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -25,7 +26,11 @@ type approvalDraftCase struct {
 func TestTerminalToolDenialReasonReachesModelAndSession(t *testing.T) {
 	for _, test := range []approvalDraftCase{
 		{name: "single line", input: "This is a read-only review; do not create files.\n", reason: "This is a read-only review; do not create files."},
+		{name: "EOF discards typed yes", input: "yes\x04"},
+		{name: "EOF discards pasted yes", input: "\x1b[200~yes\x1b[201~\x04"},
 		{name: "continued", input: "Only inspect files\\\nDo not change anything.\n", reason: "Only inspect files\nDo not change anything."},
+		{name: "continued paste preserves slashes", input: "Reason\\\n\x1b[200~// comment\nbody\\\x1b[201~\n", reason: "Reason\n// comment\nbody\\"},
+		{name: "continued paste keeps editor command literal", input: "Reason\\\n\x1b[200~/ed\x1b[201~\n", reason: "Reason\n/ed"},
 		{name: "edit continued draft", input: "Only inspect files\\\nDo not change anything.\\\n/ed\n", editorMode: "identity", seed: "Only inspect files\nDo not change anything.", reason: "Only inspect files\nDo not change anything."},
 		{name: "edit history", input: "/ed 1\n", editorMode: "identity", seed: "Review the files.", reason: "Review the files."},
 		{name: "edit regex", input: "/ed ^Review\n", editorMode: "identity", seed: "Review the files.", reason: "Review the files."},
@@ -108,7 +113,7 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 			r := startREPLUnderTerminal(t, server.URL, nil, flags...)
 			r.expect(t, freshPrompt)
 			r.typeKeys(t, "Review the files.\n")
-			r.expect(t, "Allow execution? "+toolApprovalChoices)
+			r.expect(t, strings.TrimSpace("Allow execution? "+toolApprovalChoices)+"\r\n      > ")
 			r.typeKeys(t, test.input)
 			if test.editorMode != "" {
 				if test.editorMode == "wait" {

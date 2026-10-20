@@ -21,7 +21,7 @@ func ValidateDeveloperRole(cfg RequestOptions) error {
 	if cfg.Embed {
 		return fmt.Errorf("-developer is only supported in chat mode")
 	}
-	return validateDeveloperWire(cfg, effectiveChatModel(cfg))
+	return validateDeveloperWire(cfg, EffectiveChatModel(cfg))
 }
 
 // ValidateDeveloperTurn requires a new user turn for a new instruction. The

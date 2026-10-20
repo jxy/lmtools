@@ -18,6 +18,8 @@ type Usage struct {
 	CacheReadInputTokens     *int
 	CacheCreationInputTokens *int
 	ReasoningTokens          *int
+	cacheReadIncluded        bool
+	reasoningIncluded        bool
 }
 
 // usageEnvelope matches every location the supported providers put token
@@ -125,6 +127,8 @@ func usageFromWireObject(raw json.RawMessage) *Usage {
 			wire.OutputTokensDetails.ThinkingTokens,
 		),
 	}
+	usage.cacheReadIncluded = wire.CacheReadInputTokens == nil && (wire.PromptTokensDetails.CachedTokens != nil || wire.InputTokensDetails.CachedTokens != nil)
+	usage.reasoningIncluded = wire.CompletionTokensDetails.ReasoningTokens != nil || wire.OutputTokensDetails.ReasoningTokens != nil || wire.OutputTokensDetails.ThinkingTokens != nil
 	if !usage.hasAny() {
 		return nil
 	}
@@ -191,47 +195,58 @@ func (u *Usage) MergedWith(next *Usage) *Usage {
 	merged.CacheReadInputTokens = firstReported(next.CacheReadInputTokens, u.CacheReadInputTokens)
 	merged.CacheCreationInputTokens = firstReported(next.CacheCreationInputTokens, u.CacheCreationInputTokens)
 	merged.ReasoningTokens = firstReported(next.ReasoningTokens, u.ReasoningTokens)
+	if next.CacheReadInputTokens != nil {
+		merged.cacheReadIncluded = next.cacheReadIncluded
+	}
+	if next.ReasoningTokens != nil {
+		merged.reasoningIncluded = next.reasoningIncluded
+	}
 	return &merged
 }
 
-// Summary renders the reported counts for the diagnostic note, for example
-// "input 1234, cache read 512, output 56, reasoning 20, total 1290". Input,
-// output, and total appear whenever the provider reported them; the detail
-// counts appear only when reported and non-zero, so the routinely-zero cache
-// fields do not widen every line. Counts are shown as reported, provider
-// semantics included: Anthropic's input excludes its cache counts, OpenAI's
-// includes its cached tokens, and Google's output excludes its reasoning
-// tokens.
-func (u *Usage) Summary() string {
+// DisplaySummary groups details only when the wire explicitly reports them
+// within input/output token details. Other counts retain their reported scope.
+func (u *Usage) DisplaySummary() string {
 	if u == nil {
 		return ""
 	}
-	parts := make([]string, 0, 6)
-	report := func(label string, value *int) {
-		if value != nil {
-			parts = append(parts, fmt.Sprintf("%s %d", label, *value))
+	var parts []string
+	add := func(label string, value *int, detail string, count *int, included bool) {
+		if value == nil {
+			return
+		}
+		part := fmt.Sprintf("%s %d", label, *value)
+		if included && count != nil && *count != 0 {
+			part += fmt.Sprintf(" (%s %d)", detail, *count)
+		}
+		parts = append(parts, part)
+	}
+	add("input", u.InputTokens, "cached", u.CacheReadInputTokens, u.cacheReadIncluded)
+	add("output", u.OutputTokens, "reasoning", u.ReasoningTokens, u.reasoningIncluded)
+	detail := func(label string, value *int, grouped bool) {
+		if !grouped && value != nil && *value != 0 {
+			add(label, value, "", nil, false)
 		}
 	}
-	reportNonZero := func(label string, value *int) {
-		if value != nil && *value != 0 {
-			report(label, value)
-		}
-	}
-	report("input", u.InputTokens)
-	reportNonZero("cache read", u.CacheReadInputTokens)
-	reportNonZero("cache write", u.CacheCreationInputTokens)
-	report("output", u.OutputTokens)
-	reportNonZero("reasoning", u.ReasoningTokens)
-	report("total", u.TotalTokens)
-	return strings.Join(parts, ", ")
+	detail("cache read", u.CacheReadInputTokens, u.cacheReadIncluded && u.InputTokens != nil)
+	detail("cache write", u.CacheCreationInputTokens, false)
+	detail("reasoning", u.ReasoningTokens, u.reasoningIncluded && u.OutputTokens != nil)
+	add("total", u.TotalTokens, "", nil, false)
+	return strings.Join(parts, " | ")
 }
 
 // notifyTokenUsage reports a response's token counts on the diagnostic
 // stream. It runs after response presentation is finalized and before any tool
 // approval prompt or execution the response goes on to trigger.
 func notifyTokenUsage(notifier Notifier, usage *Usage) {
-	if notifier == nil || usage == nil {
+	if notifier == nil {
 		return
 	}
-	notifier.Infof("Token usage: %s", usage.Summary())
+	if reporter, ok := notifier.(interface{ ReportUsage(*Usage) }); ok {
+		reporter.ReportUsage(usage)
+		return
+	}
+	if usage != nil {
+		notifier.Infof("Tokens: %s", usage.DisplaySummary())
+	}
 }
