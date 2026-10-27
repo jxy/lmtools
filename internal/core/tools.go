@@ -204,8 +204,19 @@ type ToolUI interface {
 	// does not decode call.Args again; it is nil when the executor never parsed
 	// the call (unsupported tool, invalid arguments, or past the per-round cap).
 	ShowCall(index, total int, call ToolCall, args *UniversalCommandArgs)
+	// ShowCallNote adds a line under a call's review, in a round that asks
+	// questions and before the first of them: why the call will not run, or
+	// why it cannot start now.
+	ShowCallNote(index int, note string)
 	// BeforeRun is called after every approval decision and before any command starts.
 	BeforeRun(total, runnable, parallel int)
+	// CallStarted and CallFinished bracket each call while it runs.
+	// ResultReady hands over each result in request order, as soon as it and
+	// every earlier result are known. The executor calls these three from one
+	// goroutine at a time.
+	CallStarted(index int, call ToolCall)
+	CallFinished(index int)
+	ResultReady(index, total int, call ToolCall, result ToolResult)
 	// AfterExecute is called after the batch finishes, with calls and results in
 	// their original request order.
 	AfterExecute(calls []ToolCall, results []ToolResult)

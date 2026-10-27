@@ -102,7 +102,7 @@ func TestApprover_EdgeCases(t *testing.T) {
 			notifier := &mockNotifier{}
 			approver := newCLIApproverWithReader(notifier, strings.NewReader(tt.input))
 
-			result, err := approver.Approve(context.Background(), core.UniversalCommandArgs{})
+			result, err := approver.Approve(context.Background(), core.UniversalCommandArgs{Command: []string{"ls"}})
 			if err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
@@ -110,7 +110,7 @@ func TestApprover_EdgeCases(t *testing.T) {
 			if result.Approved != tt.expected {
 				t.Errorf("Approve() = %v, expected %v", result, tt.expected)
 			}
-			if len(notifier.messages) == 0 || notifier.messages[0] != "      Allow execution? [y/N or reason; /ed to edit]: " {
+			if len(notifier.messages) == 0 || notifier.messages[0] != "      Allow ls? [y/N or reason; /ed to edit]: " {
 				t.Fatalf("approval prompt = %#v", notifier.messages)
 			}
 		})
@@ -131,9 +131,9 @@ func approverEntryPoints() []approverEntryPoint {
 		{
 			name: "Approve",
 			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
-				return a.Approve(ctx, core.UniversalCommandArgs{})
+				return a.Approve(ctx, core.UniversalCommandArgs{Command: []string{"ls"}})
 			},
-			prompt:    "      Allow execution? [y/N or reason; /ed to edit]: ",
+			prompt:    "      Allow ls? [y/N or reason; /ed to edit]: ",
 			eofNotice: "\n      No interactive input available; denying by default.\n",
 		},
 		{
@@ -500,5 +500,74 @@ func TestApprovalPromptFallsBackToControllingTerminal(t *testing.T) {
 
 	if approvalPromptNotifier(&mockNotifier{}) == nil {
 		t.Fatal("approvalPromptNotifier() refused despite an available controlling terminal")
+	}
+}
+
+// A question names the program the model chose, with any control in it
+// spelled out.
+func TestApproverQuestionSpellsOutControlsInTheName(t *testing.T) {
+	notifier := &mockNotifier{}
+	approver := newCLIApproverWithReader(notifier, strings.NewReader("n\n"))
+	if _, err := approver.Approve(context.Background(), core.UniversalCommandArgs{Command: []string{"\x1b[2Jrm"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.messages) == 0 || notifier.messages[0] != `      Allow "\u001b[2Jrm"? [y/N or reason; /ed to edit]: ` {
+		t.Fatalf("question = %#v", notifier.messages)
+	}
+}
+
+func TestParseApprovalAnswer(t *testing.T) {
+	for answer, want := range map[string]core.Approval{
+		"y":      {Approved: true},
+		" YES ":  {Approved: true},
+		"a":      {Approved: true, Rest: true},
+		"All":    {Approved: true, Rest: true},
+		"":       {},
+		"n":      {},
+		"No":     {},
+		"use rg": {Reason: "use rg"},
+	} {
+		if got := parseApprovalAnswer(answer); got != want {
+			t.Errorf("parseApprovalAnswer(%q) = %+v, want %+v", answer, got, want)
+		}
+	}
+}
+
+// a approves at every question. Where later calls would ask, it approves
+// them too and says how many; at the last or only question it approves this
+// call alone, without a count.
+func TestApproverAcceptsAOnEveryQuestion(t *testing.T) {
+	for _, tt := range []struct {
+		remaining int
+		count     string
+	}{
+		{remaining: 0},
+		{remaining: 2, count: "Approved this call and the remaining 2 calls."},
+	} {
+		notifier := &mockNotifier{}
+		approver := newCLIApproverWithReader(notifier, strings.NewReader("a\n"))
+		ctx := core.WithApprovalTarget(context.Background(), core.ApprovalTarget{Index: 0, Total: tt.remaining + 1, Remaining: tt.remaining})
+		approval, err := approver.Approve(ctx, core.UniversalCommandArgs{Command: []string{"ls"}})
+		if err != nil || !approval.Approved || !approval.Rest {
+			t.Fatalf("remaining %d: approval = %+v, err = %v", tt.remaining, approval, err)
+		}
+		said := strings.Join(notifier.messages, "")
+		if tt.count == "" && strings.Contains(said, "remaining") || tt.count != "" && !strings.Contains(said, tt.count) {
+			t.Fatalf("remaining %d: said %q", tt.remaining, said)
+		}
+	}
+}
+
+// With the REPL's bell on, the terminal rings as a question appears.
+func TestApproverRingsWithTheREPLBell(t *testing.T) {
+	notifier := &mockNotifier{}
+	approver := newCLIApproverWithReader(notifier, strings.NewReader("n\n"))
+	on := true
+	approver.bell = &on
+	if _, err := approver.Approve(context.Background(), core.UniversalCommandArgs{Command: []string{"ls"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.messages) < 2 || notifier.messages[0] != "\a" {
+		t.Fatalf("messages = %#v, want the bell before the question", notifier.messages)
 	}
 }

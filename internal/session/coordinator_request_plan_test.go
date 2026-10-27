@@ -369,3 +369,29 @@ func hasSiblingForMessage(t *testing.T, sessionPath, messageID string) bool {
 	}
 	return false
 }
+
+// The user message commits after the response arrives, and carries the time
+// the turn was planned, when the operator sent it: a slow answer must not
+// make the prompt look as late as the reply.
+func TestCoordinatorStampsTheUserMessageWithThePlanTime(t *testing.T) {
+	ctx := setupCoordinatorTestEnv(t)
+	before := time.Now()
+	plan, err := PrepareRequest(ctx, newTestCoordinatorConfig(), core.NewTestNotifier(), core.TestToolUI{}, "hello", false, PendingToolSkip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	committed := time.Now()
+	sess, err := plan.Commit(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := GetLineage(sess.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := messages[len(messages)-1]
+	if user.Role != core.RoleUser || user.Timestamp.Before(before.Add(-time.Second)) || !user.Timestamp.Before(committed) {
+		t.Fatalf("user message stamped %v; planned after %v, committed at %v", user.Timestamp, before, committed)
+	}
+}

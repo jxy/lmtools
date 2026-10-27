@@ -32,6 +32,13 @@ type turnTestEnv struct {
 
 func newTurnTestEnv(t *testing.T, server *mockserver.MockServer, extraFlags ...string) turnTestEnv {
 	t.Helper()
+	return newTurnTestEnvAt(t, server.URL(), extraFlags...)
+}
+
+// newTurnTestEnvAt is newTurnTestEnv for a provider served at baseURL by a
+// test's own handler.
+func newTurnTestEnvAt(t *testing.T, baseURL string, extraFlags ...string) turnTestEnv {
+	t.Helper()
 
 	sessionsDir := t.TempDir()
 	oldDir := session.GetSessionsDir()
@@ -52,7 +59,7 @@ func newTurnTestEnv(t *testing.T, server *mockserver.MockServer, extraFlags ...s
 
 	args := append([]string{
 		"-provider", "openai",
-		"-provider-url", server.URL() + "/v1",
+		"-provider-url", baseURL + "/v1",
 		"-model", "gpt-test",
 		"-retries", "0",
 	}, extraFlags...)

@@ -22,6 +22,6 @@ func handleOpenAIStreamWithTools(ctx context.Context, body io.ReadCloser, logFil
 	emitPendingResponseStreamEvents(state, output)
 	return Response{
 		Text: text, ToolCalls: toolCalls, Blocks: state.Blocks(), Usage: state.Usage(),
-		IncompleteReason: state.IncompleteReason(),
+		IncompleteReason: state.IncompleteReason(), Model: state.model,
 	}, err
 }

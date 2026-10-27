@@ -2,6 +2,7 @@ package core
 
 import (
 	"lmtools/internal/providers"
+	"slices"
 	"strings"
 )
 
@@ -128,13 +129,21 @@ func addGoogleOutputFields(reqMap map[string]interface{}, payload PreparedReques
 	}
 }
 
-func openAIReasoningEffort(effort string) string {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
-		return strings.ToLower(strings.TrimSpace(effort))
-	default:
-		return ""
+// EffortLevels are the reasoning effort values -effort and /effort accept.
+var EffortLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// NormalizeEffort returns effort lowercased and trimmed when it names one of
+// EffortLevels, and "" otherwise.
+func NormalizeEffort(effort string) string {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if slices.Contains(EffortLevels, effort) {
+		return effort
 	}
+	return ""
+}
+
+func openAIReasoningEffort(effort string) string {
+	return NormalizeEffort(effort)
 }
 
 func anthropicOutputEffort(effort string) string {

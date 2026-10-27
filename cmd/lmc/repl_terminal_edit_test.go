@@ -73,6 +73,47 @@ func TestTerminalEditorPasteIsOneDraftAndRestoresMode(t *testing.T) {
 	}
 }
 
+// A paste the preview showed whole is sent as a reference to it; one the
+// preview shortened is echoed whole, so the scrollback holds what was sent.
+func TestTerminalEditorEchoesAPasteThePreviewShortened(t *testing.T) {
+	t.Setenv("TERM", "xterm")
+	owner, pty, screen := terminalOwner(t)
+	if enabled, err := owner.enableEditing(pty.Slave, &replHistory{}); err != nil || !enabled {
+		t.Fatalf("enable=%v,%v", enabled, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	send := func(paste string) {
+		t.Helper()
+		errs := make(chan error, 1)
+		go func() { _, err := owner.readLineUnder(ctx, 1<<20); errs <- err }()
+		typeKeys(t, pty, "\x1b[200~"+paste+"\x1b[201~")
+		if err := screen.Expect("Enter sends; arrows edit; Ctrl-C discards.", time.Second); err != nil {
+			t.Fatal(err)
+		}
+		typeKeys(t, pty, "\n")
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	send("one\ntwo")
+	if err := screen.Expect("[the pasted draft above, 2 lines]", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	send("head\n" + strings.Repeat("x", maxEditorPreviewBytes) + "\ntail")
+	if err := screen.Expect(strings.Repeat("x", maxEditorPreviewBytes), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	// The bound counts bytes: these characters take three each.
+	send("head\n" + strings.Repeat("界", maxEditorPreviewBytes/2) + "\ntail")
+	if err := screen.Expect(strings.Repeat("界", maxEditorPreviewBytes/2), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(screen.String(), "[the pasted draft above, 3 lines]") {
+		t.Fatal("a shortened preview was referred to as the draft sent")
+	}
+}
+
 func TestTerminalEditorKeepsQueuedInputOutOfApproval(t *testing.T) {
 	t.Setenv("TERM", "xterm")
 	owner, pty, _ := terminalOwner(t)
@@ -126,10 +167,21 @@ func TestTerminalEditorEOFDiscardsApprovalWithoutSubmitting(t *testing.T) {
 			if err := screen.Expect("      > ", time.Second); err != nil {
 				t.Fatal(err)
 			}
+			// Ctrl-D with text on the line deletes under the cursor and
+			// submits nothing; on an emptied line it is a refusal.
 			typeKeys(t, pty, input+"\x04")
+			select {
+			case decision := <-result:
+				t.Fatalf("Ctrl-D with text answered the question: %+v", decision)
+			case <-time.After(200 * time.Millisecond):
+			}
+			typeKeys(t, pty, "\x15\x04")
 			decision := <-result
 			if err := <-errs; err != nil || decision.Approved || decision.Reason != "" {
 				t.Fatalf("EOF submitted an approval: %+v err=%v", decision, err)
+			}
+			if err := screen.Expect("Denied.", time.Second); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -187,10 +239,12 @@ func TestTerminalEditorBatchesHeldInput(t *testing.T) {
 	if err != nil || line.text != text {
 		t.Fatalf("batched input: bytes=%d err=%v", len(line.text), err)
 	}
-	if redraws := strings.Count(out.String(), "\x1b[2K"); redraws < 2 || redraws > size/256+3 {
+	if redraws := strings.Count(out.String(), "\x1b[J"); redraws < 2 || redraws > size/256+3 {
 		t.Fatalf("%d redraws for %d keys", redraws, size)
 	}
-	if strings.Contains(out.String(), "queued secret") || !strings.Contains(out.String(), "end\r") {
+	// The submitted line is reprinted whole for the scrollback; the input
+	// queued behind it is not shown.
+	if strings.Contains(out.String(), "queued secret") || !strings.Contains(out.String(), "end\n") {
 		t.Fatal("did not render the submitted line alone")
 	}
 	shown := make(chan bool, 1)

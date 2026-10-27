@@ -234,7 +234,11 @@ func NewTestApprover(defaultApproval bool) *TestApprover {
 type TestToolUI struct{}
 
 func (TestToolUI) ShowCall(int, int, ToolCall, *UniversalCommandArgs) {}
+func (TestToolUI) ShowCallNote(int, string)                           {}
 func (TestToolUI) BeforeRun(int, int, int)                            {}
+func (TestToolUI) CallStarted(int, ToolCall)                          {}
+func (TestToolUI) CallFinished(int)                                   {}
+func (TestToolUI) ResultReady(int, int, ToolCall, ToolResult)         {}
 func (TestToolUI) ShowRerun(ToolCall, string)                         {}
 func (TestToolUI) AfterExecute([]ToolCall, []ToolResult)              {}
 

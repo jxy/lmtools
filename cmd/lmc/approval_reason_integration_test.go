@@ -26,8 +26,10 @@ type approvalDraftCase struct {
 func TestTerminalToolDenialReasonReachesModelAndSession(t *testing.T) {
 	for _, test := range []approvalDraftCase{
 		{name: "single line", input: "This is a read-only review; do not create files.\n", reason: "This is a read-only review; do not create files."},
-		{name: "EOF discards typed yes", input: "yes\x04"},
-		{name: "EOF discards pasted yes", input: "\x1b[200~yes\x1b[201~\x04"},
+		// Ctrl-D with text on the line deletes under the cursor and submits
+		// nothing; once the line is cleared it is a refusal.
+		{name: "EOF discards typed yes", input: "yes\x04\x15\x04"},
+		{name: "EOF discards pasted yes", input: "\x1b[200~yes\x1b[201~\x04\x15\x04"},
 		{name: "continued", input: "Only inspect files\\\nDo not change anything.\n", reason: "Only inspect files\nDo not change anything."},
 		{name: "continued paste preserves slashes", input: "Reason\\\n\x1b[200~// comment\nbody\\\x1b[201~\n", reason: "Reason\n// comment\nbody\\"},
 		{name: "continued paste keeps editor command literal", input: "Reason\\\n\x1b[200~/ed\x1b[201~\n", reason: "Reason\n/ed"},
@@ -113,7 +115,7 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 			r := startREPLUnderTerminal(t, server.URL, nil, flags...)
 			r.expect(t, freshPrompt)
 			r.typeKeys(t, "Review the files.\n")
-			r.expect(t, strings.TrimSpace("Allow execution? "+toolApprovalChoices)+"\r\n      > ")
+			r.expect(t, "[1/1] Allow touch? "+strings.TrimRight(toolApprovalChoices, " ")+"\r\n"+approvalPrompt)
 			r.typeKeys(t, test.input)
 			if test.editorMode != "" {
 				if test.editorMode == "wait" {
@@ -121,7 +123,7 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 					r.typeKeys(t, test.editorInput)
 				}
 				r.expect(t, "Enter submits the answer;")
-				r.expect(t, freshPrompt)
+				r.expect(t, approvalPrompt)
 				if seed := editor.seed(t); seed != test.seed {
 					t.Fatalf("editor seed=%q, want %q", seed, test.seed)
 				}

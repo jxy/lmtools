@@ -209,7 +209,8 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 		t.Fatalf("image part = %#v", imagePart)
 	}
 
-	for _, want := range []string{`View image: "` + imagePath + `"`, "Detail: low", wantText} {
+	sent := "view_image: Sent plot.png (image/png, " + core.FormatByteCount(len(integrationPNG)) + ")"
+	for _, want := range []string{`View image: "` + imagePath + `"`, "Detail: low", sent} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
 		}
@@ -219,8 +220,8 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 	}
 
 	sessionID, shown := showSession(t, lmcBin, sessionsDir)
-	if !strings.Contains(shown, wantText+"\n      End output.\n      [image: plot.png (image/png, "+core.FormatByteCount(len(integrationPNG))+")]\n") {
-		t.Fatalf("-show output = %q, want the result text followed by the image line", shown)
+	if !strings.Contains(shown, sent+"\n") {
+		t.Fatalf("-show output = %q, want the result saying the image was sent", shown)
 	}
 	if strings.Contains(shown, "base64,") {
 		t.Fatal("-show printed image bytes")
@@ -398,7 +399,7 @@ func TestViewImageWhitelistRulesGovernScriptedRuns(t *testing.T) {
 	}
 
 	stderr, followUp := run(imagesUnderDir)
-	if !strings.Contains(stderr, "Completed in") || !strings.Contains(followUp, wantURL) {
+	if !strings.Contains(stderr, "view_image: Sent plot.png") || !strings.Contains(followUp, wantURL) {
 		t.Fatalf("whitelisted image was not sent\nstderr:\n%s", stderr)
 	}
 

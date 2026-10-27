@@ -88,8 +88,8 @@ func TestNoSessionToolLoopUsesMemoryStore(t *testing.T) {
 		`[1/1] Command: ["echo","memory-loop-ok"]`,
 		"Running 1 tool...",
 		"Tool results:",
-		`[1/1] "echo": Completed in `,
-		"      Output:\nmemory-loop-ok",
+		`[1/1] echo: Completed in `,
+		"      Output (stdout+stderr, 1 line):\n      | memory-loop-ok",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr)

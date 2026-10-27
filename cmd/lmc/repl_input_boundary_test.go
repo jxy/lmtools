@@ -332,7 +332,10 @@ func TestTerminalEditorMalformedUTF8PreservesKeys(t *testing.T) {
 	}{
 		{"Enter", "before\xc3\n", "before�", false},
 		{"CRLF", "before\xc3\r\n", "before�", false},
-		{"Ctrl-D", "before\xc3\x04", "before�", true},
+		// Ctrl-D on a line with text deletes under the cursor, and at the
+		// end of the line does nothing; it never ends the input there.
+		{"Ctrl-D", "before\xc3\x04\n", "before�", false},
+		{"Ctrl-D deletes", "ab\xc3\x01\x04\n", "b�", false},
 		{"left arrow", "ab\xc3\x1b[DX\n", "abX�", false},
 		{"backspace", "before\xc3\x7f\n", "before", false},
 		{"clear", "before\xc3\x15ok\n", "ok", false},

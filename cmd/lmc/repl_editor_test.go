@@ -97,7 +97,7 @@ func TestEditorCommandPassesFilenameSeparately(t *testing.T) {
 	if err != nil || string(out) != path {
 		t.Fatalf("editor output=%q, err=%v, want filename %q", out, err, path)
 	}
-	if args := editorCommand(" ", path).Args; len(args) != 2 || args[0] != "ed" || args[1] != path {
+	if args := editorCommand(" ", path).Args; len(args) != 2 || args[0] != "vi" || args[1] != path {
 		t.Fatalf("fallback command=%q", args)
 	}
 }

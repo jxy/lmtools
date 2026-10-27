@@ -87,18 +87,16 @@ Tools: 3
 Running 2 of 3 tools in parallel...
 
 Tool results:
-[1/3] "git": Completed in 58ms
-      Output:
-## main...origin/main [ahead 1]
-?? docs/
-      End output.
+[1/3] git: Completed in 58ms
+      Output (stdout+stderr, 2 lines):
+      | ## main...origin/main [ahead 1]
+      | ?? docs/
 
-[2/3] "git": Failed in 44ms: exit status 1
-      Partial output:
-failing output
-      End output.
+[2/3] git: Failed in 44ms: exit status 1
+      Output (stdout+stderr, 1 line):
+      | failing output
 
-[3/3] "git": Not run: user denied permission
+[3/3] git: Denied by you
 
 `
 	if got := notifier.out.String(); got != want {
@@ -123,9 +121,54 @@ func TestCLIToolUIShowCallUsesCompactJSONArgv(t *testing.T) {
 
 	NewCLIToolUI(notifier).ShowCall(0, 1, call, nil)
 
+	// An argument spanning lines is shown below the vector as quoted lines;
+	// every other argument keeps its exact JSON spelling.
 	want := `
 Tools: 1
-[1/1] Command: ["printf","a b","line\nnext","quote\"","back\\slash"]
+[1/1] Command: ["printf","a b",<arg 3>,"quote\"","back\\slash"]
+      Arg 3 (2 lines):
+      | line
+      | next
+`
+	if got := notifier.out.String(); got != want {
+		t.Fatalf("ShowCall() = %q, want %q", got, want)
+	}
+}
+
+// A script handed to an interpreter is the code being approved. It is shown
+// line by line, control characters spelled out so they cannot hide a line.
+func TestCLIToolUIShowCallRendersScriptsLineByLine(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	script := "import os\n\nprint('safe')\rimport shutil; shutil.rmtree('/tmp/x')  # \u202e\n"
+	call := commandCall(t, "call-script", []string{"python3", "-c", script}, core.UniversalCommandArgs{})
+	NewCLIToolUI(notifier).ShowCall(0, 1, call, nil)
+	want := `
+Tools: 1
+[1/1] Command: ["python3","-c",<arg 3>]
+      Arg 3 (3 lines, ending with a newline):
+      Control characters are shown as \uXXXX.
+      | import os
+      |
+      | print('safe')\u000dimport shutil; shutil.rmtree('/tmp/x')  # \u202e
+`
+	if got := notifier.out.String(); got != want {
+		t.Fatalf("ShowCall() =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// An approved value is shown byte for byte: a carriage return before a line
+// end is spelled out, and a value without a final newline says nothing of one.
+func TestCLIToolUIShowsEveryByteOfAMultilineValue(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	call := commandCall(t, "call-crlf", []string{"cat"}, core.UniversalCommandArgs{Stdin: toolStringPointer("a\r\nb")})
+	NewCLIToolUI(notifier).ShowCall(0, 1, call, nil)
+	want := `
+Tools: 1
+[1/1] Command: ["cat"]
+      Stdin (2 lines):
+      Control characters are shown as \uXXXX.
+      | a\u000d
+      | b
 `
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() = %q, want %q", got, want)
@@ -145,7 +188,9 @@ func TestCLIToolUIShowCallDisplaysStdioSettings(t *testing.T) {
 	want := `
 Tools: 1
 [1/1] Command: ["sort"]
-      Stdin: "beta\nalpha\n"
+      Stdin (2 lines, ending with a newline):
+      | beta
+      | alpha
       Stdout file: "sorted.txt"
       Stderr file: "errors.txt"
 `
@@ -187,8 +232,8 @@ func TestCLIToolUIAfterExecuteHandlesNoOutputTimeoutAndTruncation(t *testing.T) 
 
 	got := notifier.out.String()
 	for _, want := range []string{
-		"[1/3] Completed in 3ms (no captured output)",
-		"[2/3] Timed out in 25ms\n      Partial output:\npartial",
+		"[1/3] Completed in 3ms (no output)",
+		"[2/3] Timed out in 25ms\n      Partial output (1 line):\n      | partial",
 		"[3/3] Completed in 7ms (output truncated at 1KiB)",
 	} {
 		if !strings.Contains(got, want) {
@@ -235,12 +280,12 @@ func TestCLIToolUIAfterExecuteReportsStdioDestinations(t *testing.T) {
 
 	got := notifier.out.String()
 	for _, want := range []string{
-		`[1/6] "sort": Completed in 11ms (stdin provided; stdout file "sorted.txt")`,
-		`[2/6] "build": Completed in 12ms (stdout file "build.log"; stderr file "build.log")`,
-		`[3/6] "check": Completed in 13ms (stdout file "result.txt"; stderr file "errors.txt")`,
-		`[4/6] "consume": Completed in 14ms (stdin provided; no captured output)`,
-		`[5/6] "consume": Completed in 15ms (stdin file "input.txt"; no captured output)`,
-		`[6/6] "consume": Completed in 16ms (stdin provided; no captured output)`,
+		`[1/6] sort: Completed in 11ms (stdin provided; stdout file "sorted.txt")`,
+		`[2/6] build: Completed in 12ms (stdout file "build.log"; stderr file "build.log")`,
+		`[3/6] check: Completed in 13ms (stdout file "result.txt"; stderr file "errors.txt")`,
+		`[4/6] consume: Completed in 14ms (stdin provided; no output)`,
+		`[5/6] consume: Completed in 15ms (stdin file "input.txt"; no output)`,
+		`[6/6] consume: Completed in 16ms (stdin provided; no output)`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tool results missing %q:\n%s", want, got)
@@ -261,26 +306,94 @@ func TestCLIToolUIAfterExecuteReportsStdioSettingsOnFailure(t *testing.T) {
 
 	NewCLIToolUI(notifier).AfterExecute(calls, results)
 
-	want := `[1/1] "sort": Failed in 9ms: exit status 1 (stdin file "input.txt"; stdout file "output.txt"; stderr file "errors.txt")`
+	want := `[1/1] sort: Failed in 9ms: exit status 1 (stdin file "input.txt"; stdout file "output.txt"; stderr file "errors.txt")`
 	if got := notifier.out.String(); !strings.Contains(got, want) {
 		t.Fatalf("tool result missing %q:\n%s", want, got)
 	}
 }
 
-func TestWriteToolOutputUsesBoundedWritesWithoutIndenting(t *testing.T) {
+func TestWriteToolOutputQuotesEveryLineInBoundedWrites(t *testing.T) {
 	notifier := &toolOutputWriteRecorder{}
 	output := strings.Repeat("x\n", toolOutputChunkBytes+1) + "tail"
 
-	writeToolOutput(notifier, output)
+	writeToolOutput(notifier, "Output", "stdout+stderr", output, Options{})
 
-	if notifier.maxWrite > toolOutputChunkBytes {
-		t.Fatalf("largest output write = %d bytes, want at most %d", notifier.maxWrite, toolOutputChunkBytes)
+	if notifier.maxWrite > toolOutputChunkBytes+len(DetailIndent+QuotePrefix)+16 {
+		t.Fatalf("largest output write = %d bytes, want about %d", notifier.maxWrite, toolOutputChunkBytes)
 	}
 	if notifier.outputWrites < 2 {
 		t.Fatalf("output writes = %d, want more than one", notifier.outputWrites)
 	}
-	if got, want := notifier.out.String(), output+"\n"; got != want {
-		t.Fatalf("written output differs from source\ngot:  %q\nwant: %q", got, want)
+	lines := strings.Split(strings.TrimSuffix(notifier.out.String(), "\n"), "\n")
+	if lines[0] != fmt.Sprintf("%sOutput (stdout+stderr, %d lines):", DetailIndent, toolOutputChunkBytes+2) {
+		t.Fatalf("label = %q", lines[0])
+	}
+	for _, line := range lines[1 : len(lines)-1] {
+		if line != DetailIndent+QuotePrefix+"x" {
+			t.Fatalf("output line %q is not quoted under the label", line)
+		}
+	}
+	if last := lines[len(lines)-1]; last != DetailIndent+QuotePrefix+"tail" {
+		t.Fatalf("last line = %q", last)
+	}
+}
+
+// Long output on a live terminal shows its first and last lines, how many lay
+// between, and where to read them; nothing is lost from the result itself.
+func TestWriteToolOutputShortensLongOutputOnRequest(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	var output strings.Builder
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&output, "line %d\n", i)
+	}
+	output.WriteString(strings.Repeat("y", shortOutputLineBytes+10) + "\n")
+	writeToolOutput(notifier, "Output", "stdout+stderr", output.String(), Options{ShortOutput: true, MoreHint: "/show last prints them"})
+	got := notifier.out.String()
+	for _, want := range []string{
+		"      Output (stdout+stderr, 301 lines; showing the first 10 and last 10):\n      | line 1\n",
+		"      | line 10\n      [281 lines not shown; /show last prints them]\n      | line 292\n",
+		"      | line 300\n      | " + strings.Repeat("y", shortOutputLineBytes) + " [10 more bytes]\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("short output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "line 11\n") || strings.Contains(got, "line 291\n") {
+		t.Fatalf("hidden lines were shown:\n%s", got)
+	}
+}
+
+// Short output cuts a long line though every line is shown, and says where
+// to read it whole.
+func TestWriteToolOutputCutsALongLineOfShortOutput(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	writeToolOutput(notifier, "Output", "", "short\n"+strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{ShortOutput: true, MoreHint: "/show last prints them"})
+	want := "      Output (2 lines):\n" +
+		"      | short\n" +
+		"      | " + strings.Repeat("x", shortOutputLineBytes) + " [3000 more bytes]\n" +
+		"      [1 line cut; /show last prints them]\n"
+	if got := notifier.out.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+	notifier = newFormatTestNotifier()
+	writeToolOutput(notifier, "Output", "", strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{})
+	if got := notifier.out.String(); strings.Contains(got, "more bytes") {
+		t.Fatalf("full output was cut: %q", got[len(got)-40:])
+	}
+}
+
+// A command's output can hold escape sequences and bidi overrides; on the
+// terminal they are spelled out instead of acting on what the operator reads.
+func TestWriteToolOutputShowsControlCharacters(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	writeToolOutput(notifier, "Output", "", "\x1b[31mred\x1b[0m\r\nplain\u202eevil\n\tindented\n", Options{})
+	want := "      Output (3 lines):\n" +
+		"      Control characters are shown as \\uXXXX.\n" +
+		"      | \\u001b[31mred\\u001b[0m\n" +
+		"      | plain\\u202eevil\n" +
+		"      | \tindented\n"
+	if got := notifier.out.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
 
@@ -413,10 +526,9 @@ Tools: 1
 Running 1 tool...
 
 Tool results:
-[1/1] "/bin/echo": Completed in NNms
-      Output:
-hi
-      End output.
+[1/1] /bin/echo: Completed in NNms
+      Output (stdout+stderr, 1 line):
+      | hi
 
 `,
 		},
@@ -432,7 +544,7 @@ Tools: 1
 Running 1 tool...
 
 Tool results:
-[1/1] "/bin/sh": Failed in NNms: exit status 3
+[1/1] /bin/sh: Failed in NNms: exit status 3
 
 `,
 		},
@@ -449,7 +561,7 @@ Tools: 1
 Running 1 tool...
 
 Tool results:
-[1/1] "/bin/sleep": Timed out in NNms
+[1/1] /bin/sleep: Timed out in NNms
 
 `,
 		},
@@ -465,7 +577,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "/bin/rm": Not run: blacklisted
+[1/1] /bin/rm: Not run: blacklisted
 
 `,
 		},
@@ -482,7 +594,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "/bin/cat": Not run: not in whitelist (stdin provided)
+[1/1] /bin/cat: Not run: not in whitelist (stdin provided)
       Hint: Whitelist file: <TMP>/wl.txt
       Hint: To allow this command, either:
               1. Add {"command":["/bin/cat"],"stdin":true} to your whitelist file and use -tool-whitelist <file>
@@ -502,7 +614,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "/bin/echo": Not run: no terminal available for approval
+[1/1] /bin/echo: Not run: no terminal available for approval
       Hint: Allow via one of:
               - Run from a terminal so commands can be approved
               - Use -tool-auto-approve
@@ -522,7 +634,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "/bin/echo": Not run: approval disabled by -tool-non-interactive
+[1/1] /bin/echo: Not run: approval disabled by -tool-non-interactive
       Hint: Allow via one of:
               - Run interactively without -tool-non-interactive
               - Use -tool-auto-approve
@@ -542,7 +654,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "/bin/echo": Not run: user denied permission
+[1/1] /bin/echo: Denied by you
 
 `,
 		},
@@ -558,7 +670,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "/bin/echo": Not run: approval failed: read response: input/output error
+[1/1] /bin/echo: Not run: approval failed: read response: input/output error
 
 `,
 		},
@@ -575,7 +687,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "other_tool": Not run: unsupported tool: other_tool
+[1/1] other_tool: Not run: unsupported tool: other_tool
 
 `,
 		},
@@ -592,7 +704,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "universal_command": Not run: command array cannot be empty
+[1/1] universal_command: Not run: command array cannot be empty
 
 `,
 		},
@@ -615,9 +727,9 @@ Tools: 2
 No tools will be run.
 
 Tool results:
-[1/2] "/bin/echo": Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
+[1/2] /bin/echo: Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
 
-[2/2] "/bin/echo": Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
+[2/2] /bin/echo: Not run: another command in this round also writes to "<TMP>/shared.log"; give each command its own output file or run them in separate rounds (stdout file "<TMP>/shared.log")
 
 `,
 		},
@@ -627,15 +739,11 @@ Tool results:
 			approver: executorTestApprover{approve: true},
 			cancel:   true,
 			calls:    []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"]}`)},
+			// The turn reports a cancellation once; a round that ran
+			// nothing adds no results saying the same thing.
 			want: `
 Tools: 1
 [1/1] Command: ["/bin/echo","hi"]
-
-No tools will be run.
-
-Tool results:
-[1/1] "/bin/echo": Not run: execution cancelled
-
 `,
 		},
 	}
@@ -667,22 +775,22 @@ func TestCommandThatNeverStartedIsNotRenderedAsAFailure(t *testing.T) {
 		{
 			name:  "missing workdir with a redirection",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["/bin/echo","hi"],"workdir":"/no/such/dir","stdout_file":%q}`, filepath.Join(dir, "out.log")))},
-			want:  `[1/1] "/bin/echo": Not run: chdir /no/such/dir: no such file or directory (stdout file "<TMP>/out.log")`,
+			want:  `[1/1] /bin/echo: Not run: chdir /no/such/dir: no such file or directory (stdout file "<TMP>/out.log")`,
 		},
 		{
 			name:  "missing workdir with no redirection",
 			calls: []core.ToolCall{universalCall("a", `{"command":["/bin/echo","hi"],"workdir":"/no/such/dir"}`)},
-			want:  `[1/1] "/bin/echo": Not run: chdir /no/such/dir: no such file or directory`,
+			want:  `[1/1] /bin/echo: Not run: chdir /no/such/dir: no such file or directory`,
 		},
 		{
 			name:  "executable that does not exist",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["./biuld.sh"],"stdout_file":%q}`, filepath.Join(dir, "out.log")))},
-			want:  `[1/1] "./biuld.sh": Not run: fork/exec ./biuld.sh: no such file or directory (stdout file "<TMP>/out.log")`,
+			want:  `[1/1] ./biuld.sh: Not run: fork/exec ./biuld.sh: no such file or directory (stdout file "<TMP>/out.log")`,
 		},
 		{
 			name:  "redirection that cannot be opened",
 			calls: []core.ToolCall{universalCall("a", fmt.Sprintf(`{"command":["/bin/echo","hi"],"stdout_file":%q}`, notARegularFile))},
-			want:  `[1/1] "/bin/echo": Not run: open stdout file "<TMP>/adirectory": "<TMP>/adirectory" is neither a regular file nor one of ` + constants.PermittedCommandDevicesText + ` (stdout file "<TMP>/adirectory")`,
+			want:  `[1/1] /bin/echo: Not run: open stdout file "<TMP>/adirectory": "<TMP>/adirectory" is neither a regular file nor one of ` + constants.PermittedCommandDevicesText + ` (stdout file "<TMP>/adirectory")`,
 		},
 	}
 
@@ -908,13 +1016,13 @@ func TestCLIToolUIMultilineDenialStaysInsideItsResult(t *testing.T) {
 			}
 			NewCLIToolUI(notifier).AfterExecute(calls, []core.ToolResult{result, {ID: "completed", Output: "real tool output\n", Elapsed: 3}})
 			want := "\nTool results:\n" +
-				"[1/2] " + core.MarshalJSONForDisplay(toolName) + ": Not run: user denied permission; reason provided by the user: Use the saved report.\n" +
+				"[1/2] " + toolName + ": Denied by you: Use the saved report.\n" +
 				DetailIndent + "\n" +
 				DetailIndent + "Assistant 8\n" +
 				DetailIndent + "lmc: Working\n" +
 				DetailIndent + "[2/2] Completed in 1ms\n" +
 				DetailIndent + "Keep café data private: 100%.\n\n" +
-				"[2/2] \"universal_command\": Completed in 3ms\n" + DetailIndent + "Output:\nreal tool output\n" + DetailIndent + "End output.\n\n"
+				"[2/2] universal_command: Completed in 3ms\n" + DetailIndent + "Output (1 line):\n" + DetailIndent + "| real tool output\n\n"
 			if got := notifier.out.String(); got != want {
 				t.Fatalf("multiline denial transcript=%q, want %q", got, want)
 			}
@@ -937,7 +1045,7 @@ func TestCLIToolUIMultilineRerunDenialStaysInsideItsResult(t *testing.T) {
 	call := core.ToolCall{ID: result.ID, Name: core.UniversalCommandToolName}
 	NewCLIToolUI(notifier).AfterExecute([]core.ToolCall{call}, []core.ToolResult{result})
 	want := "\nTool results:\n" +
-		"[1/1] \"universal_command\": Failed in 0ms: outcome unknown: an earlier run started it and recorded no outcome; it was not run again; user denied permission; reason provided by the user: Use the saved report.\n" +
+		"[1/1] universal_command: Failed in 0ms: outcome unknown: an earlier run started it and recorded no outcome; it was not run again; user denied permission; reason provided by the user: Use the saved report.\n" +
 		DetailIndent + "Assistant 8\n" + DetailIndent + "lmc: Working\n\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("multiline rerun denial transcript=%q, want %q", got, want)
@@ -945,5 +1053,76 @@ func TestCLIToolUIMultilineRerunDenialStaysInsideItsResult(t *testing.T) {
 	block := core.ToolResultBlockFromResult(result, call.Name)
 	if block.Content != result.Error {
 		t.Fatalf("model-facing unknown outcome changed: %q", block.Content)
+	}
+}
+
+// Each round's results start their own list, whether the executor streamed
+// them or a saved round arrived whole.
+func TestEachRoundStartsItsOwnResultList(t *testing.T) {
+	calls := []core.ToolCall{commandCall(t, "a", []string{"ls"}, core.UniversalCommandArgs{})}
+	results := []core.ToolResult{{ID: "a", Output: "one\n", Elapsed: 2}}
+	notifier := newFormatTestNotifier()
+	ui := NewCLIToolUI(notifier)
+	ui.ResultReady(0, 1, calls[0], results[0])
+	ui.AfterExecute(calls, results)
+	ui.AfterExecute(calls, results)
+	if got := strings.Count(notifier.out.String(), "Tool results:"); got != 2 {
+		t.Fatalf("%d lists for two rounds:\n%s", got, notifier.out.String())
+	}
+}
+
+// A bare program name that resolves outside the system directories is named
+// on the review, where a surprising PATH entry would otherwise go unseen.
+func TestCLIToolUIShowsUnusualPrograms(t *testing.T) {
+	dir := t.TempDir()
+	program := filepath.Join(dir, "lmc-test-tool")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	notifier := newFormatTestNotifier()
+	ui := NewCLIToolUIWithOptions(notifier, Options{ShowPrograms: true})
+	ui.ShowCall(0, 2, commandCall(t, "a", []string{"lmc-test-tool"}, core.UniversalCommandArgs{}), nil)
+	ui.ShowCall(1, 2, commandCall(t, "b", []string{"sh", "-c", "true"}, core.UniversalCommandArgs{}), nil)
+	got := notifier.out.String()
+	if !strings.Contains(got, "[1/2] Command: [\"lmc-test-tool\"]\n      Program: "+program+"\n") {
+		t.Fatalf("unusual program not named:\n%s", got)
+	}
+	if strings.Count(got, "Program:") != 1 {
+		t.Fatalf("a system program was named too:\n%s", got)
+	}
+}
+
+// The note under a call that will not run gives the reason alone.
+func TestShowCallNoteSitsAtTheDetailColumn(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	NewCLIToolUI(notifier).ShowCallNote(0, "Will not run: blacklisted")
+	if got, want := notifier.out.String(), "      Will not run: blacklisted\n"; got != want {
+		t.Fatalf("ShowCallNote() = %q, want %q", got, want)
+	}
+}
+
+// Names, notes, and arguments come from the model; each reaches the terminal
+// with its hidden characters spelled out.
+func TestCLIToolUISpellsOutControlsFromTheModel(t *testing.T) {
+	notifier := newFormatTestNotifier()
+	ui := NewCLIToolUI(notifier)
+	ui.ShowCall(0, 2, core.ToolCall{ID: "x", Name: "odd\x1b[2Jtool", Args: []byte("{\"a\":\"\x1b]52;c;x\u0007\"")}, nil)
+	ui.ShowCallNote(0, "Cannot start now: chdir /tmp/\x1b[2J: no such file or directory")
+	call := commandCall(t, "rtl", []string{"evil\u202ecod"}, core.UniversalCommandArgs{})
+	ui.AfterExecute([]core.ToolCall{call}, []core.ToolResult{{ID: "rtl", Error: "exit status 1 \u009b", Elapsed: 5}})
+	got := notifier.out.String()
+	for _, want := range []string{
+		`Tool: "odd\u001b[2Jtool"`,
+		`Arguments: {"a":"\u001b]52;c;x\u0007"`,
+		`Cannot start now: chdir /tmp/\u001b[2J: no such file or directory`,
+		`[1/1] "evil\u202ecod": Failed in 5ms: exit status 1 \u009b`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.ContainsAny(got, "\x1b\u0007\u009b\u202e") {
+		t.Fatalf("a control reached the terminal: %q", got)
 	}
 }

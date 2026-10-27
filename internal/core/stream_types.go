@@ -59,6 +59,7 @@ type AnthropicStreamState struct {
 	blocks           []Block
 	streamEvents     []ResponseStreamEvent
 	usage            *Usage
+	model            string
 }
 
 // ParseLine implements StreamState for Anthropic SSE format
@@ -78,6 +79,9 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 			// backends, restates the input) under a top-level usage. Merge so
 			// each event contributes the counts it carries.
 			s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
+			if s.model == "" {
+				s.model = ModelFromPayload([]byte(data))
+			}
 
 		case "content_block_start":
 			var blockStart struct {
@@ -101,6 +105,10 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 				if blockStart.ContentBlock.Type == "tool_use" {
 					s.currentToolName = blockStart.ContentBlock.Name
 					s.partialInput = ""
+					s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
+						Type: ResponseStreamToolCallStart,
+						Text: blockStart.ContentBlock.Name,
+					})
 				}
 				if blockStart.ContentBlock.Type == "thinking" || blockStart.ContentBlock.Type == "redacted_thinking" {
 					s.streamEvents = append(s.streamEvents, ResponseStreamEvent{

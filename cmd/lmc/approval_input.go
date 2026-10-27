@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"lmtools/internal/ui/tools"
 	"strings"
 )
 
@@ -24,10 +23,16 @@ func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine) (inp
 	}
 	show := func(prompt string) {
 		if first == nil { // The initial approval question was already shown.
-			if owner != nil {
-				owner.setPrompt(tools.DetailIndent + prompt)
+			// An answer keeps its own prompts under the detail column.
+			if prompt == continuationPrompt {
+				prompt = approvalContinuationPrompt
+			} else {
+				prompt = approvalPrompt
 			}
-			a.notifier.Promptf("%s%s", tools.DetailIndent, prompt)
+			if owner != nil {
+				owner.setPrompt(prompt)
+			}
+			a.notifier.Promptf("%s", prompt)
 		}
 	}
 	var draft string

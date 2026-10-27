@@ -240,7 +240,7 @@ func TestEditBufferRejectedInsertionRetainsBothSides(t *testing.T) {
 
 func TestEditBufferTracksOnlyHistorySlashEscape(t *testing.T) {
 	e := newEditBuffer(100, nil)
-	e.replaceHistory("/exit")
+	e.replaceHistory(replPrompt{text: "/exit"})
 	e.key("\x12")
 	e.key("\x1b")
 	if !e.inputLine(false).escapedSlash {
@@ -251,13 +251,13 @@ func TestEditBufferTracksOnlyHistorySlashEscape(t *testing.T) {
 	if e.inputLine(false).escapedSlash {
 		t.Fatal("inserting a new prefix retained a stale history escape")
 	}
-	e.replaceHistory("/exit")
+	e.replaceHistory(replPrompt{text: "/exit"})
 	e.remove(0, 1)
 	e.insert("/")
 	if e.inputLine(false).escapedSlash {
 		t.Fatal("deleting the synthetic slash retained its escape")
 	}
-	e.replaceHistory("/exit")
+	e.replaceHistory(replPrompt{text: "/exit"})
 	e.key("\x15")
 	e.paste("// comment", false)
 	if e.inputLine(false).escapedSlash {

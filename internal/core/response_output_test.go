@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,5 +171,85 @@ func TestReasoningTextForDisplayExcludesOpaqueFields(t *testing.T) {
 	exact := "  provider text\n"
 	if got := ReasoningTextForDisplay(ReasoningBlock{Text: exact, Signature: "secret"}); got != exact {
 		t.Fatalf("ReasoningTextForDisplay() = %q, want exact block.Text %q", got, exact)
+	}
+}
+
+// cancellingBody streams its events, then cancels the turn and fails the next
+// read the way an HTTP body does when its request context ends.
+type cancellingBody struct {
+	data   *strings.Reader
+	cancel context.CancelFunc
+}
+
+func (b *cancellingBody) Read(p []byte) (int, error) {
+	if b.data.Len() > 0 {
+		return b.data.Read(p)
+	}
+	b.cancel()
+	return 0, context.Canceled
+}
+
+func (*cancellingBody) Close() error { return nil }
+
+// An answer the operator interrupted after it began is kept as it was read,
+// without the thinking or the half-written tool call it had reached, so the
+// next turn can refer to it.
+func TestHandleResponseKeepsTheTextOfACancelledStream(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":3,"output_tokens":0}}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The keeper climbed"}}`,
+		``,
+		``,
+	}, "\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	output := &recordingResponseOutput{}
+	response, err := HandleResponseWithOptions(ctx,
+		RequestOptions{Provider: "anthropic", Model: "claude-test", StreamChat: true},
+		&http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &cancellingBody{data: strings.NewReader(stream), cancel: cancel}},
+		&MockLogger{}, nil, ResponseParseOptions{Output: output})
+	if err != nil {
+		t.Fatalf("HandleResponseWithOptions() error = %v", err)
+	}
+	if response.Text != "The keeper climbed" || response.IncompleteReason != "cancelled" || len(response.Blocks) != 1 || response.Usage != nil {
+		t.Fatalf("response = %#v", response)
+	}
+	if block, ok := response.Blocks[0].(TextBlock); !ok || block.Text != response.Text {
+		t.Fatalf("blocks = %#v", response.Blocks)
+	}
+	if len(output.completed) != 1 || output.completed[0].IncompleteReason != "cancelled" {
+		t.Fatalf("presentation did not see the cancelled response: %#v", output.completed)
+	}
+	if err := ValidateResponse(RequestOptions{}, response); err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("ValidateResponse() = %v, want a cancellation", err)
+	}
+}
+
+// Cancelled before any answer text, a stream keeps nothing, as before.
+func TestHandleResponseKeepsNothingFromAStreamCancelledBeforeText(t *testing.T) {
+	stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{}}\n\n"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := HandleResponseWithOptions(ctx,
+		RequestOptions{Provider: "anthropic", Model: "claude-test", StreamChat: true},
+		&http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &cancellingBody{data: strings.NewReader(stream), cancel: cancel}},
+		&MockLogger{}, nil, ResponseParseOptions{Output: &recordingResponseOutput{}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }

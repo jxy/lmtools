@@ -15,11 +15,16 @@ const (
 	ResponseStreamReasoningStart ResponseStreamEventType = "reasoning_start"
 	ResponseStreamReasoningDelta ResponseStreamEventType = "reasoning_delta"
 	ResponseStreamReasoningEnd   ResponseStreamEventType = "reasoning_end"
+	// ResponseStreamToolCallStart marks the model beginning a tool call. Text
+	// carries the tool name; the arguments follow silently until the call is
+	// complete, which is the gap a presenter can explain to the operator.
+	ResponseStreamToolCallStart ResponseStreamEventType = "tool_call_start"
 )
 
 // ResponseStreamEvent is a semantic output event produced while parsing a
 // provider stream. ReasoningType contains the provider block type on start/end
-// events; Text is populated only for visible text and reasoning deltas.
+// events; Text is populated for visible text and reasoning deltas and names the
+// tool on a tool call start.
 type ResponseStreamEvent struct {
 	Type          ResponseStreamEventType
 	Text          string

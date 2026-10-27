@@ -89,19 +89,39 @@ func TestResponsePresenterWritesNonStreamingAnswer(t *testing.T) {
 	}
 }
 
+// The note is for reasoning the provider counted and did not show. A response
+// without reasoning tokens, which adaptive models give to easy questions, gets
+// no note.
 func TestResponsePresenterReportsMissingVisibleThinking(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	presenter := newResponsePresenter(&stdout, &stderr, true)
-	presenter.HandleResponseComplete(core.Response{
-		Text:  "answer",
-		Usage: &core.Usage{},
-	})
-
-	if got, want := stdout.String(), "answer"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if got, want := stderr.String(), "\n\n"+noThinkingSummaryNote; got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
+	reasoning := 120
+	for _, tt := range []struct {
+		name  string
+		usage *core.Usage
+		repl  bool
+		want  string
+	}{
+		{name: "counted and hidden", usage: &core.Usage{ReasoningTokens: &reasoning}, want: "\n\nNote: No visible thinking was returned for 120 reasoning tokens.\n"},
+		{name: "repl notes", usage: &core.Usage{ReasoningTokens: &reasoning}, repl: true, want: "\n\nNo visible thinking was returned for 120 reasoning tokens.\n"},
+		{name: "no reasoning", usage: &core.Usage{}, want: "\n\n"},
+		{name: "no usage", usage: nil, want: ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			presenter := newResponsePresenter(&stdout, &stderr, true)
+			// The note goes through the run's notifier, which writes to the
+			// same stream and owns the prefix.
+			presenter.notifier = cliui.NewNotifierWithWriter(&stderr)
+			if tt.repl {
+				presenter.notifier = cliui.NewREPLNotifier(&stderr)
+			}
+			presenter.HandleResponseComplete(core.Response{Text: "answer", Usage: tt.usage})
+			if got, want := stdout.String(), "answer"; got != want {
+				t.Fatalf("stdout = %q, want %q", got, want)
+			}
+			if got := stderr.String(); got != tt.want {
+				t.Fatalf("stderr = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -219,10 +239,9 @@ Tools: 1
 Running 1 tool...
 
 Tool results:
-[1/1] "date": Completed in 3ms
-      Output:
-Wed Aug 26
-      End output.
+[1/1] date: Completed in 3ms
+      Output (stdout+stderr, 1 line):
+      | Wed Aug 26
 
 Final answer.
 

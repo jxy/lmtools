@@ -18,6 +18,12 @@ type cliApprover struct {
 	answers  answerSource
 	history  *replHistory
 	stop     context.CancelCauseFunc
+	// quietCancel leaves an interrupted question unannounced: the REPL
+	// reports the cancelled turn once, in words of its own.
+	quietCancel bool
+	// bell, when set, is the REPL's /bell setting: on, the terminal rings
+	// as a question appears.
+	bell *bool
 }
 
 // newOperatorToolSurface builds the operator-facing half of tool execution:
@@ -74,36 +80,64 @@ func newCLIApproverWithReader(notifier core.Notifier, input io.Reader) *cliAppro
 
 // question is what an approval question says: the prompt, and the notices
 // for an answer missing because input ended, a question cancelled, and
-// input typed before the question that was discarded.
+// input typed before the question that was discarded. remaining counts the
+// later calls an answer of "a" approves along with this one; zero means the
+// answer is not offered.
 type question struct {
 	prompt, eofNotice, cancelNotice, discardedNotice string
 	compose                                          bool
+	remaining                                        int
+	// lead opens the question, before any notice: a named question
+	// starts after an empty line, apart from the calls listed above it.
+	lead string
 }
 
-// toolQuestion is a question under a tool's review block, aligned with the
-// block's detail column.
-func toolQuestion(prompt, eofNotice, cancelNotice string) question {
-	return question{
+// toolQuestion asks about one call. The executor shows a round's calls before
+// it asks about any of them, and says which call each question is about; such
+// a question starts the line with the call's number. A question asked without
+// a round, such as a rerun, sits under the call's review block, aligned with
+// its detail column.
+func toolQuestion(ctx context.Context, ask, eofNotice, cancelNotice string) question {
+	q := question{
 		compose:         true,
-		prompt:          tools.DetailIndent + prompt + toolApprovalChoices,
+		prompt:          tools.DetailIndent + ask + toolApprovalChoices,
 		eofNotice:       "\n" + tools.DetailIndent + eofNotice + "\n",
 		cancelNotice:    "\n" + tools.DetailIndent + cancelNotice + "\n",
 		discardedNotice: tools.DetailIndent + discardedInputNotice + "\n",
 	}
+	if target, ok := core.ApprovalTargetFrom(ctx); ok {
+		choices := toolApprovalChoices
+		if target.Remaining > 0 {
+			choices = toolApprovalChoicesWithRest
+			q.remaining = target.Remaining
+		}
+		q.prompt = fmt.Sprintf("[%d/%d] %s%s", target.Index+1, target.Total, ask, choices)
+		q.lead = "\n"
+	}
+	return q
+}
+
+// commandName names a command inside a question by its program.
+func commandName(args core.UniversalCommandArgs) string {
+	call := core.ToolCall{Name: core.UniversalCommandToolName}
+	return core.ToolCallDisplayName(call, &args)
 }
 
 // discardedInputNotice reports a complete line that was typed before a
 // question appeared and dropped, so it could not answer the question.
 const discardedInputNotice = "Discarded input typed before this question."
 
-const toolApprovalChoices = "[y/N or reason; /ed to edit]: "
+const (
+	toolApprovalChoices         = "[y/N or reason; /ed to edit]: "
+	toolApprovalChoicesWithRest = "[y/N, a = this and the rest, or reason; /ed to edit]: "
+)
 
-func (a *cliApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) (core.Approval, error) {
+func (a *cliApprover) Approve(ctx context.Context, args core.UniversalCommandArgs) (core.Approval, error) {
 	// The tool UI renders the command through this same notifier immediately
 	// above this prompt — newOperatorToolSurface hands both halves one stream —
 	// so the question and its outcomes line up under that block's detail column.
-	return a.ask(ctx, toolQuestion(
-		"Allow execution? ",
+	return a.ask(ctx, toolQuestion(ctx,
+		"Allow "+commandName(args)+"? ",
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
 	))
@@ -113,8 +147,8 @@ func (a *cliApprover) Approve(ctx context.Context, _ core.UniversalCommandArgs) 
 // above it showed the path the model asked for; the question names the type
 // and size of what was actually read, which is what will be sent.
 func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, image core.ImageBlock) (core.Approval, error) {
-	return a.ask(ctx, toolQuestion(
-		fmt.Sprintf("Send %s to the model? ", core.DescribeImageBlock(image)),
+	send := fmt.Sprintf("Send %s to the model? ", core.DescribeImageBlock(image))
+	return a.ask(ctx, toolQuestion(ctx, send,
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
 	))
@@ -124,8 +158,8 @@ func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, im
 // showed the server, the tool, and the arguments; the question names the
 // server and tool the way a rule would.
 func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (core.Approval, error) {
-	return a.ask(ctx, toolQuestion(
-		fmt.Sprintf("Call %s/%s? ", call.Server, call.Tool),
+	ask := "Call " + core.DisplayName(call.Server+"/"+call.Tool) + "? "
+	return a.ask(ctx, toolQuestion(ctx, ask,
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
 	))
@@ -136,8 +170,8 @@ func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (core.A
 // it again may repeat whatever it already did, which is why the answer
 // defaults to no and no policy can give it.
 func (a *cliApprover) ApproveRerun(ctx context.Context, call core.ToolCall) (core.Approval, error) {
-	return a.ask(ctx, toolQuestion(
-		fmt.Sprintf("Run %s again? It may already have run. ", call.Name),
+	ask := "Run " + core.ToolCallDisplayName(call, nil) + " again? It may already have run. "
+	return a.ask(ctx, toolQuestion(ctx, ask,
 		"No interactive input available; not running it again.",
 		"Rerun prompt cancelled.",
 	))
@@ -168,13 +202,23 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		bound = maxTurnBytes
 		readBound = bound + 2 // Continuation marker and carriage return.
 	}
+	editing := false
 	if owner, ok := a.answers.(*inputOwner); ok && owner.editing {
-		q.prompt = strings.TrimSpace(q.prompt) + "\n" + tools.DetailIndent + "> "
-		owner.setPrompt(tools.DetailIndent + "> ")
+		editing = true
+		// The question keeps its indent; only the space that would have
+		// held the answer goes, since the answer has a line of its own.
+		q.prompt = strings.TrimRight(q.prompt, " ") + "\n" + approvalPrompt
+		owner.setPrompt(approvalPrompt)
 	}
 	got, err := a.answers.answer(ctx, readBound, func(discardedLine bool) {
+		if q.lead != "" {
+			a.notifier.Promptf("%s", q.lead)
+		}
 		if discardedLine {
 			a.notifier.Promptf("%s", q.discardedNotice)
+		}
+		if a.bell != nil && *a.bell {
+			a.notifier.Promptf("\a")
 		}
 		a.notifier.Promptf("%s", q.prompt)
 	})
@@ -186,21 +230,24 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			a.notifier.Promptf("%s", q.cancelNotice)
+			if !a.quietCancel {
+				a.notifier.Promptf("%s", q.cancelNotice)
+			}
 			return core.Approval{}, ctxErr
 		}
 		return core.Approval{}, errors.WrapError("read response", err)
 	}
-	if got.eof {
-		if owner, ok := a.answers.(*inputOwner); ok && owner.editing {
-			// The REPL editor uses Ctrl-D to discard, including pasted input.
-			// Only Enter submits an editable approval; retain the canonical
-			// single-run reader's existing text-plus-EOF behavior below.
-			if got.text != "" || got.tooLong {
-				a.notifier.Infof("Unsubmitted approval draft discarded.")
-			}
-			got = inputLine{eof: true}
+	if got.eof && editing {
+		// In the editor Ctrl-D ends input only on an empty line, and an
+		// answer nobody gave is a refusal. Only Enter submits; text an
+		// unfinished paste left behind is discarded.
+		if got.text != "" || got.tooLong {
+			a.notifier.Infof("Unsubmitted approval draft discarded.")
 		}
+		a.notifier.Promptf("\n%sDenied.\n", tools.DetailIndent)
+		return core.Approval{}, nil
+	}
+	if got.eof {
 		if q.compose {
 			text, continues := continuationMarker(strings.TrimSuffix(got.text, "\r"))
 			command, _ := splitREPLCommand(text)
@@ -230,15 +277,25 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		a.notifier.Warnf("Approval response is too long; denying without a reason.")
 		return core.Approval{}, nil
 	}
-	return parseApprovalAnswer(got.text), nil
+	approval := parseApprovalAnswer(got.text)
+	if approval.Rest && q.remaining > 0 {
+		a.notifier.Promptf("%sApproved this call and the remaining %s.\n", tools.DetailIndent, core.Plural(q.remaining, "call"))
+	}
+	return approval, nil
 }
 
+// parseApprovalAnswer classifies a submitted answer. y or yes approves; a or
+// all approves the rest of the round too, which is this call alone when no
+// later call would ask; n, no, or nothing denies; anything else denies with
+// the text as the reason.
 func parseApprovalAnswer(line string) core.Approval {
 	text := strings.TrimSpace(line)
-	if isAffirmativeAnswer(text) {
+	switch {
+	case isAffirmativeAnswer(text):
 		return core.Approval{Approved: true}
-	}
-	if text == "" || strings.EqualFold(text, "n") || strings.EqualFold(text, "no") {
+	case strings.EqualFold(text, "a") || strings.EqualFold(text, "all"):
+		return core.Approval{Approved: true, Rest: true}
+	case text == "" || strings.EqualFold(text, "n") || strings.EqualFold(text, "no"):
 		return core.Approval{}
 	}
 	return core.Approval{Reason: text}

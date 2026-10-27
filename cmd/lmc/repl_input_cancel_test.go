@@ -29,7 +29,7 @@ func TestTerminalEditorInterruptDiscardsReadAhead(t *testing.T) {
 		{"typed input", strings.Repeat("x", 256) + "UNSENT\n", "xxxxx"},
 		{"history search", "\x12query\r\nUNSENT\n", "History search:"},
 		{"paste start", "draft\x1b[200~UNSENT\n\x1b[201~\n", "> draft"},
-		{"paste preview", "\x1b[200~draft\x1b[201~\nUNSENT\n", "End draft."},
+		{"paste preview", "\x1b[200~draft\nline\x1b[201~\nUNSENT\n", "Enter sends; arrows edit"},
 		{"partial UTF-8", "draft\xc3", "> draft"},
 		{"partial escape", "draft\x1b[", "> draft"},
 		{"Enter redraw", "draft\rUNSENT\n", "> draft"},

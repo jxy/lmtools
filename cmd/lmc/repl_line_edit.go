@@ -165,11 +165,17 @@ func (e *editBuffer) recall(direction int) {
 	if e.historyAt == len(e.history) {
 		e.restore(e.saved)
 	} else {
-		e.replaceHistory(e.history[e.historyAt].text)
+		e.replaceHistory(e.history[e.historyAt])
 	}
 }
 
-func (e *editBuffer) replaceHistory(text string) {
+func (e *editBuffer) replaceHistory(entry replPrompt) {
+	text := entry.text
+	if entry.command {
+		// A command comes back as typed, to run again.
+		e.replace(text)
+		return
+	}
 	// History holds submitted prompt text after // was unescaped. Restore
 	// the escape when recalling it, so a literal /exit cannot become a command.
 	escaped := strings.HasPrefix(text, "/")
@@ -196,7 +202,7 @@ func (e *editBuffer) search(older bool) {
 	query := string(e.query)
 	for i := start; i >= 0; i-- {
 		if strings.Contains(e.history[i].text, query) {
-			e.replaceHistory(e.history[i].text)
+			e.replaceHistory(e.history[i])
 			e.searchAt = i
 			return
 		}
@@ -312,6 +318,110 @@ func (e *editBuffer) key(key string) {
 			e.insert(key)
 		}
 	}
+}
+
+// rowsView lays the logical line holding the cursor across rows of at most
+// columns-1 cells, prompt first, the way it will read once submitted; the
+// last column stays empty so a full row never leaves the terminal waiting to
+// wrap. At most maxRows rows are returned, a window around the cursor's row.
+// Only runes near the cursor are visited, so repainting a long draft never
+// scans the whole draft; a line longer than that span is clipped, the clip
+// marked with < or >. History search, an overflowing draft, and a terminal
+// too small to wrap in keep the one-row view.
+func (e *editBuffer) rowsView(prompt string, columns, maxRows int) (rows []string, cursorRow, cursorCol int) {
+	if columns < 10 || maxRows < 2 || e.searching || e.tooLong {
+		text, cursor := e.view(prompt, columns)
+		return []string{text}, 0, cursor
+	}
+	if e.lines > 1 {
+		prompt = fmt.Sprintf("[%d/%d] %s", e.line, e.lines, prompt)
+	}
+	if len(prompt) > columns/2 {
+		prompt = strings.TrimLeft(prompt, " ")
+		if len(prompt) > columns/2 {
+			prompt = "> "
+		}
+	}
+	width := columns - 1
+	span := maxRows * width * 2
+	start, end := e.cursor, e.cursor
+	for start > 0 && e.text[start-1] != '\n' && e.cursor-start < span {
+		start--
+	}
+	for end < len(e.text) && e.text[end] != '\n' && end-e.cursor < span {
+		end++
+	}
+	var row strings.Builder
+	row.Grow(columns)
+	cells := len(prompt)
+	row.WriteString(prompt)
+	place := func(text string, n int) {
+		if cells+n > width && cells > 0 {
+			rows = append(rows, row.String())
+			row.Reset()
+			cells = 0
+		}
+		row.WriteString(text)
+		cells += n
+	}
+	if start > 0 && e.text[start-1] != '\n' {
+		place("<", 1)
+	}
+	var one strings.Builder
+	for i := start; i < end; i++ {
+		r := e.text[i]
+		n := editRuneWidth(r)
+		if cells+n > width && cells > 0 {
+			rows = append(rows, row.String())
+			row.Reset()
+			cells = 0
+		}
+		if i == e.cursor {
+			cursorRow, cursorCol = len(rows), cells
+		}
+		one.Reset()
+		writeEditRune(&one, r)
+		row.WriteString(one.String())
+		cells += n
+	}
+	if e.cursor == end {
+		cursorRow, cursorCol = len(rows), cells
+	}
+	if end < len(e.text) && e.text[end] != '\n' {
+		place(">", 1)
+	}
+	rows = append(rows, row.String())
+	if len(rows) > maxRows {
+		first := max(0, min(cursorRow-maxRows/2, len(rows)-maxRows))
+		rows = rows[first : first+maxRows]
+		cursorRow -= first
+	}
+	return rows, cursorRow, cursorCol
+}
+
+// submittedText renders a whole submitted draft for the scrollback: the
+// prompt and the first line, then each further line after the continuation
+// prompt, control characters escaped. Past limit bytes it says how much is
+// not shown, since a turn may be ten megabytes.
+func (e *editBuffer) submittedText(prompt, continuation string, limit int) string {
+	var b strings.Builder
+	b.WriteString(prompt)
+	written := 0
+	for i, r := range e.text {
+		if written >= limit {
+			fmt.Fprintf(&b, " [%d more characters not shown]", len(e.text)-i)
+			break
+		}
+		if r == '\n' {
+			b.WriteByte('\n')
+			b.WriteString(continuation)
+		} else {
+			writeEditRune(&b, r)
+		}
+		written += utf8.RuneLen(r)
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
 
 // view visits only the visible span around the cursor. Line counts are updated

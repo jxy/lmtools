@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"lmtools/internal/core"
 	"lmtools/internal/ui"
 	"os"
 	"os/signal"
@@ -23,6 +25,18 @@ type terminalEditor struct {
 	original syscall.Termios
 	active   bool
 	skipLF   bool
+	// echoed hears that the editor showed the ^C of an interrupt, so the
+	// turn it interrupted does not show it again.
+	echoed func(bool)
+}
+
+// onInterruptEcho tells echoed whenever the editor shows an interrupt's ^C.
+func (o *inputOwner) onInterruptEcho(echoed func(bool)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if t, ok := o.term.(*terminalReader); ok && t.editor != nil {
+		t.editor.echoed = echoed
+	}
 }
 
 func (o *inputOwner) enableEditing(out io.Writer, history *replHistory) (bool, error) {
@@ -226,28 +240,43 @@ func (t *terminalReader) readPaste(ctx context.Context, bound int) (inputLine, e
 	}
 }
 
+// submittedEchoBytes bounds how much of a submitted turn is reprinted for the
+// scrollback; a turn may be ten megabytes.
+const submittedEchoBytes = 16 * 1024
+
 func (t *terminalReader) readEditedLine(ctx context.Context, bound int) (line inputLine, err error) {
+	// area is what the editor painted; the shell-like prompt was written by
+	// the caller, so the first repaint starts by erasing it.
+	area := terminalArea{widths: []int{len(t.editor.prompt)}, cursorCol: len(t.editor.prompt)}
 	defer func() {
 		if errors.Is(context.Cause(ctx), errInterrupted) {
 			// Ctrl-C flushes the kernel queue, but cannot discard bytes
 			// already read here. They belong to the interrupted input.
 			t.held = nil
 			t.editor.skipLF = false
+			area.toEnd(t.editor.out)
 			_, _ = io.WriteString(t.editor.out, "^C")
+			if t.editor.echoed != nil {
+				t.editor.echoed(true)
+			}
 			// Cancellation can arrive during Enter's final redraw too.
 			err = ctx.Err()
 		}
 	}()
 	e := newEditBuffer(bound, t.editor.history)
-	painted := terminalLine{text: t.editor.prompt, cursor: len(t.editor.prompt), columns: t.columns()}
+	paintedColumns := t.columns()
 	dirty, batch := false, 0
+	// previewed is the draft as a paste preview showed it whole, so an
+	// unchanged draft is not printed twice when it is sent.
+	previewed := ""
 	redraw := func() {
 		columns := t.columns()
-		if !dirty && columns == painted.columns {
+		if !dirty && columns == paintedColumns {
 			return
 		}
-		text, cursor := e.view(t.editor.prompt, columns)
-		painted.draw(t.editor.out, text, cursor, columns)
+		rows, cursorRow, cursorCol := e.rowsView(t.editor.prompt, columns, t.rows()-1)
+		area.draw(t.editor.out, rows, cursorRow, cursorCol, columns)
+		paintedColumns = columns
 		dirty, batch = false, 0
 	}
 	stopResize := t.watchResize(redraw)
@@ -261,6 +290,7 @@ func (t *terminalReader) readEditedLine(ctx context.Context, bound int) (line in
 		key, err := t.editKey(ctx, redraw)
 		if err != nil {
 			redraw()
+			area.toEnd(t.editor.out)
 			if errors.Is(err, io.EOF) {
 				return e.inputLine(true), nil
 			}
@@ -275,35 +305,78 @@ func (t *terminalReader) readEditedLine(ctx context.Context, bound int) (line in
 			redraw()
 			paste, err := t.readPaste(ctx, e.pasteLimit())
 			if err != nil {
+				area.toEnd(t.editor.out)
 				return inputLine{text: "unfinished paste"}, err
 			}
 			if paste.eof {
+				area.toEnd(t.editor.out)
 				return inputLine{eof: true, text: "unfinished paste"}, nil
 			}
 			e.paste(paste.text, paste.tooLong)
-			if !e.searching {
-				painted.clear(t.editor.out, t.columns())
-				showTextPreview(ui.NewNotifierWithWriter(t.editor.out), "Draft", string(e.text), maxEditorPreviewBytes)
+			if !e.searching && e.lines > 1 {
+				// The editor shows the line under the cursor; the preview
+				// shows the whole draft once.
+				area.clear(t.editor.out, t.columns())
+				draft := string(e.text)
+				showTextPreview(ui.NewNotifierWithWriter(t.editor.out), "Pasted draft", draft, maxEditorPreviewBytes)
 				_, _ = io.WriteString(t.editor.out, "Enter sends; arrows edit; Ctrl-C discards.\n")
+				previewed = ""
+				if len(draft) <= maxEditorPreviewBytes {
+					previewed = draft
+				}
 			}
 		case key == "\x04":
-			redraw()
-			return e.inputLine(true), nil
+			// Ctrl-D ends input only on a line with nothing to edit: empty,
+			// or rejected as too long. With text it deletes the character
+			// under the cursor, as readline does.
+			if (len(e.text) == 0 || e.tooLong) && !e.searching {
+				redraw()
+				area.toEnd(t.editor.out)
+				return e.inputLine(true), nil
+			}
+			if !e.searching && e.cursor < len(e.text) {
+				e.key("\x1b[3~")
+			}
 		case (key == "\r" || key == "\n") && !e.searching:
-			redraw()
-			_, _ = io.WriteString(t.editor.out, "\n")
+			// The scrollback keeps what was sent: the whole draft rather
+			// than the row of it the editor last showed.
+			columns := t.columns()
+			switch {
+			case e.tooLong:
+				redraw()
+				area.toEnd(t.editor.out)
+				_, _ = io.WriteString(t.editor.out, "\n")
+			case previewed != "" && previewed == string(e.text):
+				area.clear(t.editor.out, columns)
+				_, _ = fmt.Fprintf(t.editor.out, "%s[the pasted draft above, %s]\n", t.editor.prompt, core.Plural(e.lines, "line"))
+			default:
+				area.clear(t.editor.out, columns)
+				_, _ = io.WriteString(t.editor.out, e.submittedText(t.editor.prompt, continuationFor(t.editor.prompt), submittedEchoBytes))
+			}
 			return e.inputLine(false), nil
 		default:
 			searching := e.searching
 			e.key(key)
 			if !searching && e.searching {
-				painted.clear(t.editor.out, t.columns())
+				area.clear(t.editor.out, t.columns())
 				_, _ = io.WriteString(t.editor.out, "History search: Enter accepts; Esc restores draft; Ctrl-R finds older.\n")
 			}
 		}
 		dirty = true
 		batch++
 	}
+}
+
+// continuationFor is the prompt the echo of a multiline draft puts before
+// each line after the first.
+func continuationFor(prompt string) string {
+	switch prompt {
+	case freshPrompt:
+		return continuationPrompt
+	case approvalPrompt:
+		return approvalContinuationPrompt
+	}
+	return prompt
 }
 
 // The signal watcher only wakes the existing reader. Join it before returning,
@@ -333,9 +406,13 @@ func (t *terminalReader) watchResize(redraw func()) func() {
 }
 
 func (t *terminalReader) columns() int {
-	var size struct{ Rows, Cols, X, Y uint16 }
-	if terminalIoctl(t.fd, syscall.TIOCGWINSZ, unsafe.Pointer(&size)) == nil && size.Cols > 0 {
-		return int(size.Cols)
-	}
-	return 80
+	_, columns := windowSize(uintptr(t.fd))
+	return columns
+}
+
+// rows is the terminal's height, which bounds the rows the editor may paint
+// and still reach the first of them again.
+func (t *terminalReader) rows() int {
+	rows, _ := windowSize(uintptr(t.fd))
+	return rows
 }

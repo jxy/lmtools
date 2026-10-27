@@ -5,51 +5,87 @@ import (
 	"io"
 )
 
-// terminalLine records only the displayed viewport, never the whole draft.
-// After a shrink it can span several physical rows, with the cursor in any one.
-type terminalLine struct {
-	text            string
-	cursor, columns int
+// terminalArea is a block of rows painted last, by the editor or as the
+// status line: the width of each row and the row and column of the cursor.
+// Rows are painted at most columns-1 cells wide, so none wraps when painted;
+// after a shrink the terminal may wrap them, which clear allows for.
+type terminalArea struct {
+	widths               []int
+	cursorRow, cursorCol int
 }
 
-func (l terminalLine) rows(columns int) (last, cursor int) {
+// physicalRows is how many terminal rows a painted row of cells occupies at
+// columns.
+func physicalRows(cells, columns int) int {
 	columns = max(1, columns)
-	cells, column := 0, 0
-	for _, r := range l.text {
-		width := min(editRuneWidth(r), columns)
-		if width > 0 && column+width > columns {
-			last++
-			column = 0
-		}
-		if cells <= l.cursor {
-			cursor = last
-		}
-		column += width
-		cells += width
-	}
-	return last, cursor
+	return max(1, (cells+columns-1)/columns)
 }
 
-// clear erases from the last occupied row upward, ending at the line's origin.
-// Walking rows also handles a cursor that was moved into the middle of input.
-func (l *terminalLine) clear(out io.Writer, columns int) {
-	last, cursor := l.rows(columns)
+// cursorRowsDown is how many terminal rows below the start of its painted
+// row the cursor sits. At the end of a row exactly as wide as the terminal,
+// the cursor waits on that row rather than starting the next.
+func cursorRowsDown(col, width, columns int) int {
+	columns = max(1, columns)
+	if col > 0 && col == width && col%columns == 0 {
+		return col/columns - 1
+	}
+	return col / columns
+}
+
+// clear moves to the area's first row and erases from there down.
+func (a *terminalArea) clear(out io.Writer, columns int) {
+	up := 0
+	for row := 0; row < a.cursorRow && row < len(a.widths); row++ {
+		up += physicalRows(a.widths[row], columns)
+	}
+	if a.cursorRow < len(a.widths) {
+		up += cursorRowsDown(a.cursorCol, a.widths[a.cursorRow], columns)
+	}
 	_, _ = io.WriteString(out, "\r")
-	if last > cursor {
-		_, _ = fmt.Fprintf(out, "\x1b[%dB", last-cursor)
+	if up > 0 {
+		_, _ = fmt.Fprintf(out, "\x1b[%dA", up)
 	}
-	_, _ = io.WriteString(out, "\x1b[2K")
-	for row := last; row > 0; row-- {
-		_, _ = io.WriteString(out, "\x1b[1A\r\x1b[2K")
-	}
-	*l = terminalLine{columns: columns}
+	_, _ = io.WriteString(out, "\x1b[J")
+	*a = terminalArea{}
 }
 
-func (l *terminalLine) draw(out io.Writer, text string, cursor, columns int) {
-	l.clear(out, columns)
-	_, _ = fmt.Fprintf(out, "%s\r", text)
-	if cursor > 0 {
-		_, _ = fmt.Fprintf(out, "\x1b[%dC", cursor)
+// draw replaces the area with rows and puts the cursor at cursorRow and
+// cursorCol, counted in cells.
+func (a *terminalArea) draw(out io.Writer, rows []string, cursorRow, cursorCol, columns int) {
+	a.clear(out, columns)
+	widths := make([]int, len(rows))
+	for i, row := range rows {
+		if i > 0 {
+			_, _ = io.WriteString(out, "\r\n")
+		}
+		_, _ = io.WriteString(out, row)
+		for _, r := range row {
+			widths[i] += editRuneWidth(r)
+		}
 	}
-	*l = terminalLine{text: text, cursor: cursor, columns: columns}
+	if up := len(rows) - 1 - cursorRow; up > 0 {
+		_, _ = fmt.Fprintf(out, "\x1b[%dA", up)
+	}
+	_, _ = io.WriteString(out, "\r")
+	if cursorCol > 0 {
+		_, _ = fmt.Fprintf(out, "\x1b[%dC", cursorCol)
+	}
+	*a = terminalArea{widths: widths, cursorRow: cursorRow, cursorCol: cursorCol}
+}
+
+// toEnd puts the cursor after the area's last row, where what follows the
+// area belongs: the ^C of an interrupt, or the line Ctrl-D ends.
+func (a *terminalArea) toEnd(out io.Writer) {
+	if len(a.widths) == 0 {
+		return
+	}
+	last := len(a.widths) - 1
+	if down := last - a.cursorRow; down > 0 {
+		_, _ = fmt.Fprintf(out, "\x1b[%dB", down)
+	}
+	_, _ = io.WriteString(out, "\r")
+	if a.widths[last] > 0 {
+		_, _ = fmt.Fprintf(out, "\x1b[%dC", a.widths[last])
+	}
+	a.cursorRow, a.cursorCol = last, a.widths[last]
 }

@@ -111,7 +111,7 @@ func TestREPLUnsentAndMultilinePreview(t *testing.T) {
 	loop := &replLoop{env: &turnEnv{notifier: n, cfg: &config.Config{}}, draft: "draft", images: []core.ImageBlock{{Name: "a.png"}}, base: core.RequestOptions{Developer: "pending"}}
 	loop.reportUnsent()
 	showTextPreview(n, "Draft", "first\n\nsecond\x1b[31m", 100)
-	want := "Not sent: draft, 1 image(s), developer instruction.\nDraft (18 bytes):\n  first\n  \n  second\\u001b[31m\nEnd draft.\n"
+	want := "Not sent: draft, 1 image(s), developer instruction.\nDraft (3 lines, 18 bytes):\n| first\n|\n| second\\u001b[31m\n"
 	if out.String() != want {
 		t.Fatalf("preview=%q", out.String())
 	}
@@ -127,7 +127,7 @@ func TestProgressStopsBeforeAnswerAndReportsRetry(t *testing.T) {
 	p.report(retry.Progress{Attempt: 2, Total: 3, Delay: time.Second})
 	p.stop()
 	_, _ = io.WriteString(screen.writer(&out, true), "answer")
-	if !strings.Contains(out.String(), "Retrying in 1s (attempt 2/3)...\r\x1b[2Kanswer") {
+	if !strings.Contains(out.String(), "Retrying in 1s (attempt 2/3)...\r\x1b[Janswer") {
 		t.Fatalf("progress=%q", out.String())
 	}
 	p.report(retry.Progress{Attempt: 1, Total: 1})
@@ -211,6 +211,16 @@ func TestREPLInfoResolvesTheDefaultModelAndStreamingMode(t *testing.T) {
 	}
 	if replStreaming(core.RequestOptions{StreamChat: true, ArgoLegacy: true, ToolEnabled: true}) {
 		t.Fatal("legacy tool requests are buffered")
+	}
+	// Piped input loads no history file, and /info names none.
+	if strings.Contains(out.String(), "History file") {
+		t.Fatalf("info names a history file that is not in use: %s", out.String())
+	}
+	out.Reset()
+	loop.history.file = &historyFile{path: "/sessions/.repl-history"}
+	loop.showInfo()
+	if !strings.Contains(out.String(), "History file: /sessions/.repl-history\n") {
+		t.Fatalf("info does not name the history file in use: %s", out.String())
 	}
 }
 

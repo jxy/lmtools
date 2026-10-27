@@ -209,25 +209,39 @@ one left the session, so MCP servers start once and stay up across turns.
   Unbracketed pasted lines and piped input remain one
   turn per line. Pasting into a continuation preserves leading `//` and treats
   `/ed` as text.
-- On a terminal the prompt is `> `, and `. ` on a continuation line. It goes
-  to stderr, or to the terminal when stderr is redirected, with the notes,
-  thinking summaries, tool transcript, approval questions, and fatal errors.
-  With terminal editing enabled, lines typed while a turn runs stay hidden until
-  the next prompt; approval questions discard them. Startup shows the configured
-  model and display settings.
-  `Assistant:` labels answers, and thinking has explicit start/end markers.
-  A waiting message appears only after a short delay; retries show their delay
-  and attempt count. With terminal editing enabled, progress messages clear when
-  output starts. The session ID appears once established. `/info` shows the
-  endpoint, API, session, tools, and settings.
+- On a terminal the prompt is `you> `, and `...> ` on a continuation line,
+  with an empty line above each fresh prompt. It goes to stderr, or to the
+  terminal when stderr is redirected, with the notes, thinking summaries, tool
+  transcript, approval questions, and fatal errors. A line longer than the
+  terminal wraps across rows as it is typed, and when a turn is sent the
+  whole of it is printed, so the scrollback holds what was sent. With
+  terminal editing enabled, lines typed while a turn runs stay hidden until
+  the next prompt; approval questions discard them. Startup shows the model,
+  the reasoning effort, the display settings, and the tools with the directory
+  their commands run in.
+  `Assistant:` labels answers. Thinking sits between `--- thinking ---` and
+  `--- end thinking ---`, and on a terminal each of its lines starts with `| `
+  and wraps at the terminal width, so it cannot be mistaken for the answer.
+  A status line says what a turn is waiting for, with the seconds so far:
+  `Waiting for response...`, `Thinking...` while the model thinks without
+  showing text, `Writing tool call NAME...` while it writes a call's
+  arguments, and `Running NAME...` while commands run. It appears only on an
+  empty line and clears when output starts. Retries show their delay and
+  attempt count. The usage line of each response gives its time, and in a turn
+  with tool calls every response is numbered. The session ID appears once
+  established. `/info` shows the endpoint, API, session, tools, and settings.
   All UI text is plain: no colors or styling. Cursor controls are used only
   on an interactive terminal; `TERM=dumb` keeps basic line input and prints
   waiting and retry notices as ordinary lines.
-- Ctrl-D at the prompt ends the loop. Ctrl-D inside an unfinished turn, a
-  continuation or text ended by Ctrl-D without Enter, ends the loop without
-  sending it, with a note. Ctrl-C during a turn cancels the turn and returns
-  to the prompt, noting what the turn saved; Ctrl-C at an idle prompt says
-  how to exit, and a second one in a row exits. Any line typed in between,
+- Ctrl-D on an empty prompt ends the loop; with text on the line it deletes
+  the character under the cursor, as readline does. Ctrl-D on the empty line
+  of an unfinished turn, after a continuation, ends the loop without sending
+  it, with a note. On exit the loop names the session and the `-resume` that
+  continues it. Ctrl-C during a turn cancels the turn and returns to the
+  prompt, noting what the turn saved: an answer that had begun is kept, the
+  prompt with it, so the next turn can refer to it; a turn cancelled before
+  any answer text saves nothing. Ctrl-C at an idle prompt says how to exit,
+  and a second one in a row exits. Any line typed in between,
   even an empty one, starts the count again. Before the first prompt, while
   `lmc` starts and connects MCP servers, Ctrl-C ends the run with status
   130. SIGTERM or a hangup cancels the turn and exits once it has saved what
@@ -260,9 +274,13 @@ one left the session, so MCP servers start once and stay up across turns.
 
 Left/Right move the cursor; Home/End or Ctrl-A/Ctrl-E move to line ends.
 Backspace/Delete erase, Ctrl-W erases a word, Ctrl-U clears input, and Ctrl-K
-erases from the cursor to the end of the draft. Up/Down recall prompts and
-restore an unsent draft when returning past the newest prompt. Ctrl-R searches
-history: type or paste a query, and press Ctrl-R again to find an older match.
+erases from the cursor to the end of the draft. Up/Down recall prompts and REPL
+commands, including those of earlier REPLs, and restore an unsent draft when
+returning past the newest entry. The last 100 entries are kept in
+`.repl-history` in the sessions directory, readable by you alone; an entry
+whose saved line would pass 64 KiB is kept for the current REPL only. Ctrl-R
+searches history: type or paste a query, and press Ctrl-R again to find an
+older match.
 Enter accepts a match for editing, then another Enter sends it; Escape restores
 the draft and cursor. Oversized queries leave the previous query unchanged.
 Recall accepts prompts through the same 10 MiB limit as their original submission;
@@ -282,9 +300,13 @@ REPL commands work with terminal and piped input:
 | --- | --- |
 | `/help [input\|history\|tools]` | Show commands or help for a topic. |
 | `/info` | Show the connection, display settings, tools, session, logs, and pending input. |
-| `/history [N]` | List retained prompts, or show prompt N in full; keeps up to 100 prompts and 10 MiB. |
-| `/show` | Show the saved conversation through the current message. |
-| `/ed` | Edit the current draft with `$EDITOR`, or `ed` when unset. |
+| `/model [NAME]` | Show the model, or change it for the turns that follow. |
+| `/effort [LEVEL\|default]` | Show the reasoning effort, or change it for the turns that follow. |
+| `/history [N\|clear]` | List retained prompts, show prompt N in full, or empty the history, saved history included. |
+| `/show` | Show the saved conversation through the current message, the system prompt as a one-line summary. |
+| `/show last [N]` | Show the last turn, or the last N, with tool output in full. |
+| `/show all`, `/show system` | Show the conversation with its system prompt in full, or the system prompt alone. |
+| `/ed` | Edit the current draft with `$VISUAL`, else `$EDITOR`, else `vi`. |
 | `/ed N` | Edit retained prompt N as a new draft. |
 | `/ed REGEX` | Edit all matching retained prompts together, in history order. |
 | `/image PATH` | Queue an image for the next turn; the path is literal and may contain spaces. |
@@ -293,9 +315,11 @@ REPL commands work with terminal and piped input:
 | `/clear-images` | Remove all pending attachments. |
 | `/developer TEXT` | Set a developer instruction for the next turn, replacing any pending instruction. |
 | `/clear-developer` | Remove the pending developer instruction. |
-| `/thinking on\|off` | Show or hide returned thinking; does not enable reasoning. |
+| `/thinking on\|off` | Show or hide returned thinking; does not enable reasoning. `/show` includes saved thinking while it is on. |
 | `/usage on\|off` | Show or hide reported token counts. |
-| `/exit` | End the conversation and report unsent drafts, images, or instructions. |
+| `/tool-output full\|short` | Show long tool output in full, or its first and last lines (the default on a terminal). |
+| `/bell on\|off` | Ring the terminal when an approval question waits and when a turn ends. |
+| `/exit` | End the conversation, report unsent drafts, images, or instructions, and name the session to resume. |
 
 `/ed` requires a terminal. It waits for the editor, shows a draft preview after
 a successful exit, and returns to input. Enter sends the draft; ordinary text
@@ -326,10 +350,17 @@ with the next text or image turn and replayed on resume; `/clear-developer`
 affects only an instruction that has not yet been sent. Use continuation lines
 for a developer instruction spanning multiple lines.
 
-Saved conversations and live tool turns use the same tool/result labels,
-readable durations, and explicit output boundaries. Failed calls retain their
-partial output. `/show` does not shorten saved tool output; any truncation done
-during execution is identified separately.
+Saved conversations and live tool turns use the same tool/result labels and
+readable durations, with each line of output quoted under its result. A round
+of tool results is labelled `[tool results]`. Live output longer than about
+twenty lines shows its first and last ten, and a line over 2000 bytes is cut
+with a count of the bytes left out; `/show` and `/show last` never shorten
+saved tool output, and any truncation done during execution is identified
+separately.
+
+Answers are shown as the model wrote them, markdown included, since stdout
+keeps the answer bytes exactly. To ask for plain text, add an instruction:
+`/developer Answer in plain text without markdown.`
 
 ### Tool Use
 
@@ -338,21 +369,42 @@ argument vector directly with `execvpe`-style semantics, without a shell. A
 whitelist match is already an approval: the matching command runs without a
 prompt, and `-tool-auto-approve` is not needed.
 
-At a tool approval prompt, `y` or `yes` approves; `n`, `no`, or an empty
-reply denies. In the REPL editor, Enter submits the answer; Ctrl-D discards
-an unfinished approval. Any other reply denies the call and supplies a reason, for
+A round's calls are all shown before the first question, and each question
+names the call it is about, for example `[2/3] Allow grep?`. At a tool
+approval prompt, `y` or `yes` approves; `n`, `no`, or an empty reply denies.
+`a` or `all` approves this call and every later call in the round that would
+ask; the question offers it when there are such calls, and at any other
+question it approves the one call. In the REPL
+editor, Enter submits the answer; Ctrl-D on an empty answer denies. Any other
+reply denies the call and supplies a reason, for
 example `This is a read-only review; do not change files.` The model receives
 an explicit user denial with the text labeled as a reason provided by the
-user, and the same result is saved in the session. This works for command,
-image, MCP, and uncertain-rerun approvals.
+user, and the same result is saved in the session; the transcript shows it as
+`Denied by you: ...`. This works for command, image, MCP, and uncertain-rerun
+approvals.
+
+In a round that asks anything, each call that policy will not run says so
+under its review, `Will not run: REASON`, and a command whose program is not
+on PATH, or whose working directory does not exist, says
+`Cannot start now: REASON`. That command is still asked about and run, since
+an earlier call of the round may create what it needs; if it still cannot
+start, its result says it was not run. A bare program name that
+resolves outside the system directories (`/bin`, `/usr/bin`, `/usr/local/bin`,
+and their `sbin`) is named under the command, as `Program: PATH`. An argument
+that spans lines, such as a script passed to an interpreter, and a multiline
+`stdin` are shown line by line under the command, each line starting with
+`| `; the vector names the argument `<arg N>`. Control characters in them,
+carriage returns included, are shown as `\uXXXX`, and the label says when the
+value ends with a newline, as in `Stdin (2 lines, ending with a newline):`.
 
 Approval input uses the normal 10 MiB turn limit and continuation rules: end
 a line with `\` to continue, or `\\` for a literal trailing backslash. Use
-`/ed` to edit the current answer with `$EDITOR` (or `ed`). In a REPL, `/ed N`
-and `/ed REGEX` can also select retained prompt history. After the editor
-exits, review the draft and press Enter to submit, type to append, or use
-`/ed` again. Editor exit and queued input do not submit the answer. The final
-text is interpreted the same way whether typed or edited: `y`/`yes` approves,
+`/ed` to edit the current answer with `$VISUAL`, `$EDITOR`, or `vi`. In a
+REPL, `/ed N` and `/ed REGEX` can also select retained prompt history. After
+the editor exits, review the draft and press Enter to submit, type to append,
+or use `/ed` again. Editor exit and queued input do not submit the answer.
+The final text is interpreted the same way whether typed or edited:
+`y`/`yes` approves, `a`/`all` approves this call and the rest of the round,
 `n`/`no`/empty denies, and other text becomes the user-provided denial reason.
 Use `//ed` when the literal text `/ed` should be part of the reason.
 An oversized approval answer is discarded through its last continuation line
@@ -538,8 +590,9 @@ together to `/dev/tty` when stderr is redirected, so `lmc -tool 2>lmc.log`
 still shows what it asks you to approve. Before each question `lmc` discards
 what the terminal holds, so a line typed while the model was generating, or
 keys typed without Enter, cannot answer it; when a complete line was
-discarded, a note above the question says so. An answer longer than 64 bytes
-is a denial.
+discarded, a note above the question says so. A tool approval answer takes
+the 10 MiB turn limit; the tool-call round limit question takes at most 64
+bytes, and a longer answer to it keeps the limit.
 
 Whitelist and blacklist files contain one JSON command rule per nonempty,
 non-comment line. Matching is exact per argument and treats `command` as a
@@ -551,27 +604,38 @@ usually safer.
 Assistant text stays on stdout. Tool review, approval prompts, execution
 results, warnings, and errors go to stderr, so redirecting stdout captures only
 the assistant response. Tool commands are displayed as their exact JSON argv
-arrays:
+arrays, and each result quotes its output a line at a time. Results appear in
+request order as calls finish. In the REPL on a terminal a round looks like
+this:
 
 ```text
->>> Tools requested: 2
+Tokens (response 1): input 4472 | output 403 (reasoning 152) | 4.4s
 
+Tools: 2
 [1/2] Command: ["git","status","--short"]
-      Allow execution? [y/N or reason; /ed to edit]: y
 
 [2/2] Command: ["go","test","./internal/core"]
-      Allow execution? [y/N or reason; /ed to edit]: y
 
->>> Running 2 tools in parallel...
+[1/2] Allow git? [y/N, a = this and the rest, or reason; /ed to edit]:
+      > y
 
->>> Results:
+[2/2] Allow go? [y/N or reason; /ed to edit]:
+      > y
 
-[1/2] Completed in 24ms
-      Output:
-## main
+Running 2 tools in parallel...
 
-[2/2] Completed in 814ms (no captured output)
+Tool results:
+[1/2] git: Completed in 24ms
+      Output (stdout+stderr, 1 line):
+      | ## main
+
+[2/2] go: Completed in 814ms (no output)
 ```
+
+`stdout+stderr` says the two streams were captured together; a call that
+redirected one of them shows `stdout` or `stderr` alone. A command that exited
+with an error status shows `Output`, and one stopped by its timeout or by
+Ctrl-C shows `Partial output`.
 
 ```bash
 # Run whitelisted commands without prompting.
@@ -781,9 +845,13 @@ Output controls:
   payloads are never printed; a returned Anthropic thinking block without
   visible text is shown as `[omitted by provider]`. Each block is delimited by
   `--- thinking ---` and `--- end thinking ---`; an unterminated stream uses
-  `--- end thinking (incomplete) ---`. If no visible block is returned, lmc
-  says so explicitly. Anthropic's `summarized` display is its readable thinking
-  mode; adaptive thinking may omit the block for a simple request.
+  `--- end thinking (incomplete) ---`. When stderr is a terminal each line
+  of thinking starts with `| ` and wraps at the terminal width, and control
+  characters are shown as `\uXXXX`; redirected stderr keeps the text as
+  returned. If the provider counts reasoning tokens and returns no visible
+  thinking, lmc says so. Anthropic's `summarized` display is its readable
+  thinking mode; adaptive thinking may skip thinking for a simple request,
+  which needs no note.
   Compatible Chat Completions servers' `reasoning_content` and Responses
   reasoning text/summary events are supported and retained in session history.
   A server may return thinking by default without an `-effort` flag.
@@ -1298,6 +1366,8 @@ applies to every path except `-provider openai` and
 
 - `lmc` sessions: `~/.lmc/sessions`
 - `lmc` tool call records: `~/.lmc/sessions/.journal`
+- `lmc -repl` input history: `~/.lmc/sessions/.repl-history` (prompts and
+  REPL commands, the last 100; `/history clear` empties it)
 - `lmc` logs: `~/.lmc/logs`
 - `apiproxy` Responses state: `~/.apiproxy/sessions`
 - Built binaries: `./bin/lmc` and `./bin/apiproxy`

@@ -202,6 +202,9 @@ type Response struct {
 	// reported none. Display-only: session stores decompose Response
 	// field-by-field and never persist it.
 	Usage *Usage
+	// Model is the model the provider says answered, which an alias such as
+	// claudeopus55 resolves to; empty when it said nothing. Display-only.
+	Model string
 }
 
 // ResponseParseOptions controls provider-specific compatibility parsing and
@@ -257,13 +260,19 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	}
 
 	if err != nil {
-		if response.IncompleteReason != "invalid_stream" {
+		switch {
+		case response.IncompleteReason == "invalid_stream":
+			// Save and present partial content through the same path as token
+			// exhaustion. ValidateResponse reports the decoding error before
+			// any tools execute; a completed marker cannot clear it.
+			response.CompletionError = err
+		case ctx.Err() != nil && strings.TrimSpace(response.Text) != "":
+			// The operator stopped an answer that had begun. What they read
+			// is kept, so the next turn can refer to it; see cancelledResponse.
+			response = cancelledResponse(response, err)
+		default:
 			return Response{}, err
 		}
-		// Save and present partial content through the same path as token
-		// exhaustion. ValidateResponse reports the decoding error before any
-		// tools execute; a completed marker cannot clear it.
-		response.CompletionError = err
 	}
 
 	response.Streamed = streamed
@@ -272,8 +281,22 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 	if output != nil {
 		output.HandleResponseComplete(response)
 	}
-	notifyTokenUsage(notifier, response.Usage)
+	notifyTokenUsage(notifier, response.Usage, len(response.ToolCalls) > 0)
 	return response, nil
+}
+
+// cancelledResponse keeps the answer text a cancelled stream had delivered,
+// and nothing else: reasoning without its signature cannot be replayed, a
+// tool call cut off mid-arguments cannot run, and the token counts describe a
+// response that never finished. The text becomes one block so the session's
+// blocks and its text agree.
+func cancelledResponse(response Response, err error) Response {
+	return Response{
+		Text:             response.Text,
+		Blocks:           []Block{TextBlock{Text: response.Text}},
+		IncompleteReason: "cancelled",
+		CompletionError:  err,
+	}
 }
 
 // EffectiveChatModel resolves the model a chat request is actually built with:
@@ -341,7 +364,7 @@ func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http
 		if len(blocks) == 0 {
 			blocks = responseBlocksFromParts(text, toolCalls, "")
 		}
-		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks, Usage: state.Usage(), IncompleteReason: state.IncompleteReason()}, err
+		return Response{Text: text, ToolCalls: toolCalls, Blocks: blocks, Usage: state.Usage(), IncompleteReason: state.IncompleteReason(), Model: state.model}, err
 	}
 
 	spec, err := providerSpecForName(provider)
@@ -379,6 +402,7 @@ func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provide
 			return response, err
 		}
 		response.Usage = UsageFromPayload(data)
+		response.Model = ModelFromPayload(data)
 		return response, nil
 	}
 	spec, err := providerSpecForName(provider)

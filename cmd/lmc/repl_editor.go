@@ -24,7 +24,7 @@ const maxEditorPreviewBytes = 2048
 func editorCommand(configured, path string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if strings.TrimSpace(configured) == "" {
-		cmd = exec.Command("ed", path)
+		cmd = exec.Command("vi", path)
 	} else {
 		// EDITOR is the operator's shell command. The file name stays a
 		// positional argument even when the command contains quotes/arguments.
@@ -70,7 +70,7 @@ func selectEditorSeed(history *replHistory, draft, argument string, maxBytes int
 	}
 	var matches []string
 	size := 0
-	for _, entry := range history.entries {
+	for _, entry := range history.prompts() {
 		if expression.MatchString(entry.text) {
 			if len(matches) > 0 {
 				size += 2
@@ -145,7 +145,13 @@ func editInputDraft(ctx context.Context, input *inputOwner, notifier core.Notifi
 	if err != nil {
 		return "", fmt.Errorf("write editor draft: %w", err)
 	}
-	configured := os.Getenv("EDITOR")
+	// VISUAL names a full-screen editor, which is what the REPL can hand
+	// its terminal to; EDITOR is the fallback, as git and most shells read
+	// them.
+	configured := os.Getenv("VISUAL")
+	if strings.TrimSpace(configured) == "" {
+		configured = os.Getenv("EDITOR")
+	}
 	cmd := editorCommand(configured, path)
 	err = input.runEditor(ctx, cmd, func(discarded bool) {
 		if discarded {

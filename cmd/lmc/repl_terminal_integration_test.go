@@ -150,7 +150,7 @@ func TestTerminalREPLTurnsAndCtrlD(t *testing.T) {
 	defer server.Close()
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 
-	r.expect(t, `lmc | model: gpt-test | buffered | thinking off`)
+	r.expect(t, `lmc | model: gpt-test | buffered | thinking display: off`)
 	r.expect(t, "/help commands | /info settings | Ctrl-C cancel | Ctrl-D exit")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "first question\n")
@@ -254,7 +254,7 @@ func TestTerminalREPLCtrlC(t *testing.T) {
 		t.Fatalf("no request; the terminal showed %q", r.screen.String())
 	}
 	r.typeKeys(t, ptytest.Interrupt)
-	r.expect(t, "^C\r\nTurn cancelled; nothing was saved.\r\n"+freshPrompt)
+	r.expect(t, "^C\r\nTurn cancelled; nothing was saved.\r\n\r\n"+freshPrompt)
 	r.typeKeys(t, ptytest.Interrupt)
 	if code := r.wait(t); code != 0 {
 		t.Fatalf("exit code %d, want 0; the terminal showed %q", code, r.screen.String())

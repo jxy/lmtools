@@ -6,3 +6,4 @@ import "io"
 
 func (*inputOwner) enableEditing(io.Writer, *replHistory) (bool, error) { return false, nil }
 func (*inputOwner) disableEditing() error                               { return nil }
+func (*inputOwner) onInterruptEcho(func(bool))                          {}

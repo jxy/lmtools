@@ -25,10 +25,11 @@ func resizeREPL(t *testing.T, r *replUnderTerminal, columns int) {
 
 func TestTerminalREPLResizeRedrawsIdleDraft(t *testing.T) {
 	const draft = "abcdefghijklmnopqrstuvwxyz0123456789"
+	// At 12 columns the draft wraps under the prompt instead of scrolling.
 	for _, tt := range []struct{ name, before, after, clipped, want string }{
-		{"end", "", "\n", "> <", draft},
-		{"start", "\x01", "X\n", "> abcdefgh>", "X" + draft},
-		{"partial UTF-8", "\xc3", "\xa9\n", "> <", draft + "é"},
+		{"end", "", "\n", freshPrompt + "abcdef", draft},
+		{"start", "\x01", "X\n", freshPrompt + "abcdef", "X" + draft},
+		{"partial UTF-8", "\xc3", "\xa9\n", freshPrompt + "abcdef", draft + "é"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			server := mockserver.NewMockServer(numberedAnswers())
@@ -37,18 +38,18 @@ func TestTerminalREPLResizeRedrawsIdleDraft(t *testing.T) {
 			r.expect(t, freshPrompt)
 			resizeREPL(t, r, 80)
 			r.typeKeys(t, draft)
-			r.expect(t, "> "+draft)
+			r.expect(t, freshPrompt+draft)
 			r.typeKeys(t, tt.before)
 			if tt.name == "start" {
-				r.expect(t, "\x1b[2C")
+				r.expect(t, fmt.Sprintf("\x1b[%dC", len(freshPrompt)))
 			}
 			resizeREPL(t, r, 12)
-			if err := r.screen.Expect("\r\x1b[2K"+tt.clipped, time.Second); err != nil {
+			if err := r.screen.Expect("\x1b[J"+tt.clipped, time.Second); err != nil {
 				t.Fatal("resize did not repaint the active draft: ", err)
 			}
 			// Growing again must recover the full viewport without editing.
 			resizeREPL(t, r, 80)
-			r.expect(t, "> "+draft)
+			r.expect(t, freshPrompt+draft)
 			r.typeKeys(t, tt.after)
 			r.expect(t, "answer 1")
 			r.expect(t, freshPrompt)
@@ -73,7 +74,7 @@ func TestTerminalREPLResizePreservesSearch(t *testing.T) {
 	r.typeKeys(t, "unsent\x12abc")
 	r.expect(t, `search "abc": `)
 	resizeREPL(t, r, 12)
-	if err := r.screen.Expect("\r\x1b[2K> <", time.Second); err != nil {
+	if err := r.screen.Expect("\x1b[J> <", time.Second); err != nil {
 		t.Fatal("resize did not repaint history search: ", err)
 	}
 	r.typeKeys(t, "\x1b\n")
@@ -101,7 +102,7 @@ func TestTerminalREPLResizePreservesApproval(t *testing.T) {
 	r.typeKeys(t, reason)
 	r.expect(t, "      > "+reason)
 	resizeREPL(t, r, 12)
-	if err := r.screen.Expect("\r\x1b[2K> <", time.Second); err != nil {
+	if err := r.screen.Expect("\x1b[J> Please", time.Second); err != nil {
 		t.Fatal("resize did not repaint approval: ", err)
 	}
 	server.SetResponseFunc(func(*http.Request) (interface{}, int, error) {

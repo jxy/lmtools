@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -22,8 +23,11 @@ import (
 // The prompts a loop shows when standard input is a terminal: one for a
 // fresh turn, one for a line that continues it.
 const (
-	freshPrompt        = "> "
-	continuationPrompt = ". "
+	freshPrompt        = "you> "
+	continuationPrompt = "...> "
+	// An approval answer sits under the call's detail column.
+	approvalPrompt             = "      > "
+	approvalContinuationPrompt = "      . "
 )
 
 // maxTurnBytes caps a turn and an accumulating continuation. Tests shrink
@@ -211,13 +215,15 @@ func (a *separatedAnswers) endTurn() {
 type replScreen struct {
 	mu           sync.Mutex
 	statusOut    io.Writer
-	statusLine   terminalLine
+	status       terminalArea
 	inlineStatus bool
 	columns      func() int
 	// answerLast reports that an answer was shown last, and newlines counts
-	// the newlines what was shown last ends with, up to two.
+	// the newlines what was shown last ends with, up to two. wrote reports
+	// that anything was shown at all.
 	answerLast bool
 	newlines   int
+	wrote      bool
 }
 
 func (s *replScreen) writer(w io.Writer, answer bool) io.Writer {
@@ -251,6 +257,7 @@ func (w screenWriter) Write(p []byte) (int, error) {
 	s.clearStatusLocked()
 	n, err := w.w.Write(p)
 	if n > 0 {
+		s.wrote = true
 		if s.answerLast != w.answer {
 			s.answerLast, s.newlines = w.answer, 0
 		}
@@ -447,7 +454,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 	env := &turnEnv{
 		cfg:             cfg,
 		notifier:        notifier,
-		toolUI:          tools.NewCLIToolUI(notifier),
+		toolUI:          tools.NewCLIToolUIWithOptions(notifier, tools.Options{ShowPrograms: true}),
 		logDir:          logDir,
 		pendingToolMode: session.PendingToolExecute,
 		stdout:          os.Stdout,
@@ -455,7 +462,9 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		answersOnScreen: true,
 	}
 	if input.terminal {
-		env.approver = newApprover(notifier, input)
+		approver := newApprover(notifier, input)
+		approver.quietCancel = true
+		env.approver = approver
 	}
 	loop := &replLoop{
 		env:      env,
@@ -463,11 +472,25 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		input:    input,
 		signals:  signals,
 		diag:     diag,
+		screen:   screen,
 		terminal: input.terminal,
 		images:   opts.Images,
 	}
 	if input.terminal {
 		env.progress = &turnProgress{screen: screen}
+		notifier.SetElapsedSource(env.progress.elapsed)
+		// The tool transcript quotes its blocks and shortens long output;
+		// /show last prints a round's output in full.
+		toolNotifier := ui.NewREPLNotifier(squeezedWriter{w: diag, screen: screen})
+		env.toolUI = &replToolUI{
+			CLIToolUI: tools.NewCLIToolUIWithOptions(toolNotifier, tools.Options{
+				ShortOutput:  true,
+				MoreHint:     "/show last prints them",
+				ShowPrograms: true,
+			}),
+			loop: loop,
+		}
+		env.quoteThinking = true
 	}
 	if f, ok := stream.(*os.File); ok && input.terminal && isTerminalFile(f) {
 		if _, err := input.enableEditing(diag, &loop.history); err != nil {
@@ -482,16 +505,20 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		}()
 		if terminal, ok := input.term.(interface{ columns() int }); ok {
 			screen.columns = terminal.columns
+			env.columns = terminal.columns
 		}
+		input.onInterruptEcho(loop.interruptEchoed.Store)
+		// Recall reaches the prompts and commands of earlier REPLs.
+		loadHistoryFile(&loop.history, session.GetSessionsDir(), notifier.Warnf)
 	}
 	screen.inlineStatus = input.editing
 	if approver, ok := env.approver.(*cliApprover); ok {
 		approver.history = &loop.history
 		approver.stop = signals.endProcess
+		approver.bell = &loop.bell
 	}
 	if isTerminalFile(os.Stdout) {
 		env.stdout = screen.writer(os.Stdout, true)
-		loop.screen = screen
 	} else {
 		loop.answers = &separatedAnswers{out: os.Stdout}
 		env.stdout = loop.answers
@@ -515,8 +542,8 @@ type replLoop struct {
 	// answers separates the answers on a stdout that is not a terminal; nil
 	// otherwise.
 	answers *separatedAnswers
-	// screen follows the terminal a stdout that is a terminal shares with
-	// diag; nil otherwise.
+	// screen follows what diag showed last, and the answers too when stdout
+	// shares diag's terminal.
 	screen *replScreen
 	// from is the session the first commit established, holding the head
 	// the last turn left; nil until then, while the options still name the
@@ -528,8 +555,9 @@ type replLoop struct {
 	// armed reports that the last thing that happened was an interrupt, so
 	// another at an idle prompt ends the loop.
 	armed bool
-	// history holds prompt text from this invocation; image bytes remain in
-	// the session or in images until the next committed user turn.
+	// history holds prompt and command text, from this invocation and, on a
+	// terminal, earlier ones; image bytes remain in the session or in images
+	// until the next committed user turn.
 	history replHistory
 	// shownSession suppresses repeated notes as the session head advances.
 	shownSession string
@@ -537,6 +565,30 @@ type replLoop struct {
 	draft       string
 	failedTurns int
 	hideUsage   bool
+	// bell rings the terminal when a turn ends, as /bell asks.
+	bell bool
+
+	// turnMu guards turnCtx, the context of the turn in progress, which the
+	// tool transcript reads from the executor's goroutines.
+	turnMu  sync.Mutex
+	turnCtx context.Context
+	// interruptEchoed records that the ^C of the current turn's interrupt
+	// is on screen. A terminal in editing mode echoes nothing itself.
+	interruptEchoed atomic.Bool
+}
+
+// echoInterrupt shows the ^C of an interrupted turn once, before the first
+// output that follows the interrupt.
+func (l *replLoop) echoInterrupt() {
+	l.turnMu.Lock()
+	ctx := l.turnCtx
+	l.turnMu.Unlock()
+	if ctx == nil || !errors.Is(context.Cause(ctx), errInterrupted) || !l.input.editing {
+		return
+	}
+	if l.interruptEchoed.CompareAndSwap(false, true) {
+		l.env.notifier.Promptf("^C\n")
+	}
 }
 
 // run holds the conversation: a regeneration first, when -branch names an
@@ -579,12 +631,12 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 		switch how {
 		case readEnd:
 			l.closePromptLine()
-			l.reportUnsent()
+			l.leave()
 			return nil
 		case readEndInsideTurn:
 			l.closePromptLine()
 			l.env.notifier.Infof("Input ended inside an unfinished turn, which was not sent.")
-			l.reportUnsent()
+			l.leave()
 			return nil
 		case readInterruptedInsideTurn:
 			l.closePromptLine()
@@ -603,7 +655,7 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 				continue
 			}
 			if l.armed {
-				l.reportUnsent()
+				l.leave()
 				return nil
 			}
 			l.armed = true
@@ -624,9 +676,12 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 		// output, so both remain clear with queued input.
 		l.closePromptLine()
 		l.armed = false
+		if isREPLCommand(text) && l.terminal {
+			l.history.addCommand(text)
+		}
 		action := l.interpretInput(text)
 		if action.exit {
-			l.reportUnsent()
+			l.leave()
 			return nil
 		}
 		if !action.send {
@@ -668,8 +723,20 @@ func (l *replLoop) showPrompt(prompt string) {
 	if l.screen != nil {
 		l.screen.separateAnswer(l.diag)
 	}
+	// An empty line above each fresh prompt marks where a turn begins.
+	if prompt == freshPrompt && l.screen != nil && l.screen.trailingNewlines() < 2 {
+		_, _ = io.WriteString(l.diag, "\n")
+	}
 	l.input.setPrompt(prompt)
 	_, _ = io.WriteString(l.diag, prompt)
+}
+
+// endLine ends the line the screen was left on, if one is open.
+func (l *replLoop) endLine() {
+	if l.screen != nil && l.screen.trailingNewlines() > 0 {
+		return
+	}
+	_, _ = io.WriteString(l.diag, "\n")
 }
 
 // closePromptLine ends the line a prompt left open, where an interrupt or
@@ -723,11 +790,21 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 		opts.Resume, opts.Branch = "", ""
 	}
 	ctx, end := l.signals.begin()
+	l.interruptEchoed.Store(false)
+	l.turnMu.Lock()
+	l.turnCtx = ctx
+	l.turnMu.Unlock()
 	out, err := runTurn(ctx, l.env, opts, in)
 	if err != nil && errors.Is(context.Cause(ctx), errInterrupted) {
 		err = fmt.Errorf("%w: %w", errInterrupted, err)
 	}
+	l.turnMu.Lock()
+	l.turnCtx = nil
+	l.turnMu.Unlock()
 	end()
+	if l.bell && l.terminal {
+		l.env.notifier.Promptf("\a")
+	}
 	if l.answers != nil {
 		l.answers.endTurn()
 	}
@@ -758,11 +835,17 @@ func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 	switch {
 	case err == nil:
 	case errors.Is(err, errInterrupted):
-		if l.input.editing {
-			l.env.notifier.Promptf("^C")
+		if !l.input.editing {
+			// The terminal echoed ^C where the interrupt found the cursor.
+			l.closePromptLine()
+		} else {
+			// In editing mode the editor or the tool transcript may have
+			// shown the ^C already; it appears once either way.
+			if l.interruptEchoed.CompareAndSwap(false, true) {
+				l.env.notifier.Promptf("^C")
+			}
+			l.endLine()
 		}
-		// The terminal echoed ^C where the interrupt found the cursor.
-		l.closePromptLine()
 		l.armed = true
 		l.env.notifier.Infof("Turn cancelled; %s.", describeSaved(out))
 	case l.signals.ended() != nil:

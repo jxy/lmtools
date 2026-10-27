@@ -8,6 +8,7 @@ import (
 	"lmtools/internal/session"
 	"lmtools/internal/version"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"unicode"
@@ -23,7 +24,11 @@ func (l *replLoop) showInfo() {
 	if l.base.Model == "" {
 		modelLabel += " (default)"
 	}
-	n.Promptf("%s\nConfigured model: %s\nAPI: %s\n", version.String("lmc"), modelLabel, replAPIName(l.base))
+	n.Promptf("%s\nConfigured model: %s\n", version.String("lmc"), modelLabel)
+	if served := l.env.served; served != "" && served != model {
+		n.Promptf("Model reported by the provider: %s\n", served)
+	}
+	n.Promptf("API: %s\n", replAPIName(l.base))
 	var endpoint string
 	var err error
 	if providers.UsesResponsesAPIWire(l.base.Provider, model, l.base.OpenAIResponses, l.base.ArgoLegacy) {
@@ -78,6 +83,27 @@ func (l *replLoop) showInfo() {
 	}
 	if l.base.ToolEnabled {
 		n.Promptf("Auto approval: %s\nNon-interactive tools: %s\nCommand timeout: %s\n", onOff(l.env.cfg.ToolAutoApprove), onOff(l.env.cfg.ToolNonInteractive), l.env.cfg.ToolTimeout)
+		n.Promptf("Tool rounds per turn: %d\nParallel commands: %d\nOutput kept per command: %s\n",
+			l.base.GetMaxToolRounds(), l.base.GetMaxToolParallel(), core.FormatByteCount(l.base.GetToolMaxOutputBytes()))
+		if l.base.ToolWhitelist != "" {
+			n.Promptf("Whitelist: %s\n", l.base.ToolWhitelist)
+		}
+		if l.base.ToolBlacklist != "" {
+			n.Promptf("Blacklist: %s\n", l.base.ToolBlacklist)
+		}
+		if ui, ok := l.env.toolUI.(*replToolUI); ok {
+			mode := "full"
+			if ui.Options.ShortOutput {
+				mode = "short (first and last lines of long output)"
+			}
+			n.Promptf("Tool output display: %s\n", mode)
+		}
+	}
+	if dir, err := os.Getwd(); err == nil {
+		n.Promptf("Working directory: %s\n", dir)
+	}
+	if l.history.file != nil {
+		n.Promptf("History file: %s\n", l.history.file.path)
 	}
 }
 
@@ -91,7 +117,33 @@ func (l *replLoop) currentSession(ctx context.Context) (*session.Session, error)
 	return nil, nil
 }
 
-func (l *replLoop) showConversation() {
+// showConversation prints the saved conversation: all of it with the system
+// prompt summarized, the last turns, all of it with the system prompt, or the
+// system prompt alone. Thinking is shown with the thinking display on. Tool
+// output is never shortened here.
+func (l *replLoop) showConversation(argument string) {
+	options := session.ShowOptions{SystemSummary: true, Thinking: l.env.cfg.ShowThinking}
+	fields := strings.Fields(argument)
+	switch {
+	case len(fields) == 0:
+	case len(fields) == 1 && fields[0] == "all":
+		options.SystemSummary = false
+	case len(fields) == 1 && fields[0] == "system":
+		options.SystemOnly = true
+	case fields[0] == "last" && len(fields) <= 2:
+		options.LastTurns = 1
+		if len(fields) == 2 {
+			n, err := strconv.Atoi(fields[1])
+			if err != nil || n < 1 {
+				l.env.notifier.Errorf("Use /show last N with a positive number of turns.")
+				return
+			}
+			options.LastTurns = n
+		}
+	default:
+		l.env.notifier.Errorf("Use /show, /show last [N], /show all, or /show system.")
+		return
+	}
 	ctx, end := l.commandContext()
 	defer end()
 	sess, err := l.currentSession(ctx)
@@ -103,7 +155,7 @@ func (l *replLoop) showConversation() {
 		l.env.notifier.Infof("No saved conversation yet.")
 		return
 	}
-	if err := session.ShowSessionTo(ctx, l.diag, sess, l.env.notifier); err != nil {
+	if err := session.ShowSessionWithOptions(ctx, l.diag, sess, l.env.notifier, options); err != nil {
 		l.env.notifier.Errorf("Show conversation: %v", err)
 	}
 }
@@ -127,6 +179,14 @@ func (l *replLoop) setDisplay(command, value string) {
 }
 
 func (l *replLoop) showHistory(argument string) {
+	if argument == "clear" {
+		if err := l.history.clear(); err != nil {
+			l.env.notifier.Errorf("Clear history: %v", err)
+			return
+		}
+		l.env.notifier.Infof("History cleared, including the saved history of earlier REPLs.")
+		return
+	}
 	if argument != "" {
 		id, err := strconv.Atoi(argument)
 		text, ok := l.history.get(id)
@@ -137,12 +197,13 @@ func (l *replLoop) showHistory(argument string) {
 		showTextPreview(l.env.notifier, fmt.Sprintf("Prompt %d", id), text, len(text))
 		return
 	}
-	if len(l.history.entries) == 0 {
-		l.env.notifier.Infof("No prompt text in this invocation's history yet.")
+	prompts := l.history.prompts()
+	if len(prompts) == 0 {
+		l.env.notifier.Infof("No prompts in the history yet.")
 		return
 	}
-	l.env.notifier.Promptf("Prompt history (this invocation; text only):\n")
-	for _, entry := range l.history.entries {
+	l.env.notifier.Promptf("Prompt history (text only):\n")
+	for _, entry := range prompts {
 		l.env.notifier.Promptf("%d: %s\n", entry.id, plainPreview(strings.ReplaceAll(replPromptPreview(entry.text), "\n", " / ")))
 	}
 }
@@ -170,19 +231,24 @@ func plainPreview(text string) string {
 	return out.String()
 }
 
+// showTextPreview shows text under label, every line quoted so the preview's
+// extent is plain without a closing line, and at most limit bytes of it.
 func showTextPreview(n core.Notifier, label, text string, limit int) {
 	end := min(len(text), limit)
 	for end > 0 && end < len(text) && !utf8.RuneStart(text[end]) {
 		end--
 	}
-	n.Promptf("%s (%d bytes):\n", label, len(text))
+	n.Promptf("%s (%s, %d bytes):\n", label, core.Plural(1+strings.Count(text, "\n"), "line"), len(text))
 	for _, line := range strings.Split(plainPreview(text[:end]), "\n") {
-		n.Promptf("  %s\n", line)
+		if line == "" {
+			n.Promptf("|\n")
+		} else {
+			n.Promptf("| %s\n", line)
+		}
 	}
 	if end < len(text) {
-		n.Promptf("  [preview shortened; %d bytes omitted]\n", len(text)-end)
+		n.Promptf("[preview shortened; %d bytes not shown]\n", len(text)-end)
 	}
-	n.Promptf("End %s.\n", strings.ToLower(label))
 }
 
 func (l *replLoop) commandContext() (context.Context, func()) {

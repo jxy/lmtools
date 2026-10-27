@@ -34,7 +34,17 @@ func TestShowSessionKeepsPinnedHeadAndFullFailedToolOutput(t *testing.T) {
 	if err := ShowSessionTo(ctx, &out, pinned, core.NewTestNotifier()); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"example": Failed in 1.2s: exit status 1`, "Partial output:\n" + output + "\n      End output."} {
+	// Every line of the saved output is shown, blank ones included, quoted
+	// under the result.
+	var quoted strings.Builder
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" {
+			quoted.WriteString("      |\n")
+		} else {
+			quoted.WriteString("      | " + line + "\n")
+		}
+	}
+	for _, want := range []string{`example: Failed in 1.2s: exit status 1`, "Output (stdout+stderr, 201 lines):\n" + quoted.String()} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in saved transcript %q", want, out.String())
 		}
@@ -42,7 +52,7 @@ func TestShowSessionKeepsPinnedHeadAndFullFailedToolOutput(t *testing.T) {
 	if strings.Contains(out.String(), "later answer") {
 		t.Fatal("show included a message past the pinned head")
 	}
-	if kind, err := SavedHeadKind(ctx, pinned); err != nil || kind != "1 tool result(s)" {
+	if kind, err := SavedHeadKind(ctx, pinned); err != nil || kind != "1 tool result" {
 		t.Fatalf("saved head=%q,%v", kind, err)
 	}
 	if kind, err := SavedHeadKind(ctx, sess); err != nil || kind != "assistant response" {
@@ -121,7 +131,7 @@ func TestConversationDisplayUsesEachMessagesDirectory(t *testing.T) {
 							want = 1
 						}
 					}
-					for _, marker := range []string{label + "-user.png", label + "-result.png", label + " output\n\n", label + " end\n", `"` + label + `-command": Failed`} {
+					for _, marker := range []string{label + "-user.png", label + "-result.png", "| " + label + " output\n      |\n", "| " + label + " end\n", label + `-command: Failed`} {
 						if count := strings.Count(out.String(), marker); count != want {
 							t.Fatalf("%q appeared %d times, want %d:\n%s", marker, count, want, out.String())
 						}

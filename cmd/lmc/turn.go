@@ -35,6 +35,12 @@ type turnEnv struct {
 	// answerLabel identifies provider text on an interactive terminal.
 	answerLabel string
 	progress    *turnProgress
+	// quoteThinking quotes and wraps visible thinking for a terminal, at
+	// columns when that is known.
+	quoteThinking bool
+	columns       func() int
+	// served is the model the provider last said answered.
+	served string
 }
 
 func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input *inputOwner) *turnEnv {
@@ -46,7 +52,7 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 	// stream, decided once here; the executor and the pending-tools path both
 	// receive this same UI.
 	toolNotifier, approver := newOperatorToolSurface(notifier, input)
-	return &turnEnv{
+	env := &turnEnv{
 		cfg:             cfg,
 		notifier:        notifier,
 		toolUI:          tools.NewCLIToolUI(toolNotifier),
@@ -57,6 +63,11 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 		stderr:          os.Stderr,
 		answersOnScreen: true,
 	}
+	if isTerminalFile(os.Stderr) {
+		env.quoteThinking = true
+		env.columns = fileColumns(os.Stderr)
+	}
+	return env
 }
 
 // turnInput is what one turn contributes: the prompt, and whether the turn

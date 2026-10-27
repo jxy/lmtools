@@ -220,11 +220,30 @@ func ShowConversationTo(w io.Writer, sessionPath string, notifier core.Notifier)
 
 // displayMessageWithToolsTo reads sidecars from the message's own directory.
 // IDs are local to a directory; branches routinely reuse their ancestors' IDs.
-func displayMessageWithToolsTo(w io.Writer, ref lineageMessageRef, notifier core.Notifier, knownCalls map[string]core.ToolCall) error {
+// interaction is the message's tool calls or results, nil when it has none.
+func displayMessageWithToolsTo(w io.Writer, ref lineageMessageRef, interaction *core.ToolInteraction, notifier core.Notifier, knownCalls map[string]core.ToolCall, options ShowOptions) error {
 	msg := ref.message
 	// Print message header
 	roleDisplay := FormatRole(string(msg.Role), msg.Model)
-	fmt.Fprintf(w, "[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
+	if isToolResults(msg, interaction) {
+		roleDisplay = "tool results"
+	}
+	if msg.Role == core.RoleSystem {
+		// The system message is written when the session is, after the
+		// first answer; a time on it would read as later than the prompt
+		// it precedes.
+		fmt.Fprintf(w, "[%s]\n", roleDisplay)
+	} else {
+		fmt.Fprintf(w, "[%s] %s\n", roleDisplay, msg.Timestamp.Format("2006-01-02 15:04:05"))
+	}
+
+	if msg.Role == core.RoleSystem && options.SystemSummary && strings.Count(msg.Content, "\n") >= 3 {
+		fmt.Fprintf(w, "(%d lines; /show system prints it)\n", 1+strings.Count(msg.Content, "\n"))
+		return nil
+	}
+	if msg.Role == core.RoleAssistant && options.Thinking {
+		printSavedThinking(w, ref, notifier)
+	}
 
 	// Print message content if present
 	if msg.Content != "" {
@@ -234,15 +253,43 @@ func displayMessageWithToolsTo(w io.Writer, ref lineageMessageRef, notifier core
 	images := loadDisplayImages(ref.path, msg.ID, notifier)
 	printImageLinesTo(w, "", images.user)
 
-	// Load and display tool interactions if present
-	toolInteraction, err := LoadToolInteraction(ref.path, msg.ID)
-	if err != nil {
-		return err
+	if interaction != nil {
+		printToolInteractionTo(w, interaction, images, knownCalls)
 	}
-
-	if toolInteraction != nil {
-		printToolInteractionTo(w, toolInteraction, images, knownCalls)
-	}
-
 	return nil
+}
+
+// printSavedThinking shows the visible reasoning text saved with an answer,
+// quoted between the markers a live turn uses. Opaque reasoning shows as
+// omitted, as it did live.
+func printSavedThinking(w io.Writer, ref lineageMessageRef, notifier core.Notifier) {
+	blocks, ok, err := loadMessageBlocks(ref.path, ref.message.ID)
+	if err != nil {
+		if notifier != nil {
+			notifier.Warnf("Failed to load message blocks: %v", err)
+		}
+		return
+	}
+	if !ok {
+		return
+	}
+	for _, block := range blocks {
+		reasoning, isReasoning := block.(core.ReasoningBlock)
+		if !isReasoning {
+			continue
+		}
+		text := strings.TrimRight(core.ReasoningTextForDisplay(reasoning), "\n")
+		if text == "" {
+			text = "[omitted by provider]"
+		}
+		fmt.Fprintln(w, "--- thinking ---")
+		for _, line := range strings.Split(text, "\n") {
+			if line == "" {
+				fmt.Fprintln(w, "|")
+			} else {
+				fmt.Fprintf(w, "| %s\n", line)
+			}
+		}
+		fmt.Fprintln(w, "--- end thinking ---")
+	}
 }

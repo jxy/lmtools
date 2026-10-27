@@ -12,6 +12,7 @@ import (
 	"lmtools/internal/mockserver"
 	"lmtools/internal/session"
 	"lmtools/internal/ui"
+	"lmtools/internal/ui/tools"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func TestREPLCommandsAndLiteralSlash(t *testing.T) {
 	if got := strings.Join(sessionLines(t, loop.from), "|"); !strings.HasSuffix(got, want) {
 		t.Fatalf("session = %q, want suffix %q", got, want)
 	}
-	for _, text := range []string{"REPL commands:", "No prompt text", "Unknown REPL command", "Use /ed N", "/exit takes no arguments", `1: first / second`} {
+	for _, text := range []string{"REPL commands:", "No prompts in the history yet", "Unknown REPL command", "Use /ed N", "/exit takes no arguments", `1: first / second`} {
 		if notes.count(text) != 1 {
 			t.Fatalf("notes = %q, want %q once", notes.all(), text)
 		}
@@ -172,14 +173,19 @@ func TestREPLPresentationStaysOnDiagnostics(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, notes := newTestLoop(t, te)
 	loop.terminal = true
-	typeTurns(t, w, "one\ntwo\n/exit\n", true)
+	// Without the editor the terminal echoed each line; only a turn of
+	// several lines is shown again as one.
+	typeTurns(t, w, "one\ntwo\\\nmore\n/exit\n", true)
 	if err := loop.run(false); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"model: gpt-test", "buffered | thinking off", "/help commands", "  one\n", "  two\n", "Session: "} {
+	for _, text := range []string{"model: gpt-test", "buffered | thinking display: off", "/help commands", "| two\n", "| more\n", "Session: ", "Saved in session 0001; continue it with -resume 0001."} {
 		if notes.count(text) != 1 {
 			t.Fatalf("notes = %q, want %q once", notes.all(), text)
 		}
+	}
+	if notes.count("| one\n") != 0 {
+		t.Fatalf("a one-line turn was shown again: %q", notes.all())
 	}
 	if got := te.stdout.String(); got != "answer 1answer 2" {
 		t.Fatalf("stdout = %q, want answer bytes alone", got)
@@ -326,7 +332,7 @@ func TestREPLDeveloperCommandsQueueReplaceAndClearWithoutSending(t *testing.T) {
 	if len(server.GetRequests()) != 0 || sessionDirCount(t, te.sessionsDir) != 0 || len(loop.history.entries) != 0 || te.stdout.Len() != 0 {
 		t.Fatalf("commands sent or saved a turn: requests=%v, history=%v, stdout=%q", server.GetRequests(), loop.history.entries, te.stdout.String())
 	}
-	for _, text := range []string{"Use /developer TEXT", "/clear-developer takes no arguments", "No prompt text", "/developer TEXT", "/clear-developer"} {
+	for _, text := range []string{"Use /developer TEXT", "/clear-developer takes no arguments", "No prompts in the history yet", "/developer TEXT", "/clear-developer"} {
 		if notes.count(text) == 0 {
 			t.Fatalf("notes=%q, want %q", notes.all(), text)
 		}
@@ -437,5 +443,142 @@ func TestREPLDeveloperCommandSupportsImageOnlyTurn(t *testing.T) {
 	}
 	if loop.base.Developer != "" || len(loop.images) != 0 || len(loop.history.entries) != 1 || loop.history.entries[0].text != "follow-up" {
 		t.Fatalf("pending=%q, images=%d, history=%v", loop.base.Developer, len(loop.images), loop.history.entries)
+	}
+}
+
+// /show takes last [N], all, or system; a bare number is refused with the
+// forms it does take.
+func TestREPLShowArguments(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	loop, _, notes := newTestLoop(t, te)
+	for _, command := range []string{"/show 2", "/show last 0", "/show last two", "/show all extra"} {
+		loop.interpretInput(command)
+	}
+	if got := notes.count("Use /show, /show last [N], /show all, or /show system."); got != 2 {
+		t.Fatalf("usage notes = %d: %q", got, notes.all())
+	}
+	if got := notes.count("Use /show last N with a positive number of turns."); got != 2 {
+		t.Fatalf("count notes = %d: %q", got, notes.all())
+	}
+	loop.interpretInput("/show last 2")
+	if notes.count("No saved conversation yet.") != 1 {
+		t.Fatalf("notes = %q", notes.all())
+	}
+}
+
+// /effort takes what -effort takes, in any case.
+func TestREPLEffortAcceptsTheFlagsSpelling(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	loop, _, notes := newTestLoop(t, te)
+	loop.interpretInput("/effort XHIGH")
+	if loop.base.Effort != "xhigh" || notes.count("Reasoning effort set to xhigh for the next turns.") != 1 {
+		t.Fatalf("effort = %q; notes = %q", loop.base.Effort, notes.all())
+	}
+	loop.interpretInput("/effort Default")
+	if loop.base.Effort != "" || notes.count("Reasoning effort set to default for the next turns.") != 1 {
+		t.Fatalf("effort = %q; notes = %q", loop.base.Effort, notes.all())
+	}
+}
+
+// The tools help describes the start check as it works: the command is
+// still asked about.
+func TestREPLToolsHelpDescribesTheStartCheck(t *testing.T) {
+	if !strings.Contains(replToolsHelp, "Cannot start now:") || strings.Contains(replToolsHelp, "is not asked about") {
+		t.Fatalf("tools help:\n%s", replToolsHelp)
+	}
+}
+
+// /model and /effort change the turns that follow, and only those.
+func TestREPLModelAndEffortChangeTheNextTurn(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	loop, w, notes := newTestLoop(t, te)
+	typeTurns(t, w, "first\n/model gpt-other\n/effort high\nsecond\n/effort default\n/effort bogus\n/model\nthird\n", true)
+	if err := loop.run(false); err != nil {
+		t.Fatal(err)
+	}
+	requests := server.GetRequests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d", len(requests))
+	}
+	var bodies [3]map[string]interface{}
+	for i := range requests {
+		if err := json.Unmarshal([]byte(requests[i].Body), &bodies[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if bodies[0]["model"] != "gpt-test" || bodies[1]["model"] != "gpt-other" || bodies[2]["model"] != "gpt-other" {
+		t.Fatalf("models = %v %v %v", bodies[0]["model"], bodies[1]["model"], bodies[2]["model"])
+	}
+	if _, set := bodies[0]["reasoning_effort"]; set || bodies[1]["reasoning_effort"] != "high" {
+		t.Fatalf("effort = %v then %v", bodies[0]["reasoning_effort"], bodies[1]["reasoning_effort"])
+	}
+	if _, set := bodies[2]["reasoning_effort"]; set {
+		t.Fatalf("/effort default kept %v", bodies[2]["reasoning_effort"])
+	}
+	for _, want := range []string{"Model set to gpt-other", "Reasoning effort set to high", "Unknown effort \"bogus\"", "Model: gpt-other"} {
+		if notes.count(want) != 1 {
+			t.Fatalf("notes = %q, want %q", notes.all(), want)
+		}
+	}
+	// The session records which model wrote each answer.
+	lines := sessionLines(t, loop.from)
+	if len(lines) == 0 {
+		t.Fatal("no session")
+	}
+}
+
+func TestREPLHelpAlignsEveryDescription(t *testing.T) {
+	lines := strings.Split(replHelpText(), "\n")
+	if !strings.HasPrefix(lines[1], "  /help") {
+		t.Fatal("/help is not listed first")
+	}
+	column := -1
+	for i, command := range replCommands {
+		line := lines[i+1]
+		at := strings.Index(line, command.effect)
+		if at < 0 || !strings.HasPrefix(line, "  "+command.usage) {
+			t.Fatalf("line %q does not hold %q", line, command.usage)
+		}
+		if column == -1 {
+			column = at
+		}
+		if at != column {
+			t.Fatalf("description of %q starts at %d, others at %d:\n%s", command.usage, at, column, replHelpText())
+		}
+	}
+}
+
+func TestREPLToolOutputAndBellCommands(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	loop, _, notes := newTestLoop(t, te)
+	loop.interpretInput("/tool-output full")
+	if notes.count("applies to a terminal") != 1 {
+		t.Fatalf("notes = %q", notes.all())
+	}
+	ui := &replToolUI{CLIToolUI: tools.NewCLIToolUIWithOptions(loop.env.notifier, tools.Options{ShortOutput: true}), loop: loop}
+	loop.env.toolUI = ui
+	loop.interpretInput("/tool-output full")
+	if ui.Options.ShortOutput {
+		t.Fatal("/tool-output full kept short output")
+	}
+	loop.interpretInput("/tool-output short")
+	if !ui.Options.ShortOutput {
+		t.Fatal("/tool-output short did not shorten")
+	}
+	loop.interpretInput("/bell on")
+	if !loop.bell {
+		t.Fatal("/bell on did not turn the bell on")
+	}
+	loop.interpretInput("/bell maybe")
+	if notes.count("Use /bell on or /bell off.") != 1 {
+		t.Fatalf("notes = %q", notes.all())
 	}
 }

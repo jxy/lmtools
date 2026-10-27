@@ -80,13 +80,9 @@ Tools: 1
 Running 1 tool...
 
 Tool results:
-[1/1] "view_image": Completed in NNms
-      Output:
-Attached image shot.png (image/png, %d bytes).
-      End output.
-      [image: shot.png (image/png, %d bytes)]
+[1/1] view_image: Sent shot.png (image/png, %d bytes)
 
-`, len(viewImagePNG), len(viewImagePNG))
+`, len(viewImagePNG))
 	scenarios := []executorScenario{
 		{
 			name:     "auto-approved",
@@ -115,7 +111,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "view_image": Not run: user denied permission
+[1/1] view_image: Denied by you
 
 `,
 		},
@@ -131,7 +127,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "view_image": Not run: read image "<TMP>/notes.txt": content is not PNG, JPEG, GIF, or WebP
+[1/1] view_image: Not run: read image "<TMP>/notes.txt": content is not PNG, JPEG, GIF, or WebP
 
 `,
 		},
@@ -147,7 +143,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "view_image": Not run: approval disabled by -tool-non-interactive
+[1/1] view_image: Not run: approval disabled by -tool-non-interactive
       Hint: Allow via one of:
               - Run interactively without -tool-non-interactive
               - Use -tool-auto-approve
@@ -174,7 +170,7 @@ Tools: 1
 No tools will be run.
 
 Tool results:
-[1/1] "view_image": Not run: not in whitelist
+[1/1] view_image: Not run: not in whitelist
       Hint: Whitelist file: <TMP>/commands.txt
       Hint: To allow this image, either:
               1. Add {"tool":"view_image","path":"<TMP>/shot.png"} to your whitelist file and use -tool-whitelist <file>

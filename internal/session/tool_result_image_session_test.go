@@ -116,7 +116,8 @@ func TestShowListsToolResultImagesUnderTheResult(t *testing.T) {
 	}
 	msgID := saveViewImageRound(t, ctx, sess, sessionTestImage())
 	notifier := core.NewTestNotifier()
-	want := "Attached image shot.png (image/png, 12 bytes).\n      End output.\n      [image: shot.png (image/png, 12 bytes)]\n"
+	// The result says the image went, once; the bytes are never printed.
+	want := "view_image: Sent shot.png (image/png, 12 bytes)\n"
 
 	conversation, err := captureDisplayStdout(t, func() error { return ShowConversation(sess.Path, notifier) })
 	if err != nil {
@@ -135,8 +136,11 @@ func TestShowListsToolResultImagesUnderTheResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShowMessageWithManager() error = %v", err)
 	}
-	if !strings.Contains(single, want) {
-		t.Fatalf("ShowMessageWithManager() output = %q, want it to contain %q", single, want)
+	// One message shown alone has no call to name the tool, so the result
+	// shows the text the model received and the image under it.
+	wantSingle := "      | Attached image shot.png (image/png, 12 bytes).\n      [image: shot.png (image/png, 12 bytes)]\n"
+	if !strings.Contains(single, wantSingle) {
+		t.Fatalf("ShowMessageWithManager() output = %q, want it to contain %q", single, wantSingle)
 	}
 	if len(notifier.WarnMessages) != 0 {
 		t.Fatalf("unexpected warnings: %v", notifier.WarnMessages)

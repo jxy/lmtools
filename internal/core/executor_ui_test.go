@@ -22,6 +22,7 @@ func (r *lifecycleRecorder) add(event string) {
 }
 
 type recordingToolUI struct {
+	TestToolUI
 	recorder *lifecycleRecorder
 }
 
@@ -98,12 +99,13 @@ func TestExecuteParallelDisplaysAndApprovesBeforeRun(t *testing.T) {
 		t.Fatalf("denied result = %#v, want code %s", results[2], errors.ErrCodeDeniedBlacklist)
 	}
 
+	// The whole round is shown before the first question.
 	want := []string{
 		"show:1/3:one",
-		"approve:one",
 		"show:2/3:two",
-		"approve:two",
 		"show:3/3:denied",
+		"approve:one",
+		"approve:two",
 		"run:total=3,runnable=2,parallel=1",
 		"results",
 	}

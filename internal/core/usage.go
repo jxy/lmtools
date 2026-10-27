@@ -238,15 +238,41 @@ func (u *Usage) DisplaySummary() string {
 // notifyTokenUsage reports a response's token counts on the diagnostic
 // stream. It runs after response presentation is finalized and before any tool
 // approval prompt or execution the response goes on to trigger.
-func notifyTokenUsage(notifier Notifier, usage *Usage) {
+func notifyTokenUsage(notifier Notifier, usage *Usage, toolCalls bool) {
 	if notifier == nil {
 		return
 	}
-	if reporter, ok := notifier.(interface{ ReportUsage(*Usage) }); ok {
-		reporter.ReportUsage(usage)
+	if reporter, ok := notifier.(interface{ ReportUsage(*Usage, bool) }); ok {
+		reporter.ReportUsage(usage, toolCalls)
 		return
 	}
 	if usage != nil {
 		notifier.Infof("Tokens: %s", usage.DisplaySummary())
 	}
+}
+
+// ModelFromPayload reads the model a response or stream event names: the
+// top-level model (Anthropic, OpenAI Chat and Responses), Google's
+// modelVersion, or the model inside an Anthropic message_start or a
+// Responses event. It returns "" when the payload names none.
+func ModelFromPayload(data []byte) string {
+	var envelope struct {
+		Model        string `json:"model"`
+		ModelVersion string `json:"modelVersion"`
+		Message      struct {
+			Model string `json:"model"`
+		} `json:"message"`
+		Response struct {
+			Model string `json:"model"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(data, &envelope) != nil {
+		return ""
+	}
+	for _, model := range []string{envelope.Model, envelope.ModelVersion, envelope.Message.Model, envelope.Response.Model} {
+		if model != "" {
+			return model
+		}
+	}
+	return ""
 }

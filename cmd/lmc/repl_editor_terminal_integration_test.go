@@ -8,7 +8,6 @@ import (
 	"lmtools/internal/mockserver"
 	"lmtools/internal/ptytest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -103,7 +102,7 @@ func TestTerminalREPLEditorDraftReopenAppendAndCleanup(t *testing.T) {
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/ed\n")
-	r.expect(t, "Draft (5 bytes):\r\n  draft\r\nEnd draft.")
+	r.expect(t, "Draft (1 line, 5 bytes):\r\n| draft\r\n")
 	editorReviewPrompt(t, r)
 	h.cleaned(t)
 	if len(server.GetRequests()) != 0 {
@@ -111,7 +110,7 @@ func TestTerminalREPLEditorDraftReopenAppendAndCleanup(t *testing.T) {
 	}
 	h.mode(t, "append")
 	r.typeKeys(t, "/ed\n")
-	r.expect(t, "  draft[reopened]\r\nEnd draft.")
+	r.expect(t, "| draft[reopened]\r\n")
 	editorReviewPrompt(t, r)
 	if h.seed(t) != "draft" || r.nonblocking(t) {
 		t.Fatal("editor did not reopen the draft or changed stdin's blocking description")
@@ -141,7 +140,7 @@ func TestTerminalREPLEditorHistoryRegexRequiresFreshEnter(t *testing.T) {
 	r.expect(t, "answer 2")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/ed ^match \n\nqueued prompt\n")
-	r.expect(t, "  match first\r\n  \r\n  match second\r\nEnd draft.")
+	r.expect(t, "| match first\r\n|\r\n| match second\r\n")
 	editorReviewPrompt(t, r)
 	if len(server.GetRequests()) != 2 || h.seed(t) != "match first\n\nmatch second" {
 		t.Fatalf("queued input bypassed review or wrong seed: requests=%v, seed=%q", server.GetRequests(), h.seed(t))
@@ -150,7 +149,7 @@ func TestTerminalREPLEditorHistoryRegexRequiresFreshEnter(t *testing.T) {
 	r.typeKeys(t, "/ed 1\n")
 	r.expect(t, "EDITOR_HOLD")
 	r.typeKeys(t, "\nqueued during editor\n")
-	r.expect(t, "Draft (4 bytes):\r\n  held\r\nEnd draft.")
+	r.expect(t, "Draft (1 line, 4 bytes):\r\n| held\r\n")
 	editorReviewPrompt(t, r)
 	if len(server.GetRequests()) != 2 {
 		t.Fatal("input typed during the editor caused inference")
@@ -165,7 +164,7 @@ func TestTerminalREPLEditorHistoryRegexRequiresFreshEnter(t *testing.T) {
 	r.expect(t, freshPrompt)
 	h.mode(t, "identity")
 	r.typeKeys(t, "unfinished\\\n/ed\n")
-	r.expect(t, "  unfinished\r\nEnd draft.")
+	r.expect(t, "| unfinished\r\n")
 	editorReviewPrompt(t, r)
 	if h.seed(t) != "unfinished" {
 		t.Fatalf("continuation editor seed=%q", h.seed(t))
@@ -251,18 +250,23 @@ func TestTerminalREPLEditorInterruptSuspendAndDraftDiscard(t *testing.T) {
 	h.cleaned(t)
 }
 
-func TestTerminalREPLEditorFallbackEdAndLiteralContinuation(t *testing.T) {
-	if _, err := exec.LookPath("ed"); err != nil {
-		t.Skip("ed unavailable")
+// With neither VISUAL nor EDITOR set, /ed runs vi, found on PATH; a stand-in
+// appends one literal line the way an editing session would.
+func TestTerminalREPLEditorFallbackViAndLiteralContinuation(t *testing.T) {
+	_ = getLmcBinary(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vi"), []byte("#!/bin/sh\nprintf '/exit\\n' >> \"$1\"\n"), 0o700); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	server := mockserver.NewMockServer(numberedAnswers())
 	defer server.Close()
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "/ed\n")
 	r.expect(t, "Opening editor;")
-	r.typeKeys(t, "a\n/exit\n.\nw\nq\n")
 	editorReviewPrompt(t, r)
 	if len(server.GetRequests()) != 0 {
 		t.Fatal("ed exit submitted automatically")
@@ -353,9 +357,10 @@ func testTerminalREPLEditorRedirectedStreamsAndTermination(t *testing.T, sig sys
 func TestTerminalREPLEditorFailedExecRestoresForeground(t *testing.T) {
 	_ = getLmcBinary(t)
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ed"), []byte("#!/missing-editor-interpreter\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "vi"), []byte("#!/missing-editor-interpreter\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	t.Setenv("PATH", dir)
 	server := mockserver.NewMockServer(numberedAnswers())

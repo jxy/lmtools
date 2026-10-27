@@ -43,6 +43,7 @@ type OpenAIStreamState struct {
 	failed               bool
 	toolsFinalized       bool
 	usage                *Usage
+	model                string
 }
 
 func NewOpenAIStreamState() *OpenAIStreamState {
@@ -74,6 +75,9 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 	}
 	if parsed.Usage.InputTokens != nil || parsed.Usage.OutputTokens != nil || parsed.Usage.TotalTokens != nil {
 		s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
+	}
+	if s.model == "" {
+		s.model = ModelFromPayload([]byte(data))
 	}
 
 	var text strings.Builder
@@ -179,6 +183,9 @@ func (s *OpenAIStreamState) appendToolCall(delta ParsedOpenAIStreamToolCall) {
 		partial.Type = delta.Type
 	}
 	if delta.Name != "" {
+		if partial.Name == "" {
+			s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamToolCallStart, Text: delta.Name})
+		}
 		partial.Name = delta.Name
 	}
 	if partial.Type == "custom" {

@@ -20,6 +20,10 @@ type requestPreparer struct {
 	// the edge; a nil UI is valid only when pending tools cannot require
 	// interactive approval.
 	toolUI core.ToolUI
+	// prepared is when the turn was planned. The user message commits once
+	// the response has arrived, and is stamped with this time, when the
+	// operator sent it, rather than with the response's.
+	prepared time.Time
 }
 
 // PrepareRequest builds request messages without committing new session state.
@@ -27,7 +31,7 @@ type requestPreparer struct {
 // resumed head are resolved beforehand by ResolvePendingToolCalls, or
 // previewed with placeholders for -print-curl.
 func PrepareRequest(ctx context.Context, cfg core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, inputStr string, isRegeneration bool, pendingTools PendingToolMode) (*RequestPlan, error) {
-	preparer := requestPreparer{cfg: cfg, notifier: notifier, toolUI: toolUI}
+	preparer := requestPreparer{cfg: cfg, notifier: notifier, toolUI: toolUI, prepared: time.Now()}
 	return preparer.PrepareRequest(ctx, inputStr, isRegeneration, pendingTools)
 }
 
@@ -138,7 +142,7 @@ func (c *requestPreparer) prepareSessionResumeRequest(ctx context.Context, resum
 // resolved pending tool calls, or ran a turn before, prepares the next
 // request against the history it knows.
 func PrepareRequestAt(ctx context.Context, cfg core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, sess *Session, inputStr string, isRegeneration bool, pendingTools PendingToolMode) (*RequestPlan, error) {
-	preparer := requestPreparer{cfg: cfg, notifier: notifier, toolUI: toolUI}
+	preparer := requestPreparer{cfg: cfg, notifier: notifier, toolUI: toolUI, prepared: time.Now()}
 	return preparer.prepareSessionAt(ctx, sess, sess.Head, inputStr, isRegeneration, pendingTools)
 }
 
@@ -456,10 +460,14 @@ func (c *requestPreparer) saveUserMessage(ctx context.Context, sess *Session, in
 		}
 	}
 
+	stamp := c.prepared
+	if stamp.IsZero() {
+		stamp = time.Now()
+	}
 	userMsg := Message{
 		Role:      core.RoleUser,
 		Content:   inputStr,
-		Timestamp: time.Now(),
+		Timestamp: stamp,
 	}
 
 	result, err := c.appendUserTurn(ctx, sess, userMsg, blocks)

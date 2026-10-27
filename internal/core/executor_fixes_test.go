@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/constants"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,10 @@ func TestCommandJSONFormat(t *testing.T) {
 	// authority, so a bare ["git"] rule does not grant it.
 	tmpDir := t.TempDir()
 	whitelistPath := filepath.Join(tmpDir, "whitelist.txt")
-	rule := `{"command":["git"],"environ":{"GIT_DIR":".git"},"workdir":"/tmp/test"}`
+	// The workdir has to exist: a command that cannot start is refused
+	// before it is approved or executed.
+	workdir := t.TempDir()
+	rule := `{"command":["git"],"environ":{"GIT_DIR":".git"},"workdir":` + strconv.Quote(workdir) + `}`
 	if err := os.WriteFile(whitelistPath, []byte(rule), constants.FilePerm); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +63,7 @@ func TestCommandJSONFormat(t *testing.T) {
 	args, _ := json.Marshal(map[string]interface{}{
 		"command": []string{"git", "rev-parse", "--show-toplevel"},
 		"environ": map[string]string{"GIT_DIR": ".git"},
-		"workdir": "/tmp/test",
+		"workdir": workdir,
 		"timeout": 30,
 	})
 	call := ToolCall{

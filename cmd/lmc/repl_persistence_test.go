@@ -65,9 +65,13 @@ func TestREPLUnsavedAnswerAfterDiagnosticKeepsExistingSpacing(t *testing.T) {
 			diag := screen.writer(&transcript, false)
 			p := newResponsePresenter(screen.writer(&transcript, true), diag, kind == "thinking")
 			response := core.Response{Text: "answer"}
+			count := 1
 			if kind == "usage" {
-				count := 1
 				response.Usage = &core.Usage{OutputTokens: &count}
+			} else {
+				// Counted reasoning with nothing visible is what the
+				// presenter's own note reports.
+				response.Usage = &core.Usage{ReasoningTokens: &count}
 			}
 			p.HandleResponseComplete(response)
 			p.Close()

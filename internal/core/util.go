@@ -38,15 +38,17 @@ func FormatByteCount(size int) string {
 // escapes &, <, and > by default, on the assumption the output is going into a
 // web page; a person reading an approval line or a suggested whitelist rule for
 // `sh -c "make build && ./run > out 2>&1"` has to be able to read it as
-// written to judge it.
+// written to judge it. JSON leaves DEL, C1 controls, and format characters
+// such as bidi overrides as they are; they are escaped too, which keeps the
+// text valid JSON with the same meaning.
 func MarshalJSONForDisplay(value interface{}) string {
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(value); err != nil {
-		return fmt.Sprintf("%v", value)
+		return VisibleText(fmt.Sprintf("%v", value))
 	}
-	return strings.TrimSuffix(buf.String(), "\n")
+	return VisibleText(strings.TrimSuffix(buf.String(), "\n"))
 }
 
 // GetString safely extracts a string value from a map

@@ -92,13 +92,13 @@ func TestMCPOutcomesRenderThroughTheCLI(t *testing.T) {
 
 	want := "\nTools: 3\n" +
 		"[1/3] MCP tool: github/list_issues\n      Arguments: {\"repo\":\"a/b\"}\n\n" +
-		"[2/3] MCP tool: github/delete_repo\n      Arguments: {}\n\n" +
+		"[2/3] MCP tool: github/delete_repo\n      Arguments: {}\n      Will not run: blacklisted\n\n" +
 		"[3/3] MCP tool: github/create_issue\n      Arguments: {\"title\":\"x\"}\n" +
 		"\nRunning 1 of 3 tools...\n" +
 		"\nTool results:\n" +
-		fmt.Sprintf("[1/3] \"github/list_issues\": Completed in Nms (1 image(s) attached)\n      Output:\n#1 open\n      End output.\n      [image: image/png, %d bytes]\n\n", len(viewImagePNG)) +
-		"[2/3] \"github/delete_repo\": Not run: blacklisted\n\n" +
-		"[3/3] \"github/create_issue\": Not run: user denied permission\n\n"
+		fmt.Sprintf("[1/3] github/list_issues: Completed in Nms (1 image(s) attached)\n      Output (1 line):\n      | #1 open\n      [image: image/png, %d bytes]\n\n", len(viewImagePNG)) +
+		"[2/3] github/delete_repo: Not run: blacklisted\n\n" +
+		"[3/3] github/create_issue: Denied by you\n\n"
 	if got := elapsedPattern.ReplaceAllString(notifier.out.String(), "in Nms"); got != want {
 		t.Fatalf("transcript = %q\nwant %q", got, want)
 	}

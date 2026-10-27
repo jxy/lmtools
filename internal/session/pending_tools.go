@@ -214,7 +214,7 @@ func endsWithToolResults(refs []lineageMessageRef) (bool, error) {
 	if err != nil {
 		return false, lmerrors.WrapError("load tool interaction for message "+last.message.ID, err)
 	}
-	return interaction != nil && len(interaction.Results) > 0, nil
+	return isToolResults(last.message, interaction), nil
 }
 
 // askRerun asks whether to run an uncertain call again, and reports whether

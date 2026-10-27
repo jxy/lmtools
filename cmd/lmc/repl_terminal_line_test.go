@@ -6,31 +6,29 @@ import (
 	"testing"
 )
 
-func TestTerminalLineClearsReflowedRows(t *testing.T) {
+// After a shrink the terminal may wrap a painted row; clear climbs to the
+// row's first terminal row. A cursor at the end of a row exactly as wide as
+// the terminal waits on that row.
+func TestTerminalAreaClearsReflowedRows(t *testing.T) {
 	for _, tt := range []struct {
-		name, text                 string
-		cursor, columns, last, row int
-		want                       string
+		name                string
+		width, col, columns int
+		want                string
 	}{
-		{"one row", "> abc", 5, 12, 0, 0, "\r\x1b[2K"},
-		{"shrink at end", "> abcdefghijkl", 14, 5, 2, 2, "\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"},
-		{"shrink at start", "> abcdefghijkl", 2, 5, 2, 0, "\r\x1b[2B\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"},
-		{"cursor at wrap", "> abcdefghijkl", 5, 5, 2, 1, "\r\x1b[1B\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"},
-		{"exactly filled", "> abcdef", 8, 4, 1, 1, "\r\x1b[2K\x1b[1A\r\x1b[2K"},
-		{"wide rune wraps early", "> ab界界界", 10, 5, 2, 2, "\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"},
-		{"combining mark", "> e\u0301x", 4, 5, 0, 0, "\r\x1b[2K"},
-		{"one column", "> x", 3, 1, 2, 2, "\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"},
-		{"grow", "> <tail", 7, 80, 0, 0, "\r\x1b[2K"},
+		{"one row", 5, 5, 12, "\r\x1b[J"},
+		{"shrink at end", 14, 14, 5, "\r\x1b[2A\x1b[J"},
+		{"shrink at start", 14, 2, 5, "\r\x1b[J"},
+		{"cursor at wrap", 14, 5, 5, "\r\x1b[1A\x1b[J"},
+		{"exactly filled", 8, 8, 4, "\r\x1b[1A\x1b[J"},
+		{"one column", 3, 3, 1, "\r\x1b[2A\x1b[J"},
+		{"grow", 7, 7, 80, "\r\x1b[J"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			line := terminalLine{text: tt.text, cursor: tt.cursor, columns: 80}
-			if last, row := line.rows(tt.columns); last != tt.last || row != tt.row {
-				t.Fatalf("rows=%d cursor row=%d; want %d %d", last, row, tt.last, tt.row)
-			}
+			area := terminalArea{widths: []int{tt.width}, cursorCol: tt.col}
 			var out bytes.Buffer
-			line.clear(&out, tt.columns)
-			if out.String() != tt.want || line.text != "" {
-				t.Fatalf("clear=%q state=%+v", out.String(), line)
+			area.clear(&out, tt.columns)
+			if out.String() != tt.want || len(area.widths) != 0 {
+				t.Fatalf("clear = %q, state %+v; want %q", out.String(), area, tt.want)
 			}
 		})
 	}
@@ -43,13 +41,16 @@ func TestInlineStatusClearsRowsAfterResize(t *testing.T) {
 	screen.setStatus("Waiting for response...")
 	columns = 10
 	screen.setStatus("")
-	if got := out.String(); got != "Waiting for response...\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K" {
+	if got := out.String(); got != "Waiting for response...\r\x1b[2A\x1b[J" {
 		t.Fatalf("wrapped waiting status was not erased: %q", got)
 	}
 	out.Reset()
 	screen.setStatus("Retrying in 1s (attempt 2/3)...")
 	screen.setStatus("")
-	if strings.Count(out.String(), "\x1b[2K") != 1 {
-		t.Fatalf("status did not clip to the new width: %q", out.String())
+	if got := out.String(); got != "Retrying \r\x1b[J" {
+		t.Fatalf("status did not clip to the new width: %q", got)
+	}
+	if strings.Contains(out.String(), "attempt") {
+		t.Fatalf("clipped status shows its tail: %q", out.String())
 	}
 }

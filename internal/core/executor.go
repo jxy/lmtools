@@ -258,6 +258,9 @@ type preparedExecution struct {
 	image            *preparedImage
 	mcp              *preparedMCP
 	approvalRequired bool
+	// startWarning is why the command could not start when the round was
+	// prepared; an earlier call of the round may still make it startable.
+	startWarning string
 }
 
 // noun is what a rule admitting this call would name, for the advice a
@@ -339,113 +342,6 @@ func NewExecutor(cfg RequestOptions, log ExecLogger, approver Approver) (*Execut
 	return e, nil
 }
 
-// ExecuteParallel displays and approves every call before starting any command,
-// then executes approved calls in parallel with a concurrency limit. A nil UI
-// is valid only when policy does not require interactive approval.
-func (e *Executor) ExecuteParallel(ctx context.Context, calls []ToolCall, ui ToolUI) []ToolResult {
-	results := make([]ToolResult, len(calls))
-	prepared := make([]preparedExecution, 0, min(len(calls), DefaultMaxToolCalls))
-	for i, call := range calls {
-		var exec preparedExecution
-		var result ToolResult
-		var ready bool
-		if i >= DefaultMaxToolCalls {
-			result = ToolResult{
-				ID:    call.ID,
-				Error: fmt.Sprintf("maximum tool calls per round exceeded (%d)", DefaultMaxToolCalls),
-				Code:  errors.ErrCodeInvalidInput,
-			}
-		} else {
-			exec, result, ready = e.prepareSingle(ctx, call)
-		}
-
-		if exec.mcp != nil {
-			// Label the call for the review line and the result list, even
-			// when response parsing had no definitions to label it from.
-			calls[i].MCPServer, calls[i].MCPTool = exec.mcp.call.Server, exec.mcp.call.Tool
-			call = calls[i]
-		}
-		if ui != nil {
-			ui.ShowCall(i, len(calls), call, exec.args)
-		}
-
-		if ready && exec.approvalRequired {
-			ready = e.resolveApproval(ctx, exec, ui, &result)
-		}
-
-		if !ready {
-			// One place says so for every way a call can be refused before it
-			// runs, including the ones above that assemble their own result.
-			// Leaving each site to remember would put the CLI's old
-			// error-code list back, one struct literal at a time.
-			result.NotRun = true
-			results[i] = result
-			continue
-		}
-		exec.index = i
-		prepared = append(prepared, exec)
-	}
-
-	prepared = rejectSharedOutputFiles(prepared, results)
-
-	workers := min(effectiveMaxParallel(e.maxParallel), len(prepared))
-	if ui != nil {
-		ui.BeforeRun(len(calls), len(prepared), workers)
-	}
-
-	// Every call refused before this point has its outcome already, and
-	// recording it now means recovery reads the refusal instead of asking
-	// again.
-	runnable := make([]bool, len(calls))
-	for _, exec := range prepared {
-		runnable[exec.index] = true
-	}
-	for i := range calls {
-		if !runnable[i] {
-			e.recordOutcome(calls[i], results[i])
-		}
-	}
-
-	jobs := make(chan preparedExecution)
-	var wg sync.WaitGroup
-
-	for worker := 0; worker < workers; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for exec := range jobs {
-				call := calls[exec.index]
-				if ctx.Err() == nil {
-					if err := e.recordStart(call); err != nil {
-						result := ToolResult{
-							ID:     exec.id,
-							NotRun: true,
-							Error:  fmt.Sprintf("not run: recording the call's start failed: %v", err),
-							Code:   errors.ErrCodeExecError,
-						}
-						results[exec.index] = result
-						e.recordOutcome(call, result)
-						continue
-					}
-				}
-				results[exec.index] = e.executePrepared(ctx, exec)
-				e.recordOutcome(call, results[exec.index])
-			}
-		}()
-	}
-
-	for _, exec := range prepared {
-		jobs <- exec
-	}
-	close(jobs)
-
-	wg.Wait()
-	if ui != nil {
-		ui.AfterExecute(calls, results)
-	}
-	return results
-}
-
 // effectiveMaxParallel floors the worker count at one. Zero workers is not a
 // serial batch, it is a permanent one: the jobs channel is unbuffered, so the
 // first send blocks with nobody ranging over it and ExecuteParallel never
@@ -461,21 +357,22 @@ func effectiveMaxParallel(maxParallel int) int {
 }
 
 // resolveApproval asks the operator about one prepared call and reports whether
-// it may run, recording the reason on result when it may not. A command and an
-// image are two questions with one set of outcomes, so the approver is asked
-// the question that fits the call and everything after the answer is shared.
-func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, ui ToolUI, result *ToolResult) bool {
+// it may run, and whether the answer approved the rest of the round too,
+// recording the reason on result when it may not. A command and an image are
+// two questions with one set of outcomes, so the approver is asked the
+// question that fits the call and everything after the answer is shared.
+func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, ui ToolUI, result *ToolResult) (approved, rest bool) {
 	// The nil-approver case is unreachable through NewExecutor, which refuses to
 	// set canPrompt without an approver, so decide never asks for a prompt that
 	// cannot happen. It stays as the backstop for a policy assembled by hand.
 	switch {
 	case e.approver == nil:
 		e.denyApprovalUnavailable(result, errors.ErrCodeApprovalError, exec.noun())
-		return false
+		return false, false
 	case ui == nil:
 		result.Error = "approval failed: interactive approval requires a reviewed tool UI"
 		result.Code = errors.ErrCodeApprovalError
-		return false
+		return false, false
 	}
 
 	var approval Approval
@@ -491,11 +388,11 @@ func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, 
 	switch {
 	case err != nil && ctx.Err() != nil:
 		markCancelledBeforeRun(result)
-		return false
+		return false, false
 	case err != nil:
 		result.Error = fmt.Sprintf("approval failed: %v", err)
 		result.Code = errors.ErrCodeApprovalError
-		return false
+		return false, false
 	case !approval.Approved:
 		// Reason alone. That the command never ran is stated once, by
 		// notRunStatement, for every refusal rather than by this one in wording
@@ -503,9 +400,9 @@ func (e *Executor) resolveApproval(ctx context.Context, exec preparedExecution, 
 		result.Reason = approval.DenialReason()
 		result.Error = result.Reason
 		result.Code = errors.ErrCodeNotApproved
-		return false
+		return false, false
 	}
-	return true
+	return true, approval.Rest
 }
 
 // markCancelledBeforeRun records a cancellation that stopped a command from
@@ -849,6 +746,20 @@ func commandTimeout(seconds int, fallback time.Duration) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+// newCommand builds the process a command call starts: its program and
+// arguments, its working directory, and the current environment with the
+// call's additions. The start check before the question examines the same
+// command the run starts.
+func newCommand(ctx context.Context, cmdArgs *UniversalCommandArgs) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, cmdArgs.Command[0], cmdArgs.Command[1:]...)
+	cmd.Dir = cmdArgs.Workdir
+	cmd.Env = os.Environ()
+	for k, v := range cmdArgs.Environ {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	}
+	return cmd
+}
+
 // executeCommand runs the command with its timeout and standard I/O settings.
 //
 // started answers whether a process was ever created, and this is the only
@@ -867,7 +778,7 @@ func (e *Executor) executeCommand(ctx context.Context, cmdArgs *UniversalCommand
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, cmdArgs.Command[0], cmdArgs.Command[1:]...)
+	cmd := newCommand(ctx, cmdArgs)
 
 	// A descendant that inherits the captured output pipe keeps it open after
 	// the direct child exits, and Wait blocks on the pipe rather than on the
@@ -876,17 +787,6 @@ func (e *Executor) executeCommand(ctx context.Context, cmdArgs *UniversalCommand
 	// watching the deadline. WaitDelay caps the wait and makes the overrun an
 	// error instead of a silent one.
 	cmd.WaitDelay = CommandWaitDelay
-
-	// Set working directory
-	if cmdArgs.Workdir != "" {
-		cmd.Dir = cmdArgs.Workdir
-	}
-
-	// Setup environment (inherit current + additions)
-	cmd.Env = os.Environ()
-	for k, v := range cmdArgs.Environ {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-	}
 
 	// Capture streams that were not redirected to files.
 	output, truncated, err = runCommandWithIO(ctx, cmd, cmdArgs, e.maxOutputSize)
@@ -979,10 +879,16 @@ func (e *Executor) prepareSingle(ctx context.Context, call ToolCall) (preparedEx
 
 	decision := e.policy.decide(*cmdArgs)
 	switch decision {
-	case decisionAllow:
-		return preparedExecution{id: call.ID, args: cmdArgs}, result, true
-	case decisionRequireApproval:
-		return preparedExecution{id: call.ID, args: cmdArgs, approvalRequired: true}, result, true
+	case decisionAllow, decisionRequireApproval:
+		exec := preparedExecution{id: call.ID, args: cmdArgs, approvalRequired: decision == decisionRequireApproval}
+		// An executable missing from PATH or a working directory that does
+		// not exist is noted ahead of the question. The call still runs when
+		// approved, since an earlier call of the round may create what it
+		// needs; if it still cannot start, its result says so.
+		if err := verifyCommandCanStart(newCommand(context.Background(), cmdArgs)); err != nil {
+			exec.startWarning = err.Error()
+		}
+		return exec, result, true
 	case decisionDenyBlacklist:
 		if e.log != nil && e.log.IsDebugEnabled() {
 			e.log.Debugf("Command rejected: %s | Reason: blacklisted", cmdArgs.Command)

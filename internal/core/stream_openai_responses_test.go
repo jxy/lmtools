@@ -185,7 +185,10 @@ func TestOpenAIResponsesStreamTerminalSnapshotCompletesAndReorders(t *testing.T)
 	if text != "Done" || len(calls) != 2 || calls[0].Name != "first" || calls[1].Name != "second" || string(calls[1].Args) != `{"full":true}` {
 		t.Fatalf("snapshot text=%q calls=%#v", text, calls)
 	}
-	if len(display) != 3 || display[0].Type != ResponseStreamReasoningStart || display[1].Text != "Visible" || display[2].Type != ResponseStreamReasoningEnd {
+	// The added call announces itself once; the terminal snapshot's other
+	// call arrives complete and needs no announcement.
+	if len(display) != 4 || display[0].Type != ResponseStreamToolCallStart || display[0].Text != "second" ||
+		display[1].Type != ResponseStreamReasoningStart || display[2].Text != "Visible" || display[3].Type != ResponseStreamReasoningEnd {
 		t.Fatalf("display = %#v", display)
 	}
 	blocks := state.Blocks()

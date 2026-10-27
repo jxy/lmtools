@@ -36,7 +36,7 @@ func TestTerminalREPLPastedSearchRequiresTwoEnters(t *testing.T) {
 		t.Fatal("pasting a query submitted a prompt")
 	}
 	r.typeKeys(t, "\r\n")
-	r.expect(t, "[2/2] > 界\\")
+	r.expect(t, "[2/2] "+freshPrompt+"界\\")
 	if len(server.GetRequests()) != 2 {
 		t.Fatal("accepting the search submitted a prompt")
 	}
@@ -196,11 +196,16 @@ func TestTerminalREPLDiscardInputAndRestoreOnEOF(t *testing.T) {
 	r := startREPLUnderTerminal(t, server.URL(), nil)
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "unfinished")
-	r.expect(t, "> unfinished")
+	r.expect(t, freshPrompt+"unfinished")
 	r.typeKeys(t, ptytest.Interrupt)
 	r.expect(t, "Discarded the unfinished turn.")
 	r.expect(t, freshPrompt)
+	// Ctrl-D with text on the line ends nothing; on the empty line of an
+	// unfinished turn it ends the input, and the turn is not sent.
 	r.typeKeys(t, "also unfinished"+ptytest.EndOfInput)
+	r.typeKeys(t, "\\\n")
+	r.expect(t, continuationPrompt)
+	r.typeKeys(t, ptytest.EndOfInput)
 	r.expect(t, "Input ended inside an unfinished turn, which was not sent.")
 	if code := r.wait(t); code != 0 || len(server.GetRequests()) != 0 {
 		t.Fatalf("exit=%d requests=%v", code, server.GetRequests())

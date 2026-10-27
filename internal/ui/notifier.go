@@ -5,6 +5,7 @@ import (
 	"io"
 	"lmtools/internal/core"
 	"os"
+	"time"
 )
 
 // StdNotifier implements core.Notifier on the CLI diagnostic stream.
@@ -13,6 +14,9 @@ type StdNotifier struct {
 	plainInfo bool
 	hideUsage bool
 	response  int
+	// elapsed, when set, measures from the request a response answers, for
+	// the usage line.
+	elapsed func() time.Duration
 }
 
 // NewNotifier creates a notifier that writes to stderr
@@ -34,18 +38,40 @@ func (n *StdNotifier) BeginTurn() { n.response = 0 }
 
 func (n *StdNotifier) SetUsageEnabled(enabled bool) { n.hideUsage = !enabled }
 
-// ReportUsage identifies model responses within a tool turn, without treating
-// cache or reasoning counts as additional tokens or inventing missing totals.
-func (n *StdNotifier) ReportUsage(usage *core.Usage) {
+// SetElapsedSource makes the usage line report the time from the request to
+// the response's end, as source measures it.
+func (n *StdNotifier) SetElapsedSource(source func() time.Duration) { n.elapsed = source }
+
+// ReportUsage reports one response's usage, without treating cache or
+// reasoning counts as additional tokens or inventing missing totals. Every
+// response counts, those without counts included. In the REPL every response
+// of a turn with tool calls is numbered, the first included, since a response
+// that asked for tools is followed by another.
+func (n *StdNotifier) ReportUsage(usage *core.Usage, toolCalls bool) {
 	n.response++
 	if n.hideUsage || usage == nil {
 		return
 	}
 	label := "Tokens"
-	if n.plainInfo && n.response > 1 {
+	if n.plainInfo && (n.response > 1 || toolCalls) {
 		label = fmt.Sprintf("Tokens (response %d)", n.response)
 	}
-	n.Promptf("%s: %s\n", label, usage.DisplaySummary())
+	line := label + ": " + usage.DisplaySummary()
+	if n.elapsed != nil {
+		if d := n.elapsed(); d > 0 {
+			line += " | " + formatResponseTime(d)
+		}
+	}
+	n.Promptf("%s\n", line)
+}
+
+// formatResponseTime gives tenths of a second under a minute.
+func formatResponseTime(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	d = d.Round(time.Second)
+	return fmt.Sprintf("%dm%02ds", int(d/time.Minute), int(d%time.Minute/time.Second))
 }
 
 // Infof prints an informational message with "Note:" prefix

@@ -141,7 +141,10 @@ func TestAnthropicShowThinkingPreservesJSONStdout(t *testing.T) {
 	}
 }
 
-func TestAnthropicShowThinkingReportsWhenAdaptiveThinkingReturnsNoBlock(t *testing.T) {
+// Adaptive thinking often answers an easy question without thinking at all.
+// That is not worth a note on every such answer; the note is kept for
+// reasoning the provider counted and did not show.
+func TestAnthropicShowThinkingStaysQuietWhenAdaptiveThinkingReturnsNoBlock(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		name := "non-streaming"
 		if stream {
@@ -213,8 +216,8 @@ func TestAnthropicShowThinkingReportsWhenAdaptiveThinkingReturnsNoBlock(t *testi
 			if stdout != "No-thinking answer" {
 				t.Fatalf("stdout = %q, want answer only", stdout)
 			}
-			if got := strings.Count(stderr, "No visible thinking summary was returned for this response."); got != 1 {
-				t.Fatalf("missing-thinking notes = %d, want 1:\n%s", got, stderr)
+			if strings.Contains(stderr, "No visible thinking") {
+				t.Fatalf("a response that did no reasoning got a missing-thinking note:\n%s", stderr)
 			}
 			if strings.Contains(stderr, thinkingStartMarker) {
 				t.Fatalf("stderr rendered a thinking block the provider did not return:\n%s", stderr)

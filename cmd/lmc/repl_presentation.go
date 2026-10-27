@@ -6,19 +6,65 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/providers"
 	"lmtools/internal/session"
+	"os"
 	"strings"
 )
 
+// showStartup names what the conversation will use: the model and effort,
+// how answers arrive, whether thinking is shown, and the tools with the
+// directory their commands run in.
 func (l *replLoop) showStartup() {
 	if !l.terminal {
 		return
 	}
+	n := l.env.notifier
+	n.Promptf("%s\n", l.settingsLine())
+	if tools := l.toolSummary(); tools != "" {
+		n.Promptf("%s\n", tools)
+	}
+	n.Promptf("/help commands | /info settings | Ctrl-C cancel | Ctrl-D exit\n")
+}
+
+func (l *replLoop) settingsLine() string {
 	mode := "buffered"
 	if replStreaming(l.base) {
 		mode = "streaming"
 	}
-	l.env.notifier.Promptf("lmc | model: %s | %s | thinking %s\n", core.EffectiveChatModel(l.base), mode, onOff(l.env.cfg.ShowThinking))
-	l.env.notifier.Promptf("/help commands | /info settings | Ctrl-C cancel | Ctrl-D exit\n")
+	parts := []string{"lmc", "model: " + core.EffectiveChatModel(l.base)}
+	if l.base.Effort != "" {
+		parts = append(parts, "effort: "+l.base.Effort)
+	}
+	parts = append(parts, mode, "thinking display: "+onOff(l.env.cfg.ShowThinking))
+	return strings.Join(parts, " | ")
+}
+
+// toolSummary names the advertised tools, a server's tools as a count, and
+// where commands run; it is empty when tools are off.
+func (l *replLoop) toolSummary() string {
+	if !l.base.ToolEnabled {
+		return ""
+	}
+	var names []string
+	servers := map[string]int{}
+	var order []string
+	for _, def := range core.AdvertisedTools(l.base) {
+		if def.MCPServer == "" {
+			names = append(names, def.Name)
+			continue
+		}
+		if servers[def.MCPServer] == 0 {
+			order = append(order, def.MCPServer)
+		}
+		servers[def.MCPServer]++
+	}
+	for _, server := range order {
+		names = append(names, fmt.Sprintf("%s (%d MCP tools)", server, servers[server]))
+	}
+	line := "tools: " + strings.Join(names, ", ")
+	if dir, err := os.Getwd(); err == nil {
+		line += " | commands run in " + dir
+	}
+	return line
 }
 
 func replAPIName(opts core.RequestOptions) string {
@@ -70,7 +116,9 @@ func (l *replLoop) showTurn(in turnInput, images []core.ImageBlock) {
 	case in.text == "" && len(images) == 0:
 		l.env.notifier.Promptf("Recovering pending tools.\n")
 	default:
-		if !l.input.editing {
+		// Without the editor the terminal echoed each line as typed; a turn
+		// of several lines is shown once more as one.
+		if !l.input.editing && strings.Contains(in.text, "\n") {
 			showTextPreview(l.env.notifier, "Submitted prompt", in.text, maxEditorPreviewBytes)
 		}
 		if len(images) > 0 {
@@ -104,6 +152,17 @@ func (l *replLoop) reportUnsent() {
 	if pending := l.pendingDescription(); pending != "" {
 		l.env.notifier.Infof("Not sent: %s.", pending)
 	}
+}
+
+// leave reports, as the loop ends, what was left unsent and where the
+// conversation is saved, with the flag that continues it.
+func (l *replLoop) leave() {
+	l.reportUnsent()
+	if !l.terminal || l.from == nil {
+		return
+	}
+	id := session.GetSessionID(l.from.Path)
+	l.env.notifier.Infof("Saved in session %s; continue it with -resume %s.", id, id)
 }
 
 func (l *replLoop) showSession(sess *session.Session) {

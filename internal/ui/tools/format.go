@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -15,13 +19,39 @@ const (
 	// approval prompt is printed by cmd/lmc directly beneath the block this
 	// package renders, so it has to indent to the same column.
 	DetailIndent = "      "
+	// QuotePrefix marks every line of content quoted under a label: command
+	// output, and argument values that span lines. A line of output can then
+	// never be mistaken for a line of the transcript around it.
+	QuotePrefix = "| "
 
 	toolOutputChunkBytes = 32 * 1024
+
+	shortOutputHeadLines = 10
+	shortOutputTailLines = 10
+	shortOutputLineBytes = 2000
 )
 
-// CLIToolUI displays command review, execution, and result batches.
+// Options adjust a CLIToolUI for a live terminal. The zero value renders
+// everything in full, which is what a saved conversation and a log want.
+type Options struct {
+	// ShortOutput shows output longer than about twenty lines as its first
+	// and last lines, with a count of the lines between and MoreHint saying
+	// where to read them.
+	ShortOutput bool
+	MoreHint    string
+	// ShowPrograms names the program a bare command name resolves to when it
+	// lies outside the standard system directories, where it may surprise.
+	ShowPrograms bool
+}
+
+// CLIToolUI displays command review, execution, and result batches. Options
+// may change between rounds, as the REPL's /tool-output does.
 type CLIToolUI struct {
 	notifier core.Notifier
+	Options  Options
+	// streamed records that this round's results began through ResultReady,
+	// so AfterExecute only closes the list.
+	streamed bool
 }
 
 // NewCLIToolUI creates a CLI renderer for tool execution batches.
@@ -29,9 +59,15 @@ func NewCLIToolUI(notifier core.Notifier) *CLIToolUI {
 	return &CLIToolUI{notifier: notifier}
 }
 
-// ShowCall displays one call immediately before its approval decision. args is
-// the executor's already-parsed view of the call; calls it never parsed, such
-// as one past the per-round cap, arrive nil and are decoded here for display.
+// NewCLIToolUIWithOptions creates a renderer for a live terminal.
+func NewCLIToolUIWithOptions(notifier core.Notifier, options Options) *CLIToolUI {
+	return &CLIToolUI{notifier: notifier, Options: options}
+}
+
+// ShowCall displays one call. The executor shows every call of a round before
+// it asks about any of them. args is the executor's already-parsed view of
+// the call; calls it never parsed, such as one past the per-round cap, arrive
+// nil and are decoded here for display.
 func (ui *CLIToolUI) ShowCall(index, total int, call core.ToolCall, args *core.UniversalCommandArgs) {
 	if index == 0 {
 		ui.notifier.Promptf("\nTools: %d\n", total)
@@ -60,7 +96,7 @@ func (ui *CLIToolUI) showCallLines(prefix string, call core.ToolCall, args *core
 	}
 
 	if args != nil && len(args.Command) > 0 {
-		ui.showJSON(prefix+" Command", core.MarshalJSONForDisplay(args.Command))
+		ui.showCommand(prefix, args.Command)
 		if args.Workdir != "" {
 			ui.notifier.Promptf("%sWorkdir: %s\n", DetailIndent, core.MarshalJSONForDisplay(args.Workdir))
 		}
@@ -68,7 +104,7 @@ func (ui *CLIToolUI) showCallLines(prefix string, call core.ToolCall, args *core
 			ui.showJSON(DetailIndent+"Environ", core.MarshalJSONForDisplay(args.Environ))
 		}
 		if args.Stdin != nil {
-			ui.notifier.Promptf("%sStdin: %s\n", DetailIndent, core.MarshalJSONForDisplay(*args.Stdin))
+			ui.showValue("Stdin", *args.Stdin)
 		}
 		if args.StdinFile != "" {
 			ui.notifier.Promptf("%sStdin file: %s\n", DetailIndent, core.MarshalJSONForDisplay(args.StdinFile))
@@ -97,18 +133,109 @@ func (ui *CLIToolUI) showCallLines(prefix string, call core.ToolCall, args *core
 		// The executor labelled the call with the server and the server's
 		// tool name; the qualified name the model used is what a rule
 		// would not name, so the line reads the way a rule does.
-		ui.notifier.Promptf("%s MCP tool: %s/%s\n", prefix, call.MCPServer, call.MCPTool)
+		ui.notifier.Promptf("%s MCP tool: %s\n", prefix, core.ToolCallDisplayName(call, nil))
 		ui.showJSON(DetailIndent+"Arguments", compactToolArguments(call.Args))
 		return
 	}
 
-	ui.notifier.Promptf("%s Tool: %s\n", prefix, call.Name)
+	ui.notifier.Promptf("%s Tool: %s\n", prefix, core.DisplayName(call.Name))
 	ui.showJSON(DetailIndent+"Arguments", compactToolArguments(call.Args))
+}
+
+// showCommand renders an argument vector. An argument that spans lines, a
+// script handed to an interpreter most often, would read as one escaped JSON
+// string wrapped by the terminal inside words; it is replaced in the vector by
+// <arg N> and shown below as quoted lines, which is still every byte of it.
+func (ui *CLIToolUI) showCommand(prefix string, argv []string) {
+	multiline := false
+	for _, arg := range argv {
+		multiline = multiline || strings.Contains(arg, "\n")
+	}
+	if !multiline {
+		ui.showJSON(prefix+" Command", core.MarshalJSONForDisplay(argv))
+		ui.showProgram(argv[0])
+		return
+	}
+	parts := make([]string, len(argv))
+	for i, arg := range argv {
+		if strings.Contains(arg, "\n") {
+			parts[i] = fmt.Sprintf("<arg %d>", i+1)
+		} else {
+			parts[i] = core.MarshalJSONForDisplay(arg)
+		}
+	}
+	ui.notifier.Promptf("%s Command: [%s]\n", prefix, strings.Join(parts, ","))
+	ui.showProgram(argv[0])
+	for i, arg := range argv {
+		if strings.Contains(arg, "\n") {
+			ui.showValue(fmt.Sprintf("Arg %d", i+1), arg)
+		}
+	}
+}
+
+// showProgram names the program behind the command line, when it may
+// surprise.
+func (ui *CLIToolUI) showProgram(name string) {
+	if !ui.Options.ShowPrograms {
+		return
+	}
+	if program := unusualProgram(name); program != "" {
+		ui.notifier.Promptf("%sProgram: %s\n", DetailIndent, core.VisibleText(program))
+	}
+}
+
+// ShowCallNote prints a note under a call's review, at the detail column.
+func (ui *CLIToolUI) ShowCallNote(_ int, note string) {
+	ui.notifier.Promptf("%s%s\n", DetailIndent, core.VisibleText(note))
+}
+
+// showValue renders a string field the operator approves: as JSON on one
+// line, or quoted line by line when it spans lines. Every byte stays visible:
+// a carriage return is spelled out like any control, and the label says when
+// the value ends with a newline.
+func (ui *CLIToolUI) showValue(label, value string) {
+	if !strings.Contains(value, "\n") {
+		ui.notifier.Promptf("%s%s: %s\n", DetailIndent, label, core.MarshalJSONForDisplay(value))
+		return
+	}
+	body, newline := strings.CutSuffix(value, "\n")
+	lines := strings.Split(body, "\n")
+	described := core.Plural(len(lines), "line")
+	if newline {
+		described += ", ending with a newline"
+	}
+	ui.notifier.Promptf("%s%s (%s):\n", DetailIndent, label, described)
+	if slices.ContainsFunc(lines, func(line string) bool { return strings.IndexFunc(line, core.IsHiddenControl) >= 0 }) {
+		ui.notifier.Promptf("%sControl characters are shown as \\uXXXX.\n", DetailIndent)
+	}
+	writeQuotedLines(ui.notifier, lines)
+}
+
+// standardProgramDirs are where a bare command name is expected to resolve.
+var standardProgramDirs = map[string]bool{
+	"/bin": true, "/sbin": true, "/usr/bin": true, "/usr/sbin": true,
+	"/usr/local/bin": true, "/usr/local/sbin": true,
+}
+
+// unusualProgram returns the program a bare name resolves to through PATH,
+// as os/exec resolves it, when it lies outside the standard directories.
+func unusualProgram(name string) string {
+	if strings.ContainsRune(name, filepath.Separator) {
+		return ""
+	}
+	path, err := exec.LookPath(name)
+	if err != nil || standardProgramDirs[filepath.Dir(path)] {
+		return ""
+	}
+	return path
 }
 
 // Long objects and argument vectors get one field per line. JSON indentation
 // preserves strings and numeric spelling; approval values are never shortened.
+// Arguments that are not valid JSON arrive as the model sent them, so hidden
+// characters are spelled out here.
 func (ui *CLIToolUI) showJSON(label, value string) {
+	value = core.VisibleText(value)
 	if len(label)+len(value) > 100 && (strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[")) {
 		var pretty bytes.Buffer
 		if json.Indent(&pretty, []byte(value), DetailIndent, "  ") == nil {
@@ -156,41 +283,51 @@ func (ui *CLIToolUI) BeforeRun(total, runnable, parallel int) {
 	ui.notifier.Promptf("\nRunning %s%s...\n", count, parallelText)
 }
 
-// AfterExecute displays results in their original request order. It decodes
-// each call's arguments for itself rather than carrying ShowCall's copy
-// forward: both phases run the same json.Unmarshal on the same bytes behind the
-// same tool-name gate and nothing mutates the call in between, so the cache
-// answered a question it was already answering — and a per-batch slice reset at
-// the end of every round is state to keep aligned for a decode that costs one
-// pass over arguments the round has already printed in full.
-func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResult) {
-	ui.notifier.Promptf("\nTool results:\n")
-	total := len(calls)
+// CallStarted and CallFinished say nothing: the transcript speaks when a
+// call's result is ready.
+func (ui *CLIToolUI) CallStarted(int, core.ToolCall) {}
+func (ui *CLIToolUI) CallFinished(int)               {}
 
-	for i, result := range results {
-		if i > 0 {
-			ui.notifier.Promptf("\n")
-		}
-		formatToolResult(ui.notifier, i, total, calls[i], result)
-		for _, image := range result.Images {
-			ui.notifier.Promptf("%s[image: %s]\n", DetailIndent, core.DescribeImageBlock(image))
+// ResultReady shows one result as soon as it and every earlier one are known,
+// in request order.
+func (ui *CLIToolUI) ResultReady(index, total int, call core.ToolCall, result core.ToolResult) {
+	if !ui.streamed {
+		ui.streamed = true
+		ui.notifier.Promptf("\nTool results:\n")
+	} else {
+		ui.notifier.Promptf("\n")
+	}
+	formatToolResult(ui.notifier, ui.Options, index, total, call, result)
+}
+
+// AfterExecute ends a round's results. The executor has shown them through
+// ResultReady as they arrived; a saved round arrives here whole and is shown
+// the same way.
+func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResult) {
+	if !ui.streamed {
+		for i, result := range results {
+			ui.ResultReady(i, len(calls), calls[i], result)
 		}
 	}
+	ui.streamed = false
 	ui.notifier.Promptf("\n")
 }
 
-func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCall, result core.ToolResult) {
+func formatToolResult(notifier core.Notifier, options Options, index, total int, call core.ToolCall, result core.ToolResult) {
 	args := commandCallArgs(call)
 	prefix := fmt.Sprintf("[%d/%d]", index+1, total)
-	name := call.Name
-	if call.MCPServer != "" {
-		name = call.MCPServer + "/" + call.MCPTool
+	if call.Name != "" || call.MCPServer != "" {
+		prefix += " " + core.ToolCallDisplayName(call, args) + ":"
 	}
-	if args != nil && len(args.Command) > 0 {
-		name = args.Command[0]
-	}
-	if name != "" {
-		prefix += " " + core.MarshalJSONForDisplay(name) + ":"
+	if call.Name == core.ViewImageToolName && result.Error == "" && len(result.Images) > 0 {
+		// The question named the file, type, and size; the result only has
+		// to say it went.
+		descriptions := make([]string, len(result.Images))
+		for i, image := range result.Images {
+			descriptions[i] = core.DescribeImageBlock(image)
+		}
+		notifier.Promptf("%s Sent %s\n", prefix, strings.Join(descriptions, ", "))
+		return
 	}
 	status, hints := toolResultStatus(result)
 	details := toolResultDetails(args)
@@ -203,7 +340,7 @@ func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCa
 	// asked for rather than something to report.
 	redirected := args != nil && (args.StdoutFile != "" || args.StderrFile != "")
 	if result.Error == "" && result.Output == "" && !redirected {
-		details = append(details, "no captured output")
+		details = append(details, "no output")
 	}
 	if result.Truncated {
 		details = append(details, "output truncated at "+core.FormatByteCount(result.TruncatedTo))
@@ -219,25 +356,43 @@ func formatToolResult(notifier core.Notifier, index, total int, call core.ToolCa
 		writeToolLines(notifier, hint, DetailIndent+"Hint: ", DetailIndent+"      ")
 	}
 
-	if result.Output == "" {
-		return
+	if result.Output != "" {
+		label := "Output"
+		if result.Code == errors.ErrCodeTimeout || result.Code == errors.ErrCodeCancelled {
+			// Only a command stopped from outside left output unfinished. One
+			// that exited with an error status said everything it had to.
+			label = "Partial output"
+		}
+		writeToolOutput(notifier, label, outputStreams(args), result.Output, options)
 	}
-	label := "Output"
-	if result.Error != "" {
-		label = "Partial output"
+	for _, image := range result.Images {
+		notifier.Promptf("%s[image: %s]\n", DetailIndent, core.DescribeImageBlock(image))
 	}
-	notifier.Promptf("%s%s:\n", DetailIndent, label)
-	writeToolOutput(notifier, result.Output)
-	notifier.Promptf("%sEnd output.\n", DetailIndent)
+}
+
+// outputStreams names what a command's captured output holds: both streams
+// interleaved unless a redirection took one of them.
+func outputStreams(args *core.UniversalCommandArgs) string {
+	switch {
+	case args == nil:
+		return ""
+	case args.StdoutFile != "" && args.StderrFile == "":
+		return "stderr"
+	case args.StderrFile != "" && args.StdoutFile == "":
+		return "stdout"
+	}
+	return "stdout+stderr"
 }
 
 // writeToolLines keeps every continuation under its tool result, including
 // blank lines and text that happens to look like another speaker's label.
+// Each line's hidden characters are spelled out: errors quote what the model
+// asked for.
 func writeToolLines(notifier core.Notifier, text, firstPrefix, continuationPrefix string) {
 	prefix := firstPrefix
 	for {
 		line, rest, more := strings.Cut(text, "\n")
-		notifier.Promptf("%s%s\n", prefix, line)
+		notifier.Promptf("%s%s\n", prefix, core.VisibleText(line))
 		if !more {
 			return
 		}
@@ -299,6 +454,14 @@ func toolResultStatus(result core.ToolResult) (string, []string) {
 		// result's structured reason and hints when it recorded them, or in its
 		// error text otherwise. Restating either here would send half these
 		// readers after a flag they never passed.
+		if given, denied := core.UserDenial(result.Reason); denied {
+			// The operator wrote the reason; the model reads the sentence
+			// attributing it, which the result keeps.
+			if given == "" {
+				return "Denied by you", result.Hints
+			}
+			return "Denied by you: " + given, result.Hints
+		}
 		if result.Reason != "" {
 			return "Not run: " + result.Reason, result.Hints
 		}
@@ -336,18 +499,106 @@ func compactToolArguments(args json.RawMessage) string {
 	return string(args)
 }
 
-// writeToolOutput forwards the executor's already-bounded output in small
-// writes. Promptf uses fmt.Fprintf, which buffers each formatted call, so one
-// call containing the whole result would still duplicate a large output. The
-// caller guarantees output is non-empty; the trailing-newline check reads the
-// last byte.
-func writeToolOutput(notifier core.Notifier, output string) {
-	for len(output) > toolOutputChunkBytes {
-		notifier.Promptf("%s", output[:toolOutputChunkBytes])
-		output = output[toolOutputChunkBytes:]
+// writeToolOutput shows the executor's already-bounded output under its label,
+// every line quoted. With ShortOutput a long output shows its first and last
+// lines and says how many lay between and where to read them, and a long line
+// is cut.
+func writeToolOutput(notifier core.Notifier, label, streams, output string, options Options) {
+	lines := splitDisplayLines(output)
+	described := core.Plural(len(lines), "line")
+	if streams != "" {
+		described = streams + ", " + described
 	}
-	notifier.Promptf("%s", output)
-	if output[len(output)-1] != '\n' {
-		notifier.Promptf("\n")
+	hidden := 0
+	if options.ShortOutput && len(lines) > shortOutputHeadLines+shortOutputTailLines+3 {
+		hidden = len(lines) - shortOutputHeadLines - shortOutputTailLines
+		described += fmt.Sprintf("; showing the first %d and last %d", shortOutputHeadLines, shortOutputTailLines)
 	}
+	notifier.Promptf("%s%s (%s):\n", DetailIndent, label, described)
+	if hasControlCharacters(output) {
+		notifier.Promptf("%sControl characters are shown as \\uXXXX.\n", DetailIndent)
+	}
+	if hidden == 0 {
+		lineBytes := 0
+		if options.ShortOutput {
+			lineBytes = shortOutputLineBytes
+		}
+		if cut := writeQuotedLinesLimited(notifier, lines, lineBytes); cut > 0 && options.MoreHint != "" {
+			notifier.Promptf("%s[%s cut; %s]\n", DetailIndent, core.Plural(cut, "line"), options.MoreHint)
+		}
+		return
+	}
+	writeQuotedLinesLimited(notifier, lines[:shortOutputHeadLines], shortOutputLineBytes)
+	more := fmt.Sprintf("%s[%s not shown", DetailIndent, core.Plural(hidden, "line"))
+	if options.MoreHint != "" {
+		more += "; " + options.MoreHint
+	}
+	notifier.Promptf("%s]\n", more)
+	writeQuotedLinesLimited(notifier, lines[len(lines)-shortOutputTailLines:], shortOutputLineBytes)
+}
+
+func writeQuotedLines(notifier core.Notifier, lines []string) {
+	writeQuotedLinesLimited(notifier, lines, 0)
+}
+
+// writeQuotedLinesLimited quotes each line under the detail column, in writes
+// of a bounded size: Promptf formats each call into a buffer of its own, so
+// one call holding a whole large output would duplicate it. A positive
+// lineBytes cuts longer lines and says how much was left out; it returns how
+// many lines it cut.
+func writeQuotedLinesLimited(notifier core.Notifier, lines []string, lineBytes int) (cutLines int) {
+	var chunk strings.Builder
+	flush := func() {
+		if chunk.Len() > 0 {
+			notifier.Promptf("%s", chunk.String())
+			chunk.Reset()
+		}
+	}
+	for _, line := range lines {
+		cut := 0
+		if lineBytes > 0 && len(line) > lineBytes {
+			end := lineBytes
+			for end > 0 && !utf8.RuneStart(line[end]) {
+				end--
+			}
+			cut, line = len(line)-end, line[:end]
+			cutLines++
+		}
+		if line == "" && cut == 0 {
+			chunk.WriteString(DetailIndent + strings.TrimRight(QuotePrefix, " ") + "\n")
+		} else {
+			chunk.WriteString(DetailIndent + QuotePrefix)
+			chunk.WriteString(core.VisibleText(line))
+			if cut > 0 {
+				fmt.Fprintf(&chunk, " [%d more bytes]", cut)
+			}
+			chunk.WriteByte('\n')
+		}
+		if chunk.Len() >= toolOutputChunkBytes {
+			flush()
+		}
+	}
+	flush()
+	return cutLines
+}
+
+// splitDisplayLines splits text into the lines a reader sees: a final newline
+// ends the last line rather than starting an empty one, and CRLF is one line
+// end.
+func splitDisplayLines(text string) []string {
+	text = strings.TrimSuffix(text, "\n")
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+	return lines
+}
+
+func hasControlCharacters(text string) bool {
+	for _, line := range splitDisplayLines(text) {
+		if strings.IndexFunc(line, core.IsHiddenControl) >= 0 {
+			return true
+		}
+	}
+	return false
 }

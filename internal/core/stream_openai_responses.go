@@ -63,11 +63,15 @@ type responsesStreamItem struct {
 	textParts      []*responsesStreamPart
 	fullContent    bool
 	fullSummary    bool
+	// startReported records that a tool call start event went out for the
+	// item, so a repeated output_item.added cannot announce it twice.
+	startReported bool
 }
 
 // OpenAIResponsesStreamState tracks output items by their explicit index or
 // item ID. An omitted output_index must never become the real index zero.
 type OpenAIResponsesStreamState struct {
+	model            string
 	items            []*responsesStreamItem
 	itemsByID        map[string]*responsesStreamItem
 	itemsByIndex     map[int]*responsesStreamItem
@@ -197,6 +201,10 @@ func (s *OpenAIResponsesStreamState) parseLine(line string) (string, []ToolCall,
 		if event.Type == "response.output_item.done" {
 			item.reasoningEnded = true
 		}
+		if event.Type == "response.output_item.added" && item.isTool() && !item.startReported {
+			item.startReported = true
+			s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamToolCallStart, Text: item.fieldString("name")})
+		}
 		if item.fieldString("type") == "message" {
 			text, err := s.remainingText()
 			if text != "" {
@@ -206,6 +214,9 @@ func (s *OpenAIResponsesStreamState) parseLine(line string) (string, []ToolCall,
 		}
 	case "response.completed", "response.incomplete":
 		s.usage = s.usage.MergedWith(UsageFromPayload([]byte(data)))
+		if model := ModelFromPayload([]byte(data)); model != "" {
+			s.model = model
+		}
 		s.incompleteReason = event.Response.incompleteReason()
 		if event.Type == "response.incomplete" && s.incompleteReason == "" {
 			s.incompleteReason = "incomplete"

@@ -63,8 +63,12 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	presenter := newResponsePresenter(env.stdout, env.stderr, env.cfg.ShowThinking)
 	presenter.separate = env.answersOnScreen
 	presenter.answerLabel = env.answerLabel
+	if env.quoteThinking {
+		presenter.quoteThinking(env.columns)
+	}
+	presenter.notifier = env.notifier
 	if env.progress != nil {
-		presenter.onOutput = env.progress.stop
+		presenter.progress = env.progress
 	}
 	defer presenter.Close()
 	defer func() { out.PartialAnswer = presenter.lastIncomplete }()
@@ -76,6 +80,9 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	})
 	if err != nil {
 		return out, err
+	}
+	if response.Model != "" {
+		env.served = response.Model
 	}
 
 	if plan != nil {
@@ -515,6 +522,11 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 }
 
 func actualModelForConfig(cfg *config.Config, opts core.RequestOptions) string {
+	// The turn's options name the model it is sent with, which the REPL's
+	// /model can change after the flags were read.
+	if opts.Model != "" {
+		return opts.Model
+	}
 	actualModel := cfg.Model
 	if actualModel != "" {
 		return actualModel

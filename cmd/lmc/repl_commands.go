@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"strconv"
@@ -13,25 +15,47 @@ const (
 	maxREPLHistoryBytes   = constants.MaxCLIInputSize
 )
 
+// replPrompt is one history entry: a prompt sent to the model, or a REPL
+// command, which Up and Ctrl-R recall as typed and /history and /ed leave out.
 type replPrompt struct {
-	id   int
-	text string
+	id      int
+	text    string
+	command bool
 }
 
-// replHistory bounds both the prompt count and the retained text. IDs remain
+// replHistory bounds both the entry count and the retained text. IDs remain
 // stable as earlier entries expire, so /ed never selects a different prompt.
+// With a file, entries are saved as they are added and reloaded by the next
+// REPL, so Up and Ctrl-R reach earlier sessions.
 type replHistory struct {
 	entries []replPrompt
 	nextID  int
 	bytes   int
+	file    *historyFile
 }
 
 func (h *replHistory) add(text string) {
+	h.addEntry(text, false)
+}
+
+// addCommand records a REPL command for recall.
+func (h *replHistory) addCommand(text string) {
+	h.addEntry(text, true)
+}
+
+func (h *replHistory) addEntry(text string, command bool) {
 	if text == "" {
 		return
 	}
+	h.remember(text, command)
+	if h.file != nil {
+		h.file.append(text, command)
+	}
+}
+
+func (h *replHistory) remember(text string, command bool) {
 	h.nextID++
-	h.entries = append(h.entries, replPrompt{id: h.nextID, text: text})
+	h.entries = append(h.entries, replPrompt{id: h.nextID, text: text, command: command})
 	h.bytes += len(text)
 	for len(h.entries) > maxREPLHistoryEntries || h.bytes > maxREPLHistoryBytes {
 		h.bytes -= len(h.entries[0].text)
@@ -40,13 +64,38 @@ func (h *replHistory) add(text string) {
 	}
 }
 
+// clear forgets every entry, and empties the file.
+func (h *replHistory) clear() error {
+	h.entries, h.bytes = nil, 0
+	if h.file != nil {
+		return h.file.clear()
+	}
+	return nil
+}
+
 func (h *replHistory) get(id int) (string, bool) {
 	for _, entry := range h.entries {
-		if entry.id == id {
+		if entry.id == id && !entry.command {
 			return entry.text, true
 		}
 	}
 	return "", false
+}
+
+// prompts are the entries /history lists and /ed selects from.
+func (h *replHistory) prompts() []replPrompt {
+	prompts := make([]replPrompt, 0, len(h.entries))
+	for _, entry := range h.entries {
+		if !entry.command {
+			prompts = append(prompts, entry)
+		}
+	}
+	return prompts
+}
+
+// isREPLCommand reports text the loop interprets rather than sends.
+func isREPLCommand(text string) bool {
+	return strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "//")
 }
 
 type replAction struct {
@@ -66,7 +115,7 @@ func (l *replLoop) interpretInput(text string) replAction {
 	}
 	command, argument := splitREPLCommand(text)
 	switch command {
-	case "/info", "/show", "/images", "/clear-images", "/clear-developer", "/exit":
+	case "/info", "/images", "/clear-images", "/clear-developer", "/exit":
 		if argument != "" {
 			l.env.notifier.Errorf("%s takes no arguments. Use /help for commands.", command)
 			return replAction{}
@@ -78,7 +127,15 @@ func (l *replLoop) interpretInput(text string) replAction {
 	case "/info":
 		l.showInfo()
 	case "/show":
-		l.showConversation()
+		l.showConversation(argument)
+	case "/model":
+		l.setModel(argument)
+	case "/effort":
+		l.setEffort(argument)
+	case "/tool-output":
+		l.setToolOutput(argument)
+	case "/bell":
+		l.setBell(argument)
 	case "/thinking", "/usage":
 		l.setDisplay(command, argument)
 	case "/history":
@@ -108,7 +165,13 @@ func (l *replLoop) interpretInput(text string) replAction {
 		}
 		image, err := core.LoadImageFile(argument, constants.MaxCLIImageBytes)
 		if err != nil {
-			l.env.notifier.Errorf("%v. Image paths are literal: omit shell quotes and use a full path instead of ~.", err)
+			// The hint explains a path that was not found because of how it
+			// was spelled, and nothing else.
+			if errors.Is(err, fs.ErrNotExist) && (strings.ContainsAny(argument, `"'`) || strings.HasPrefix(argument, "~")) {
+				l.env.notifier.Errorf("%v. Image paths are literal: omit shell quotes and use a full path instead of ~.", err)
+			} else {
+				l.env.notifier.Errorf("%v.", err)
+			}
 			return replAction{}
 		}
 		image.Detail = strings.ToLower(strings.TrimSpace(l.env.cfg.ImageDetail))
@@ -159,4 +222,82 @@ func replPromptPreview(text string) string {
 		runes++
 	}
 	return text
+}
+
+// setModel changes the model of the turns that follow; the session keeps the
+// model of each answer it saved.
+func (l *replLoop) setModel(model string) {
+	if model == "" {
+		l.env.notifier.Infof("Model: %s (%s API). /model NAME changes it for the next turns.", core.EffectiveChatModel(l.base), replAPIName(l.base))
+		return
+	}
+	if strings.IndexFunc(model, unicode.IsSpace) >= 0 {
+		l.env.notifier.Errorf("Use /model NAME; a model name has no spaces.")
+		return
+	}
+	l.base.Model = model
+	l.env.notifier.Infof("Model set to %s for the next turns (%s API).", model, replAPIName(l.base))
+}
+
+// setEffort takes what -effort takes, in any case, or default, which sends
+// none.
+func (l *replLoop) setEffort(effort string) {
+	current := l.base.Effort
+	if current == "" {
+		current = "default"
+	}
+	levels := strings.Join(core.EffortLevels, ", ")
+	switch level := core.NormalizeEffort(effort); {
+	case effort == "":
+		l.env.notifier.Infof("Reasoning effort: %s. /effort LEVEL changes it: %s, or default.", current, levels)
+		return
+	case strings.EqualFold(effort, "default"):
+		effort = "default"
+		l.base.Effort = ""
+	case level != "":
+		effort = level
+		l.base.Effort = level
+	default:
+		l.env.notifier.Errorf("Unknown effort %q; use %s, or default.", effort, levels)
+		return
+	}
+	l.env.notifier.Infof("Reasoning effort set to %s for the next turns.", effort)
+}
+
+// setToolOutput chooses between the first and last lines of long output and
+// all of it, on the terminal; the model always receives everything.
+func (l *replLoop) setToolOutput(value string) {
+	ui, ok := l.env.toolUI.(*replToolUI)
+	if !ok {
+		l.env.notifier.Errorf("/tool-output applies to a terminal; tool output is shown in full here.")
+		return
+	}
+	switch value {
+	case "full":
+		ui.Options.ShortOutput = false
+		l.env.notifier.Infof("Tool output is shown in full.")
+	case "short":
+		ui.Options.ShortOutput = true
+		l.env.notifier.Infof("Long tool output shows its first and last lines; /show last prints the rest.")
+	case "":
+		mode := "full"
+		if ui.Options.ShortOutput {
+			mode = "short"
+		}
+		l.env.notifier.Infof("Tool output: %s. Use /tool-output full or /tool-output short.", mode)
+	default:
+		l.env.notifier.Errorf("Use /tool-output full or /tool-output short.")
+	}
+}
+
+// setBell turns on a terminal bell when a question waits for an answer and
+// when a turn ends, for an operator who has looked away during a long turn.
+func (l *replLoop) setBell(value string) {
+	switch value {
+	case "on", "off":
+		l.bell = value == "on"
+		l.env.notifier.Infof("Bell %s.", value)
+	default:
+		l.env.notifier.Errorf("Use /bell on or /bell off.")
+	}
 }

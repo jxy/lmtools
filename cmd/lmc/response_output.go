@@ -12,8 +12,14 @@ const (
 	thinkingEndMarker           = "--- end thinking ---"
 	thinkingIncompleteEndMarker = "--- end thinking (incomplete) ---"
 	omittedThinkingText         = "[omitted by provider]"
-	noThinkingSummaryNote       = "Note: No visible thinking summary was returned for this response.\n"
 )
+
+// presenterProgress hears what a response is doing as it streams, so a status
+// line can explain a silence; the REPL's turnProgress implements it.
+type presenterProgress interface {
+	streamEvent(core.ResponseStreamEvent)
+	responseComplete()
+}
 
 // responsePresenter keeps the assistant answer on stdout while optionally
 // rendering provider-visible reasoning summaries on stderr. A single instance
@@ -23,17 +29,19 @@ type responsePresenter struct {
 	diagnostics    io.Writer
 	showThinking   bool
 	answerLabel    string
-	onOutput       func()
+	progress       presenterProgress
 	lastIncomplete bool
 	// separate keeps a note off the end of an answer on the screen both
 	// share; newResponsePresenter sets it.
 	separate bool
+	// notifier carries the presenter's own note, in the run's style; a
+	// presenter without one writes no note.
+	notifier core.Notifier
+	thinking thinkingText
 
 	thinkingActive       bool
 	thinkingEnded        bool
 	thinkingIncomplete   bool
-	thinkingHasText      bool
-	thinkingEndsNewline  bool
 	streamedThinking     bool
 	answerWritten        bool
 	answerLabelNeeded    bool
@@ -42,22 +50,39 @@ type responsePresenter struct {
 }
 
 func newResponsePresenter(answer, diagnostics io.Writer, showThinking bool) *responsePresenter {
-	return &responsePresenter{
+	p := &responsePresenter{
 		answer:       answer,
 		diagnostics:  diagnostics,
 		showThinking: showThinking,
 		separate:     true,
 	}
+	p.thinking.out = diagnostics
+	p.thinking.reset()
+	return p
+}
+
+// quoteThinking formats visible thinking for a person at a terminal: each
+// line quoted, words wrapped at width, control characters escaped. A nil
+// width quotes without wrapping.
+func (p *responsePresenter) quoteThinking(width func() int) {
+	p.thinking.quote = thinkingQuote
+	p.thinking.width = width
+	p.thinking.escape = true
 }
 
 func (p *responsePresenter) HandleStreamEvent(event core.ResponseStreamEvent) {
-	if p.onOutput != nil && (event.Type == core.ResponseStreamTextDelta || p.showThinking) {
-		p.onOutput()
+	if p.progress != nil {
+		p.progress.streamEvent(event)
 	}
 	switch event.Type {
 	case core.ResponseStreamTextDelta:
 		p.finishThinking(!p.thinkingEnded)
 		p.writeAnswer(event.Text)
+	case core.ResponseStreamToolCallStart:
+		// The arguments arrive silently; end the open section and the
+		// answer line so the status explaining the wait has a line of its own.
+		p.finishThinking(!p.thinkingEnded)
+		p.separateDiagnosticsFromAnswer()
 	case core.ResponseStreamReasoningStart:
 		p.streamedThinking = true
 		p.startThinking()
@@ -70,18 +95,20 @@ func (p *responsePresenter) HandleStreamEvent(event core.ResponseStreamEvent) {
 	case core.ResponseStreamReasoningEnd:
 		p.streamedThinking = true
 		// The terminal response can still report a token limit. Defer the
-		// marker until the next block/answer or completion knows the outcome.
+		// marker until the next block/answer or completion knows the outcome;
+		// the last word need not wait for it.
 		if p.thinkingActive {
 			p.thinkingEnded = true
 			p.thinkingIncomplete = event.Incomplete
+			p.thinking.flushWord()
 		}
 	}
 }
 
 func (p *responsePresenter) HandleResponseComplete(response core.Response) {
 	p.lastIncomplete = response.IncompleteReason != ""
-	if p.onOutput != nil {
-		p.onOutput()
+	if p.progress != nil {
+		p.progress.responseComplete()
 	}
 	p.finishThinking((response.Streamed && !p.thinkingEnded) || response.IncompleteReason != "")
 	presentedThinking := p.streamedThinking
@@ -97,9 +124,11 @@ func (p *responsePresenter) HandleResponseComplete(response core.Response) {
 		p.writeAnswer(response.Text)
 	}
 
-	if p.showThinking && !presentedThinking {
+	// Adaptive models often answer without thinking at all; only reasoning
+	// the provider counted and did not show is worth a note.
+	if reasoning := reportedReasoningTokens(response.Usage); p.notifier != nil && p.showThinking && !presentedThinking && reasoning > 0 {
 		p.separateDiagnosticsFromAnswer()
-		_, _ = fmt.Fprint(p.diagnostics, noThinkingSummaryNote)
+		p.notifier.Infof("No visible thinking was returned for %d reasoning tokens.", reasoning)
 	}
 
 	if response.Usage != nil || len(response.ToolCalls) > 0 {
@@ -154,6 +183,13 @@ func shouldPresentEmptyReasoning(block core.ReasoningBlock) bool {
 	}
 }
 
+func reportedReasoningTokens(usage *core.Usage) int {
+	if usage == nil || usage.ReasoningTokens == nil {
+		return 0
+	}
+	return *usage.ReasoningTokens
+}
+
 func (p *responsePresenter) writeThinking(text string) {
 	if text == "" {
 		return
@@ -164,9 +200,7 @@ func (p *responsePresenter) writeThinking(text string) {
 	if !p.showThinking {
 		return
 	}
-	_, _ = fmt.Fprint(p.diagnostics, text)
-	p.thinkingHasText = true
-	p.thinkingEndsNewline = text[len(text)-1] == '\n'
+	p.thinking.write(text)
 }
 
 func (p *responsePresenter) writeAnswer(text string) {
@@ -218,6 +252,7 @@ func (p *responsePresenter) startThinking() {
 	p.thinkingActive = true
 	p.thinkingEnded = false
 	p.thinkingIncomplete = false
+	p.thinking.reset()
 	if p.showThinking {
 		p.separateDiagnosticsFromAnswer()
 		_, _ = fmt.Fprintf(p.diagnostics, "%s\n", thinkingStartMarker)
@@ -230,11 +265,10 @@ func (p *responsePresenter) finishThinking(incomplete bool) {
 		return
 	}
 	if p.showThinking {
-		if !p.thinkingHasText {
-			_, _ = fmt.Fprintf(p.diagnostics, "%s\n", omittedThinkingText)
-		} else if !p.thinkingEndsNewline {
-			_, _ = fmt.Fprint(p.diagnostics, "\n")
+		if !p.thinking.wrote {
+			p.thinking.write(omittedThinkingText)
 		}
+		p.thinking.finish()
 		marker := thinkingEndMarker
 		if incomplete || p.thinkingIncomplete {
 			marker = thinkingIncompleteEndMarker
@@ -244,8 +278,7 @@ func (p *responsePresenter) finishThinking(incomplete bool) {
 	p.thinkingActive = false
 	p.thinkingEnded = false
 	p.thinkingIncomplete = false
-	p.thinkingHasText = false
-	p.thinkingEndsNewline = false
+	p.thinking.reset()
 }
 
 func (p *responsePresenter) Close() {
