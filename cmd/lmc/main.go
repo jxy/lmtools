@@ -75,7 +75,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		Output:     presenter,
 	})
 	if err != nil {
-		return out, errors.WrapError("handle response", err)
+		return out, err
 	}
 
 	if plan != nil {
@@ -123,7 +123,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) core.ToolContext {
 	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
 
-	retryClient := retry.NewClientWithRetries(env.cfg.Timeout, env.cfg.Retries, logger.From(ctx))
+	retryClient := retry.NewClientWithRetries(env.cfg.Timeout, env.cfg.Retries, retryLogger{logger.From(ctx)})
 
 	execCfg := core.ToolExecutionConfig{
 		Store:       store,
@@ -612,10 +612,20 @@ func isShellBarewordRune(r rune) bool {
 		strings.ContainsRune("@%_+=:,./-", r)
 }
 
+// retryLogger keeps the retry loop's per-attempt failures off the terminal.
+// The retry is already on screen as a status, and the final failure is
+// reported once by the caller; the record keeps its ERROR severity in the
+// file log, where it explains the attempts that came before the answer.
+type retryLogger struct{ *logger.RequestLogger }
+
+func (l retryLogger) Errorf(format string, args ...interface{}) {
+	l.FileErrorf(format, args...)
+}
+
 // sendWithRetry sends the HTTP request with retry logic
 func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (*http.Response, error) {
 	// Create pooled HTTP client with retry logic
-	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, logger.From(ctx))
+	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, retryLogger{logger.From(ctx)})
 
 	// Send request with retry using pooled client
 	// Redact API key from URL before logging
