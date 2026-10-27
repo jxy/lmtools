@@ -534,3 +534,24 @@ func TestParseFlagsREPLStreams(t *testing.T) {
 		}
 	}
 }
+
+// The flag parser stops at the first word it cannot place and leaves every
+// later flag unread, so a leftover argument is refused rather than ignored.
+func TestParseFlagsRejectsLeftoverArguments(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "prompt", args: []string{"-argo-user", "u", "what is this"}, want: "reads the prompt from standard input"},
+		{name: "boolean value", args: []string{"-argo-user", "u", "-stream", "false", "-repl"}, want: "-stream=false"},
+		{name: "before version", args: []string{"extra", "-version"}, want: `unexpected argument "extra"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseFlags(tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ParseFlags(%q) error = %v, want one containing %q", tt.args, err, tt.want)
+			}
+		})
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"lmtools/internal/prompts"
 	"lmtools/internal/providerconfig"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -86,6 +87,9 @@ func ParseFlags(args []string) (Config, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
+	}
+	if fs.NArg() > 0 {
+		return cfg, unexpectedArgumentError(fs.Arg(0))
 	}
 
 	// -version is answered before any validation, like -h: it needs no
@@ -304,4 +308,15 @@ func (c Config) RequestOptions() core.RequestOptions {
 		Images:              append([]core.ImageBlock(nil), c.Images...),
 		ExcludedTools:       append([]string(nil), c.ExcludedTools...),
 	}
+}
+
+// unexpectedArgumentError refuses a word the flag parser could not place. The
+// parser stops at the first such word and leaves every flag after it unread,
+// so `-stream false -repl` would otherwise run without -repl and say nothing.
+func unexpectedArgumentError(arg string) error {
+	switch strings.ToLower(arg) {
+	case "true", "false", "t", "f", "1", "0":
+		return fmt.Errorf("unexpected argument %q: give a boolean flag its value with =, as in -stream=false", arg)
+	}
+	return fmt.Errorf("unexpected argument %q: lmc reads the prompt from standard input, as in echo 'question' | lmc", arg)
 }

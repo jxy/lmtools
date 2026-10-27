@@ -36,7 +36,10 @@ pseudo-version naming the commit for a build from an untagged checkout.
 
 For chat and embeddings, `lmc` reads the input from stdin and writes the result
 to stdout. Typed at a terminal, the input ends with Ctrl-D at the start of a
-line, and Ctrl-C ends the run.
+line, and Ctrl-C ends the run. `lmc` takes no positional arguments: a word
+left after the flags, such as a prompt or the `false` of `-stream false`, is
+an error, since every flag after it would go unread. Give a boolean flag its
+value with `=`, as in `-stream=false`.
 
 ### Chat
 
