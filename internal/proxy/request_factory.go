@@ -65,6 +65,16 @@ func buildProviderJSONRequest(ctx context.Context, spec providerJSONRequest) (*h
 			return nil, nil, fmt.Errorf("configure %s request: %w", requestName, err)
 		}
 	}
+	// Every request asks for an uncompressed response unless it names an
+	// encoding itself. Go's transport offers gzip on its own, and a
+	// compressed stream reaches the proxy only when the upstream's compressor
+	// flushes, which Argo leaves until the response ends: every delta of a
+	// streamed answer then arrives at once. Legacy Argo streams carry no
+	// Accept header to tell them apart, and the JSON a request that is not
+	// streamed gets back is small.
+	if req.Header.Get("Accept-Encoding") == "" {
+		req.Header.Set("Accept-Encoding", "identity")
+	}
 
 	return req, reqBody, nil
 }

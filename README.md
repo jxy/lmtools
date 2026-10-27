@@ -1301,6 +1301,12 @@ applies to every path except `-provider openai` and
 
 ## Troubleshooting
 
+- Both binaries ask providers for uncompressed event streams
+  (`Accept-Encoding: identity`); apiproxy asks for every response it requests
+  that way. A compressed stream reaches the client only when the server's
+  compressor flushes, which some servers leave until the response ends; a
+  proxy or gateway between you and the provider can still do the same, and
+  then streamed text arrives all at once.
 - Pass `-log-level DEBUG` to either binary to inspect request routing and conversion warnings.
   DEBUG wire logs include complete, unredacted request, response, and stream
   bytes; they can contain credentials and grow without bound on long streams.

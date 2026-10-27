@@ -21,6 +21,11 @@ func TestStreamNativeArgoAnthropicUsesAnthropicEndpoint(t *testing.T) {
 		if !strings.HasSuffix(r.URL.Path, "/v1/messages") {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
+		// Argo compresses an event stream whenever the client accepts gzip,
+		// and then releases it only at the end.
+		if got := r.Header.Get("Accept-Encoding"); got != "identity" {
+			t.Errorf("Accept-Encoding = %q, want identity", got)
+		}
 		sawAnthropic = true
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(strings.Join([]string{
@@ -81,6 +86,9 @@ func TestStreamNativeArgoOpenAIUsesOpenAIEndpointAndPreamble(t *testing.T) {
 	mockArgo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
 			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept-Encoding"); got != "identity" {
+			t.Errorf("Accept-Encoding = %q, want identity", got)
 		}
 		sawOpenAI = true
 		w.Header().Set("Content-Type", "text/event-stream")

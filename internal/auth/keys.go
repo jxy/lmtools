@@ -116,17 +116,21 @@ func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 	}
 }
 
-// SetRequestHeaders sets common headers based on request type
-func SetRequestHeaders(req *http.Request, isJSON bool, stream bool, provider string) {
+// SetRequestHeaders sets common headers based on request type.
+//
+// A streamed response is asked for uncompressed from every provider. A
+// compressed event stream reaches the client only when the server's compressor
+// flushes, and Argo's flushes at the end of the response, so a request that
+// let Go's transport offer gzip showed nothing until the answer was complete.
+// The header used to depend on the provider being "argo", which native Argo
+// routes never pass: their requests name the wire, anthropic or openai.
+func SetRequestHeaders(req *http.Request, isJSON bool, stream bool) {
 	if isJSON && req.Method != "GET" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
-		// Argo's streaming endpoint may compress responses, causing issues
-		if provider == constants.ProviderArgo {
-			req.Header.Set("Accept-Encoding", "identity")
-		}
+		req.Header.Set("Accept-Encoding", "identity")
 	}
 }

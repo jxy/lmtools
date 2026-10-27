@@ -150,7 +150,7 @@ func buildArgoEmbedRequest(cfg RequestOptions, input string) (*http.Request, []b
 		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	auth.SetRequestHeaders(httpReq, true, cfg.StreamChat, constants.ProviderArgo)
+	auth.SetRequestHeaders(httpReq, true, cfg.StreamChat)
 	return httpReq, body, nil
 }
 

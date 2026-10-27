@@ -92,7 +92,7 @@ func buildProviderRequest(cfg RequestOptions, url string, body []byte, provider 
 	if err := applyProviderAuth(httpReq, cfg, provider); err != nil {
 		return nil, nil, err
 	}
-	auth.SetRequestHeaders(httpReq, true, stream, provider)
+	auth.SetRequestHeaders(httpReq, true, stream)
 
 	return httpReq, body, nil
 }

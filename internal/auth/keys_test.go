@@ -128,3 +128,23 @@ func writeAuthTestKeyFile(t *testing.T, key string) string {
 	}
 	return path
 }
+
+func TestSetRequestHeadersAsksForUncompressedStreams(t *testing.T) {
+	for _, stream := range []bool{true, false} {
+		req, err := http.NewRequest(http.MethodPost, "https://example.test/v1", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		SetRequestHeaders(req, true, stream)
+		want, wantAccept := "", ""
+		if stream {
+			want, wantAccept = "identity", "text/event-stream"
+		}
+		if got := req.Header.Get("Accept-Encoding"); got != want {
+			t.Fatalf("stream=%v: Accept-Encoding = %q, want %q", stream, got, want)
+		}
+		if got := req.Header.Get("Accept"); got != wantAccept {
+			t.Fatalf("stream=%v: Accept = %q, want %q", stream, got, wantAccept)
+		}
+	}
+}

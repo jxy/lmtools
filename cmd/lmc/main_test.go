@@ -219,6 +219,34 @@ func TestBuildPrintCurlRequestArgoUserAddsAuthorizationHeader(t *testing.T) {
 	})
 }
 
+// Native Argo routes render the request in the wire's dialect, anthropic for
+// claude models and openai for the rest, and both must still ask for an
+// uncompressed stream: Argo releases a compressed event stream only when the
+// response ends.
+func TestBuildStreamingArgoRequestAsksForUncompressedStream(t *testing.T) {
+	for _, model := range []string{"claudeopus4", "gpt4o"} {
+		t.Run(model, func(t *testing.T) {
+			cfg, err := config.ParseFlags([]string{
+				"-argo-user", "testuser",
+				"-model", model,
+				"-provider-url", "http://argo.example.test",
+				"-stream",
+				"-no-session",
+			})
+			if err != nil {
+				t.Fatalf("ParseFlags() error = %v", err)
+			}
+			rb, err := buildHTTPRequest(context.Background(), &cfg, cfg.RequestOptions(), nil, "hello")
+			if err != nil {
+				t.Fatalf("buildHTTPRequest() error = %v", err)
+			}
+			if got := rb.Request.Header.Get("Accept-Encoding"); got != "identity" {
+				t.Fatalf("Accept-Encoding = %q, want identity", got)
+			}
+		})
+	}
+}
+
 func writeTestAPIKeyFile(t *testing.T, key string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "api-key")

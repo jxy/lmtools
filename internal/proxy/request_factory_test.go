@@ -49,6 +49,38 @@ func TestBuildProviderJSONRequest(t *testing.T) {
 	}
 }
 
+// A streamed request asks for an uncompressed body, because a compressed event
+// stream is released only when the upstream compressor flushes; other
+// requests keep Go's transparent gzip, and an encoding the caller set stays.
+// Every provider request asks for an uncompressed response unless it names
+// an encoding.
+func TestBuildProviderJSONRequestStreamEncoding(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{name: "stream", headers: map[string]string{"Accept": "text/event-stream"}, want: "identity"},
+		{name: "not a stream", headers: nil, want: "identity"},
+		{name: "explicit encoding", headers: map[string]string{"Accept": "text/event-stream", "Accept-Encoding": "br"}, want: "br"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _, err := buildProviderJSONRequest(context.Background(), providerJSONRequest{
+				URL:          "https://example.com/v1/test",
+				Provider:     "openai",
+				Payload:      map[string]string{"hello": "world"},
+				ExtraHeaders: tt.headers,
+			})
+			if err != nil {
+				t.Fatalf("buildProviderJSONRequest() error = %v", err)
+			}
+			if got := req.Header.Get("Accept-Encoding"); got != tt.want {
+				t.Fatalf("Accept-Encoding = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildProviderJSONRequestConfigureWithError(t *testing.T) {
 	_, _, err := buildProviderJSONRequest(context.Background(), providerJSONRequest{
 		URL:         "https://example.com/v1/test",
