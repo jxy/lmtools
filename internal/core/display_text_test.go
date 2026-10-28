@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -41,13 +42,13 @@ func TestDisplayNameQuotesWhatCouldBeMisread(t *testing.T) {
 // Display JSON spells out what encoding/json leaves raw and still decodes to
 // the same value, so a suggested rule copied from a hint still matches.
 func TestMarshalJSONForDisplayEscapesAndStaysValid(t *testing.T) {
-	argv := []string{"echo", "a\u009bb", "c\u202ed", "e\x7ff"}
+	argv := []string{"echo", "a\u009bb", "c\u202ed", "e\x7ff", "tag\U000E0001", "beam\U0001D173"}
 	got := MarshalJSONForDisplay(argv)
-	if want := `["echo","a\u009bb","c\u202ed","e\u007ff"]`; got != want {
+	if want := `["echo","a\u009bb","c\u202ed","e\u007ff","tag\udb40\udc01","beam\ud834\udd73"]`; got != want {
 		t.Fatalf("MarshalJSONForDisplay = %s, want %s", got, want)
 	}
 	var back []string
-	if err := json.Unmarshal([]byte(got), &back); err != nil || len(back) != len(argv) || back[1] != argv[1] || back[2] != argv[2] || back[3] != argv[3] {
+	if err := json.Unmarshal([]byte(got), &back); err != nil || !slices.Equal(back, argv) {
 		t.Fatalf("round trip = %q, %v", back, err)
 	}
 }
@@ -70,6 +71,21 @@ func TestPlural(t *testing.T) {
 	for n, want := range map[int]string{0: "0 lines", 1: "1 line", 2: "2 lines"} {
 		if got := Plural(n, "line"); got != want {
 			t.Errorf("Plural(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
+// Every escape has four digits: a character beyond U+FFFF is spelled as its
+// UTF-16 surrogate pair, which reads back as that character in JSON.
+func TestEscapeRuneUsesSurrogatePairsAboveFFFF(t *testing.T) {
+	for r, want := range map[rune]string{
+		0x1b:    `\u001b`,
+		0x202e:  `\u202e`,
+		0xE0001: `\udb40\udc01`,
+		0x1D173: `\ud834\udd73`,
+	} {
+		if got := EscapeRune(r); got != want {
+			t.Errorf("EscapeRune(%U) = %q, want %q", r, got, want)
 		}
 	}
 }

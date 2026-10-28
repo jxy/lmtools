@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 )
 
 // IsHiddenControl reports a character a terminal acts on rather than shows:
@@ -14,8 +15,8 @@ func IsHiddenControl(r rune) bool {
 	return r != '\t' && (unicode.IsControl(r) || unicode.Is(unicode.Cf, r))
 }
 
-// VisibleText spells every hidden character of text as \uXXXX, so text a
-// model or a command produced cannot move the cursor, recolor the terminal,
+// VisibleText spells every hidden character of text with EscapeRune, so text
+// a model or a command produced cannot move the cursor, recolor the terminal,
 // or reorder what the operator reads.
 func VisibleText(text string) string {
 	if strings.IndexFunc(text, IsHiddenControl) < 0 {
@@ -24,12 +25,23 @@ func VisibleText(text string) string {
 	var b strings.Builder
 	for _, r := range text {
 		if IsHiddenControl(r) {
-			fmt.Fprintf(&b, "\\u%04x", r)
+			b.WriteString(EscapeRune(r))
 			continue
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// EscapeRune spells r the way JSON does: \uXXXX, and a character beyond
+// U+FFFF as its UTF-16 surrogate pair, so every escape has four digits and
+// reads back, in JSON or by eye, as the character it stands for.
+func EscapeRune(r rune) string {
+	if r > 0xFFFF {
+		high, low := utf16.EncodeRune(r)
+		return fmt.Sprintf("\\u%04x\\u%04x", high, low)
+	}
+	return fmt.Sprintf("\\u%04x", r)
 }
 
 // DisplayName renders a name for one line of the transcript. A name that is

@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -218,17 +217,14 @@ func (l *replLoop) showImages() {
 	}
 }
 
-// plainPreview preserves readable lines while making terminal control bytes visible.
+// plainPreview keeps a text's lines and spells out, on each, what a terminal
+// would act on rather than show.
 func plainPreview(text string) string {
-	var out strings.Builder
-	for _, r := range text {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' {
-			fmt.Fprintf(&out, "\\u%04x", r)
-		} else {
-			out.WriteRune(r)
-		}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = core.VisibleText(line)
 	}
-	return out.String()
+	return strings.Join(lines, "\n")
 }
 
 // showTextPreview shows text under label, every line quoted so the preview's

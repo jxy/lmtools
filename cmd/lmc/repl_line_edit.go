@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"lmtools/internal/core"
 	"strconv"
 	"strings"
 	"unicode"
@@ -502,13 +503,11 @@ func editRuneWidth(r rune) int {
 		return 4
 	}
 	if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-		if r < 0x10000 {
-			return 6
+		// writeEditRune spells it \uXXXX, or as a surrogate pair of two.
+		if r > 0xFFFF {
+			return 12
 		}
-		if r < 0x100000 {
-			return 7
-		}
-		return 8
+		return 6
 	}
 	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
 		return 0
@@ -524,7 +523,7 @@ func writeEditRune(b *strings.Builder, r rune) {
 	case r == '\t':
 		b.WriteString("    ")
 	case unicode.IsControl(r) || unicode.Is(unicode.Cf, r):
-		fmt.Fprintf(b, "\\u%04x", r)
+		b.WriteString(core.EscapeRune(r))
 	default:
 		b.WriteRune(r)
 	}

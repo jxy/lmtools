@@ -372,3 +372,23 @@ func TestEditBufferBoundsAndNarrowViewport(t *testing.T) {
 		t.Fatalf("overflow notice exceeds viewport: %q cursor=%d", view, cursor)
 	}
 }
+
+// The editor measures an escaped character by the escape it draws, a
+// surrogate pair beyond U+FFFF included.
+func TestEditRuneWidthMatchesItsEscape(t *testing.T) {
+	for _, r := range []rune{'\x1b', '\u202e', '\U000E0001'} {
+		var b strings.Builder
+		writeEditRune(&b, r)
+		if got := len(b.String()); got != editRuneWidth(r) {
+			t.Errorf("%U draws %q, %d cells, but measures %d", r, b.String(), got, editRuneWidth(r))
+		}
+	}
+}
+
+// A preview keeps its lines and spells out controls and bidi overrides on
+// each.
+func TestPlainPreviewSpellsOutHiddenCharacters(t *testing.T) {
+	if got, want := plainPreview("a\u202eb\nc\x1b\td"), "a\\u202eb\nc\\u001b\td"; got != want {
+		t.Fatalf("plainPreview = %q, want %q", got, want)
+	}
+}
