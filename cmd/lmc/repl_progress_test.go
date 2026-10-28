@@ -257,3 +257,66 @@ func TestProgressStatusSpellsOutControlsInNames(t *testing.T) {
 		t.Fatalf("a control reached the terminal: %q", out.String())
 	}
 }
+
+// recordedProgress keeps the stream events a presenter passes on.
+type recordedProgress struct {
+	events []core.ResponseStreamEventType
+}
+
+func (r *recordedProgress) streamEvent(event core.ResponseStreamEvent) {
+	r.events = append(r.events, event.Type)
+}
+func (r *recordedProgress) responseComplete() {}
+
+// Shown thinking is output, so each delta restarts the quiet spell before a
+// status; hidden thinking draws nothing, so its deltas are not passed on.
+func TestResponsePresenterPassesOnlyShownThinkingDeltas(t *testing.T) {
+	for _, shown := range []bool{false, true} {
+		p := newResponsePresenter(io.Discard, io.Discard, shown)
+		progress := &recordedProgress{}
+		p.progress = progress
+		for _, event := range []core.ResponseStreamEvent{
+			{Type: core.ResponseStreamReasoningStart},
+			{Type: core.ResponseStreamReasoningDelta, Text: "step"},
+			{Type: core.ResponseStreamReasoningEnd},
+		} {
+			p.HandleStreamEvent(event)
+		}
+		deltas := 0
+		for _, event := range progress.events {
+			if event == core.ResponseStreamReasoningDelta {
+				deltas++
+			}
+		}
+		if want := map[bool]int{false: 0, true: 1}[shown]; deltas != want || len(progress.events) != 2+want {
+			t.Fatalf("thinking shown %v: progress heard %v", shown, progress.events)
+		}
+	}
+}
+
+// With thinking hidden, reasoning deltas that arrive faster than the quiet
+// spell leave the status showing and counting.
+func TestHiddenThinkingKeepsTheStatusCounting(t *testing.T) {
+	shortenStatusDelays(t)
+	quietStatusDelay = 50 * time.Millisecond
+	out := &syncBuffer{}
+	progress, _, clock := newTestProgress(out)
+	p := newResponsePresenter(io.Discard, io.Discard, false)
+	p.progress = progress
+	p.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningStart})
+	streamUntil := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for !strings.Contains(out.String(), want) && time.Now().Before(deadline) {
+			p.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamReasoningDelta, Text: "x"})
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("%q never appeared while hidden thinking streamed: %q", want, out.String())
+		}
+	}
+	streamUntil("Thinking...")
+	clock.advance(3 * time.Second)
+	streamUntil("Thinking... 3s")
+	progress.stop()
+}

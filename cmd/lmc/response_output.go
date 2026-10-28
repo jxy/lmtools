@@ -71,7 +71,9 @@ func (p *responsePresenter) quoteThinking(width func() int) {
 }
 
 func (p *responsePresenter) HandleStreamEvent(event core.ResponseStreamEvent) {
-	if p.progress != nil {
+	// Hidden thinking writes nothing, so its deltas are no sign of output:
+	// the status keeps counting the thinking from its start.
+	if p.progress != nil && (event.Type != core.ResponseStreamReasoningDelta || p.showThinking) {
 		p.progress.streamEvent(event)
 	}
 	switch event.Type {
