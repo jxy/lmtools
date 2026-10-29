@@ -6,6 +6,8 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/providers"
 	"lmtools/internal/session"
+	"lmtools/internal/ui"
+	"lmtools/internal/ui/tools"
 	"lmtools/internal/version"
 	"net/url"
 	"os"
@@ -118,11 +120,16 @@ func (l *replLoop) currentSession(ctx context.Context) (*session.Session, error)
 
 // showConversation prints the saved conversation: all of it with the system
 // prompt summarized, the last turns, all of it with the system prompt, or the
-// system prompt alone. Thinking is shown with the thinking display on. Tool
-// output is never shortened here.
+// system prompt alone; or, for /show output, an output the transcript
+// shortened. Thinking is shown with the thinking display on. Tool output is
+// never shortened here.
 func (l *replLoop) showConversation(argument string) {
 	options := session.ShowOptions{SystemSummary: true, Thinking: l.env.cfg.ShowThinking, Columns: l.env.columns}
 	fields := strings.Fields(argument)
+	if len(fields) > 0 && fields[0] == "output" {
+		l.showOutput(context.Background(), strings.Join(fields[1:], " "))
+		return
+	}
 	switch {
 	case len(fields) == 0:
 	case len(fields) == 1 && fields[0] == "all":
@@ -140,7 +147,7 @@ func (l *replLoop) showConversation(argument string) {
 			options.LastTurns = n
 		}
 	default:
-		l.env.notifier.Errorf("Use /show, /show last [N], /show all, or /show system.")
+		l.env.notifier.Errorf("Use /show, /show last [N], /show all, /show system, or /show output [N].")
 		return
 	}
 	ctx, end := l.commandContext()
@@ -157,6 +164,28 @@ func (l *replLoop) showConversation(argument string) {
 	if err := session.ShowSessionWithOptions(ctx, l.diag, sess, l.env.notifier, options); err != nil {
 		l.env.notifier.Errorf("Show conversation: %v", err)
 	}
+}
+
+// showOutput prints the whole of an output the transcript shortened: the
+// one argument numbers, or the most recent without one. It serves /show
+// output at the prompt and at an approval question.
+func (l *replLoop) showOutput(_ context.Context, argument string) {
+	number := 0
+	if argument != "" {
+		n, err := strconv.Atoi(argument)
+		if err != nil || n < 1 {
+			l.env.notifier.Errorf("Use /show output [N], with N from the note under an output.")
+			return
+		}
+		number = n
+	}
+	output, missing := l.kept.get(number)
+	if missing != "" {
+		l.env.notifier.Infof("%s", missing)
+		return
+	}
+	fmt.Fprintf(l.diag, "Output %d, from %s:\n", output.number, output.title)
+	tools.WriteOutput(ui.NewNotifierWithWriter(l.diag), output.text, l.env.columns)
 }
 
 func (l *replLoop) setDisplay(command, value string) {

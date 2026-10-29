@@ -13,6 +13,7 @@ var replCommands = []struct{ usage, effect string }{
 	{"/effort [LEVEL|default]", "Show the reasoning effort, or change it for the next turns."},
 	{"/history [N|clear]", "List recent prompts, show prompt N in full, or clear the history."},
 	{"/show [last [N]|all|system]", "Show the saved conversation, its last turns, or its system prompt."},
+	{"/show output [N]", "Show a shortened tool output in full, or the latest; works at questions."},
 	{"/ed [N|REGEX]", "Edit a draft or recalled prompts with $VISUAL or $EDITOR."},
 	{"/image PATH", "Attach an image to the next turn."},
 	{"/images", "List pending images."},
@@ -82,6 +83,8 @@ History recall includes text, not earlier image attachments.
 /show displays the saved conversation, including tool results and attachments;
 /show last shows the last turn and /show last N the last N, with tool output in full.
 /show all includes the system prompt, and /show system shows it alone.
+/show output N prints shortened output N in full, and /show output the latest;
+the REPL keeps 64 MiB of shortened output.
 /info shows the session, current message, and logs. Sessions are saved as turns
 commit; failed requests can leave images and instructions pending for the next turn.
 Developer instructions are inserted once and replayed with saved history.
@@ -97,15 +100,17 @@ Then each call that needs approval is asked about by number and name.
 y or yes approves. a or all approves this call and the rest of the round.
 Enter, n, or no declines. Other text declines with your reason.
 /ed edits a reason; continuation lines work as at the normal prompt.
-At a question, /help runs, other commands get a note, and the question is
-asked again. A reason starting with / begins with //.
+At a question, /show output [N] and /help run, other commands get a note, and
+the question is asked again. A reason starting with / begins with //.
 Ctrl-C cancels the turn. Ctrl-D on an empty answer declines.
 Input typed before an approval question cannot answer it.
 A command whose program or working directory is missing shows Cannot start now:
 under its review; it is still asked about and run, since an earlier call may create it.
 An unknown earlier outcome is shown before asking whether to run that call again.
 Results appear in order as calls finish, quoted under each call; long output shows
-its first and last lines (/tool-output full shows all, /show last prints it).
+its first and last lines, and the note under it names the /show output N that
+prints it whole, at the prompt or at the next question (/tool-output full shows
+all).
 A line longer than the terminal wraps, and its continuation rows start with "  : ".
 Results distinguish not run, completed, failed, timed out, cancelled, and unknown.
 Token counts belong to each model response; tool follow-ups have separate counts.

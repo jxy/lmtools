@@ -316,7 +316,7 @@ func TestWriteToolOutputQuotesEveryLineInBoundedWrites(t *testing.T) {
 	notifier := &toolOutputWriteRecorder{}
 	output := strings.Repeat("x\n", toolOutputChunkBytes+1) + "tail"
 
-	writeToolOutput(notifier, "Output", "stdout+stderr", output, Options{})
+	writeToolOutput(notifier, "", "Output", "stdout+stderr", output, Options{})
 
 	if notifier.maxWrite > toolOutputChunkBytes+len(DetailIndent+QuotePrefix)+16 {
 		t.Fatalf("largest output write = %d bytes, want about %d", notifier.maxWrite, toolOutputChunkBytes)
@@ -339,7 +339,8 @@ func TestWriteToolOutputQuotesEveryLineInBoundedWrites(t *testing.T) {
 }
 
 // Long output on a live terminal shows its first and last lines, how many lay
-// between, and where to read them; nothing is lost from the result itself.
+// between, and the command that prints them; nothing is lost from the result
+// itself.
 func TestWriteToolOutputShortensLongOutputOnRequest(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	var output strings.Builder
@@ -347,11 +348,16 @@ func TestWriteToolOutputShortensLongOutputOnRequest(t *testing.T) {
 		fmt.Fprintf(&output, "line %d\n", i)
 	}
 	output.WriteString(strings.Repeat("y", shortOutputLineBytes+10) + "\n")
-	writeToolOutput(notifier, "Output", "stdout+stderr", output.String(), Options{ShortOutput: true, MoreHint: "/show last prints them"})
+	var keptTitle, kept string
+	keep := func(title, output string) string {
+		keptTitle, kept = title, output
+		return "/show output 3"
+	}
+	writeToolOutput(notifier, "[1/2] seq", "Output", "stdout+stderr", output.String(), Options{ShortOutput: true, KeepOutput: keep})
 	got := notifier.out.String()
 	for _, want := range []string{
 		"  Output (stdout+stderr, 301 lines; showing the first 10 and last 10):\n  | line 1\n",
-		"  | line 10\n  [281 lines not shown; /show last prints them]\n  | line 292\n",
+		"  | line 10\n  [281 lines not shown; /show output 3 prints them]\n  | line 292\n",
 		"  | line 300\n  | " + strings.Repeat("y", shortOutputLineBytes) + " [10 more bytes]\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -361,22 +367,27 @@ func TestWriteToolOutputShortensLongOutputOnRequest(t *testing.T) {
 	if strings.Contains(got, "line 11\n") || strings.Contains(got, "line 291\n") {
 		t.Fatalf("hidden lines were shown:\n%s", got)
 	}
+	// The whole output is kept, titled by its call, for the command to print.
+	if keptTitle != "[1/2] seq (stdout+stderr, 301 lines)" || kept != output.String() {
+		t.Fatalf("kept %q with %d bytes", keptTitle, len(kept))
+	}
 }
 
 // Short output cuts a long line though every line is shown, and says where
 // to read it whole.
 func TestWriteToolOutputCutsALongLineOfShortOutput(t *testing.T) {
 	notifier := newFormatTestNotifier()
-	writeToolOutput(notifier, "Output", "", "short\n"+strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{ShortOutput: true, MoreHint: "/show last prints them"})
+	keep := func(string, string) string { return "/show output 4" }
+	writeToolOutput(notifier, "", "Output", "", "short\n"+strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{ShortOutput: true, KeepOutput: keep})
 	want := "  Output (2 lines):\n" +
 		"  | short\n" +
 		"  | " + strings.Repeat("x", shortOutputLineBytes) + " [3000 more bytes]\n" +
-		"  [1 line cut; /show last prints them]\n"
+		"  [1 line cut; /show output 4 prints the output whole]\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 	notifier = newFormatTestNotifier()
-	writeToolOutput(notifier, "Output", "", strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{})
+	writeToolOutput(notifier, "", "Output", "", strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{})
 	if got := notifier.out.String(); strings.Contains(got, "more bytes") {
 		t.Fatalf("full output was cut: %q", got[len(got)-40:])
 	}
@@ -386,7 +397,7 @@ func TestWriteToolOutputCutsALongLineOfShortOutput(t *testing.T) {
 // terminal they are spelled out instead of acting on what the operator reads.
 func TestWriteToolOutputShowsControlCharacters(t *testing.T) {
 	notifier := newFormatTestNotifier()
-	writeToolOutput(notifier, "Output", "", "\x1b[31mred\x1b[0m\r\nplain\u202eevil\n\tindented\n", Options{})
+	writeToolOutput(notifier, "", "Output", "", "\x1b[31mred\x1b[0m\r\nplain\u202eevil\n\tindented\n", Options{})
 	want := "  Output (3 lines):\n" +
 		"  Control characters are shown as \\uXXXX.\n" +
 		"  | \\u001b[31mred\\u001b[0m\n" +

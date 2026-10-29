@@ -456,7 +456,7 @@ func TestREPLShowArguments(t *testing.T) {
 	for _, command := range []string{"/show 2", "/show last 0", "/show last two", "/show all extra"} {
 		loop.interpretInput(command)
 	}
-	if got := notes.count("Use /show, /show last [N], /show all, or /show system."); got != 2 {
+	if got := notes.count("Use /show, /show last [N], /show all, /show system, or /show output [N]."); got != 2 {
 		t.Fatalf("usage notes = %d: %q", got, notes.all())
 	}
 	if got := notes.count("Use /show last N with a positive number of turns."); got != 2 {

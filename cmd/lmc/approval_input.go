@@ -68,7 +68,7 @@ func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine, reas
 		} else if isREPLCommand(text) {
 			command, arg := splitREPLCommand(text)
 			if command != "/ed" {
-				a.questionCommand(text, true)
+				a.questionCommand(ctx, text, true)
 				reask()
 				continue
 			}

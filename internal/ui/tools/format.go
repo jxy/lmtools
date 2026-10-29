@@ -46,10 +46,13 @@ const (
 // everything in full, which is what a saved conversation and a log want.
 type Options struct {
 	// ShortOutput shows output longer than about twenty lines as its first
-	// and last lines, with a count of the lines between and MoreHint saying
-	// where to read them.
+	// and last lines, with a count of the lines between, and cuts a line
+	// longer than 2000 bytes.
 	ShortOutput bool
-	MoreHint    string
+	// KeepOutput, when set, keeps the whole text of an output ShortOutput
+	// shortened, titled by its call, and returns the command that prints it,
+	// which the note under the output names.
+	KeepOutput func(title, output string) string
 	// ShowPrograms names the program a bare command name resolves to when it
 	// lies outside the standard system directories, where it may surprise.
 	ShowPrograms bool
@@ -494,9 +497,11 @@ func (ui *CLIToolUI) AfterExecute(calls []core.ToolCall, results []core.ToolResu
 func formatToolResult(notifier core.Notifier, options Options, index, total int, call core.ToolCall, result core.ToolResult) {
 	t := newTranscript(notifier, options)
 	args := commandCallArgs(call)
-	prefix := fmt.Sprintf("[%d/%d]", index+1, total)
+	name := fmt.Sprintf("[%d/%d]", index+1, total)
+	prefix := name
 	if call.Name != "" || call.MCPServer != "" {
-		prefix += " " + core.ToolCallDisplayName(call, args) + ":"
+		name += " " + core.ToolCallDisplayName(call, args)
+		prefix = name + ":"
 	}
 	if call.Name == core.ViewImageToolName && result.Error == "" && len(result.Images) > 0 {
 		// The question named the file, type, and size; the result only has
@@ -542,7 +547,7 @@ func formatToolResult(notifier core.Notifier, options Options, index, total int,
 			// that exited with an error status said everything it had to.
 			label = "Partial output"
 		}
-		writeToolOutput(notifier, label, outputStreams(args), result.Output, options)
+		writeToolOutput(notifier, name, label, outputStreams(args), result.Output, options)
 	}
 	for _, image := range result.Images {
 		t.line(DetailIndent + "[image: " + core.DescribeImageBlock(image) + "]")
@@ -663,14 +668,27 @@ func compactToolArguments(args json.RawMessage) string {
 
 // writeToolOutput shows the executor's already-bounded output under its label,
 // every line quoted. With ShortOutput a long output shows its first and last
-// lines and says how many lay between and where to read them, and a long line
-// is cut.
-func writeToolOutput(notifier core.Notifier, label, streams, output string, options Options) {
+// lines and says how many lay between, and a long line is cut; with
+// KeepOutput the note names the command that prints the whole output. name
+// is the call's place and name, which titles the kept output.
+func writeToolOutput(notifier core.Notifier, name, label, streams, output string, options Options) {
 	t := newTranscript(notifier, options)
 	lines := splitDisplayLines(output)
 	described := core.Plural(len(lines), "line")
 	if streams != "" {
 		described = streams + ", " + described
+	}
+	title := described
+	if name != "" {
+		title = name + " (" + described + ")"
+	}
+	// keep keeps the whole output for a note about shortening it, and
+	// returns the command that prints it, if any.
+	keep := func() string {
+		if options.KeepOutput == nil {
+			return ""
+		}
+		return options.KeepOutput(title, output)
 	}
 	hidden := 0
 	if options.ShortOutput && len(lines) > shortOutputHeadLines+shortOutputTailLines+3 {
@@ -686,18 +704,31 @@ func writeToolOutput(notifier core.Notifier, label, streams, output string, opti
 		if options.ShortOutput {
 			lineBytes = shortOutputLineBytes
 		}
-		if cut := t.quoted(lines, lineBytes, outputText); cut > 0 && options.MoreHint != "" {
-			t.line(fmt.Sprintf("%s[%s cut; %s]", DetailIndent, core.Plural(cut, "line"), options.MoreHint))
+		if cut := t.quoted(lines, lineBytes, outputText); cut > 0 {
+			if command := keep(); command != "" {
+				t.line(fmt.Sprintf("%s[%s cut; %s prints the output whole]", DetailIndent, core.Plural(cut, "line"), command))
+			}
 		}
 		return
 	}
 	t.quoted(lines[:shortOutputHeadLines], shortOutputLineBytes, outputText)
 	more := fmt.Sprintf("%s[%s not shown", DetailIndent, core.Plural(hidden, "line"))
-	if options.MoreHint != "" {
-		more += "; " + options.MoreHint
+	if command := keep(); command != "" {
+		more += "; " + command + " prints them"
 	}
 	t.line(more + "]")
 	t.quoted(lines[len(lines)-shortOutputTailLines:], shortOutputLineBytes, outputText)
+}
+
+// WriteOutput writes an output's lines whole, quoted the way the transcript
+// quotes them and wrapped within columns when it is set, after a note when it
+// holds control characters.
+func WriteOutput(notifier core.Notifier, output string, columns func() int) {
+	t := transcript{notifier: notifier, columns: columns}
+	if hasControlCharacters(output) {
+		t.line(DetailIndent + "Control characters are shown as \\uXXXX.")
+	}
+	t.quoted(splitDisplayLines(output), 0, outputText)
 }
 
 // splitDisplayLines splits text into the lines a reader sees: a final newline

@@ -27,6 +27,9 @@ type cliApprover struct {
 	// columns, when set, is the terminal's width, within which a question
 	// above the editor's answer line wraps like the tool transcript.
 	columns func() int
+	// showOutput, when set, prints an output the transcript shortened, for
+	// /show output at a question; the REPL sets it.
+	showOutput func(ctx context.Context, argument string)
 }
 
 // newOperatorToolSurface builds the operator-facing half of tool execution:
@@ -245,7 +248,7 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		if err != nil || got.eof || q.compose || !isREPLCommand(strings.TrimSpace(got.text)) {
 			break
 		}
-		a.questionCommand(strings.TrimSpace(got.text), false)
+		a.questionCommand(ctx, strings.TrimSpace(got.text), false)
 	}
 	if err == nil {
 		err = ctx.Err()
@@ -334,24 +337,53 @@ func isAffirmativeAnswer(line string) bool {
 	}
 }
 
-// questionCommand runs a command typed at a question: /help explains the
-// answers. Anything else gets a note, so a command never becomes an answer.
-// compose says the question takes a reason and /ed.
-func (a *cliApprover) questionCommand(text string, compose bool) {
-	if command, _ := splitREPLCommand(text); command == "/help" {
+// questionCommand runs a command typed at a question: /show output prints an
+// output the transcript shortened, and /help explains the answers. Anything
+// else gets a note, so a command never becomes an answer. compose says the
+// question takes a reason and /ed.
+func (a *cliApprover) questionCommand(ctx context.Context, text string, compose bool) {
+	command, argument := splitREPLCommand(text)
+	field, rest, _ := strings.Cut(argument, " ")
+	switch {
+	case command == "/show" && field == "output" && a.showOutput != nil:
+		a.showOutput(ctx, strings.TrimSpace(rest))
+	case command == "/help":
 		a.notifier.Promptf("%s", tools.Wrap(a.questionGuide(compose), a.columns))
-		return
+	default:
+		a.notifier.Promptf("%s\n", tools.Wrap(a.questionCommandsNote(compose), a.columns))
 	}
-	a.notifier.Promptf("%s\n", tools.Wrap(a.questionCommandsNote(compose), a.columns))
 }
 
 // questionCommandsNote names the commands a question understands.
 func (a *cliApprover) questionCommandsNote(compose bool) string {
-	if !compose {
-		return tools.DetailIndent + "At this question, /help works."
+	var commands []string
+	if a.showOutput != nil {
+		commands = append(commands, "/show output [N]")
 	}
-	return tools.DetailIndent + "At a question, /help and /ed work.\n" +
+	commands = append(commands, "/help")
+	if !compose {
+		verb := " work."
+		if len(commands) == 1 {
+			verb = " works."
+		}
+		return tools.DetailIndent + "At this question, " + listed(commands) + verb
+	}
+	commands = append(commands, "/ed")
+	return tools.DetailIndent + "At a question, " + listed(commands) + " work.\n" +
 		tools.DetailIndent + "To give a reason that starts with /, begin it with //."
+}
+
+// listed joins items as a sentence lists them: a, a and b, or a, b, and c.
+func listed(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
 }
 
 // questionGuide explains the answers a question takes and the commands it
@@ -365,6 +397,9 @@ func (a *cliApprover) questionGuide(compose bool) string {
 		b.WriteString(indent + "/ed edits the answer; to give a reason that starts with /, begin it with //.\n")
 	} else {
 		b.WriteString(indent + "y or yes continues; n, no, Enter, or other text stops here.\n")
+	}
+	if a.showOutput != nil {
+		b.WriteString(indent + "/show output [N] prints an output the transcript shortened.\n")
 	}
 	b.WriteString(indent + "Ctrl-C cancels the turn.\n")
 	return b.String()

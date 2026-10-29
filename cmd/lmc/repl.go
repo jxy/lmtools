@@ -485,7 +485,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		env.toolUI = &replToolUI{
 			CLIToolUI: tools.NewCLIToolUIWithOptions(toolNotifier, tools.Options{
 				ShortOutput:  true,
-				MoreHint:     "/show last prints them",
+				KeepOutput:   loop.kept.keep,
 				ShowPrograms: true,
 			}),
 			loop: loop,
@@ -520,6 +520,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		approver.stop = signals.endProcess
 		approver.bell = &loop.bell
 		approver.columns = env.columns
+		approver.showOutput = loop.showOutput
 	}
 	if isTerminalFile(os.Stdout) {
 		env.stdout = screen.writer(os.Stdout, true)
@@ -571,6 +572,8 @@ type replLoop struct {
 	hideUsage   bool
 	// bell rings the terminal when a turn ends, as /bell asks.
 	bell bool
+	// kept holds the outputs the transcript shortened, for /show output.
+	kept keptOutputs
 
 	// turnMu guards turnCtx, the context of the turn in progress, which the
 	// tool transcript reads from the executor's goroutines.

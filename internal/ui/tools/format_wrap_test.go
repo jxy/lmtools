@@ -24,7 +24,7 @@ func rowWidth(row string) int {
 func TestTranscriptWrapsLongLinesWithAContinuationMarker(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	line := "INFO server started on port 8080; config loaded from /etc/app/config.yaml with overrides"
-	writeToolOutput(notifier, "Output", "", line+"\n", Options{Columns: columns(40)})
+	writeToolOutput(notifier, "", "Output", "", line+"\n", Options{Columns: columns(40)})
 	// 39 cells a row: the prefix and 35 characters.
 	want := "  Output (1 line):\n" +
 		"  | INFO server started on port 8080; c\n" +
@@ -40,7 +40,7 @@ func TestTranscriptWrapsLongLinesWithAContinuationMarker(t *testing.T) {
 func TestTranscriptWrapsWideAndCombiningCharactersWhole(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	text := strings.Repeat("\u754c", 20) + " e" + "\u0301" + strings.Repeat("x", 30)
-	writeToolOutput(notifier, "Output", "", text+"\n", Options{Columns: columns(25)})
+	writeToolOutput(notifier, "", "Output", "", text+"\n", Options{Columns: columns(25)})
 	rows := strings.Split(strings.TrimSuffix(notifier.out.String(), "\n"), "\n")
 	var content strings.Builder
 	for i, row := range rows {
@@ -80,7 +80,7 @@ func TestWrapMeasuresEachLine(t *testing.T) {
 // from the content's start, so a table keeps its alignment under the quote.
 func TestTranscriptExpandsTabsFromTheContentStart(t *testing.T) {
 	notifier := newFormatTestNotifier()
-	writeToolOutput(notifier, "Output", "", "a\tb\nlonger\tc\n", Options{})
+	writeToolOutput(notifier, "", "Output", "", "a\tb\nlonger\tc\n", Options{})
 	want := "  Output (2 lines):\n  | a       b\n  | longer  c\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("output = %q, want %q", got, want)

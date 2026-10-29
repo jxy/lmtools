@@ -306,6 +306,7 @@ REPL commands work with terminal and piped input:
 | `/show` | Show the saved conversation through the current message, the system prompt as a one-line summary. |
 | `/show last [N]` | Show the last turn, or the last N, with tool output in full. |
 | `/show all`, `/show system` | Show the conversation with its system prompt in full, or the system prompt alone. |
+| `/show output [N]` | Show a shortened tool output in full: number N from the note under it, or the latest; also works at an approval question. |
 | `/ed` | Edit the current draft with `$VISUAL`, else `$EDITOR`, else `vi`. |
 | `/ed N` | Edit retained prompt N as a new draft. |
 | `/ed REGEX` | Edit all matching retained prompts together, in history order. |
@@ -354,9 +355,14 @@ Saved conversations and live tool turns use the same tool/result labels and
 readable durations, with each line of output quoted under its result. A round
 of tool results is labelled `[tool results]`. Live output longer than about
 twenty lines shows its first and last ten, and a line over 2000 bytes is cut
-with a count of the bytes left out; `/show` and `/show last` never shorten
-saved tool output, and any truncation done during execution is identified
-separately.
+with a count of the bytes left out. The note under a shortened output names
+the command that prints it whole, as in
+`[281 lines not shown; /show output 3 prints them]`; the REPL keeps the whole
+text of every shortened output, up to 64 MiB in all, the oldest dropped
+first. `/show output 3` works at the prompt and at an approval question, so
+an output can be read before the next call is approved. `/show` and
+`/show last` never shorten saved tool output, and any truncation done during
+execution is identified separately.
 
 Answers are shown as the model wrote them, markdown included, since stdout
 keeps the answer bytes exactly. To ask for plain text, add an instruction:
@@ -376,10 +382,10 @@ approval prompt, `y` or `yes` approves; `n`, `no`, or an empty reply denies.
 ask; the question offers it when there are such calls, and at any other
 question it approves the one call. In the REPL
 editor, Enter submits the answer; Ctrl-D on an empty answer denies. A question
-also takes `/help`, which explains the answers, and `/ed`, and asks again
-afterwards; any other line that starts with `/` gets a note and the question
-again, and the call stays undecided. A reason that starts with `/` begins
-with `//`. Any other
+also takes `/show output [N]`, `/help`, which explains the answers, and `/ed`,
+and asks again afterwards; any other line that starts with `/` gets a note
+and the question again, and the call stays undecided. A reason that starts
+with `/` begins with `//`. Any other
 reply denies the call and supplies a reason, for
 example `This is a read-only review; do not change files.` The model receives
 an explicit user denial with the text labeled as a reason provided by the

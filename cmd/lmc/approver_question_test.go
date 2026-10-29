@@ -46,12 +46,27 @@ func TestRoundLimitQuestionRunsCommands(t *testing.T) {
 	if strings.Count(said, "Reset it and continue?") != 3 || !strings.Contains(said, "y or yes continues") || !strings.Contains(said, "At this question, /help works.") {
 		t.Fatalf("transcript:\n%s", said)
 	}
+
+	// In the REPL, /show output runs there too.
+	notifier = &mockNotifier{}
+	a = newCLIApproverWithReader(notifier, strings.NewReader("/show output\n/exit\ny\n"))
+	shown := 0
+	a.showOutput = func(context.Context, string) { shown++ }
+	reset, err = a.ApproveToolRoundLimitReset(context.Background(), 8)
+	if err != nil || !reset || shown != 1 {
+		t.Fatalf("reset = %v, err = %v, shown %d", reset, err, shown)
+	}
+	said = strings.Join(notifier.messages, "")
+	if strings.Count(said, "Reset it and continue?") != 3 || !strings.Contains(said, "At this question, /show output [N] and /help work.") {
+		t.Fatalf("transcript:\n%s", said)
+	}
 }
 
 // The guide and the note at a question fit a terminal 80 columns wide as
 // they are.
 func TestQuestionHelpFitsEightyColumns(t *testing.T) {
 	a := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(""))
+	a.showOutput = func(context.Context, string) {}
 	for _, compose := range []bool{true, false} {
 		for _, line := range strings.Split(a.questionGuide(compose)+a.questionCommandsNote(compose), "\n") {
 			if len(line) > 79 {
