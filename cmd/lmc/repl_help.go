@@ -85,6 +85,7 @@ History recall includes text, not earlier image attachments.
 /show all includes the system prompt, and /show system shows it alone.
 /show output N prints shortened output N in full, and /show output the latest;
 the REPL keeps 64 MiB of shortened output.
+On a terminal, /show opens in $PAGER, else less, when taller than the screen.
 /info shows the session, current message, and logs. Sessions are saved as turns
 commit; failed requests can leave images and instructions pending for the next turn.
 Developer instructions are inserted once and replayed with saved history.

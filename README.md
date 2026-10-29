@@ -362,7 +362,9 @@ text of every shortened output, up to 64 MiB in all, the oldest dropped
 first. `/show output 3` works at the prompt and at an approval question, so
 an output can be read before the next call is approved. `/show` and
 `/show last` never shorten saved tool output, and any truncation done during
-execution is identified separately.
+execution is identified separately. On a terminal, `/show` and
+`/show output` open in `$PAGER`, else `less`, when the text is taller than
+the terminal; quitting the pager returns to the prompt or the question.
 
 Answers are shown as the model wrote them, markdown included, since stdout
 keeps the answer bytes exactly. To ask for plain text, add an instruction:

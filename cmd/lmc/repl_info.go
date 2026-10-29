@@ -127,7 +127,9 @@ func (l *replLoop) showConversation(argument string) {
 	options := session.ShowOptions{SystemSummary: true, Thinking: l.env.cfg.ShowThinking, Columns: l.env.columns}
 	fields := strings.Fields(argument)
 	if len(fields) > 0 && fields[0] == "output" {
-		l.showOutput(context.Background(), strings.Join(fields[1:], " "))
+		ctx, end := l.commandContext()
+		defer end()
+		l.showOutput(ctx, strings.Join(fields[1:], " "))
 		return
 	}
 	switch {
@@ -161,7 +163,10 @@ func (l *replLoop) showConversation(argument string) {
 		l.env.notifier.Infof("No saved conversation yet.")
 		return
 	}
-	if err := session.ShowSessionWithOptions(ctx, l.diag, sess, l.env.notifier, options); err != nil {
+	var b strings.Builder
+	err = session.ShowSessionWithOptions(ctx, &b, sess, l.env.notifier, options)
+	l.view(ctx, b.String())
+	if err != nil {
 		l.env.notifier.Errorf("Show conversation: %v", err)
 	}
 }
@@ -169,7 +174,7 @@ func (l *replLoop) showConversation(argument string) {
 // showOutput prints the whole of an output the transcript shortened: the
 // one argument numbers, or the most recent without one. It serves /show
 // output at the prompt and at an approval question.
-func (l *replLoop) showOutput(_ context.Context, argument string) {
+func (l *replLoop) showOutput(ctx context.Context, argument string) {
 	number := 0
 	if argument != "" {
 		n, err := strconv.Atoi(argument)
@@ -184,8 +189,10 @@ func (l *replLoop) showOutput(_ context.Context, argument string) {
 		l.env.notifier.Infof("%s", missing)
 		return
 	}
-	fmt.Fprintf(l.diag, "Output %d, from %s:\n", output.number, output.title)
-	tools.WriteOutput(ui.NewNotifierWithWriter(l.diag), output.text, l.env.columns)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Output %d, from %s:\n", output.number, output.title)
+	tools.WriteOutput(ui.NewNotifierWithWriter(&b), output.text, l.env.columns)
+	l.view(ctx, b.String())
 }
 
 func (l *replLoop) setDisplay(command, value string) {
