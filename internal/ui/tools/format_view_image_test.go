@@ -34,7 +34,7 @@ func TestCLIToolUIShowCallRendersViewImage(t *testing.T) {
 	ui.ShowCall(0, 2, viewImageCall(t, "img", core.ViewImageArgs{Path: "plots/out.png", Detail: "high"}), nil)
 	ui.ShowCall(1, 2, viewImageCall(t, "plain", core.ViewImageArgs{Path: "shot.png"}), nil)
 
-	want := "\nTools: 2\n[1/2] View image: \"plots/out.png\"\n      Detail: high\n\n[2/2] View image: \"shot.png\"\n"
+	want := "\nTools: 2\n[1/2] View image: \"plots/out.png\"\n  Detail: high\n\n[2/2] View image: \"shot.png\"\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() output = %q, want %q", got, want)
 	}
@@ -46,7 +46,7 @@ func TestCLIToolUIShowCallFallsBackForAnUndecodableViewImage(t *testing.T) {
 
 	ui.ShowCall(0, 1, core.ToolCall{ID: "img", Name: core.ViewImageToolName, Args: json.RawMessage(`{}`)}, nil)
 
-	want := "\nTools: 1\n[1/1] Tool: view_image\n      Arguments: {}\n"
+	want := "\nTools: 1\n[1/1] Tool: view_image\n  Arguments: {}\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() output = %q, want %q", got, want)
 	}
@@ -106,7 +106,7 @@ Tool results:
 			want: `
 Tools: 1
 [1/1] View image: "<TMP>/shot.png"
-      Detail: low
+  Detail: low
 
 No tools will be run.
 
@@ -144,10 +144,10 @@ No tools will be run.
 
 Tool results:
 [1/1] view_image: Not run: approval disabled by -tool-non-interactive
-      Hint: Allow via one of:
-              - Run interactively without -tool-non-interactive
-              - Use -tool-auto-approve
-              - Add the image to a whitelist
+  Hint: Allow via one of:
+          - Run interactively without -tool-non-interactive
+          - Use -tool-auto-approve
+          - Add the image to a whitelist
 
 `,
 		},
@@ -171,10 +171,10 @@ No tools will be run.
 
 Tool results:
 [1/1] view_image: Not run: not in whitelist
-      Hint: Whitelist file: <TMP>/commands.txt
-      Hint: To allow this image, either:
-              1. Add {"tool":"view_image","path":"<TMP>/shot.png"} to your whitelist file and use -tool-whitelist <file>
-              2. Run interactively without -tool-non-interactive
+  Hint: Whitelist file: <TMP>/commands.txt
+  Hint: To allow this image, either:
+          1. Add {"tool":"view_image","path":"<TMP>/shot.png"} to your whitelist file and use -tool-whitelist <file>
+          2. Run interactively without -tool-non-interactive
 
 `,
 		},

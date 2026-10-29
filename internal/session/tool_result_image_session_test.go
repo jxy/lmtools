@@ -138,7 +138,7 @@ func TestShowListsToolResultImagesUnderTheResult(t *testing.T) {
 	}
 	// One message shown alone has no call to name the tool, so the result
 	// shows the text the model received and the image under it.
-	wantSingle := "      | Attached image shot.png (image/png, 12 bytes).\n      [image: shot.png (image/png, 12 bytes)]\n"
+	wantSingle := "  | Attached image shot.png (image/png, 12 bytes).\n  [image: shot.png (image/png, 12 bytes)]\n"
 	if !strings.Contains(single, wantSingle) {
 		t.Fatalf("ShowMessageWithManager() output = %q, want it to contain %q", single, wantSingle)
 	}

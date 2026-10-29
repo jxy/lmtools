@@ -39,9 +39,9 @@ func TestShowSessionKeepsPinnedHeadAndFullFailedToolOutput(t *testing.T) {
 	var quoted strings.Builder
 	for _, line := range strings.Split(output, "\n") {
 		if line == "" {
-			quoted.WriteString("      |\n")
+			quoted.WriteString("  |\n")
 		} else {
-			quoted.WriteString("      | " + line + "\n")
+			quoted.WriteString("  | " + line + "\n")
 		}
 	}
 	for _, want := range []string{`example: Failed in 1.2s: exit status 1`, "Output (stdout+stderr, 201 lines):\n" + quoted.String()} {
@@ -131,7 +131,7 @@ func TestConversationDisplayUsesEachMessagesDirectory(t *testing.T) {
 							want = 1
 						}
 					}
-					for _, marker := range []string{label + "-user.png", label + "-result.png", "| " + label + " output\n      |\n", "| " + label + " end\n", label + `-command: Failed`} {
+					for _, marker := range []string{label + "-user.png", label + "-result.png", "| " + label + " output\n  |\n", "| " + label + " end\n", label + `-command: Failed`} {
 						if count := strings.Count(out.String(), marker); count != want {
 							t.Fatalf("%q appeared %d times, want %d:\n%s", marker, count, want, out.String())
 						}

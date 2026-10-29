@@ -121,7 +121,7 @@ func (l *replLoop) currentSession(ctx context.Context) (*session.Session, error)
 // system prompt alone. Thinking is shown with the thinking display on. Tool
 // output is never shortened here.
 func (l *replLoop) showConversation(argument string) {
-	options := session.ShowOptions{SystemSummary: true, Thinking: l.env.cfg.ShowThinking}
+	options := session.ShowOptions{SystemSummary: true, Thinking: l.env.cfg.ShowThinking, Columns: l.env.columns}
 	fields := strings.Fields(argument)
 	switch {
 	case len(fields) == 0:

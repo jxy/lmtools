@@ -106,7 +106,7 @@ func TestTerminalEditorInterruptedApprovalCannotBecomePrompt(t *testing.T) {
 	defer cancel(nil)
 	shown, interrupted := false, false
 	out := editorWriteHook(func(text string) {
-		if !shown && strings.HasSuffix(text, "\n      > ") {
+		if !shown && strings.HasSuffix(text, "\n  > ") {
 			shown = true
 			// Input arrives after the approval's initial flush.
 			reader.held = []byte(strings.Repeat("x", 256) + "yes\n")

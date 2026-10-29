@@ -47,7 +47,7 @@ func TestCLIToolUIShowCallRendersMCPCalls(t *testing.T) {
 	ui.ShowCall(0, 2, mcpCall("a", "list_issues", `{ "repo": "a/b" }`), nil)
 	ui.ShowCall(1, 2, core.ToolCall{ID: "b", Name: "mcp__other__tool", Args: json.RawMessage(`{}`)}, nil)
 
-	want := "\nTools: 2\n[1/2] MCP tool: github/list_issues\n      Arguments: {\"repo\":\"a/b\"}\n\n[2/2] Tool: mcp__other__tool\n      Arguments: {}\n"
+	want := "\nTools: 2\n[1/2] MCP tool: github/list_issues\n  Arguments: {\"repo\":\"a/b\"}\n\n[2/2] Tool: mcp__other__tool\n  Arguments: {}\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() output = %q, want %q", got, want)
 	}
@@ -91,12 +91,12 @@ func TestMCPOutcomesRenderThroughTheCLI(t *testing.T) {
 	}, NewCLIToolUI(notifier))
 
 	want := "\nTools: 3\n" +
-		"[1/3] MCP tool: github/list_issues\n      Arguments: {\"repo\":\"a/b\"}\n\n" +
-		"[2/3] MCP tool: github/delete_repo\n      Arguments: {}\n      Will not run: blacklisted\n\n" +
-		"[3/3] MCP tool: github/create_issue\n      Arguments: {\"title\":\"x\"}\n" +
+		"[1/3] MCP tool: github/list_issues\n  Arguments: {\"repo\":\"a/b\"}\n\n" +
+		"[2/3] MCP tool: github/delete_repo\n  Arguments: {}\n  Will not run: blacklisted\n\n" +
+		"[3/3] MCP tool: github/create_issue\n  Arguments: {\"title\":\"x\"}\n" +
 		"\nRunning 1 of 3 tools...\n" +
 		"\nTool results:\n" +
-		fmt.Sprintf("[1/3] github/list_issues: Completed in Nms (1 image(s) attached)\n      Output (1 line):\n      | #1 open\n      [image: image/png, %d bytes]\n\n", len(viewImagePNG)) +
+		fmt.Sprintf("[1/3] github/list_issues: Completed in Nms (1 image(s) attached)\n  Output (1 line):\n  | #1 open\n  [image: image/png, %d bytes]\n\n", len(viewImagePNG)) +
 		"[2/3] github/delete_repo: Not run: blacklisted\n\n" +
 		"[3/3] github/create_issue: Denied by you\n\n"
 	if got := elapsedPattern.ReplaceAllString(notifier.out.String(), "in Nms"); got != want {

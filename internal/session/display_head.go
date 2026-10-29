@@ -18,6 +18,9 @@ type ShowOptions struct {
 	SystemOnly    bool
 	// Thinking shows the reasoning text saved with each answer.
 	Thinking bool
+	// Columns, when set, is the terminal's width, within which tool rounds
+	// wrap their lines as they do live.
+	Columns func() int
 }
 
 // ShowSessionTo respects the conversation's pinned head, including its identity,

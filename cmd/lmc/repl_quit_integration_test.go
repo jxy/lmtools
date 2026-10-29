@@ -133,9 +133,9 @@ func TestTerminalREPLSIGQUITDuringApproval(t *testing.T) {
 	r := startREPLUnderTerminal(t, server.URL(), nil, "-tool")
 	r.expect(t, freshPrompt)
 	r.typeKeys(t, "run the tool\n")
-	r.expect(t, "      > ")
+	r.expect(t, "  > ")
 	r.typeKeys(t, "yes")
-	r.expect(t, "      > yes")
+	r.expect(t, "  > yes")
 	if err := r.cmd.Process.Signal(syscall.SIGQUIT); err != nil {
 		t.Fatal(err)
 	}

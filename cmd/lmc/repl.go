@@ -25,9 +25,9 @@ import (
 const (
 	freshPrompt        = "you> "
 	continuationPrompt = "...> "
-	// An approval answer sits under the call's detail column.
-	approvalPrompt             = "      > "
-	approvalContinuationPrompt = "      . "
+	// An approval answer sits at the detail column, under its question.
+	approvalPrompt             = tools.DetailIndent + "> "
+	approvalContinuationPrompt = tools.DetailIndent + ". "
 )
 
 // maxTurnBytes caps a turn and an accumulating continuation. Tests shrink
@@ -506,6 +506,9 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		if terminal, ok := input.term.(interface{ columns() int }); ok {
 			screen.columns = terminal.columns
 			env.columns = terminal.columns
+			if ui, ok := env.toolUI.(*replToolUI); ok {
+				ui.Options.Columns = terminal.columns
+			}
 		}
 		input.onInterruptEcho(loop.interruptEchoed.Store)
 		// Recall reaches the prompts and commands of earlier REPLs.
@@ -516,6 +519,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		approver.history = &loop.history
 		approver.stop = signals.endProcess
 		approver.bell = &loop.bell
+		approver.columns = env.columns
 	}
 	if isTerminalFile(os.Stdout) {
 		env.stdout = screen.writer(os.Stdout, true)

@@ -164,7 +164,7 @@ func TestTerminalEditorEOFDiscardsApprovalWithoutSubmitting(t *testing.T) {
 			result := make(chan core.Approval, 1)
 			errs := make(chan error, 1)
 			go func() { decision, err := a.Approve(ctx, core.UniversalCommandArgs{}); result <- decision; errs <- err }()
-			if err := screen.Expect("      > ", time.Second); err != nil {
+			if err := screen.Expect("  > ", time.Second); err != nil {
 				t.Fatal(err)
 			}
 			// Ctrl-D with text on the line deletes under the cursor and
@@ -184,6 +184,39 @@ func TestTerminalEditorEOFDiscardsApprovalWithoutSubmitting(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// Above the editor's answer line, a question longer than the terminal wraps
+// the way the tool transcript does, its continuation rows starting with "  : ".
+func TestTerminalEditorWrapsALongApprovalQuestion(t *testing.T) {
+	t.Setenv("TERM", "xterm")
+	owner, pty, screen := terminalOwner(t)
+	if _, err := owner.enableEditing(pty.Slave, &replHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	a := newApprover(ui.NewREPLNotifier(pty.Slave), owner)
+	a.columns = func() int { return 40 }
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ctx = core.WithApprovalTarget(ctx, core.ApprovalTarget{Index: 0, Total: 2, Remaining: 1})
+	errs := make(chan error, 1)
+	go func() { _, err := a.Approve(ctx, core.UniversalCommandArgs{Command: []string{"ls"}}); errs <- err }()
+	// 39 cells a row: the question, then rows after the continuation marker.
+	for _, row := range []string{
+		"[1/2] Allow ls? [y/N, a = this and the \r\n",
+		"  : rest, or reason; /ed to edit]:\r\n",
+	} {
+		if err := screen.Expect(row, time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := screen.Expect("  > ", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	typeKeys(t, pty, "n\r")
+	if err := <-errs; err != nil {
+		t.Fatal(err)
 	}
 }
 

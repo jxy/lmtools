@@ -110,7 +110,7 @@ func TestApprover_EdgeCases(t *testing.T) {
 			if result.Approved != tt.expected {
 				t.Errorf("Approve() = %v, expected %v", result, tt.expected)
 			}
-			if len(notifier.messages) == 0 || notifier.messages[0] != "      Allow ls? [y/N or reason; /ed to edit]: " {
+			if len(notifier.messages) == 0 || notifier.messages[0] != "  Allow ls? [y/N or reason; /ed to edit]: " {
 				t.Fatalf("approval prompt = %#v", notifier.messages)
 			}
 		})
@@ -133,8 +133,8 @@ func approverEntryPoints() []approverEntryPoint {
 			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
 				return a.Approve(ctx, core.UniversalCommandArgs{Command: []string{"ls"}})
 			},
-			prompt:    "      Allow ls? [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n      No interactive input available; denying by default.\n",
+			prompt:    "  Allow ls? [y/N or reason; /ed to edit]: ",
+			eofNotice: "\n  No interactive input available; denying by default.\n",
 		},
 		{
 			name: "ApproveImage",
@@ -144,8 +144,8 @@ func approverEntryPoints() []approverEntryPoint {
 				return a.ApproveImage(ctx, core.ViewImageArgs{Path: "plots/shot.png"},
 					core.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgo=", Name: "shot.png"})
 			},
-			prompt:    "      Send shot.png (image/png, 8 bytes) to the model? [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n      No interactive input available; denying by default.\n",
+			prompt:    "  Send shot.png (image/png, 8 bytes) to the model? [y/N or reason; /ed to edit]: ",
+			eofNotice: "\n  No interactive input available; denying by default.\n",
 		},
 		{
 			name: "ApproveMCP",
@@ -154,8 +154,8 @@ func approverEntryPoints() []approverEntryPoint {
 				// names the server and tool the way a rule would.
 				return a.ApproveMCP(ctx, core.MCPCall{Server: "github", Tool: "list_issues", Arguments: json.RawMessage(`{"repo":"a/b"}`)})
 			},
-			prompt:    "      Call github/list_issues? [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n      No interactive input available; denying by default.\n",
+			prompt:    "  Call github/list_issues? [y/N or reason; /ed to edit]: ",
+			eofNotice: "\n  No interactive input available; denying by default.\n",
 		},
 		{
 			name: "ApproveRerun",
@@ -164,8 +164,8 @@ func approverEntryPoints() []approverEntryPoint {
 				// is unknown; the question names the tool and the risk.
 				return a.ApproveRerun(ctx, core.ToolCall{ID: "call-1", Name: "universal_command"})
 			},
-			prompt:    "      Run universal_command again? It may already have run. [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n      No interactive input available; not running it again.\n",
+			prompt:    "  Run universal_command again? It may already have run. [y/N or reason; /ed to edit]: ",
+			eofNotice: "\n  No interactive input available; not running it again.\n",
 		},
 		{
 			name: "ApproveToolRoundLimitReset",
@@ -511,7 +511,7 @@ func TestApproverQuestionSpellsOutControlsInTheName(t *testing.T) {
 	if _, err := approver.Approve(context.Background(), core.UniversalCommandArgs{Command: []string{"\x1b[2Jrm"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(notifier.messages) == 0 || notifier.messages[0] != `      Allow "\u001b[2Jrm"? [y/N or reason; /ed to edit]: ` {
+	if len(notifier.messages) == 0 || notifier.messages[0] != `  Allow "\u001b[2Jrm"? [y/N or reason; /ed to edit]: ` {
 		t.Fatalf("question = %#v", notifier.messages)
 	}
 }

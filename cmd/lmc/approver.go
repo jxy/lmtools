@@ -24,6 +24,9 @@ type cliApprover struct {
 	// bell, when set, is the REPL's /bell setting: on, the terminal rings
 	// as a question appears.
 	bell *bool
+	// columns, when set, is the terminal's width, within which a question
+	// above the editor's answer line wraps like the tool transcript.
+	columns func() int
 }
 
 // newOperatorToolSurface builds the operator-facing half of tool execution:
@@ -207,7 +210,7 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		editing = true
 		// The question keeps its indent; only the space that would have
 		// held the answer goes, since the answer has a line of its own.
-		q.prompt = strings.TrimRight(q.prompt, " ") + "\n" + approvalPrompt
+		q.prompt = tools.Wrap(strings.TrimRight(q.prompt, " "), a.columns) + "\n" + approvalPrompt
 		owner.setPrompt(approvalPrompt)
 	}
 	got, err := a.answers.answer(ctx, readBound, func(discardedLine bool) {

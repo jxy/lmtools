@@ -240,8 +240,8 @@ Running 1 tool...
 
 Tool results:
 [1/1] date: Completed in 3ms
-      Output (stdout+stderr, 1 line):
-      | Wed Aug 26
+  Output (stdout+stderr, 1 line):
+  | Wed Aug 26
 
 Final answer.
 

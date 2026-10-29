@@ -97,12 +97,13 @@ func TestTerminalREPLResizePreservesApproval(t *testing.T) {
 	r.expect(t, freshPrompt)
 	resizeREPL(t, r, 80)
 	r.typeKeys(t, "question\n")
-	r.expect(t, "      > ")
+	r.expect(t, "  > ")
 	const reason = "Please inspect the files without changing them."
 	r.typeKeys(t, reason)
-	r.expect(t, "      > "+reason)
+	r.expect(t, "  > "+reason)
 	resizeREPL(t, r, 12)
-	if err := r.screen.Expect("\x1b[J> Please", time.Second); err != nil {
+	// The answer prompt is narrow enough to keep at twelve columns.
+	if err := r.screen.Expect("\x1b[J  > Please", time.Second); err != nil {
 		t.Fatal("resize did not repaint approval: ", err)
 	}
 	server.SetResponseFunc(func(*http.Request) (interface{}, int, error) {

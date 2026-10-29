@@ -68,7 +68,7 @@ func showMessageTo(w io.Writer, manager *Manager, messagePath string, notifier c
 			notifier.Warnf("Failed to load tool interactions: %v", err)
 		}
 	} else if toolInteraction != nil {
-		printToolInteractionTo(w, toolInteraction, images, nil)
+		printToolInteractionTo(w, toolInteraction, images, nil, nil)
 	}
 
 	return nil
@@ -183,8 +183,8 @@ func printImageLinesTo(w io.Writer, indent string, images []core.ImageBlock) {
 // printToolInteraction renders a message's tool calls and results. A result's
 // text comes from .tools.json and its images from the blocks file, printed
 // under the output they arrived with.
-func printToolInteractionTo(w io.Writer, interaction *core.ToolInteraction, images displayImages, byID map[string]core.ToolCall) {
-	renderer := tools.NewCLIToolUI(ui.NewNotifierWithWriter(w))
+func printToolInteractionTo(w io.Writer, interaction *core.ToolInteraction, images displayImages, byID map[string]core.ToolCall, columns func() int) {
+	renderer := tools.NewCLIToolUIWithOptions(ui.NewNotifierWithWriter(w), tools.Options{Columns: columns})
 	if byID == nil {
 		byID = make(map[string]core.ToolCall, len(interaction.Calls))
 	}
@@ -254,7 +254,7 @@ func displayMessageWithToolsTo(w io.Writer, ref lineageMessageRef, interaction *
 	printImageLinesTo(w, "", images.user)
 
 	if interaction != nil {
-		printToolInteractionTo(w, interaction, images, knownCalls)
+		printToolInteractionTo(w, interaction, images, knownCalls, options.Columns)
 	}
 	return nil
 }

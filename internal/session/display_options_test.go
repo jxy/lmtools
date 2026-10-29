@@ -112,3 +112,29 @@ func TestShowThinkingQuotesSavedReasoning(t *testing.T) {
 		t.Fatalf("thinking display:\n%s\nwant it to contain\n%s", got, want)
 	}
 }
+
+// Saved tool rounds wrap within the width /show is given, as live rounds do.
+func TestShowWrapsToolRoundsWithinColumns(t *testing.T) {
+	ctx := setupCoordinatorTestEnv(t)
+	sess := createPlanSession(t, "system")
+	appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
+	call := core.ToolCall{ID: "call-1", Name: "universal_command", Args: json.RawMessage(`{"command":["cat","log"]}`)}
+	if _, err := AppendMessageWithToolInteraction(ctx, sess, Message{Role: core.RoleAssistant}, []core.ToolCall{call}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SaveToolResults(ctx, sess, []core.ToolResult{{ID: call.ID, Output: strings.Repeat("w", 100) + "\n", Elapsed: 2}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	got := showWith(t, sess, ShowOptions{Columns: func() int { return 40 }})
+	if !strings.Contains(got, "\n  : ") {
+		t.Fatalf("long output was not wrapped:\n%s", got)
+	}
+	for _, row := range strings.Split(got, "\n") {
+		if len(row) > 39 {
+			t.Fatalf("row %q is wider than the terminal", row)
+		}
+	}
+	if whole := showWith(t, sess, ShowOptions{}); strings.Contains(whole, "\n  : ") {
+		t.Fatalf("output wrapped without a width:\n%s", whole)
+	}
+}

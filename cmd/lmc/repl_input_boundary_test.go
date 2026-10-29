@@ -88,7 +88,7 @@ func TestTerminalEditorOversizedApprovalDeniesWholeSubmission(t *testing.T) {
 			}
 			done := make(chan result, 1)
 			go func() { decision, err := a.Approve(ctx, core.UniversalCommandArgs{}); done <- result{decision, err} }()
-			if err := screen.Expect("      > ", time.Second); err != nil {
+			if err := screen.Expect("  > ", time.Second); err != nil {
 				t.Fatal(err)
 			}
 			// Even an affirmative next submission must not salvage this one.
@@ -209,7 +209,7 @@ func TestOversizedContinuedApprovalDoesNotRunCommand(t *testing.T) {
 	go func() {
 		done <- executor.ExecuteParallel(ctx, []core.ToolCall{{ID: "call", Name: "universal_command", Args: args}}, core.TestToolUI{})
 	}()
-	if err := screen.Expect("      > ", time.Second); err != nil {
+	if err := screen.Expect("  > ", time.Second); err != nil {
 		t.Fatal(err)
 	}
 	typeKeys(t, pty, strings.Repeat("x", 16)+"\\\nyes\n")

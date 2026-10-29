@@ -394,8 +394,10 @@ and their `sbin`) is named under the command, as `Program: PATH`. An argument
 that spans lines, such as a script passed to an interpreter, and a multiline
 `stdin` are shown line by line under the command, each line starting with
 `| `; the vector names the argument `<arg N>`. Control characters in them,
-carriage returns included, are shown as `\uXXXX`, and the label says when the
-value ends with a newline, as in `Stdin (2 lines, ending with a newline):`.
+carriage returns and tabs included, are shown as `\uXXXX`, so a script
+indented with tabs never looks like one indented with spaces, and the label
+says when the value ends with a newline, as in
+`Stdin (2 lines, ending with a newline):`.
 
 Approval input uses the normal 10 MiB turn limit and continuation rules: end
 a line with `\` to continue, or `\\` for a literal trailing backslash. Use
@@ -617,20 +619,27 @@ Tools: 2
 [2/2] Command: ["go","test","./internal/core"]
 
 [1/2] Allow git? [y/N, a = this and the rest, or reason; /ed to edit]:
-      > y
+  > y
 
 [2/2] Allow go? [y/N or reason; /ed to edit]:
-      > y
+  > y
 
 Running 2 tools in parallel...
 
 Tool results:
 [1/2] git: Completed in 24ms
-      Output (stdout+stderr, 1 line):
-      | ## main
+  Output (stdout+stderr, 1 line):
+  | ## main
 
 [2/2] go: Completed in 814ms (no output)
 ```
+
+Everything under a call or a result sits two columns in, the answer to a
+question included. On a terminal the transcript wraps a line longer than the
+terminal itself, and each row that continues it starts with `  : `, so the
+row stays in its block and cannot be mistaken for a line of output. Tabs in
+output reach every eighth column counted from the start of the output, which
+keeps tables aligned under `| `.
 
 `stdout+stderr` says the two streams were captured together; a call that
 redirected one of them shows `stdout` or `stderr` alone. A command that exited

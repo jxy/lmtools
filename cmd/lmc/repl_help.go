@@ -104,6 +104,7 @@ under its review; it is still asked about and run, since an earlier call may cre
 An unknown earlier outcome is shown before asking whether to run that call again.
 Results appear in order as calls finish, quoted under each call; long output shows
 its first and last lines (/tool-output full shows all, /show last prints it).
+A line longer than the terminal wraps, and its continuation rows start with "  : ".
 Results distinguish not run, completed, failed, timed out, cancelled, and unknown.
 Token counts belong to each model response; tool follow-ups have separate counts.
 /info lists the enabled tools and execution settings.

@@ -22,8 +22,8 @@ func TestLongApprovalArgumentsAreIndentedWithoutChangingValues(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	args := `{"text":"` + strings.Repeat("value", 30) + `","number":9007199254740993,"escaped":"line\nend\\"}`
 	NewCLIToolUI(notifier).ShowCall(0, 1, core.ToolCall{Name: "custom", Args: json.RawMessage(args)}, nil)
-	_, displayed, ok := strings.Cut(notifier.out.String(), "      Arguments:\n")
-	if !ok || !strings.Contains(displayed, "\n        \"number\": 9007199254740993") {
+	_, displayed, ok := strings.Cut(notifier.out.String(), "  Arguments:\n")
+	if !ok || !strings.Contains(displayed, "\n    \"number\": 9007199254740993") {
 		t.Fatalf("long arguments are not readable: %q", notifier.out.String())
 	}
 	var compact bytes.Buffer
@@ -78,23 +78,23 @@ Tools: 3
 [1/3] Command: ["git","status","--short","--branch"]
 
 [2/3] Command: ["git","show","--stat","--oneline","--summary","HEAD"]
-      Timeout: 120s
+  Timeout: 120s
 
 [3/3] Command: ["git","diff","HEAD^","HEAD","--check"]
-      Workdir: "/workspace/lmtools"
-      Environ: {"GOCACHE":"/tmp/lmtools-cache"}
+  Workdir: "/workspace/lmtools"
+  Environ: {"GOCACHE":"/tmp/lmtools-cache"}
 
 Running 2 of 3 tools in parallel...
 
 Tool results:
 [1/3] git: Completed in 58ms
-      Output (stdout+stderr, 2 lines):
-      | ## main...origin/main [ahead 1]
-      | ?? docs/
+  Output (stdout+stderr, 2 lines):
+  | ## main...origin/main [ahead 1]
+  | ?? docs/
 
 [2/3] git: Failed in 44ms: exit status 1
-      Output (stdout+stderr, 1 line):
-      | failing output
+  Output (stdout+stderr, 1 line):
+  | failing output
 
 [3/3] git: Denied by you
 
@@ -126,9 +126,9 @@ func TestCLIToolUIShowCallUsesCompactJSONArgv(t *testing.T) {
 	want := `
 Tools: 1
 [1/1] Command: ["printf","a b",<arg 3>,"quote\"","back\\slash"]
-      Arg 3 (2 lines):
-      | line
-      | next
+  Arg 3 (2 lines):
+  | line
+  | next
 `
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() = %q, want %q", got, want)
@@ -145,11 +145,11 @@ func TestCLIToolUIShowCallRendersScriptsLineByLine(t *testing.T) {
 	want := `
 Tools: 1
 [1/1] Command: ["python3","-c",<arg 3>]
-      Arg 3 (3 lines, ending with a newline):
-      Control characters are shown as \uXXXX.
-      | import os
-      |
-      | print('safe')\u000dimport shutil; shutil.rmtree('/tmp/x')  # \u202e
+  Arg 3 (3 lines, ending with a newline):
+  Control characters are shown as \uXXXX.
+  | import os
+  |
+  | print('safe')\u000dimport shutil; shutil.rmtree('/tmp/x')  # \u202e
 `
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() =\n%s\nwant\n%s", got, want)
@@ -165,10 +165,10 @@ func TestCLIToolUIShowsEveryByteOfAMultilineValue(t *testing.T) {
 	want := `
 Tools: 1
 [1/1] Command: ["cat"]
-      Stdin (2 lines):
-      Control characters are shown as \uXXXX.
-      | a\u000d
-      | b
+  Stdin (2 lines):
+  Control characters are shown as \uXXXX.
+  | a\u000d
+  | b
 `
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() = %q, want %q", got, want)
@@ -188,11 +188,11 @@ func TestCLIToolUIShowCallDisplaysStdioSettings(t *testing.T) {
 	want := `
 Tools: 1
 [1/1] Command: ["sort"]
-      Stdin (2 lines, ending with a newline):
-      | beta
-      | alpha
-      Stdout file: "sorted.txt"
-      Stderr file: "errors.txt"
+  Stdin (2 lines, ending with a newline):
+  | beta
+  | alpha
+  Stdout file: "sorted.txt"
+  Stderr file: "errors.txt"
 `
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() = %q, want %q", got, want)
@@ -211,8 +211,8 @@ func TestCLIToolUIShowCallDisplaysStdinFile(t *testing.T) {
 	want := `
 Tools: 1
 [1/1] Command: ["sort"]
-      Workdir: "/workspace"
-      Stdin file: "inputs/data.txt"
+  Workdir: "/workspace"
+  Stdin file: "inputs/data.txt"
 `
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("ShowCall() = %q, want %q", got, want)
@@ -233,7 +233,7 @@ func TestCLIToolUIAfterExecuteHandlesNoOutputTimeoutAndTruncation(t *testing.T) 
 	got := notifier.out.String()
 	for _, want := range []string{
 		"[1/3] Completed in 3ms (no output)",
-		"[2/3] Timed out in 25ms\n      Partial output (1 line):\n      | partial",
+		"[2/3] Timed out in 25ms\n  Partial output (1 line):\n  | partial",
 		"[3/3] Completed in 7ms (output truncated at 1KiB)",
 	} {
 		if !strings.Contains(got, want) {
@@ -350,9 +350,9 @@ func TestWriteToolOutputShortensLongOutputOnRequest(t *testing.T) {
 	writeToolOutput(notifier, "Output", "stdout+stderr", output.String(), Options{ShortOutput: true, MoreHint: "/show last prints them"})
 	got := notifier.out.String()
 	for _, want := range []string{
-		"      Output (stdout+stderr, 301 lines; showing the first 10 and last 10):\n      | line 1\n",
-		"      | line 10\n      [281 lines not shown; /show last prints them]\n      | line 292\n",
-		"      | line 300\n      | " + strings.Repeat("y", shortOutputLineBytes) + " [10 more bytes]\n",
+		"  Output (stdout+stderr, 301 lines; showing the first 10 and last 10):\n  | line 1\n",
+		"  | line 10\n  [281 lines not shown; /show last prints them]\n  | line 292\n",
+		"  | line 300\n  | " + strings.Repeat("y", shortOutputLineBytes) + " [10 more bytes]\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("short output missing %q:\n%s", want, got)
@@ -368,10 +368,10 @@ func TestWriteToolOutputShortensLongOutputOnRequest(t *testing.T) {
 func TestWriteToolOutputCutsALongLineOfShortOutput(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	writeToolOutput(notifier, "Output", "", "short\n"+strings.Repeat("x", shortOutputLineBytes+3000)+"\n", Options{ShortOutput: true, MoreHint: "/show last prints them"})
-	want := "      Output (2 lines):\n" +
-		"      | short\n" +
-		"      | " + strings.Repeat("x", shortOutputLineBytes) + " [3000 more bytes]\n" +
-		"      [1 line cut; /show last prints them]\n"
+	want := "  Output (2 lines):\n" +
+		"  | short\n" +
+		"  | " + strings.Repeat("x", shortOutputLineBytes) + " [3000 more bytes]\n" +
+		"  [1 line cut; /show last prints them]\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
@@ -387,11 +387,11 @@ func TestWriteToolOutputCutsALongLineOfShortOutput(t *testing.T) {
 func TestWriteToolOutputShowsControlCharacters(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	writeToolOutput(notifier, "Output", "", "\x1b[31mred\x1b[0m\r\nplain\u202eevil\n\tindented\n", Options{})
-	want := "      Output (3 lines):\n" +
-		"      Control characters are shown as \\uXXXX.\n" +
-		"      | \\u001b[31mred\\u001b[0m\n" +
-		"      | plain\\u202eevil\n" +
-		"      | \tindented\n"
+	want := "  Output (3 lines):\n" +
+		"  Control characters are shown as \\uXXXX.\n" +
+		"  | \\u001b[31mred\\u001b[0m\n" +
+		"  | plain\\u202eevil\n" +
+		"  |         indented\n"
 	if got := notifier.out.String(); got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
@@ -527,8 +527,8 @@ Running 1 tool...
 
 Tool results:
 [1/1] /bin/echo: Completed in NNms
-      Output (stdout+stderr, 1 line):
-      | hi
+  Output (stdout+stderr, 1 line):
+  | hi
 
 `,
 		},
@@ -556,7 +556,7 @@ Tool results:
 			want: `
 Tools: 1
 [1/1] Command: ["/bin/sleep","5"]
-      Timeout: 1s
+  Timeout: 1s
 
 Running 1 tool...
 
@@ -589,16 +589,16 @@ Tool results:
 			want: `
 Tools: 1
 [1/1] Command: ["/bin/cat"]
-      Stdin: "x"
+  Stdin: "x"
 
 No tools will be run.
 
 Tool results:
 [1/1] /bin/cat: Not run: not in whitelist (stdin provided)
-      Hint: Whitelist file: <TMP>/wl.txt
-      Hint: To allow this command, either:
-              1. Add {"command":["/bin/cat"],"stdin":true} to your whitelist file and use -tool-whitelist <file>
-              2. Run interactively without -tool-non-interactive
+  Hint: Whitelist file: <TMP>/wl.txt
+  Hint: To allow this command, either:
+          1. Add {"command":["/bin/cat"],"stdin":true} to your whitelist file and use -tool-whitelist <file>
+          2. Run interactively without -tool-non-interactive
 
 `,
 		},
@@ -615,10 +615,10 @@ No tools will be run.
 
 Tool results:
 [1/1] /bin/echo: Not run: no terminal available for approval
-      Hint: Allow via one of:
-              - Run from a terminal so commands can be approved
-              - Use -tool-auto-approve
-              - Add the command to a whitelist
+  Hint: Allow via one of:
+          - Run from a terminal so commands can be approved
+          - Use -tool-auto-approve
+          - Add the command to a whitelist
 
 `,
 		},
@@ -635,10 +635,10 @@ No tools will be run.
 
 Tool results:
 [1/1] /bin/echo: Not run: approval disabled by -tool-non-interactive
-      Hint: Allow via one of:
-              - Run interactively without -tool-non-interactive
-              - Use -tool-auto-approve
-              - Add the command to a whitelist
+  Hint: Allow via one of:
+          - Run interactively without -tool-non-interactive
+          - Use -tool-auto-approve
+          - Add the command to a whitelist
 
 `,
 		},
@@ -682,7 +682,7 @@ Tool results:
 			want: `
 Tools: 1
 [1/1] Tool: other_tool
-      Arguments: {}
+  Arguments: {}
 
 No tools will be run.
 
@@ -699,7 +699,7 @@ Tool results:
 			want: `
 Tools: 1
 [1/1] Tool: universal_command
-      Arguments: {"command":[]}
+  Arguments: {"command":[]}
 
 No tools will be run.
 
@@ -719,10 +719,10 @@ Tool results:
 			want: `
 Tools: 2
 [1/2] Command: ["/bin/echo","a"]
-      Stdout file: "<TMP>/shared.log"
+  Stdout file: "<TMP>/shared.log"
 
 [2/2] Command: ["/bin/echo","b"]
-      Stdout file: "<TMP>/shared.log"
+  Stdout file: "<TMP>/shared.log"
 
 No tools will be run.
 
@@ -1085,7 +1085,7 @@ func TestCLIToolUIShowsUnusualPrograms(t *testing.T) {
 	ui.ShowCall(0, 2, commandCall(t, "a", []string{"lmc-test-tool"}, core.UniversalCommandArgs{}), nil)
 	ui.ShowCall(1, 2, commandCall(t, "b", []string{"sh", "-c", "true"}, core.UniversalCommandArgs{}), nil)
 	got := notifier.out.String()
-	if !strings.Contains(got, "[1/2] Command: [\"lmc-test-tool\"]\n      Program: "+program+"\n") {
+	if !strings.Contains(got, "[1/2] Command: [\"lmc-test-tool\"]\n  Program: "+program+"\n") {
 		t.Fatalf("unusual program not named:\n%s", got)
 	}
 	if strings.Count(got, "Program:") != 1 {
@@ -1097,7 +1097,7 @@ func TestCLIToolUIShowsUnusualPrograms(t *testing.T) {
 func TestShowCallNoteSitsAtTheDetailColumn(t *testing.T) {
 	notifier := newFormatTestNotifier()
 	NewCLIToolUI(notifier).ShowCallNote(0, "Will not run: blacklisted")
-	if got, want := notifier.out.String(), "      Will not run: blacklisted\n"; got != want {
+	if got, want := notifier.out.String(), "  Will not run: blacklisted\n"; got != want {
 		t.Fatalf("ShowCallNote() = %q, want %q", got, want)
 	}
 }

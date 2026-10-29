@@ -52,20 +52,21 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 	// stream, decided once here; the executor and the pending-tools path both
 	// receive this same UI.
 	toolNotifier, approver := newOperatorToolSurface(notifier, input)
+	// On a terminal, thinking is quoted and wrapped, and the tool transcript
+	// wraps its lines, within the terminal's width.
+	columns := fileColumns(os.Stderr)
 	env := &turnEnv{
 		cfg:             cfg,
 		notifier:        notifier,
-		toolUI:          tools.NewCLIToolUI(toolNotifier),
+		toolUI:          tools.NewCLIToolUIWithOptions(toolNotifier, tools.Options{Columns: columns}),
 		approver:        approver,
 		logDir:          logDir,
 		pendingToolMode: pendingToolMode,
 		stdout:          os.Stdout,
 		stderr:          os.Stderr,
 		answersOnScreen: true,
-	}
-	if isTerminalFile(os.Stderr) {
-		env.quoteThinking = true
-		env.columns = fileColumns(os.Stderr)
+		quoteThinking:   columns != nil,
+		columns:         columns,
 	}
 	return env
 }
