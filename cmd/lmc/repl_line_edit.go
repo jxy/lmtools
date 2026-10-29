@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"lmtools/internal/core"
+	"lmtools/internal/termwidth"
 	"strconv"
 	"strings"
 	"unicode"
@@ -496,8 +497,6 @@ func (e *editBuffer) view(prompt string, columns int) (text string, cursor int) 
 	return b.String(), cursor
 }
 
-//go:generate go run ../../scripts/gen_terminal_width.go -input ../../testdata/unicode/EastAsianWidth-18.0.0.txt -output repl_width_table.go
-
 func editRuneWidth(r rune) int {
 	if r == '\t' {
 		return 4
@@ -509,13 +508,7 @@ func editRuneWidth(r rune) int {
 		}
 		return 6
 	}
-	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
-		return 0
-	}
-	if unicode.Is(editWideRunes, r) {
-		return 2
-	}
-	return 1
+	return termwidth.RuneWidth(r)
 }
 
 func writeEditRune(b *strings.Builder, r rune) {

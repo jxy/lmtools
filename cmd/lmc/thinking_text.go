@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"lmtools/internal/termwidth"
 	"strings"
 	"unicode"
 )
@@ -74,7 +75,7 @@ func (t *thinkingText) write(text string) {
 				t.writeRune(r)
 				continue
 			}
-			if unicode.Is(editWideRunes, r) {
+			if termwidth.RuneWidth(r) == 2 {
 				t.placeWord()
 				t.continuing = false
 				t.word = append(t.word, r)

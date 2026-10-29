@@ -1,7 +1,8 @@
 //go:build ignore
 
-// gen_terminal_width generates the editor's wide-character table from pinned
-// Unicode data. Run it with go generate ./cmd/lmc; generation is offline.
+// gen_terminal_width generates the wide-character table of internal/termwidth
+// from pinned Unicode data. Run it with go generate ./internal/termwidth;
+// generation is offline.
 package main
 
 import (
@@ -75,7 +76,7 @@ func generate(input, output string) error {
 	fmt.Fprintln(&b, "// Source: https://www.unicode.org/Public/18.0.0/ucd/EastAsianWidth.txt")
 	fmt.Fprintf(&b, "// SHA-256: %s\n", sourceSHA256)
 	fmt.Fprintln(&b, "// Unicode data copyright Unicode, Inc.; see testdata/unicode/LICENSE.txt.")
-	fmt.Fprintln(&b, "package main\n\nimport \"unicode\"\n\nvar editWideRunes = &unicode.RangeTable{")
+	fmt.Fprintln(&b, "package termwidth\n\nimport \"unicode\"\n\nvar wideRunes = &unicode.RangeTable{")
 	fmt.Fprintln(&b, "R16: []unicode.Range16{")
 	for _, r := range ranges {
 		if r.first <= 0xffff {

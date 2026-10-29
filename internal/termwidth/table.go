@@ -2,11 +2,11 @@
 // Source: https://www.unicode.org/Public/18.0.0/ucd/EastAsianWidth.txt
 // SHA-256: a0cf29eacd00cfcaec4381c6b7c281685f18dbb4e7ff82b4076ccb342ca839aa
 // Unicode data copyright Unicode, Inc.; see testdata/unicode/LICENSE.txt.
-package main
+package termwidth
 
 import "unicode"
 
-var editWideRunes = &unicode.RangeTable{
+var wideRunes = &unicode.RangeTable{
 	R16: []unicode.Range16{
 		{Lo: 0x1100, Hi: 0x115f, Stride: 1},
 		{Lo: 0x231a, Hi: 0x231b, Stride: 1},
