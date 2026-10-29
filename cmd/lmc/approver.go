@@ -206,27 +206,46 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		readBound = bound + 2 // Continuation marker and carriage return.
 	}
 	editing := false
+	// question is the question alone, for asking again after a command.
+	question := tools.Wrap(strings.TrimRight(q.prompt, " "), a.columns)
 	if owner, ok := a.answers.(*inputOwner); ok && owner.editing {
 		editing = true
 		// The question keeps its indent; only the space that would have
 		// held the answer goes, since the answer has a line of its own.
-		q.prompt = tools.Wrap(strings.TrimRight(q.prompt, " "), a.columns) + "\n" + approvalPrompt
+		q.prompt = question + "\n" + approvalPrompt
 		owner.setPrompt(approvalPrompt)
 	}
-	got, err := a.answers.answer(ctx, readBound, func(discardedLine bool) {
+	rang := false
+	show := func(discardedLine bool) {
 		if q.lead != "" {
 			a.notifier.Promptf("%s", q.lead)
 		}
 		if discardedLine {
 			a.notifier.Promptf("%s", q.discardedNotice)
 		}
-		if a.bell != nil && *a.bell {
+		if a.bell != nil && *a.bell && !rang {
+			rang = true
 			a.notifier.Promptf("\a")
 		}
 		a.notifier.Promptf("%s", q.prompt)
-	})
-	if err == nil && q.compose && !got.eof {
-		got, err = a.composeAnswer(ctx, got)
+	}
+	reask := func() {
+		a.notifier.Promptf("\n%s\n", strings.TrimLeft(question, "\n"))
+	}
+	var got inputLine
+	var err error
+	for {
+		got, err = a.answers.answer(ctx, readBound, show)
+		if err == nil && q.compose && !got.eof {
+			got, err = a.composeAnswer(ctx, got, reask)
+		}
+		// A question that composes its answer runs commands as they come;
+		// a plain one runs a command here and asks again. A command is
+		// never an answer.
+		if err != nil || got.eof || q.compose || !isREPLCommand(strings.TrimSpace(got.text)) {
+			break
+		}
+		a.questionCommand(strings.TrimSpace(got.text), false)
 	}
 	if err == nil {
 		err = ctx.Err()
@@ -253,8 +272,9 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 	if got.eof {
 		if q.compose {
 			text, continues := continuationMarker(strings.TrimSuffix(got.text, "\r"))
-			command, _ := splitREPLCommand(text)
-			if continues || command == "/ed" {
+			// A command cannot run once input has ended, and is never an
+			// answer.
+			if continues || isREPLCommand(text) {
 				a.notifier.Infof("Unsubmitted approval draft discarded.")
 				got.text = ""
 			} else {
@@ -312,4 +332,40 @@ func isAffirmativeAnswer(line string) bool {
 	default:
 		return false
 	}
+}
+
+// questionCommand runs a command typed at a question: /help explains the
+// answers. Anything else gets a note, so a command never becomes an answer.
+// compose says the question takes a reason and /ed.
+func (a *cliApprover) questionCommand(text string, compose bool) {
+	if command, _ := splitREPLCommand(text); command == "/help" {
+		a.notifier.Promptf("%s", tools.Wrap(a.questionGuide(compose), a.columns))
+		return
+	}
+	a.notifier.Promptf("%s\n", tools.Wrap(a.questionCommandsNote(compose), a.columns))
+}
+
+// questionCommandsNote names the commands a question understands.
+func (a *cliApprover) questionCommandsNote(compose bool) string {
+	if !compose {
+		return tools.DetailIndent + "At this question, /help works."
+	}
+	return tools.DetailIndent + "At a question, /help and /ed work.\n" +
+		tools.DetailIndent + "To give a reason that starts with /, begin it with //."
+}
+
+// questionGuide explains the answers a question takes and the commands it
+// understands.
+func (a *cliApprover) questionGuide(compose bool) string {
+	indent := tools.DetailIndent
+	var b strings.Builder
+	if compose {
+		b.WriteString(indent + "y or yes approves this call; a or all approves it and the rest of the round.\n")
+		b.WriteString(indent + "n, no, or Enter denies it; other text denies it and is your reason.\n")
+		b.WriteString(indent + "/ed edits the answer; to give a reason that starts with /, begin it with //.\n")
+	} else {
+		b.WriteString(indent + "y or yes continues; n, no, Enter, or other text stops here.\n")
+	}
+	b.WriteString(indent + "Ctrl-C cancels the turn.\n")
+	return b.String()
 }

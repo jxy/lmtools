@@ -375,7 +375,11 @@ approval prompt, `y` or `yes` approves; `n`, `no`, or an empty reply denies.
 `a` or `all` approves this call and every later call in the round that would
 ask; the question offers it when there are such calls, and at any other
 question it approves the one call. In the REPL
-editor, Enter submits the answer; Ctrl-D on an empty answer denies. Any other
+editor, Enter submits the answer; Ctrl-D on an empty answer denies. A question
+also takes `/help`, which explains the answers, and `/ed`, and asks again
+afterwards; any other line that starts with `/` gets a note and the question
+again, and the call stays undecided. A reason that starts with `/` begins
+with `//`. Any other
 reply denies the call and supplies a reason, for
 example `This is a read-only review; do not change files.` The model receives
 an explicit user denial with the text labeled as a reason provided by the

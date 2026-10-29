@@ -97,6 +97,8 @@ Then each call that needs approval is asked about by number and name.
 y or yes approves. a or all approves this call and the rest of the round.
 Enter, n, or no declines. Other text declines with your reason.
 /ed edits a reason; continuation lines work as at the normal prompt.
+At a question, /help runs, other commands get a note, and the question is
+asked again. A reason starting with / begins with //.
 Ctrl-C cancels the turn. Ctrl-D on an empty answer declines.
 Input typed before an approval question cannot answer it.
 A command whose program or working directory is missing shows Cannot start now:

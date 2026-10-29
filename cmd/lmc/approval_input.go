@@ -8,8 +8,9 @@ import (
 )
 
 // composeAnswer uses the normal turn reader and editor. The completed text is
-// classified only after submission, so an edited y/yes is an approval too.
-func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine) (inputLine, error) {
+// classified only after submission, so an edited y/yes is an approval too. A
+// command other than /ed runs, and reask shows the question again.
+func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine, reask func()) (inputLine, error) {
 	owner, _ := a.answers.(*inputOwner)
 	terminal := owner != nil && owner.terminal && owner.term != nil
 	first := &initial
@@ -64,9 +65,14 @@ func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine) (inp
 			draft += text
 		} else if strings.HasPrefix(text, "//") {
 			text = text[1:]
-		} else {
+		} else if isREPLCommand(text) {
 			command, arg := splitREPLCommand(text)
-			edit, argument = command == "/ed", arg
+			if command != "/ed" {
+				a.questionCommand(text, true)
+				reask()
+				continue
+			}
+			edit, argument = true, arg
 		}
 		if !edit {
 			if len(draft)+len(text) > maxTurnBytes {
