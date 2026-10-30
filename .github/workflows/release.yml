@@ -32,7 +32,7 @@ jobs:
 
       - name: Check the stamped version
         run: |
-          for bin in bin/*-*/lmc bin/*-*/apiproxy; do
+          for bin in bin/*-*/lmc bin/*-*/apiproxy bin/*-*/alcfauth; do
             if ! go version -m "$bin" | grep -Eq "^[[:space:]]+mod[[:space:]]+lmtools[[:space:]]+$GITHUB_REF_NAME[[:space:]]*$"; then
               echo "$bin is not stamped with $GITHUB_REF_NAME:"
               go version -m "$bin"
@@ -46,7 +46,7 @@ jobs:
           for dir in bin/*-*/; do
             platform=$(basename "$dir")
             tar -czf "dist/lmtools-$GITHUB_REF_NAME-$platform.tar.gz" \
-              -C "$dir" lmc apiproxy \
+              -C "$dir" lmc apiproxy alcfauth \
               -C "$GITHUB_WORKSPACE" LICENSE README.md
           done
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)

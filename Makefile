@@ -27,7 +27,7 @@ build:
 	subdir="$(BUILD_SUBDIR)"; [ -n "$$subdir" ] || subdir="$$goos-$$goarch"; \
 	out="$(BIN_DIR)"; [ "$$subdir" = . ] || out="$$out/$$subdir"; \
 	mkdir -p "$$out"; \
-	for cmd in lmc apiproxy; do \
+	for cmd in lmc apiproxy alcfauth; do \
 	    echo "GOOS=$$goos GOARCH=$$goarch go build -o $$out/$$cmd$$exe ./cmd/$$cmd"; \
 	    GOOS=$$goos GOARCH=$$goarch go build -o "$$out/$$cmd$$exe" "./cmd/$$cmd"; \
 	done
@@ -37,7 +37,7 @@ test: test-unit
 
 # Run unit tests
 test-unit:
-	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures
+	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures ./cmd/alcfauth
 
 # Run integration tests (requires built binaries)
 test-integration: build
@@ -52,7 +52,7 @@ test-all: test-unit test-integration test-e2e
 
 # Run tests with coverage for all packages
 coverage:
-	go test -race -coverprofile=coverage.out ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures
+	go test -race -coverprofile=coverage.out ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures ./cmd/alcfauth
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report saved to coverage.html"
 	@go tool cover -func=coverage.out | grep "total:" | awk '{print "Total coverage: " $$3}'
