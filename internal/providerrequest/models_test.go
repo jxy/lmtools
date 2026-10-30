@@ -73,6 +73,24 @@ func TestBuildModelsRequestSendsAnthropicBearer(t *testing.T) {
 	}
 }
 
+func TestBuildModelsRequestUsesModelsURL(t *testing.T) {
+	const models = "https://inference-api.alcf.anl.gov/resource_server/minerva/models"
+	req, err := BuildModelsRequest(ModelsRequestOptions{
+		ProviderOptions: providerconfig.Options{
+			Provider:    constants.ProviderOpenAI,
+			ProviderURL: "https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1",
+			APIKeyFile:  writeProviderRequestKeyFile(t, "test-key"),
+			ModelsURL:   models,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildModelsRequest() error = %v", err)
+	}
+	if req.URL.String() != models || req.Header.Get("Authorization") != "Bearer test-key" {
+		t.Fatalf("request = %s with %v, want %s", req.URL, req.Header, models)
+	}
+}
+
 func TestBuildModelsRequestProviderURLWithoutKeyAllowed(t *testing.T) {
 	req, err := BuildModelsRequest(ModelsRequestOptions{
 		ProviderOptions: providerconfig.Options{

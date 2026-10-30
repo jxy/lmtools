@@ -37,6 +37,9 @@ type Config struct {
 	// AnthropicBearer sends the anthropic key as Authorization: Bearer too.
 	AnthropicBearer bool
 
+	// ModelsURL replaces the provider's model list URL for /v1/models.
+	ModelsURL string
+
 	// StripEncryptedReasoning removes opaque encrypted reasoning state from
 	// direct Responses requests as an opt-in recovery measure.
 	StripEncryptedReasoning bool

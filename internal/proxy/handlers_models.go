@@ -163,6 +163,7 @@ func (s *Server) fetchModelsWithCapability(ctx context.Context, capability model
 			ArgoEnv:         s.config.ArgoEnv,
 			ArgoLegacy:      s.config.ArgoLegacy,
 			AnthropicBearer: s.config.AnthropicBearer,
+			ModelsURL:       s.config.ModelsURL,
 		},
 		ProviderKey: providerKey,
 	})
@@ -232,6 +233,9 @@ func (s *Server) fetchAnthropicModelPages(ctx context.Context, capability modelP
 			return nil, err
 		}
 		all = append(all, models...)
+		if modelcatalog.IsBareList(data) {
+			return all, nil
+		}
 
 		var response modelcatalog.AnthropicModelsResponse
 		if err := json.Unmarshal(data, &response); err != nil {

@@ -22,9 +22,13 @@ func BuildModelsRequest(opts ModelsRequestOptions) (*http.Request, error) {
 	}
 	provider := providerOpts.Provider
 
-	url, err := providers.ResolveModelsURL(provider, providerOpts.ProviderURL, providerOpts.ArgoEnv)
-	if err != nil {
-		return nil, err
+	url := providerOpts.ModelsURL
+	if url == "" {
+		resolved, err := providers.ResolveModelsURL(provider, providerOpts.ProviderURL, providerOpts.ArgoEnv)
+		if err != nil {
+			return nil, err
+		}
+		url = resolved
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)

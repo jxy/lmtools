@@ -3,6 +3,7 @@ package errors
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -53,6 +54,9 @@ func (e *HTTPError) Error() string {
 // {"detail":...} or {"message":...} of other compatible servers. It returns
 // "" when the body is none of these, so nothing is lost by guessing.
 func providerErrorSummary(body string) string {
+	if title := htmlTitle(body); title != "" {
+		return title
+	}
 	var payload struct {
 		Error   json.RawMessage `json:"error"`
 		Detail  json.RawMessage `json:"detail"`
@@ -89,6 +93,20 @@ func providerErrorSummary(body string) string {
 		return strings.TrimSpace(payload.Message)
 	}
 	return ""
+}
+
+// htmlTitlePattern finds the title of a body that starts as an HTML page.
+var htmlTitlePattern = regexp.MustCompile(`(?is)^\s*(?:<!doctype html|<html).*?<title[^>]*>(.*?)</title>`)
+
+// htmlTitle returns the title of an HTML page, which is how a web server's
+// own error page, such as the ALCF gateway's 404, names the error. Anything
+// else gives "".
+func htmlTitle(body string) string {
+	match := htmlTitlePattern.FindStringSubmatch(body)
+	if match == nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(match[1]), " ")
 }
 
 // NewHTTPError creates a new HTTP error

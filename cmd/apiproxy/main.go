@@ -78,6 +78,9 @@ Provider Options:
   -anthropic-bearer          With -provider anthropic, also send the API key as
                             Authorization: Bearer (the ALCF inference gateway
                             requires it)
+  -models-url string         URL of the provider's model list for /v1/models, in
+                            place of the one -provider-url implies (for an ALCF
+                            cluster, .../resource_server/<cluster>/models)
 
 Model Options:
   -model-map REGEX=MODEL     Map matching request models to a backend model
@@ -237,6 +240,7 @@ func main() {
 		ProviderURL:             providerOpts.ProviderURL,
 		ChatCompletions:         providerOpts.ChatCompletions,
 		AnthropicBearer:         providerOpts.AnthropicBearer,
+		ModelsURL:               providerOpts.ModelsURL,
 		StripEncryptedReasoning: cl.stripEncryptedReasoning,
 		ModelMapRules:           modelMapRules,
 		MaxRequestBodySize:      maxRequestBodySizeBytes,

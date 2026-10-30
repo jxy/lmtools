@@ -30,6 +30,13 @@ func TestHTTPErrorSummarizesProviderErrorBodies(t *testing.T) {
 		{name: "detail", body: `{"detail":"Not authenticated"}`, want: "HTTP 400: Not authenticated"},
 		{name: "message", body: `{"message":"Internal error"}`, want: "HTTP 400: Internal error"},
 		{name: "plain text", body: "upstream timed out\n", want: "HTTP 400: upstream timed out"},
+		{
+			name: "html page",
+			body: "\n<!doctype html>\n<html lang=\"en\">\n<head>\n  <title>Not Found</title>\n</head>\n<body>\n  <h1>Not Found</h1>\n</body>\n</html>\n",
+			want: "HTTP 400: Not Found",
+		},
+		{name: "html without a title", body: "<html><body>Oops</body></html>", want: "HTTP 400: <html><body>Oops</body></html>"},
+		{name: "html with text before the title", body: "<!DOCTYPE html><html><head><meta name=\"x\" content=\"İİİ\"><TITLE lang=\"en\">Bad\n Gateway</TITLE>", want: "HTTP 400: Bad Gateway"},
 		{name: "unknown json", body: `{"detail":[{"loc":["body"],"msg":"field required"}]}`, want: `HTTP 400: {"detail":[{"loc":["body"],"msg":"field required"}]}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

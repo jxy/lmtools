@@ -1,6 +1,7 @@
 package modelcatalog
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/constants"
@@ -153,9 +154,21 @@ func ParseArgo(data []byte) ([]Item, error) {
 	return nil, fmt.Errorf("unable to parse Argo models response")
 }
 
+// IsBareList reports whether a model list is a bare array, as the ALCF
+// inference gateway's /resource_server/<cluster>/models is; such a list has
+// no pages.
+func IsBareList(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '['
+}
+
 func ParseOpenAI(data []byte) ([]Item, error) {
 	var response OpenAIModelsResponse
-	if err := json.Unmarshal(data, &response); err != nil {
+	target := any(&response)
+	if IsBareList(data) {
+		target = &response.Data
+	}
+	if err := json.Unmarshal(data, target); err != nil {
 		return nil, fmt.Errorf("parse OpenAI models: %w", err)
 	}
 
@@ -203,7 +216,11 @@ func ParseGoogle(data []byte) ([]Item, error) {
 
 func ParseAnthropic(data []byte) ([]Item, error) {
 	var response AnthropicModelsResponse
-	if err := json.Unmarshal(data, &response); err != nil {
+	target := any(&response)
+	if IsBareList(data) {
+		target = &response.Data
+	}
+	if err := json.Unmarshal(data, target); err != nil {
 		return nil, fmt.Errorf("parse Anthropic models: %w", err)
 	}
 

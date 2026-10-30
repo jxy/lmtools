@@ -25,6 +25,9 @@ type Options struct {
 	// AnthropicBearer is -anthropic-bearer: send the anthropic key as
 	// Authorization: Bearer beside x-api-key.
 	AnthropicBearer bool
+	// ModelsURL is -models-url: the provider's model list, in place of the
+	// one ProviderURL implies.
+	ModelsURL string
 }
 
 type Defaults struct {
@@ -45,6 +48,7 @@ func RegisterFlags(fs *flag.FlagSet, opts *Options, defaults Defaults) {
 	fs.StringVar(&opts.Provider, "provider", provider, "provider: argo, openai, google, anthropic")
 	fs.StringVar(&opts.ProviderURL, "provider-url", "", "custom provider API endpoint")
 	fs.StringVar(&opts.APIKeyFile, "api-key-file", "", "path to API key file (required for openai/google/anthropic; optional alternative for argo)")
+	fs.StringVar(&opts.ModelsURL, "models-url", "", "URL of the provider's model list, in place of the one -provider-url implies; for an ALCF cluster, https://inference-api.alcf.anl.gov/resource_server/<cluster>/models")
 	fs.BoolVar(&opts.ChatCompletions, "chat-completions", false, "use the provider's chat/completions route instead of its Responses API (/v1/responses), which -provider openai and argo gpt* models use by default")
 	fs.BoolVar(&opts.AnthropicBearer, "anthropic-bearer", false, "with -provider anthropic, also send the API key as Authorization: Bearer, which the ALCF inference gateway requires")
 }

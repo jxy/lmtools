@@ -814,7 +814,7 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 		if err != nil {
 			return errors.WrapError("fetch models", fmt.Errorf("HTTP %d (failed to read body: %v)", resp.StatusCode, err))
 		}
-		return errors.WrapError("fetch models", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body)))
+		return errors.WrapError("fetch models", errors.NewHTTPError(resp.StatusCode, string(body)))
 	}
 
 	// Read response with size limit
