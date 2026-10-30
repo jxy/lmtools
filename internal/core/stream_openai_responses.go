@@ -27,6 +27,7 @@ func (c openAIResponsesCompletion) incompleteReason() string {
 
 type responsesStreamEvent struct {
 	Type         string          `json:"type"`
+	Object       string          `json:"object"`
 	Delta        string          `json:"delta"`
 	Text         string          `json:"text"`
 	ItemID       string          `json:"item_id"`
@@ -91,6 +92,9 @@ type OpenAIResponsesStreamState struct {
 	terminal         bool
 	snapshotOrder    bool
 	incompleteReason string
+	// sawEvent records that an event with a type arrived, so a [DONE] after
+	// none at all is a failure and not an empty answer.
+	sawEvent bool
 }
 
 func NewOpenAIResponsesStreamState() *OpenAIResponsesStreamState {
@@ -122,6 +126,9 @@ func (s *OpenAIResponsesStreamState) parseLine(line string) (string, []ToolCall,
 		return "", nil, s.terminal, nil
 	}
 	if data == "[DONE]" {
+		if !s.sawEvent {
+			return "", nil, false, fmt.Errorf("the Responses stream ended without a Responses event")
+		}
 		s.terminal = true
 		for _, item := range s.items {
 			item.reasoningClosed = true
@@ -141,6 +148,15 @@ func (s *OpenAIResponsesStreamState) parseLine(line string) (string, []ToolCall,
 	}
 	if hasResponsesJSON(event.Error) {
 		return "", nil, false, newFatalStreamError(fmt.Errorf("upstream stream error: %s", formatOpenAIStreamError(event.Error)))
+	}
+	if event.Type == "" && strings.HasPrefix(event.Object, "chat.completion") {
+		if err := alcfGatewayStreamError([]byte(data)); err != nil {
+			return "", nil, false, err
+		}
+		return "", nil, false, fmt.Errorf("the provider sent a Chat Completions chunk on a Responses stream")
+	}
+	if event.Type != "" {
+		s.sawEvent = true
 	}
 
 	switch event.Type {

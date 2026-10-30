@@ -66,6 +66,9 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 		return "", calls, true, err
 	}
 
+	if err := alcfGatewayStreamError([]byte(data)); err != nil {
+		return "", nil, false, err
+	}
 	parsed, err := ParseOpenAIStreamChunk([]byte(data))
 	if err != nil {
 		if !isFatalStreamError(err) {

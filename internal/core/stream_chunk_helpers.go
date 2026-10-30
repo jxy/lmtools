@@ -58,6 +58,40 @@ func ParseOpenAIStreamErrorChunk(data []byte) error {
 	return newFatalStreamError(fmt.Errorf("upstream stream error: %s", formatOpenAIStreamError(envelope.Error)))
 }
 
+// alcfGatewayErrorChunkID is the ID the ALCF inference gateway gives the one
+// chunk it sends when the model's server refuses a streamed request. The chunk
+// carries the error as its content, after "[ERROR]", and finishes with "stop",
+// on Chat and Responses streams alike, so it reads as an answer.
+const alcfGatewayErrorChunkID = "chatcmpl-api-error"
+
+// alcfGatewayStreamError returns the error such a chunk reports, or nil for
+// any other event.
+func alcfGatewayStreamError(data []byte) error {
+	if !bytes.Contains(data, []byte(alcfGatewayErrorChunkID)) {
+		return nil
+	}
+	var chunk struct {
+		ID      string `json:"id"`
+		Choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal(data, &chunk) != nil || chunk.ID != alcfGatewayErrorChunkID {
+		return nil
+	}
+	var content strings.Builder
+	for _, choice := range chunk.Choices {
+		content.WriteString(choice.Delta.Content)
+	}
+	message, ok := strings.CutPrefix(strings.TrimSpace(content.String()), "[ERROR]")
+	if !ok {
+		return nil
+	}
+	return newFatalStreamError(fmt.Errorf("upstream stream error: %s", strings.TrimSpace(message)))
+}
+
 func formatOpenAIStreamError(raw json.RawMessage) string {
 	var details struct {
 		Message string `json:"message"`

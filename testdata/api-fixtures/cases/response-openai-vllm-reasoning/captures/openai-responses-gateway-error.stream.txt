@@ -1,0 +1,4 @@
+data: {"id": "chatcmpl-api-error", "object": "chat.completion.chunk", "created": 1793392991, "model": "mistral-large-4-nvfp4", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "\n\n[ERROR] Error: Unexpected error calling stream API: Error: Could not send stream API call to https://minerva-login-01.minerva.alcf.anl.gov:9443/models/mistral-large-4-nvfp4/v1/responses (status code: 400): {\"error\":{\"message\":\"'input_text' is not a valid ChunkTypes\",\"type\":\"BadRequestError\",\"param\":null,\"code\":400}}"}, "finish_reason": "stop"}]}
+
+data: [DONE]
+
