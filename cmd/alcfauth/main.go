@@ -209,7 +209,7 @@ func runLogin(ctx context.Context, args []string, e env) error {
 		"      -provider-url %s/minerva/api/v1 \\\n"+
 		"      -api-key-file %s \\\n"+
 		"      -model mistral-large-4-nvfp4\n\n"+
-		"Run 'alcfauth token -q' before a session to refresh the key file.\n",
+		"Run 'alcfauth token -watch' in another terminal to keep the key file valid while lmc or apiproxy runs.\n",
 		alcfauth.DefaultGatewayURL, store.KeyFilePath)
 	return nil
 }

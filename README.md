@@ -836,6 +836,10 @@ Provider and credentials:
 - `-argo-user string`: Argo user or API key.
 - `-api-key-file string`: API key file for OpenAI, Google, Anthropic, or Argo.
 - `-provider-url string`: Custom provider URL.
+- `-anthropic-bearer`: With `-provider anthropic`, also send the API key as
+  `Authorization: Bearer`, which the ALCF inference gateway requires.
+- `-models-url string`: URL of the provider's model list, in place of the one
+  `-provider-url` implies. See [ALCF Inference Endpoints](#alcf-inference-endpoints).
 - `-argo-dev`, `-argo-test`: Use the Argo dev or test host.
 - `-argo-legacy`: Use the Argo legacy chat endpoints.
 
@@ -1061,38 +1065,111 @@ paste the code back.
 An access token lasts 48 hours. `alcfauth token` refreshes it when less than
 an hour is left (`-min-valid` sets the margin), rewrites the key file, and
 prints the token, so `curl -H "Authorization: Bearer $(alcfauth token)"`
-works; `-q` skips the printing. `lmc` reads the key file for every request,
-so `alcfauth token` run in another terminal also renews the token of a
-running `lmc -repl`. A shell function can refresh before each run:
+works; `-q` skips the printing. `alcfauth token -watch` keeps running and
+refreshes the key file whenever less than `-min-valid` is left, until it is
+stopped. `lmc` reads the key file for every request, and `apiproxy` reads it
+again whenever it changes, so with a watch running a long `lmc -repl` or
+`apiproxy` never meets an expired token. Run the watch in its own terminal or
+tmux window:
 
 ```bash
-minerva() {
-  alcfauth token -q || return
-  lmc -provider openai \
-    -provider-url https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1 \
-    -api-key-file ~/.lmc/alcf/inference.key "$@"
-}
-echo "Hello" | minerva -model inkling-bf16
+alcfauth token -watch
 ```
+
+or as a systemd user service on Linux, in
+`~/.config/systemd/user/alcfauth.service` with the path to your `alcfauth`,
+started with `systemctl --user enable --now alcfauth`:
+
+```ini
+[Unit]
+Description=Keep the ALCF inference key file valid
+
+[Service]
+ExecStart=%h/bin/alcfauth token -watch
+
+[Install]
+WantedBy=default.target
+```
+
+or as a launchd agent on macOS, in
+`~/Library/LaunchAgents/gov.anl.alcf.alcfauth.plist` with your own paths,
+started with `launchctl load ~/Library/LaunchAgents/gov.anl.alcf.alcfauth.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>gov.anl.alcf.alcfauth</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/you/bin/alcfauth</string><string>token</string><string>-watch</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>/Users/you/.lmc/alcf/watch.log</string>
+</dict>
+</plist>
+```
+
+The watch prints a line to stderr for each refresh. It exits with status 1
+when Globus wants a new login, which ALCF requires every 30 days; run
+`alcfauth login` and start the watch again.
 
 Other clusters differ in the URL: replace `minerva/api/v1` with
 `metis/api/v1`, `tara/api/v1`, or `sophia/vllm/v1`, and pick a model the
 cluster serves. With `-provider openai`, `lmc` uses the Responses API;
 `-chat-completions` switches to Chat Completions for a model whose
 capabilities lack `responses`. `lmc` shows Minerva's reasoning on both APIs.
-Minerva's `mistral-large-4-nvfp4` refuses `-developer` (`Unknown message role:
-developer`). When a model's server refuses a streamed request, the gateway
-sends the refusal as an answer that starts with `[ERROR]`; `lmc` reports it as
-an error and exits with status 1. `lmc -list-models` does not work against
-these URLs, since the gateway has no `/models` route there. The list is at
-`/resource_server/<cluster>/models`: `curl -sH "Authorization: Bearer
-$(alcfauth token)"
-https://inference-api.alcf.anl.gov/resource_server/minerva/models`.
+When a model's server refuses a streamed request, the gateway sends the
+refusal as an answer that starts with `[ERROR]`; `lmc` and `apiproxy` report
+it as an error.
+
+The gateway also serves Anthropic Messages, which returns thinking blocks with
+their signatures. It reads only `Authorization: Bearer`, so the anthropic
+provider needs `-anthropic-bearer`:
+
+```bash
+echo "Explain PKCE in two sentences" | lmc \
+  -provider anthropic -anthropic-bearer \
+  -provider-url https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1 \
+  -api-key-file ~/.lmc/alcf/inference.key \
+  -model inkling-bf16
+```
+
+The gateway has no `/models` under a cluster's API. `-models-url
+https://inference-api.alcf.anl.gov/resource_server/minerva/models` gives
+`lmc -list-models` and apiproxy's `/v1/models` the cluster's list.
+
+What Minerva's models refused or ignored on 2026-10-30:
+
+| Model | Limits |
+| --- | --- |
+| `beam-1.0-bf16` | Text only; refuses images. |
+| `mistral-large-4-nvfp4` | Refuses `-developer`. |
+| `muse-spark-bf16` | Does not enforce `-json-schema`: the answer can be prose or fenced JSON, which `lmc` reports as an error. On Messages, refuses a thinking `budget_tokens`. |
+
+With `apiproxy` in front of a cluster:
+
+- Anthropic clients such as Claude Code: `apiproxy -provider anthropic
+  -anthropic-bearer -provider-url
+  https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1
+  -api-key-file ~/.lmc/alcf/inference.key`. The gateway's Messages answers,
+  thinking included, pass through; `/v1/messages/count_tokens` is estimated
+  locally, since the gateway has no such route.
+- Chat Completions and Responses clients: the same with `-provider openai` and
+  without `-anthropic-bearer`. Chat requests pass through with their
+  reasoning. `/v1/responses` is forwarded, and Minerva keeps no responses, so
+  `previous_response_id` and `GET /v1/responses/{id}` fail. With
+  `-chat-completions`, apiproxy converts `/v1/responses` to chat completions
+  and keeps the responses itself, so both work, as does
+  `/v1/responses/input_tokens`; the converted answers carry no reasoning.
+- Add `-models-url` for `/v1/models`.
+
+`-log-level DEBUG` logs every request in full, its `Authorization` header
+included, so a DEBUG log of `lmc` or `apiproxy` holds a live access token.
 
 | Command | Action |
 | --- | --- |
 | `alcfauth login` | Log in and write the token cache and the key file. `-no-browser` only prints the URL; `-client-id ID` logs in as another Globus native app. |
-| `alcfauth token` | Refresh the access token when less than `-min-valid` (default `1h`) is left, rewrite the key file, and print the token unless `-q` is given. |
+| `alcfauth token` | Refresh the access token when less than `-min-valid` (default `1h`) is left, rewrite the key file, and print the token unless `-q` is given. `-watch` keeps running and refreshes the key file before it runs out. |
 | `alcfauth status` | Show how long the access token has left and when the login ran. `-check` asks the gateway whether it accepts the token, refreshing an expired one first. |
 | `alcfauth logout` | Revoke the tokens at Globus and remove them from the cache and the key file. |
 
@@ -1143,6 +1220,10 @@ apiproxy -host 0.0.0.0 -port 8080 \
 - `-api-key-file string`: API key file for the selected provider.
 - `-argo-user string`: Argo user or API key when using Argo.
 - `-provider-url string`: Custom provider URL.
+- `-anthropic-bearer`: With `-provider anthropic`, also send the API key as
+  `Authorization: Bearer`, which the ALCF inference gateway requires.
+- `-models-url string`: URL of the provider's model list for `/v1/models`, in
+  place of the one `-provider-url` implies.
 - `-model-map REGEX=MODEL_NAME`: Map matching request models to a backend model.
   Repeat it to add rules; the first match wins.
 - `-argo-dev`, `-argo-test`, `-argo-legacy`
@@ -1541,9 +1622,9 @@ applies to every path except `-provider openai`, and `-provider argo` on a
 - When the ALCF gateway answers HTTP 401 or 403, run `alcfauth status -check`.
   An expired token needs `alcfauth token`; a login 30 days old or more needs
   `alcfauth login`, and `alcfauth token` warns from day 29. `apiproxy` reads
-  `-api-key-file` once at startup, so with an ALCF key file it stops working
-  when that token expires; restart it after `alcfauth token`. `-print-curl`
-  puts the access token in the curl command it prints.
+  `-api-key-file` again whenever the file changes, so `alcfauth token` or a
+  running `alcfauth token -watch` renews its token without a restart.
+  `-print-curl` puts the access token in the curl command it prints.
 - For Argo, check whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
 - When a converted Responses request loses an OpenAI-only field, switch to
   `-provider openai`, or to a `gpt*` model on `-provider argo`, without
