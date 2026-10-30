@@ -849,7 +849,10 @@ Mode and model:
 - `-e`: Generate embeddings instead of chat. Embed mode turns off sessions,
   does not stream or use the Responses API, and rejects `-tool`, `-resume`,
   `-branch`, and the output controls.
-- `-list-models`: List the models the provider reports.
+- `-list-models`: List the models the provider reports. When the provider
+  describes its models, as Anthropic, Google, and the ALCF inference gateway
+  do, a line under each gives what it reports of the context and output
+  limits, inputs, thinking, effort levels, tools, structured output, and APIs.
 - `-no-stream`: Wait for the whole answer instead of streaming it. A chat
   streams by default; `-show` and embed mode do not stream.
 - `-repl`: Read one turn per line from stdin until it ends, continuing one
@@ -1056,6 +1059,12 @@ echo "Explain PKCE in two sentences" | lmc \
   -provider-url https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1 \
   -api-key-file ~/.lmc/alcf/inference.key \
   -model mistral-large-4-nvfp4
+
+# List Minerva's models with their context windows, inputs, effort levels,
+# and APIs.
+lmc -provider openai -api-key-file ~/.lmc/alcf/inference.key \
+  -models-url https://inference-api.alcf.anl.gov/resource_server/minerva/models \
+  -list-models
 ```
 
 `alcfauth login` opens the URL in a browser when it can. Over SSH, or with
@@ -1135,8 +1144,9 @@ echo "Explain PKCE in two sentences" | lmc \
 ```
 
 The gateway has no `/models` under a cluster's API. `-models-url
-https://inference-api.alcf.anl.gov/resource_server/minerva/models` gives
-`lmc -list-models` and apiproxy's `/v1/models` the cluster's list.
+https://inference-api.alcf.anl.gov/resource_server/minerva/models` points
+`lmc -list-models` and apiproxy's `/v1/models` at the cluster's list, from
+which `lmc` shows each model's context window, inputs, effort levels, and APIs.
 
 What Minerva's models refused or ignored on 2026-10-30:
 

@@ -833,7 +833,7 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 		return errors.WrapError("parse models response", err)
 	}
 
-	displayModels(provider, items)
+	displayModels(os.Stdout, provider, items)
 	return nil
 }
 
@@ -844,7 +844,9 @@ func buildListModelsRequest(cfg config.Config) (*http.Request, error) {
 	})
 }
 
-func displayModels(provider string, items []modelcatalog.Item) {
+// displayModels lists the models, each followed by the features the
+// provider describes, when it describes any.
+func displayModels(w io.Writer, provider string, items []modelcatalog.Item) {
 	modelcatalog.Sort(items)
 
 	name := provider
@@ -852,13 +854,16 @@ func displayModels(provider string, items []modelcatalog.Item) {
 		name = info.DisplayName
 	}
 
-	fmt.Printf("Available %s models:\n", name)
+	fmt.Fprintf(w, "Available %s models:\n", name)
 	for _, model := range items {
 		if model.DisplayName != "" {
-			fmt.Printf("  %s (%s)\n", model.ID, model.DisplayName)
-			continue
+			fmt.Fprintf(w, "  %s (%s)\n", model.ID, model.DisplayName)
+		} else {
+			fmt.Fprintf(w, "  %s\n", model.ID)
 		}
-		fmt.Printf("  %s\n", model.ID)
+		if features := modelcatalog.Describe(model).String(); features != "" {
+			fmt.Fprintf(w, "    %s\n", features)
+		}
 	}
 }
 

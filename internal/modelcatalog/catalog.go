@@ -34,6 +34,9 @@ type OpenAIModelInfo struct {
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
+	// OpenAI sends neither; the ALCF inference gateway sends both.
+	DisplayName  string                 `json:"display_name"`
+	Capabilities map[string]interface{} `json:"capabilities"`
 }
 
 type ArgoModelsResponse struct {
@@ -183,10 +186,12 @@ func ParseOpenAI(data []byte) ([]Item, error) {
 			owner = constants.ProviderOpenAI
 		}
 		items = append(items, Item{
-			ID:      model.ID,
-			Object:  object,
-			Created: model.Created,
-			OwnedBy: owner,
+			ID:           model.ID,
+			Object:       object,
+			Created:      model.Created,
+			OwnedBy:      owner,
+			DisplayName:  model.DisplayName,
+			Capabilities: cloneMap(model.Capabilities),
 		})
 	}
 	return items, nil
