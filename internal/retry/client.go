@@ -21,6 +21,8 @@ type Client struct {
 	useDefaultRetries bool
 	retryersMu        sync.Mutex
 	retryers          map[string]*Retryer
+	// streamStartErrors is set by RetryStreamStartErrors.
+	streamStartErrors bool
 }
 
 type clientOptions struct {
@@ -128,6 +130,22 @@ func NewClientForTesting(timeout time.Duration, maxRetries int, logger Logger, l
 	})
 }
 
+// RetryStreamStartErrors makes Do retry a failure that the provider reports
+// inside a 200 event stream before any content, as it would retry the HTTP
+// status the failure stands for. Argo reports "Streaming response failed"
+// this way, and passes on a backend's 503 as an error event naming
+// "Error code: 503". On every attempt but the last, Do reads such a stream
+// up to its first event with content, puts back what it read, and only then
+// returns the response. The last attempt's stream is returned unread, so a
+// failure that outlasts the retries reaches the caller's parser as before.
+//
+// apiproxy leaves this off: its idle heartbeat to the client starts when the
+// upstream response arrives, so the client would get no pings during the
+// wait for the first content.
+func (c *Client) RetryStreamStartErrors() {
+	c.streamStartErrors = true
+}
+
 func (c *Client) retryer(provider string) *Retryer {
 	key := provider
 	if key == "" {
@@ -159,6 +177,8 @@ func (c *Client) retryer(provider string) *Retryer {
 // rewound, a 429 or 5xx resubmits the request up to MaxRetries more times —
 // repeat inference, on a POST the client made once — and once the attempts run
 // out the caller receives the final HTTP response, with its body still open.
+// With RetryStreamStartErrors, an error event that opens a 200 stream
+// resubmits it too.
 // GetBody makes a body rewindable at any size, and http.NewRequest sets it for
 // every in-memory body, so most requests in this repository retry. A body
 // without GetBody is read into memory below maxRetryBodySize precisely so it
@@ -206,7 +226,9 @@ func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*h
 	}
 
 	firstAttempt := true
+	attempts := 0
 	return retryer.DoWithFunc(ctx, func() (*http.Response, error) {
+		attempts++
 		// Clone the request for each attempt
 		reqClone := req.Clone(ctx)
 
@@ -227,7 +249,15 @@ func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*h
 			}
 		}
 
-		return c.client.Do(reqClone)
+		resp, err := c.client.Do(reqClone)
+		if err != nil || !c.streamStartErrors || attempts > retryer.config.MaxRetries {
+			return resp, err
+		}
+		if streamErr := checkStreamStart(reqClone, resp); streamErr != nil {
+			resp.Body.Close()
+			return nil, streamErr
+		}
+		return resp, nil
 	})
 }
 

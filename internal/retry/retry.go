@@ -277,7 +277,14 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 				if stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
 					return nil, err
 				}
-				if !isRetryableTransportError(err) {
+				var streamErr *streamStartError
+				if stdErrors.As(err, &streamErr) {
+					// Logged like a 5xx response above, since the caller
+					// never sees this stream.
+					if logger != nil {
+						logger.Errorf("%v", err)
+					}
+				} else if !isRetryableTransportError(err) {
 					return nil, errors.WrapError("execute request", err)
 				}
 			}
@@ -320,8 +327,14 @@ func isRetryableTransportError(err error) bool {
 
 // shouldRetryResponse determines if a response warrants a retry
 func (r *Retryer) shouldRetryResponse(resp *http.Response) bool {
+	return retryableStatus(resp.StatusCode)
+}
+
+// retryableStatus reports whether a request that failed with this HTTP
+// status is worth sending again.
+func retryableStatus(status int) bool {
 	// Retry on specific status codes
-	switch resp.StatusCode {
+	switch status {
 	case http.StatusRequestTimeout, // 408
 		http.StatusTooManyRequests,     // 429
 		425,                            // Too Early
@@ -332,11 +345,11 @@ func (r *Retryer) shouldRetryResponse(resp *http.Response) bool {
 		return true
 	default:
 		// Don't retry client errors (4xx) except specific ones above
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if status >= 400 && status < 500 {
 			return false
 		}
 		// Retry other server errors
-		return resp.StatusCode >= 500
+		return status >= 500
 	}
 }
 

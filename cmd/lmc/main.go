@@ -130,7 +130,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) core.ToolContext {
 	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
 
-	retryClient := retry.NewClientWithRetries(env.cfg.Timeout, env.cfg.Retries, retryLogger{logger.From(ctx)})
+	retryClient := newRetryClient(ctx, env.cfg)
 
 	execCfg := core.ToolExecutionConfig{
 		Store:       store,
@@ -634,10 +634,19 @@ func (l retryLogger) Errorf(format string, args ...interface{}) {
 	l.FileErrorf(format, args...)
 }
 
+// newRetryClient builds the client for a request and its tool rounds. It
+// retries a failure that a stream reports before any content, such as
+// Argo's "Streaming response failed", as it retries a failed status.
+func newRetryClient(ctx context.Context, cfg *config.Config) *retry.Client {
+	client := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, retryLogger{logger.From(ctx)})
+	client.RetryStreamStartErrors()
+	return client
+}
+
 // sendWithRetry sends the HTTP request with retry logic
 func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (*http.Response, error) {
 	// Create pooled HTTP client with retry logic
-	retryClient := retry.NewClientWithRetries(cfg.Timeout, cfg.Retries, retryLogger{logger.From(ctx)})
+	retryClient := newRetryClient(ctx, cfg)
 
 	// Send request with retry using pooled client
 	// Redact API key from URL before logging
