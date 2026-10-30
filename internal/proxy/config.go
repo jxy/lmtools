@@ -13,6 +13,9 @@ type ProviderKeySet = auth.ProviderKeySet
 // Config holds the configuration for the API proxy
 type Config struct {
 	ProviderKeySet auth.ProviderKeySet
+	// KeyFile, when set, supplies the keys in place of ProviderKeySet and is
+	// read again whenever the file changes.
+	KeyFile *auth.KeyFile
 
 	// Argo Configuration
 	ArgoUser   string

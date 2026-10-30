@@ -40,12 +40,21 @@ func (s *Server) useLegacyArgo() bool {
 	return s != nil && s.config != nil && s.config.ArgoLegacy
 }
 
+// providerKeys returns the keys a request authenticates with. A key file is
+// read again when it changes, so a running proxy picks up a renewed token.
+func (s *Server) providerKeys() auth.ProviderKeySet {
+	if s.config.KeyFile != nil {
+		return s.config.KeyFile.Key().Set()
+	}
+	return s.config.ProviderKeySet
+}
+
 func (s *Server) argoAPIKey() string {
 	if s == nil || s.config == nil {
 		return ""
 	}
-	if s.config.ProviderKeySet.ArgoAPIKey != "" {
-		return s.config.ProviderKeySet.ArgoAPIKey
+	if key := s.providerKeys().ArgoAPIKey; key != "" {
+		return key
 	}
 	// Argo currently expects -argo-user to act as the native API key; keep this
 	// fallback until Argo changes authentication.
@@ -53,7 +62,7 @@ func (s *Server) argoAPIKey() string {
 }
 
 func (s *Server) configureOpenAIRequest(req *http.Request) {
-	auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.config.ProviderKeySet.OpenAIAPIKey)
+	auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.providerKeys().OpenAIAPIKey)
 }
 
 func (s *Server) configureArgoOpenAIRequest(req *http.Request) {
@@ -257,7 +266,7 @@ func (s *Server) forwardToGoogle(ctx context.Context, anthReq *AnthropicRequest)
 
 	var googleResp GoogleResponse
 	err = s.doJSON(ctx, url, googleReq, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.providerKeys().GoogleAPIKey)
 	}, &googleResp, constants.ProviderGoogle, "Google")
 	if err != nil {
 		return nil, err
@@ -277,7 +286,7 @@ func (s *Server) forwardGoogleCountTokens(ctx context.Context, googleReq *Google
 	payload := &GoogleCountTokensRequest{GenerateContentRequest: googleReq}
 	var googleResp GoogleCountTokensResponse
 	err = s.doJSON(ctx, url, payload, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+		auth.SetProviderHeaders(req, constants.ProviderGoogle, s.providerKeys().GoogleAPIKey)
 	}, &googleResp, constants.ProviderGoogle, "Google countTokens")
 	if err != nil {
 		return nil, err
@@ -313,7 +322,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
 	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
+		auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.providerKeys().AnthropicAPIKey)
 		applyAnthropicBetaHeader(req, anthReq.Betas)
 	}, &anthResp, constants.ProviderAnthropic, "Anthropic")
 	if err != nil {

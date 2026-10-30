@@ -201,7 +201,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
 		os.Exit(1)
 	}
-	providerKeys, err := loadProviderKeys(providerOpts.Provider, providerOpts.APIKeyFile)
+	keyFile, providerKeys, err := loadProviderKeys(providerOpts.Provider, providerOpts.APIKeyFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load API key file: %v\n", err)
 		os.Exit(1)
@@ -224,6 +224,7 @@ func main() {
 	// Create configuration from flags
 	config := &proxy.Config{
 		ProviderKeySet:          providerKeys,
+		KeyFile:                 keyFile,
 		ArgoUser:                providerOpts.ArgoUser,
 		ArgoDev:                 providerOpts.ArgoDev,
 		ArgoTest:                providerOpts.ArgoTest,
@@ -302,13 +303,18 @@ func main() {
 	logger.GetLogger().Infof("Server exited")
 }
 
-func loadProviderKeys(preferredProvider, apiKeyFile string) (auth.ProviderKeySet, error) {
+// loadProviderKeys reads the -api-key-file key. The proxy reads the file again
+// whenever it changes, so `alcfauth token -watch` can renew a running proxy's
+// token.
+func loadProviderKeys(preferredProvider, apiKeyFile string) (*auth.KeyFile, auth.ProviderKeySet, error) {
 	if apiKeyFile == "" {
-		return auth.ProviderKeySet{}, nil
+		return nil, auth.ProviderKeySet{}, nil
 	}
-	providerKey, err := auth.LoadProviderKeyFile(preferredProvider, apiKeyFile)
+	keyFile, err := auth.OpenKeyFile(preferredProvider, apiKeyFile, func(err error) {
+		logger.GetLogger().Warnf("Keeping the previous API key, since the key file could not be read again: %v", err)
+	})
 	if err != nil {
-		return auth.ProviderKeySet{}, err
+		return nil, auth.ProviderKeySet{}, err
 	}
-	return providerKey.Set(), nil
+	return keyFile, keyFile.Key().Set(), nil
 }

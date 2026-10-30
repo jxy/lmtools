@@ -102,7 +102,7 @@ func (s *Server) googleStreamingRequest(ctx context.Context, anthReq *AnthropicR
 		RequestName: "Google",
 		Payload:     googleReq,
 		Configure: func(req *http.Request) {
-			auth.SetProviderHeaders(req, constants.ProviderGoogle, s.config.ProviderKeySet.GoogleAPIKey)
+			auth.SetProviderHeaders(req, constants.ProviderGoogle, s.providerKeys().GoogleAPIKey)
 		},
 	})
 }
@@ -126,7 +126,7 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 		Payload:      anthReq,
 		ExtraHeaders: extraHeaders,
 		Configure: func(req *http.Request) {
-			auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.config.ProviderKeySet.AnthropicAPIKey)
+			auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.providerKeys().AnthropicAPIKey)
 		},
 	})
 }

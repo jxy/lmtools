@@ -149,7 +149,7 @@ func (s *Server) fetchModelsWithCapability(ctx context.Context, capability model
 	log := logger.From(ctx)
 
 	var providerKey *auth.ProviderKey
-	if apiKey := s.config.ProviderKeySet.KeyForProvider(s.config.Provider); apiKey != "" {
+	if apiKey := s.providerKeys().KeyForProvider(s.config.Provider); apiKey != "" {
 		key, err := auth.NewProviderKey(s.config.Provider, apiKey)
 		if err != nil {
 			return nil, err

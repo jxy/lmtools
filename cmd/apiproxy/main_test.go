@@ -71,7 +71,7 @@ func TestLoadProviderKeysRoutesSelectedProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := loadProviderKeys(tt.provider, writeApiproxyTestKeyFile(t, "proxy-key"))
+			_, got, err := loadProviderKeys(tt.provider, writeApiproxyTestKeyFile(t, "proxy-key"))
 			if err != nil {
 				t.Fatalf("loadProviderKeys() error = %v", err)
 			}
@@ -83,11 +83,11 @@ func TestLoadProviderKeysRoutesSelectedProvider(t *testing.T) {
 }
 
 func TestLoadProviderKeysEmptyFilePathReturnsEmptySet(t *testing.T) {
-	got, err := loadProviderKeys(constants.ProviderOpenAI, "")
+	keyFile, got, err := loadProviderKeys(constants.ProviderOpenAI, "")
 	if err != nil {
 		t.Fatalf("loadProviderKeys() error = %v", err)
 	}
-	if got != (auth.ProviderKeySet{}) {
+	if keyFile != nil || got != (auth.ProviderKeySet{}) {
 		t.Fatalf("loadProviderKeys() = %#v, want empty set", got)
 	}
 }
