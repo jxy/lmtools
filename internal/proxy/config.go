@@ -34,6 +34,9 @@ type Config struct {
 	// which OpenAI and native Argo (gpt* models) otherwise get.
 	ChatCompletions bool
 
+	// AnthropicBearer sends the anthropic key as Authorization: Bearer too.
+	AnthropicBearer bool
+
 	// StripEncryptedReasoning removes opaque encrypted reasoning state from
 	// direct Responses requests as an opt-in recovery measure.
 	StripEncryptedReasoning bool
@@ -63,6 +66,10 @@ func (c *Config) Validate() error {
 	if !constants.IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid -provider: %s, must be one of: %s",
 			c.Provider, constants.JoinedProviders())
+	}
+
+	if err := providerconfig.ValidateAnthropicBearerFlag(c.Provider, c.AnthropicBearer); err != nil {
+		return err
 	}
 
 	if ok, _ := evaluateProviderCredentials(c.Provider, newProviderCredentialState(c)); !ok {

@@ -56,6 +56,23 @@ func TestBuildModelsRequestAppliesProviderAuthWithKeyFile(t *testing.T) {
 	}
 }
 
+func TestBuildModelsRequestSendsAnthropicBearer(t *testing.T) {
+	req, err := BuildModelsRequest(ModelsRequestOptions{
+		ProviderOptions: providerconfig.Options{
+			Provider:        constants.ProviderAnthropic,
+			ProviderURL:     "http://localhost:8080/v1",
+			APIKeyFile:      writeProviderRequestKeyFile(t, "test-key"),
+			AnthropicBearer: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildModelsRequest() error = %v", err)
+	}
+	if req.Header.Get("x-api-key") != "test-key" || req.Header.Get("Authorization") != "Bearer test-key" {
+		t.Fatalf("headers = %v, want the key in x-api-key and Authorization", req.Header)
+	}
+}
+
 func TestBuildModelsRequestProviderURLWithoutKeyAllowed(t *testing.T) {
 	req, err := BuildModelsRequest(ModelsRequestOptions{
 		ProviderOptions: providerconfig.Options{

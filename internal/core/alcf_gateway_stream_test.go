@@ -12,17 +12,19 @@ import (
 func TestALCFGatewayErrorChunkFailsTheStream(t *testing.T) {
 	for _, tt := range []struct {
 		capture   string
+		provider  string
 		responses bool
 		want      string
 	}{
-		{"openai-gateway-error.stream.txt", false, "Unknown message role: developer"},
-		{"openai-responses-gateway-error.stream.txt", true, "'input_text' is not a valid ChunkTypes"},
+		{"openai-gateway-error.stream.txt", "openai", false, "Unknown message role: developer"},
+		{"openai-responses-gateway-error.stream.txt", "openai", true, "'input_text' is not a valid ChunkTypes"},
+		{"anthropic-gateway-error.stream.txt", "anthropic", false, "beam-1.0-bf16 is not a multimodal model"},
 	} {
 		t.Run(tt.capture, func(t *testing.T) {
 			stream := readOpenAIChatFixture(t, "response-openai-vllm-reasoning", tt.capture)
 			output := &recordingResponseOutput{}
 			response, err := HandleResponseWithOptions(context.Background(), RequestOptions{
-				Provider: "openai", Model: "mistral-large-4-nvfp4", OpenAIResponses: tt.responses, StreamChat: true,
+				Provider: tt.provider, Model: "mistral-large-4-nvfp4", OpenAIResponses: tt.responses, StreamChat: true,
 			}, &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(stream))},
 				&MockLogger{logDir: t.TempDir()}, &MockNotifier{}, ResponseParseOptions{Output: output})
 			if err == nil || !strings.Contains(err.Error(), "upstream stream error: Error: Unexpected error calling stream API") || !strings.Contains(err.Error(), tt.want) {

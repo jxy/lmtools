@@ -247,6 +247,13 @@ func TestConfigValidateArgoDevAndTestConflict(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAnthropicBearerFlag(t *testing.T) {
+	config := &Config{Provider: constants.ProviderOpenAI, AnthropicBearer: true, ProviderURL: "http://localhost:1/v1"}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "-anthropic-bearer requires -provider anthropic") {
+		t.Fatalf("Validate() error = %v, want the -anthropic-bearer conflict", err)
+	}
+}
+
 // -chat-completions turns off the provider's Responses API where it has one
 // and changes nothing where it has none, so every provider accepts it.
 func TestConfigValidateAcceptsChatCompletions(t *testing.T) {

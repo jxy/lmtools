@@ -43,6 +43,7 @@ type RequestOptions struct {
 	JSONMode            bool
 	JSONSchema          json.RawMessage
 	OpenAIResponses     bool
+	AnthropicBearer     bool
 	ToolEnabled         bool
 	ToolTimeout         time.Duration
 	ToolWhitelist       string

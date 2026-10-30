@@ -51,6 +51,9 @@ func handleAPIKeyAuth(httpReq *http.Request, cfg RequestOptions, provider string
 			return fmt.Errorf("failed to read API key file: %w", err)
 		}
 		auth.SetProviderHeaders(httpReq, providerKey.Provider, providerKey.Value)
+		if cfg.AnthropicBearer && providerKey.Provider == constants.ProviderAnthropic {
+			auth.SetAnthropicBearer(httpReq, providerKey.Value)
+		}
 	}
 	return nil
 }

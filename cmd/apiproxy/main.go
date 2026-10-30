@@ -75,6 +75,9 @@ Provider Options:
                             instead of forwarding them to the provider's own
                             Responses API, which openai and argo gpt* models
                             get by default
+  -anthropic-bearer          With -provider anthropic, also send the API key as
+                            Authorization: Bearer (the ALCF inference gateway
+                            requires it)
 
 Model Options:
   -model-map REGEX=MODEL     Map matching request models to a backend model
@@ -233,6 +236,7 @@ func main() {
 		Provider:                providerOpts.Provider,
 		ProviderURL:             providerOpts.ProviderURL,
 		ChatCompletions:         providerOpts.ChatCompletions,
+		AnthropicBearer:         providerOpts.AnthropicBearer,
 		StripEncryptedReasoning: cl.stripEncryptedReasoning,
 		ModelMapRules:           modelMapRules,
 		MaxRequestBodySize:      maxRequestBodySizeBytes,

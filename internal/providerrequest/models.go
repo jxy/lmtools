@@ -3,6 +3,7 @@ package providerrequest
 import (
 	"fmt"
 	"lmtools/internal/auth"
+	"lmtools/internal/constants"
 	"lmtools/internal/providerconfig"
 	"lmtools/internal/providers"
 	"net/http"
@@ -40,6 +41,9 @@ func BuildModelsRequest(opts ModelsRequestOptions) (*http.Request, error) {
 	}
 	if providerKey != nil {
 		auth.SetProviderHeaders(req, providerKey.Provider, providerKey.Value)
+		if providerOpts.AnthropicBearer && providerKey.Provider == constants.ProviderAnthropic {
+			auth.SetAnthropicBearer(req, providerKey.Value)
+		}
 	}
 
 	return req, nil

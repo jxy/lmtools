@@ -61,6 +61,14 @@ func (s *Server) argoAPIKey() string {
 	return s.config.ArgoUser
 }
 
+func (s *Server) configureAnthropicRequest(req *http.Request) {
+	key := s.providerKeys().AnthropicAPIKey
+	auth.SetProviderHeaders(req, constants.ProviderAnthropic, key)
+	if s.config.AnthropicBearer {
+		auth.SetAnthropicBearer(req, key)
+	}
+}
+
 func (s *Server) configureOpenAIRequest(req *http.Request) {
 	auth.SetProviderHeaders(req, constants.ProviderOpenAI, s.providerKeys().OpenAIAPIKey)
 }
@@ -322,7 +330,7 @@ func (s *Server) forwardToArgo(ctx context.Context, anthReq *AnthropicRequest) (
 func (s *Server) forwardToAnthropic(ctx context.Context, anthReq *AnthropicRequest) (*AnthropicResponse, error) {
 	var anthResp AnthropicResponse
 	err := s.doJSON(ctx, s.endpoints.Anthropic, anthReq, func(req *http.Request) {
-		auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.providerKeys().AnthropicAPIKey)
+		s.configureAnthropicRequest(req)
 		applyAnthropicBetaHeader(req, anthReq.Betas)
 	}, &anthResp, constants.ProviderAnthropic, "Anthropic")
 	if err != nil {

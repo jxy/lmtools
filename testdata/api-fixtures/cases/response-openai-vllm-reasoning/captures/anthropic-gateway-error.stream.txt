@@ -1,0 +1,4 @@
+data: {"id": "chatcmpl-api-error", "object": "chat.completion.chunk", "created": 1793396622, "model": "beam-1.0-bf16", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "\n\n[ERROR] Error: Unexpected error calling stream API: Error: Could not send stream API call to https://minerva-login-01.minerva.alcf.anl.gov:9443/models/beam-1.0-bf16/v1/messages (status code: 400): {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"beam-1.0-bf16 is not a multimodal model\"}}"}, "finish_reason": "stop"}]}
+
+data: [DONE]
+

@@ -72,6 +72,9 @@ func (s *AnthropicStreamState) ParseLine(line string) (string, []ToolCall, bool,
 
 	// Handle data lines
 	if data, ok := streamFieldValue(line, "data"); ok {
+		if err := alcfGatewayStreamError([]byte(data)); err != nil {
+			return "", nil, false, err
+		}
 		switch s.currentEvent {
 		case "message_start", "message_delta":
 			// message_start reports input tokens under message.usage;

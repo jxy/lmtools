@@ -302,6 +302,7 @@ func (c Config) RequestOptions() core.RequestOptions {
 		JSONMode:            c.JSONMode,
 		JSONSchema:          append(json.RawMessage(nil), c.JSONSchema...),
 		OpenAIResponses:     c.OpenAIResponses,
+		AnthropicBearer:     c.AnthropicBearer,
 		ToolEnabled:         c.EnableTool,
 		ToolTimeout:         c.ToolTimeout,
 		ToolWhitelist:       c.ToolWhitelist,

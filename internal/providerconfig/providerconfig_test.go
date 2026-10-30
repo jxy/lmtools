@@ -33,6 +33,17 @@ func TestOptionsNormalizeRejectsArgoDevAndTest(t *testing.T) {
 	}
 }
 
+func TestOptionsNormalizeLimitsAnthropicBearerToAnthropic(t *testing.T) {
+	opts := Options{Provider: constants.ProviderAnthropic, AnthropicBearer: true}
+	if err := opts.Normalize(); err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	opts = Options{Provider: constants.ProviderOpenAI, AnthropicBearer: true}
+	if err := opts.Normalize(); err == nil || !strings.Contains(err.Error(), "-anthropic-bearer requires -provider anthropic") {
+		t.Fatalf("Normalize() error = %v, want the -anthropic-bearer conflict", err)
+	}
+}
+
 func TestRegisterFlagsParsesProviderOptions(t *testing.T) {
 	var opts Options
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)

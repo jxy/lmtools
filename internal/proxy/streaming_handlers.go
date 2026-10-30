@@ -126,7 +126,7 @@ func (s *Server) anthropicStreamingRequest(ctx context.Context, anthReq *Anthrop
 		Payload:      anthReq,
 		ExtraHeaders: extraHeaders,
 		Configure: func(req *http.Request) {
-			auth.SetProviderHeaders(req, constants.ProviderAnthropic, s.providerKeys().AnthropicAPIKey)
+			s.configureAnthropicRequest(req)
 		},
 	})
 }

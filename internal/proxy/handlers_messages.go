@@ -3,8 +3,8 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"lmtools/internal/logger"
 	"lmtools/internal/providers"
@@ -133,7 +133,16 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	log.Infof("Token counting: model=%s->%s, provider=%s", originalModel, mappedModel, provider)
 
-	if resp, handled, err := s.countAnthropicTokensWithProvider(ctx, req, provider, mappedModel); handled {
+	resp, handled, err := s.countAnthropicTokensWithProvider(ctx, req, provider, mappedModel)
+	// An Anthropic-compatible server may serve /messages without
+	// /messages/count_tokens, as the ALCF inference gateway does; the local
+	// estimate answers for it.
+	var respErr *ResponseError
+	if handled && errors.As(err, &respErr) && respErr.StatusCode == http.StatusNotFound {
+		log.Warnf("The %s provider has no count_tokens route (HTTP 404); estimating locally", provider)
+		handled = false
+	}
+	if handled {
 		if err != nil {
 			s.sendProviderErrorAsAnthropic(ctx, w, provider, err)
 			return
@@ -162,16 +171,16 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Create response - use a simple map for now
-	resp := map[string]interface{}{
+	estimate := map[string]interface{}{
 		"input_tokens": inputTokens,
 	}
 
 	// Log the response
 	log.Debugf("Count tokens response: input_tokens=%d", inputTokens)
-	logger.DebugJSON(log, "Token Count Response", resp)
+	logger.DebugJSON(log, "Token Count Response", estimate)
 
 	// Send response using centralized helper (logs errors internally)
-	if err := s.sendJSONResponse(ctx, w, resp); err != nil {
+	if err := s.sendJSONResponse(ctx, w, estimate); err != nil {
 		return // Error already logged, can't send another response
 	}
 
@@ -257,7 +266,7 @@ func (s *Server) forwardArgoCountTokens(ctx context.Context, req *AnthropicToken
 func (s *Server) forwardAnthropicCountTokens(ctx context.Context, req *AnthropicTokenCountRequest) (*AnthropicTokenCountResponse, error) {
 	var resp AnthropicTokenCountResponse
 	err := s.doJSON(ctx, s.endpoints.AnthropicCountTokens, req, func(httpReq *http.Request) {
-		auth.SetProviderHeaders(httpReq, constants.ProviderAnthropic, s.providerKeys().AnthropicAPIKey)
+		s.configureAnthropicRequest(httpReq)
 	}, &resp, constants.ProviderAnthropic, "Anthropic count_tokens")
 	if err != nil {
 		return nil, err

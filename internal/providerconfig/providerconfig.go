@@ -22,6 +22,9 @@ type Options struct {
 	// chat/completions route where it also has a Responses API, which is
 	// used otherwise. It changes nothing for a provider without one.
 	ChatCompletions bool
+	// AnthropicBearer is -anthropic-bearer: send the anthropic key as
+	// Authorization: Bearer beside x-api-key.
+	AnthropicBearer bool
 }
 
 type Defaults struct {
@@ -43,6 +46,7 @@ func RegisterFlags(fs *flag.FlagSet, opts *Options, defaults Defaults) {
 	fs.StringVar(&opts.ProviderURL, "provider-url", "", "custom provider API endpoint")
 	fs.StringVar(&opts.APIKeyFile, "api-key-file", "", "path to API key file (required for openai/google/anthropic; optional alternative for argo)")
 	fs.BoolVar(&opts.ChatCompletions, "chat-completions", false, "use the provider's chat/completions route instead of its Responses API (/v1/responses), which -provider openai and argo gpt* models use by default")
+	fs.BoolVar(&opts.AnthropicBearer, "anthropic-bearer", false, "with -provider anthropic, also send the API key as Authorization: Bearer, which the ALCF inference gateway requires")
 }
 
 // RemovedFlags maps the name of a bool flag a binary no longer has to what
@@ -91,6 +95,15 @@ func ResponsesAPIAvailable(provider string, argoLegacy bool) bool {
 	}
 }
 
+// ValidateAnthropicBearerFlag reports whether -anthropic-bearer fits the
+// selected provider; it changes the headers of anthropic requests alone.
+func ValidateAnthropicBearerFlag(provider string, anthropicBearer bool) error {
+	if anthropicBearer && constants.NormalizeProvider(provider) != constants.ProviderAnthropic {
+		return fmt.Errorf("invalid flag combination: -anthropic-bearer requires -provider anthropic")
+	}
+	return nil
+}
+
 func ResolveArgoEnvironment(dev, test bool) string {
 	if dev {
 		return "dev"
@@ -118,7 +131,7 @@ func (o *Options) Normalize() error {
 	if o.ArgoEnv == "" {
 		o.ArgoEnv = ResolveArgoEnvironment(o.ArgoDev, o.ArgoTest)
 	}
-	return nil
+	return ValidateAnthropicBearerFlag(o.Provider, o.AnthropicBearer)
 }
 
 func ValidateArgoEnvironmentFlags(dev, test bool) error {

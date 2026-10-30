@@ -116,6 +116,15 @@ func SetProviderHeaders(req *http.Request, provider string, apiKey string) {
 	}
 }
 
+// SetAnthropicBearer adds Authorization: Bearer beside x-api-key, for an
+// Anthropic-compatible server that reads only the bearer header, such as the
+// ALCF inference gateway. -anthropic-bearer asks for it.
+func SetAnthropicBearer(req *http.Request, apiKey string) {
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+}
+
 // SetRequestHeaders sets common headers based on request type.
 //
 // A streamed response is asked for uncompressed from every provider. A

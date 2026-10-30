@@ -158,10 +158,11 @@ func (s *Server) fetchModelsWithCapability(ctx context.Context, capability model
 	}
 	req, err := providerrequest.BuildModelsRequest(providerrequest.ModelsRequestOptions{
 		ProviderOptions: providerconfig.Options{
-			Provider:    s.config.Provider,
-			ProviderURL: s.config.ProviderURL,
-			ArgoEnv:     s.config.ArgoEnv,
-			ArgoLegacy:  s.config.ArgoLegacy,
+			Provider:        s.config.Provider,
+			ProviderURL:     s.config.ProviderURL,
+			ArgoEnv:         s.config.ArgoEnv,
+			ArgoLegacy:      s.config.ArgoLegacy,
+			AnthropicBearer: s.config.AnthropicBearer,
 		},
 		ProviderKey: providerKey,
 	})
