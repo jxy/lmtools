@@ -179,11 +179,13 @@ func openAIProxyMessagesToCore(messages []OpenAIMessage, strict bool) ([]core.Op
 		}
 
 		result = append(result, core.OpenAIMessage{
-			Role:       role,
-			Content:    content,
-			ToolCalls:  openAIToolCallsToTyped(msg.ToolCalls),
-			ToolCallID: toolCallID,
-			Name:       msg.Name,
+			Role:             role,
+			Content:          content,
+			ToolCalls:        openAIToolCallsToTyped(msg.ToolCalls),
+			ToolCallID:       toolCallID,
+			Name:             msg.Name,
+			ReasoningContent: msg.ReasoningContent,
+			Reasoning:        msg.Reasoning,
 		})
 	}
 	if strict {

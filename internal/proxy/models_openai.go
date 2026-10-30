@@ -90,6 +90,10 @@ type OpenAIMessage struct {
 	Refusal      *string       `json:"refusal,omitempty"`
 	Annotations  []interface{} `json:"annotations,omitempty"`
 	Audio        interface{}   `json:"audio,omitempty"`
+	// Chat Completions backends return reasoning beside the content, as
+	// reasoning_content or, from newer vLLM, reasoning.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Reasoning        string `json:"reasoning,omitempty"`
 }
 
 // OpenAIContent represents content in multimodal messages.
@@ -273,8 +277,10 @@ type OpenAIDelta struct {
 	Refusal      *string            `json:"refusal,omitempty"`
 	Audio        interface{}        `json:"audio,omitempty"`
 	// ContentNull forces encoding of `"content": null` when true.
-	ContentNull bool            `json:"-"`
-	ToolCalls   []ToolCallDelta `json:"tool_calls,omitempty"`
+	ContentNull      bool            `json:"-"`
+	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string         `json:"reasoning,omitempty"`
 }
 
 // MarshalJSON implements custom JSON encoding for OpenAIDelta to support
@@ -300,6 +306,12 @@ func (d OpenAIDelta) MarshalJSON() ([]byte, error) {
 	}
 	if d.Audio != nil {
 		m["audio"] = d.Audio
+	}
+	if d.ReasoningContent != nil {
+		m["reasoning_content"] = *d.ReasoningContent
+	}
+	if d.Reasoning != nil {
+		m["reasoning"] = *d.Reasoning
 	}
 	return json.Marshal(m)
 }

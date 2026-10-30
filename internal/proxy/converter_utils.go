@@ -160,11 +160,13 @@ func typedOpenAIMessagesToProxy(messages []core.OpenAIMessage) []OpenAIMessage {
 			content = nil
 		}
 		proxyMessages = append(proxyMessages, OpenAIMessage{
-			Role:       core.Role(msg.Role),
-			Content:    content,
-			Name:       msg.Name,
-			ToolCalls:  typedOpenAIToolCallsToProxy(msg.ToolCalls),
-			ToolCallID: msg.ToolCallID,
+			Role:             core.Role(msg.Role),
+			Content:          content,
+			Name:             msg.Name,
+			ToolCalls:        typedOpenAIToolCallsToProxy(msg.ToolCalls),
+			ToolCallID:       msg.ToolCallID,
+			ReasoningContent: msg.ReasoningContent,
+			Reasoning:        msg.Reasoning,
 		})
 	}
 	return proxyMessages

@@ -627,7 +627,7 @@ func (f *openAICompatibleStreamStopForwarder) chunkHasDeltaPayload(chunk OpenAIS
 		return chunk.Usage != nil
 	}
 	for _, choice := range chunk.Choices {
-		if choice.Delta.Content != nil || choice.Delta.Role != nil || choice.Delta.FunctionCall != nil || len(choice.Delta.ToolCalls) > 0 || choice.Delta.Refusal != nil || choice.Delta.Audio != nil || choice.Delta.ContentNull || choice.FinishReason != nil {
+		if choice.Delta.Content != nil || choice.Delta.Role != nil || choice.Delta.FunctionCall != nil || len(choice.Delta.ToolCalls) > 0 || choice.Delta.Refusal != nil || choice.Delta.Audio != nil || choice.Delta.ContentNull || choice.Delta.ReasoningContent != nil || choice.Delta.Reasoning != nil || choice.FinishReason != nil {
 			return true
 		}
 	}
