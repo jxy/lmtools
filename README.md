@@ -1,11 +1,13 @@
 # lmtools
 
-`lmtools` builds two binaries:
+`lmtools` builds three binaries:
 
 - `lmc`: a command-line client for chat, embeddings, tool calls, and local session history.
 - `apiproxy`: an HTTP proxy that serves Anthropic-compatible, OpenAI Chat
   Completions-compatible, and OpenAI Responses-compatible endpoints over
   Anthropic, OpenAI, Google, or Argo backends.
+- `alcfauth`: a Globus login for the ALCF Inference Endpoints that keeps an
+  access token in a key file for `lmc -api-key-file`.
 
 **Disclaimer**: LLMs (GPT, Claude, Gemini, and others) "vibe-coded" almost all
 code in this repository. Use it at your own risk and review it before you deploy
@@ -19,7 +21,7 @@ Requires Go 1.21.13 or later.
 make build
 ```
 
-`make build` writes `lmc` and `apiproxy` for the host into
+`make build` writes `lmc`, `apiproxy`, and `alcfauth` for the host into
 `./bin/<goos>-<goarch>/`, such as `./bin/linux-amd64/`. Set `GOOS` and `GOARCH`
 to cross-compile; each platform gets its own directory. The Makefile works with
 both BSD make and GNU make.
@@ -27,12 +29,12 @@ both BSD make and GNU make.
 Prebuilt binaries for linux/amd64, freebsd/amd64, and macOS/arm64 are attached
 to each [GitHub release](https://github.com/jxy/lmtools/releases) as
 `lmtools-<tag>-<goos>-<goarch>.tar.gz`, with a `SHA256SUMS` file beside them.
-Each archive holds `lmc`, `apiproxy`, `LICENSE`, and this README.
+Each archive holds `lmc`, `apiproxy`, `alcfauth`, `LICENSE`, and this README.
 
-The examples below run `lmc` and `apiproxy` by name. Add the directory that
+The examples below run the binaries by name. Add the directory that
 holds them to your `PATH`, or copy them into a directory already on it.
 
-`lmc -version` and `apiproxy -version` print the version the go command
+`lmc -version`, `apiproxy -version`, and `alcfauth -version` print the version the go command
 stamped at build time: the release tag for a release archive, or a
 pseudo-version naming the commit for a build from an untagged checkout.
 
@@ -1030,6 +1032,73 @@ Build information:
 - `-version`: Print the build's version and exit. The line names the module
   version stamped at build time, the Go toolchain, and the commit.
 
+## ALCF Inference Endpoints
+
+The [ALCF Inference Endpoints](https://docs.alcf.anl.gov/services/inference-endpoints/)
+serve OpenAI compatible APIs that take a Globus access token as the bearer
+key. `alcfauth` logs in through Globus the way `alcf-tokens login inference`
+does, without Python, and writes the access token to a key file that `lmc`
+reads with `-api-key-file`.
+
+```bash
+# Log in: open the printed URL, log in with your institution, and paste the
+# code Globus shows. ALCF asks for a new login every 30 days.
+alcfauth login
+
+# Chat with a model on Minerva.
+echo "Explain PKCE in two sentences" | lmc \
+  -provider openai \
+  -provider-url https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1 \
+  -api-key-file ~/.lmc/alcf/inference.key \
+  -model mistral-large-4-nvfp4
+```
+
+`alcfauth login` opens the URL in a browser when it can. Over SSH, or with
+`-no-browser`, it only prints the URL; open it in a browser on any machine and
+paste the code back.
+
+An access token lasts 48 hours. `alcfauth token` refreshes it when less than
+an hour is left (`-min-valid` sets the margin), rewrites the key file, and
+prints the token, so `curl -H "Authorization: Bearer $(alcfauth token)"`
+works; `-q` skips the printing. `lmc` reads the key file for every request,
+so `alcfauth token` run in another terminal also renews the token of a
+running `lmc -repl`. A shell function can refresh before each run:
+
+```bash
+minerva() {
+  alcfauth token -q || return
+  lmc -provider openai \
+    -provider-url https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1 \
+    -api-key-file ~/.lmc/alcf/inference.key "$@"
+}
+echo "Hello" | minerva -model inkling-bf16
+```
+
+Other clusters differ in the URL: replace `minerva/api/v1` with
+`metis/api/v1`, `tara/api/v1`, or `sophia/vllm/v1`, and pick a model the
+cluster serves. With `-provider openai`, `lmc` uses the Responses API, which
+every Minerva model serves; `-chat-completions` switches to Chat Completions
+for a model whose capabilities lack `responses`. `lmc -list-models` does not
+work against these URLs, since the gateway has no `/models` route there. The
+list is at `/resource_server/<cluster>/models`: `curl -sH "Authorization:
+Bearer $(alcfauth token)"
+https://inference-api.alcf.anl.gov/resource_server/minerva/models`.
+
+| Command | Action |
+| --- | --- |
+| `alcfauth login` | Log in and write the token cache and the key file. `-no-browser` only prints the URL; `-client-id ID` logs in as another Globus native app. |
+| `alcfauth token` | Refresh the access token when less than `-min-valid` (default `1h`) is left, rewrite the key file, and print the token unless `-q` is given. |
+| `alcfauth status` | Show how long the access token has left and when the login ran. `-check` asks the gateway whether it accepts the token, refreshing an expired one first. |
+| `alcfauth logout` | Revoke the tokens at Globus and remove them from the cache and the key file. |
+
+Every command takes `-cache file` (default `~/.lmc/alcf/tokens.json`) and
+`-key-file file` (default `~/.lmc/alcf/inference.key`). Both files hold
+credentials and are written with mode 0600. The cache uses the layout of the
+`alcf-tokens.sh` script that ships with `alcf-tokens`, so `-cache` can point at
+that script's `tokens-bash.json`. By default `alcfauth` logs in as the public
+Globus app `alcf-tokens` uses, but it keeps its own cache: a login with
+`alcf-tokens` or `inference_auth_token.py` does not log `alcfauth` in.
+
 ## apiproxy
 
 `apiproxy` binds `127.0.0.1:8082` and translates request and response formats at
@@ -1446,8 +1515,10 @@ applies to every path except `-provider openai`, and `-provider argo` on a
   REPL commands, the last 100; `/history clear` empties it)
 - `lmc` logs: `~/.lmc/logs`
 - `apiproxy` Responses state: `~/.apiproxy/sessions`
-- Built binaries: `./bin/<goos>-<goarch>/lmc` and
-  `./bin/<goos>-<goarch>/apiproxy`
+- `alcfauth` token cache and key file: `~/.lmc/alcf/tokens.json` and
+  `~/.lmc/alcf/inference.key`
+- Built binaries: `./bin/<goos>-<goarch>/lmc`,
+  `./bin/<goos>-<goarch>/apiproxy`, and `./bin/<goos>-<goarch>/alcfauth`
 
 ## Troubleshooting
 
@@ -1462,6 +1533,12 @@ applies to every path except `-provider openai`, and `-provider argo` on a
   bytes, the responses of retried attempts among them; they can contain
   credentials and grow without bound on long streams.
 - Confirm that the selected `-provider` has credentials or a `-provider-url`.
+- When the ALCF gateway answers HTTP 401 or 403, run `alcfauth status -check`.
+  An expired token needs `alcfauth token`; a login 30 days old or more needs
+  `alcfauth login`, and `alcfauth token` warns from day 29. `apiproxy` reads
+  `-api-key-file` once at startup, so with an ALCF key file it stops working
+  when that token expires; restart it after `alcfauth token`. `-print-curl`
+  puts the access token in the curl command it prints.
 - For Argo, check whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
 - When a converted Responses request loses an OpenAI-only field, switch to
   `-provider openai`, or to a `gpt*` model on `-provider argo`, without
