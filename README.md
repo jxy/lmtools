@@ -1079,15 +1079,14 @@ Other clusters differ in the URL: replace `minerva/api/v1` with
 `metis/api/v1`, `tara/api/v1`, or `sophia/vllm/v1`, and pick a model the
 cluster serves. With `-provider openai`, `lmc` uses the Responses API;
 `-chat-completions` switches to Chat Completions for a model whose
-capabilities lack `responses`. On Chat Completions, Minerva streams reasoning
-in a `reasoning` field that `lmc` does not read yet, so Minerva's thinking
-shows only on the Responses API. As of 2026-10-30, Minerva's
-`mistral-large-4-nvfp4` rejects the Responses requests `lmc` sends (its
-backend refuses `input_text` content parts), and a streamed request ends with
-no output; use `-chat-completions` for that model. `lmc -list-models` does not
-work against these URLs, since the gateway has no `/models` route there. The
-list is at `/resource_server/<cluster>/models`: `curl -sH "Authorization:
-Bearer $(alcfauth token)"
+capabilities lack `responses`. `lmc` shows Minerva's reasoning on both APIs.
+Minerva's `mistral-large-4-nvfp4` refuses `-developer` (`Unknown message role:
+developer`). When a model's server refuses a streamed request, the gateway
+sends the refusal as an answer that starts with `[ERROR]`; `lmc` reports it as
+an error and exits with status 1. `lmc -list-models` does not work against
+these URLs, since the gateway has no `/models` route there. The list is at
+`/resource_server/<cluster>/models`: `curl -sH "Authorization: Bearer
+$(alcfauth token)"
 https://inference-api.alcf.anl.gov/resource_server/minerva/models`.
 
 | Command | Action |
