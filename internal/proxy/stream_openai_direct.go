@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"net/http"
 	"sort"
@@ -89,6 +90,13 @@ func (f *openAICompatibleStreamStopForwarder) handleRecord(record sseRecord) err
 	// It cannot go through the chunk path: OpenAIStreamChunk has no error field,
 	// so the record decodes to a chunk with no choices and no usage and
 	// chunkHasDeltaPayload drops it.
+	//
+	// The ALCF gateway reports a refused request as an ordinary chunk whose
+	// content is the refusal; it becomes an error record here, so the client
+	// reads a failure where it would have read an answer.
+	if message, ok := core.ALCFGatewayRefusal([]byte(data)); ok {
+		data = openAIStreamErrorRecord(message)
+	}
 	if isOpenAIStreamErrorRecord(data) {
 		// A turn that ended does not un-end because the upstream had trouble
 		// afterwards. Local stop enforcement makes that ordinary rather than exotic:
@@ -276,6 +284,15 @@ func (f *openAICompatibleStreamStopForwarder) terminate(streamErr error) error {
 		return err
 	}
 	return f.closeStream()
+}
+
+// openAIStreamErrorRecord is the error record a client reads in place of the
+// ALCF gateway's refusal chunk.
+func openAIStreamErrorRecord(message string) string {
+	encoded, _ := json.Marshal(map[string]map[string]string{
+		"error": {"message": message, "type": "upstream_error"},
+	})
+	return string(encoded)
 }
 
 // isOpenAIStreamErrorRecord reports whether an SSE record is an upstream error

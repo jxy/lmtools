@@ -44,8 +44,12 @@ type ParsedOpenAIStreamChunk struct {
 	Choices []ParsedOpenAIStreamChoice
 }
 
-// ParseOpenAIStreamErrorChunk detects OpenAI-compatible SSE error payloads.
+// ParseOpenAIStreamErrorChunk detects OpenAI-compatible SSE error payloads,
+// the ALCF gateway's refusal chunk among them.
 func ParseOpenAIStreamErrorChunk(data []byte) error {
+	if err := alcfGatewayStreamError(data); err != nil {
+		return err
+	}
 	var envelope struct {
 		Error json.RawMessage `json:"error"`
 	}
@@ -67,8 +71,18 @@ const alcfGatewayErrorChunkID = "chatcmpl-api-error"
 // alcfGatewayStreamError returns the error such a chunk reports, or nil for
 // any other event.
 func alcfGatewayStreamError(data []byte) error {
-	if !bytes.Contains(data, []byte(alcfGatewayErrorChunkID)) {
+	message, ok := ALCFGatewayRefusal(data)
+	if !ok {
 		return nil
+	}
+	return newFatalStreamError(fmt.Errorf("upstream stream error: %s", message))
+}
+
+// ALCFGatewayRefusal reports whether a stream event is the ALCF gateway's
+// refusal chunk, and returns the refusal without its "[ERROR]" marker.
+func ALCFGatewayRefusal(data []byte) (string, bool) {
+	if !bytes.Contains(data, []byte(alcfGatewayErrorChunkID)) {
+		return "", false
 	}
 	var chunk struct {
 		ID      string `json:"id"`
@@ -79,7 +93,7 @@ func alcfGatewayStreamError(data []byte) error {
 		} `json:"choices"`
 	}
 	if json.Unmarshal(data, &chunk) != nil || chunk.ID != alcfGatewayErrorChunkID {
-		return nil
+		return "", false
 	}
 	var content strings.Builder
 	for _, choice := range chunk.Choices {
@@ -87,9 +101,9 @@ func alcfGatewayStreamError(data []byte) error {
 	}
 	message, ok := strings.CutPrefix(strings.TrimSpace(content.String()), "[ERROR]")
 	if !ok {
-		return nil
+		return "", false
 	}
-	return newFatalStreamError(fmt.Errorf("upstream stream error: %s", strings.TrimSpace(message)))
+	return strings.TrimSpace(message), true
 }
 
 func formatOpenAIStreamError(raw json.RawMessage) string {

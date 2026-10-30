@@ -297,6 +297,11 @@ func (s *Server) streamFromAnthropic(ctx context.Context, anthReq *AnthropicRequ
 func (s *Server) parseAnthropicStream(body io.Reader, handler *AnthropicStreamHandler) error {
 	log := logger.From(handler.ctx)
 	if err := consumeSSEStream(body, func(currentEvent string, data json.RawMessage) error {
+		// The ALCF gateway sends a refusal as a Chat Completions chunk, also on
+		// its Messages route; the handler turns the error into an error event.
+		if message, ok := core.ALCFGatewayRefusal(data); ok {
+			return fmt.Errorf("upstream stream error: %s", message)
+		}
 		recognized := warnAnthropicStreamEventFields(handler.ctx, currentEvent, data)
 		switch currentEvent {
 		case EventMessageStart:

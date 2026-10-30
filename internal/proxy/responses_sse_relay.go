@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"math"
 	"net/http"
@@ -64,6 +65,15 @@ func (r *responsesSSERelay) run(body io.Reader) error {
 		data := record.data()
 		if r.transform != nil {
 			data = r.transform(data)
+		}
+		// The ALCF gateway answers a refused Responses request with one Chat
+		// Completions chunk carrying the refusal; the client gets it as the
+		// failure in place of the chunk.
+		if message, ok := core.ALCFGatewayRefusal([]byte(data)); ok && !r.sawTerminal {
+			if err := r.emitSyntheticFailure(errors.New(message)); err != nil {
+				return err
+			}
+			return errStopConsumingSSERecords
 		}
 		// Observe what the client sees, not what the upstream sent. On the mapped
 		// path the transform rewrites the model back to the client's name, and a
