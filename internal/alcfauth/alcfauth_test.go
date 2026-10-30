@@ -491,6 +491,28 @@ func TestValidUsesTheCachedTokenWhileEnoughIsLeft(t *testing.T) {
 	if key, _ := auth.ReadKeyFile(store.KeyFilePath); key != "cached" {
 		t.Errorf("key file = %q, want the cached token", key)
 	}
+
+	// A key file that already holds the token keeps its identity, which is
+	// what apiproxy watches; one that holds something else is rewritten.
+	before, err := os.Stat(store.KeyFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Valid(context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.Stat(store.KeyFilePath); err != nil || !os.SameFile(before, after) {
+		t.Errorf("unchanged key file was replaced (err %v)", err)
+	}
+	if err := os.WriteFile(store.KeyFilePath, []byte("other\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Valid(context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if key, _ := auth.ReadKeyFile(store.KeyFilePath); key != "cached" {
+		t.Errorf("key file = %q after Valid, want the cached token back", key)
+	}
 }
 
 func TestValidRefreshesWhenLittleIsLeft(t *testing.T) {

@@ -27,6 +27,9 @@ type fakeALCF struct {
 	refreshes     int
 	revoked       []string
 	gatewayStatus int
+	// refreshFailures answers that many refreshes with refreshStatus.
+	refreshFailures int
+	refreshStatus   int
 }
 
 func newFakeALCF(t *testing.T) *fakeALCF {
@@ -55,6 +58,16 @@ func (f *fakeALCF) serve(w http.ResponseWriter, r *http.Request) {
 			f.exchanges++
 			token("access-0", "refresh-0")
 		case "refresh_token":
+			if f.refreshFailures > 0 {
+				f.refreshFailures--
+				w.WriteHeader(f.refreshStatus)
+				if f.refreshStatus == http.StatusBadRequest {
+					_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"refused by the test"}`))
+				} else {
+					_, _ = w.Write([]byte(`{"error":"server_error"}`))
+				}
+				return
+			}
 			f.refreshes++
 			token(fmt.Sprintf("access-%d", f.refreshes), "")
 		default:
@@ -96,6 +109,7 @@ type cli struct {
 	opened  []string
 	nextIn  string
 	browser func(string) error
+	wait    func(ctx context.Context, d time.Duration) error
 }
 
 func newCLI(t *testing.T) *cli {
@@ -118,6 +132,7 @@ func (c *cli) run(args ...string) (code int, stdout, stderr string) {
 		gatewayURL:  c.server.URL + "/resource_server",
 		now:         func() time.Time { return c.now },
 		openBrowser: c.browser,
+		wait:        c.wait,
 	})
 	return code, out.String(), errOut.String()
 }
@@ -291,6 +306,89 @@ func TestTokenWarnsAboutAnOldLogin(t *testing.T) {
 	c.now = time.Unix(1_793_377_319, 0).Add(28 * 24 * time.Hour)
 	if _, _, stderr := c.run("token"); stderr != "" {
 		t.Errorf("warning at 28 days: %s", stderr)
+	}
+}
+
+// watchUntil makes the CLI's waits advance its clock and records them, and
+// ends the watch once done reports true.
+func (c *cli) watchUntil(done func() bool) *[]time.Duration {
+	var waits []time.Duration
+	c.wait = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		c.now = c.now.Add(d)
+		if done() {
+			return context.Canceled
+		}
+		return ctx.Err()
+	}
+	return &waits
+}
+
+func TestTokenWatchRefreshesBeforeTheMargin(t *testing.T) {
+	c := newCLI(t)
+	c.nextIn = "code\n"
+	if code, _, stderr := c.run("login"); code != 0 {
+		t.Fatal(stderr)
+	}
+	login := c.now
+	waits := c.watchUntil(func() bool {
+		_, refreshes, _ := c.server.counts()
+		return refreshes == 2
+	})
+	code, stdout, stderr := c.run("token", "-watch")
+	if code != 0 || stdout != "" {
+		t.Fatalf("token -watch: exit %d, stdout %q, stderr:\n%s", code, stdout, stderr)
+	}
+	if got := c.key(); got != "access-2" {
+		t.Errorf("key file = %q, want access-2", got)
+	}
+	if !strings.Contains(stderr, "keeping "+c.keyFile()+" valid") || strings.Count(stderr, "refreshed the access token") != 2 {
+		t.Errorf("stderr:\n%s", stderr)
+	}
+	for _, d := range *waits {
+		if d < time.Minute || d > 10*time.Minute {
+			t.Fatalf("wait of %s, want between 1m and 10m", d)
+		}
+	}
+	// Each token lasts 48 hours and is refreshed with an hour left, so the
+	// second refresh comes 94 hours after the login. The clock stops after the
+	// wait that follows it, up to 10 minutes later.
+	if elapsed := c.now.Sub(login); elapsed < 94*time.Hour || elapsed > 94*time.Hour+20*time.Minute {
+		t.Errorf("watch ended %s after the login, want 94h to 94h20m", elapsed)
+	}
+}
+
+func TestTokenWatchRetriesAFailedRefresh(t *testing.T) {
+	c := newCLI(t)
+	c.nextIn = "code\n"
+	if code, _, stderr := c.run("login"); code != 0 {
+		t.Fatal(stderr)
+	}
+	c.server.refreshFailures, c.server.refreshStatus = 2, http.StatusInternalServerError
+	waits := c.watchUntil(func() bool {
+		_, refreshes, _ := c.server.counts()
+		return refreshes == 1
+	})
+	code, _, stderr := c.run("token", "-watch", "-min-valid", "49h")
+	if code != 0 || strings.Count(stderr, "trying again") != 2 || !strings.Contains(stderr, "refreshed the access token") {
+		t.Fatalf("token -watch: exit %d, stderr:\n%s", code, stderr)
+	}
+	if got := (*waits)[:2]; got[0] != time.Minute || got[1] != 2*time.Minute {
+		t.Errorf("retry waits = %v, want 1m then 2m", got)
+	}
+}
+
+func TestTokenWatchStopsWhenGlobusWantsALogin(t *testing.T) {
+	c := newCLI(t)
+	c.nextIn = "code\n"
+	if code, _, stderr := c.run("login"); code != 0 {
+		t.Fatal(stderr)
+	}
+	c.server.refreshFailures, c.server.refreshStatus = 1, http.StatusBadRequest
+	waits := c.watchUntil(func() bool { return false })
+	code, _, stderr := c.run("token", "-watch", "-min-valid", "49h")
+	if code != 1 || !strings.Contains(stderr, "Run 'alcfauth login'") || len(*waits) != 0 {
+		t.Errorf("token -watch: exit %d, %d waits, stderr:\n%s", code, len(*waits), stderr)
 	}
 }
 

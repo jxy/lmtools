@@ -109,7 +109,13 @@ func (c *cacheFile) write(path string) error {
 // lmc reads that file for every request, so the rename matters: a reader sees
 // the old token or the new one, never a partial write.
 func writeKeyFile(path, accessToken string) error {
-	if err := writeFileAtomic(path, []byte(accessToken+"\n")); err != nil {
+	data := []byte(accessToken + "\n")
+	// An unchanged key file is left alone, so a reader that reloads the file
+	// when it changes, as apiproxy does, reads it once for each token.
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("write key file: %w", err)
 	}
 	return nil

@@ -13,7 +13,9 @@ import (
 	"lmtools/internal/version"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -24,7 +26,8 @@ token in a key file for lmc -api-key-file.
 
 Commands:
   login    log in and write the token cache and the key file
-  token    refresh the access token when needed, rewrite the key file, print it
+  token    refresh the access token when needed, rewrite the key file, print it;
+           with -watch, keep running and refresh it before it runs out
   status   show how long the access token and the login have left
   logout   revoke the tokens and remove them
 
@@ -42,6 +45,8 @@ type env struct {
 	httpClient  *http.Client
 	now         func() time.Time
 	openBrowser func(url string) error
+	// wait sleeps for d or until ctx ends; nil sleeps on a timer.
+	wait func(ctx context.Context, d time.Duration) error
 }
 
 func main() {
@@ -214,6 +219,7 @@ func runToken(ctx context.Context, args []string, e env) error {
 	fs := newFlagSet("token", "token [flags]", e, &o)
 	minValid := fs.Duration("min-valid", time.Hour, "refresh the access token when less than this `duration` is left")
 	quiet := fs.Bool("q", false, "write the key file without printing the token")
+	watch := fs.Bool("watch", false, "keep running, and refresh the key file whenever less than -min-valid is left, until interrupted")
 	if err := noArguments(fs, args); err != nil {
 		return err
 	}
@@ -225,6 +231,9 @@ func runToken(ctx context.Context, args []string, e env) error {
 	if err != nil {
 		return err
 	}
+	if *watch {
+		return watchToken(ctx, e, store, *minValid)
+	}
 	tok, _, err := store.Valid(ctx, *minValid)
 	if err != nil {
 		return err
@@ -234,6 +243,70 @@ func runToken(ctx context.Context, args []string, e env) error {
 		fmt.Fprintln(e.stdout, tok.AccessToken)
 	}
 	return nil
+}
+
+const (
+	// watchMaxWait bounds each wait of token -watch. Go's timers do not count
+	// the time a machine spends suspended, so one long wait could end after
+	// the token expired; a short one notices the wall clock soon after a wake.
+	watchMaxWait = 10 * time.Minute
+	// watchMinWait keeps a -min-valid as long as the token's lifetime from
+	// refreshing without pause.
+	watchMinWait = time.Minute
+)
+
+// watchToken keeps the key file valid until ctx ends or a signal arrives, so a
+// long running lmc or apiproxy reading the key file never meets an expired
+// token. It ends with an error only when Globus wants a new login.
+func watchToken(ctx context.Context, e env, store alcfauth.Store, minValid time.Duration) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	wait := e.wait
+	if wait == nil {
+		wait = sleep
+	}
+	retry := watchMinWait
+	started := false
+	for {
+		tok, refreshed, err := store.Valid(ctx, minValid)
+		var next time.Duration
+		switch {
+		case ctx.Err() != nil:
+			return nil
+		case errors.Is(err, alcfauth.ErrLoginRequired):
+			return err
+		case err != nil:
+			fmt.Fprintf(e.stderr, "alcfauth: refreshing the access token failed, trying again in %s: %v\n", formatDuration(retry), err)
+			next = retry
+			retry = min(2*retry, watchMaxWait)
+		default:
+			retry = watchMinWait
+			switch {
+			case refreshed:
+				fmt.Fprintf(e.stderr, "alcfauth: refreshed the access token in %s; valid until %s\n", store.KeyFilePath, formatTime(tok.Expiry()))
+				warnLoginAge(e, tok)
+			case !started:
+				fmt.Fprintf(e.stderr, "alcfauth: keeping %s valid; the access token is valid until %s\n", store.KeyFilePath, formatTime(tok.Expiry()))
+				warnLoginAge(e, tok)
+			}
+			started = true
+			next = min(max(tok.Expiry().Add(-minValid).Sub(e.now()), watchMinWait), watchMaxWait)
+		}
+		if err := wait(ctx, next); err != nil {
+			return nil
+		}
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func runStatus(ctx context.Context, args []string, e env) error {
