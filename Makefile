@@ -4,10 +4,10 @@
 # has to be computed is computed by POSIX sh inside the recipe that needs it.
 #
 # Cross-compilation: set GOOS and GOARCH on the command line or in the
-# environment. A build for the host lands in BIN_DIR; a build for another
-# platform lands in BIN_DIR/<goos>-<goarch>. BUILD_SUBDIR names that
-# subdirectory explicitly, and BUILD_SUBDIR=. flattens a cross build into
-# BIN_DIR.
+# environment; they default to the host. Every build lands in
+# BIN_DIR/<goos>-<goarch>, a host build included, so builds for different
+# platforms never overwrite each other. BUILD_SUBDIR names that subdirectory
+# explicitly, and BUILD_SUBDIR=. writes the binaries into BIN_DIR itself.
 GOOS ?=
 GOARCH ?=
 BIN_DIR ?= ./bin
@@ -21,15 +21,11 @@ all: lint test build
 # Build all binaries for the selected platform
 build:
 	@set -e; \
-	host_goos=$$(go env GOHOSTOS); host_goarch=$$(go env GOHOSTARCH); \
 	goos="$(GOOS)"; [ -n "$$goos" ] || goos=$$(go env GOOS); \
 	goarch="$(GOARCH)"; [ -n "$$goarch" ] || goarch=$$(go env GOARCH); \
 	exe=; [ "$$goos" != windows ] || exe=.exe; \
-	subdir="$(BUILD_SUBDIR)"; \
-	if [ -z "$$subdir" ] && [ "$$goos-$$goarch" != "$$host_goos-$$host_goarch" ]; then \
-	    subdir="$$goos-$$goarch"; \
-	fi; \
-	out="$(BIN_DIR)"; [ -z "$$subdir" ] || out="$$out/$$subdir"; \
+	subdir="$(BUILD_SUBDIR)"; [ -n "$$subdir" ] || subdir="$$goos-$$goarch"; \
+	out="$(BIN_DIR)"; [ "$$subdir" = . ] || out="$$out/$$subdir"; \
 	mkdir -p "$$out"; \
 	for cmd in lmc apiproxy; do \
 	    echo "GOOS=$$goos GOARCH=$$goarch go build -o $$out/$$cmd$$exe ./cmd/$$cmd"; \
@@ -96,7 +92,7 @@ help:
 	@echo "Available targets:"
 	@echo ""
 	@echo "  make                 - Run lint, test, and build (default)"
-	@echo "  make build           - Build all binaries for GOOS/GOARCH, defaulting to the host"
+	@echo "  make build           - Build all binaries for the host into ./bin/<goos>-<goarch>"
 	@echo "  make build GOOS=linux GOARCH=amd64 - Cross-build all binaries into ./bin/linux-amd64"
 	@echo "  make test            - Run all unit tests"
 	@echo "  make test-integration - Run integration tests (requires binaries)"

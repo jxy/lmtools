@@ -19,14 +19,18 @@ Requires Go 1.21.13 or later.
 make build
 ```
 
-`make build` writes `./bin/lmc` and `./bin/apiproxy`. Set `GOOS` and `GOARCH` to
-cross-compile; those builds land in `./bin/<goos>-<goarch>/`. The Makefile works
-with both BSD make and GNU make.
+`make build` writes `lmc` and `apiproxy` for the host into
+`./bin/<goos>-<goarch>/`, such as `./bin/linux-amd64/`. Set `GOOS` and `GOARCH`
+to cross-compile; each platform gets its own directory. The Makefile works with
+both BSD make and GNU make.
 
 Prebuilt binaries for linux/amd64, freebsd/amd64, and macOS/arm64 are attached
 to each [GitHub release](https://github.com/jxy/lmtools/releases) as
 `lmtools-<tag>-<goos>-<goarch>.tar.gz`, with a `SHA256SUMS` file beside them.
 Each archive holds `lmc`, `apiproxy`, `LICENSE`, and this README.
+
+The examples below run `lmc` and `apiproxy` by name. Add the directory that
+holds them to your `PATH`, or copy them into a directory already on it.
 
 `lmc -version` and `apiproxy -version` print the version the go command
 stamped at build time: the release tag for a release archive, or a
@@ -45,46 +49,46 @@ value with `=`, as in `-stream=false`.
 
 ```bash
 # Chat with the default Argo provider.
-echo "Tell me a story" | ./bin/lmc -argo-user "$USER"
+echo "Tell me a story" | lmc -argo-user "$USER"
 
 # Stream the answer.
-echo "Tell me a story" | ./bin/lmc -argo-user "$USER" -stream
+echo "Tell me a story" | lmc -argo-user "$USER" -stream
 
 # Show provider-returned thinking summaries on stderr while keeping the answer on stdout.
-echo "Solve this carefully" | ./bin/lmc -argo-user "$USER" \
+echo "Solve this carefully" | lmc -argo-user "$USER" \
   -effort high \
   -show-thinking
 
 # Ask about an image. Repeat -image to attach several; the prompt may be empty.
-echo "What is wrong in this screenshot?" | ./bin/lmc -argo-user "$USER" \
+echo "What is wrong in this screenshot?" | lmc -argo-user "$USER" \
   -image screenshot.png
 
 # Use OpenAI.
-echo "Explain quantum computing" | ./bin/lmc \
+echo "Explain quantum computing" | lmc \
   -provider openai \
   -api-key-file "$HOME/.openai-key" \
   -model gpt-5
 
 # Use OpenAI's Responses API instead of Chat Completions.
-echo "Return three bullet points" | ./bin/lmc \
+echo "Return three bullet points" | lmc \
   -provider openai \
   -api-key-file "$HOME/.openai-key" \
   -openai-responses
 
 # Use Argo's Responses API, which serves gpt* models.
-echo "Return three bullet points" | ./bin/lmc \
+echo "Return three bullet points" | lmc \
   -argo-user "$USER" \
   -model gpt5 \
   -openai-responses
 
 # Print the equivalent curl command instead of sending the request.
-echo "Explain quantum computing" | ./bin/lmc \
+echo "Explain quantum computing" | lmc \
   -provider openai \
   -api-key-file "$HOME/.openai-key" \
   -print-curl
 
 # Generate embeddings. Embed mode turns off session tracking.
-echo "Hello world" | ./bin/lmc -argo-user "$USER" -e
+echo "Hello world" | lmc -argo-user "$USER" -e
 ```
 
 When a response reports token counts, `lmc` prints them to stderr as soon as
@@ -109,23 +113,23 @@ addresses either a session (`0001`) or one message inside it (`0001/0002`).
 
 ```bash
 # List saved sessions.
-./bin/lmc -show-sessions
+lmc -show-sessions
 
 # Show a session or a single message.
-./bin/lmc -show 0001
-./bin/lmc -show 0001/0002
+lmc -show 0001
+lmc -show 0001/0002
 
 # Continue a session.
-echo "Continue" | ./bin/lmc -argo-user "$USER" -resume 0001
+echo "Continue" | lmc -argo-user "$USER" -resume 0001
 
 # Branch from a message.
-echo "Try a different answer" | ./bin/lmc -argo-user "$USER" -branch 0001/0002
+echo "Try a different answer" | lmc -argo-user "$USER" -branch 0001/0002
 
 # Delete a session, branch, or message together with its descendants.
-./bin/lmc -delete 0001
+lmc -delete 0001
 
 # Answer once without writing session files.
-echo "One-off question" | ./bin/lmc -argo-user "$USER" -no-session
+echo "One-off question" | lmc -argo-user "$USER" -no-session
 ```
 
 `-show-sessions`, `-show`, and `-delete` touch only local files, so they need no
@@ -193,9 +197,9 @@ from stdin until stdin ends, and each turn continues from where the previous
 one left the session, so MCP servers start once and stay up across turns.
 
 ```bash
-./bin/lmc -argo-user "$USER" -repl
-./bin/lmc -argo-user "$USER" -repl -resume 0001 -tool
-./bin/lmc -argo-user "$USER" -repl < questions.txt > answers.txt
+lmc -argo-user "$USER" -repl
+lmc -argo-user "$USER" -repl -resume 0001 -tool
+lmc -argo-user "$USER" -repl < questions.txt > answers.txt
 ```
 
 - A line ending in `\` continues the turn on the next line; `\\` at the end
@@ -661,7 +665,7 @@ Ctrl-C shows `Partial output`.
 ```bash
 # Run whitelisted commands without prompting.
 printf '["ls"]\n["pwd"]\n' > whitelist.txt
-echo "Show the working directory and files" | ./bin/lmc \
+echo "Show the working directory and files" | lmc \
   -argo-user "$USER" \
   -tool \
   -tool-whitelist whitelist.txt
@@ -669,13 +673,13 @@ echo "Show the working directory and files" | ./bin/lmc \
 # Grant one exact redirected shape. The plain ["sort"] rule would not grant it.
 printf '%s\n' '{"command":["sort"],"stdin_file":"in.txt","stdout_file":"out.txt"}' \
   > redirected-whitelist.txt
-echo "Sort in.txt into out.txt" | ./bin/lmc \
+echo "Sort in.txt into out.txt" | lmc \
   -argo-user "$USER" \
   -tool \
   -tool-whitelist redirected-whitelist.txt
 
 # For scripts, run only whitelisted commands and deny every non-match.
-echo "Run the allowed checks" | ./bin/lmc \
+echo "Run the allowed checks" | lmc \
   -argo-user "$USER" \
   -tool \
   -tool-non-interactive \
@@ -683,7 +687,7 @@ echo "Run the allowed checks" | ./bin/lmc \
 
 # Run every command not blocked by the blacklist, without prompting.
 printf '["rm"]\n["dd"]\n' > blacklist.txt
-echo "Inspect this repository" | ./bin/lmc \
+echo "Inspect this repository" | lmc \
   -argo-user "$USER" \
   -tool \
   -tool-auto-approve \
@@ -691,7 +695,7 @@ echo "Inspect this repository" | ./bin/lmc \
 
 # Give the model the tools of the MCP servers a file names, approving each
 # call at the prompt.
-echo "List the files in my home directory" | ./bin/lmc \
+echo "List the files in my home directory" | lmc \
   -argo-user "$USER" \
   -mcp-config examples/lmc/mcp-config.json
 ```
@@ -799,13 +803,13 @@ selection that leaves no tool at all, and an MCP server named
 
 ```bash
 # The filesystem server alone: no local commands, no image tool.
-echo "List the files in my home directory" | ./bin/lmc \
+echo "List the files in my home directory" | lmc \
   -argo-user "$USER" \
   -mcp-config examples/lmc/mcp-config.json \
   -tool-include filesystem
 
 # Local commands and the server, less one of its tools and the image tool.
-echo "Inspect this repository" | ./bin/lmc \
+echo "Inspect this repository" | lmc \
   -argo-user "$USER" \
   -mcp-config examples/lmc/mcp-config.json \
   -tool-exclude filesystem/directory_tree,view_image
@@ -1001,23 +1005,23 @@ beyond localhost.
 # OpenAI backend.
 echo "sk-..." > ~/.openai-key
 chmod 600 ~/.openai-key
-./bin/apiproxy -provider openai -api-key-file "$HOME/.openai-key"
+apiproxy -provider openai -api-key-file "$HOME/.openai-key"
 
 # Anthropic backend.
 echo "sk-ant-..." > ~/.anthropic-key
 chmod 600 ~/.anthropic-key
-./bin/apiproxy -provider anthropic -api-key-file "$HOME/.anthropic-key"
+apiproxy -provider anthropic -api-key-file "$HOME/.anthropic-key"
 
 # Google backend.
 echo "AIza..." > ~/.google-key
 chmod 600 ~/.google-key
-./bin/apiproxy -provider google -api-key-file "$HOME/.google-key"
+apiproxy -provider google -api-key-file "$HOME/.google-key"
 
 # Argo backend.
-./bin/apiproxy -provider argo -argo-user "$USER"
+apiproxy -provider argo -argo-user "$USER"
 
 # Listen on another host and port.
-./bin/apiproxy -host 0.0.0.0 -port 8080 \
+apiproxy -host 0.0.0.0 -port 8080 \
   -provider openai \
   -api-key-file "$HOME/.openai-key"
 ```
@@ -1197,7 +1201,7 @@ Start the proxy with a model map from the Codex-requested model name to the
 backend model:
 
 ```bash
-./bin/apiproxy -provider argo -argo-user "$USER" \
+apiproxy -provider argo -argo-user "$USER" \
   -model-map '^gpt-5\.5$=gpt55'
 ```
 
@@ -1230,7 +1234,7 @@ against any `-provider`.
 - When no rule matches, the requested model name goes upstream unchanged.
 
 ```bash
-./bin/apiproxy -provider argo -argo-user "$USER" \
+apiproxy -provider argo -argo-user "$USER" \
   -model-map '^gpt-4o-mini$=gpt5mini' \
   -model-map '^gpt-4o$=gpt5' \
   -model-map '^claude-3-haiku.*=claude-3-haiku-20240307' \
@@ -1272,7 +1276,7 @@ Argo serves an OpenAI-compatible Responses API at
 experimental, so the proxy uses it only when you pass `-openai-responses`:
 
 ```bash
-./bin/apiproxy -provider argo -argo-user "$USER" -openai-responses
+apiproxy -provider argo -argo-user "$USER" -openai-responses
 ```
 
 In this mode the proxy:
@@ -1391,7 +1395,8 @@ applies to every path except `-provider openai` and
   REPL commands, the last 100; `/history clear` empties it)
 - `lmc` logs: `~/.lmc/logs`
 - `apiproxy` Responses state: `~/.apiproxy/sessions`
-- Built binaries: `./bin/lmc` and `./bin/apiproxy`
+- Built binaries: `./bin/<goos>-<goarch>/lmc` and
+  `./bin/<goos>-<goarch>/apiproxy`
 
 ## Troubleshooting
 
