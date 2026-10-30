@@ -901,8 +901,9 @@ Output controls:
   thinking, lmc says so, once a run. Anthropic's `summarized` display is its readable
   thinking mode; adaptive thinking may skip thinking for a simple request,
   which needs no note.
-  Compatible Chat Completions servers' `reasoning_content` and Responses
-  reasoning text/summary events are supported and retained in session history.
+  Compatible Chat Completions servers' `reasoning_content` or `reasoning`
+  field (newer vLLM sends `reasoning`) and Responses reasoning text/summary
+  events are supported and retained in session history.
   A server may return thinking by default without an `-effort` flag. OpenAI's
   Chat Completions API returns no reasoning text, and Argo's chat completions
   route adds none for `gpt*` models. `lmc` warns when the thinking display

@@ -233,7 +233,7 @@ func OpenAIResponsesInputProjection(messages []TypedMessage) []OpenAIResponsesIn
 }
 
 func openAIResponsesReasoningItem(block ReasoningBlock) map[string]interface{} {
-	if block.Provider != "openai" || block.Type == "reasoning_content" {
+	if block.Provider != "openai" || isOpenAIChatReasoning(block) {
 		return nil
 	}
 	if len(block.Raw) > 0 {

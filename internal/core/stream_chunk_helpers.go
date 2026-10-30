@@ -34,6 +34,7 @@ type ParsedOpenAIStreamChoice struct {
 	FinishReason     string
 	Content          string
 	ReasoningContent string
+	Reasoning        string
 	ToolCalls        []ParsedOpenAIStreamToolCall
 }
 
@@ -111,6 +112,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 			Delta        struct {
 				Content          json.RawMessage `json:"content"`
 				ReasoningContent string          `json:"reasoning_content"`
+				Reasoning        string          `json:"reasoning"`
 				ToolCalls        []struct {
 					Index    int    `json:"index"`
 					ID       string `json:"id"`
@@ -155,6 +157,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 			Content:          openAIChatContentText(blocks),
 			Blocks:           blocks,
 			ReasoningContent: rawChoice.Delta.ReasoningContent,
+			Reasoning:        rawChoice.Delta.Reasoning,
 		}
 		if len(rawChoice.Delta.ToolCalls) > 0 {
 			choice.ToolCalls = make([]ParsedOpenAIStreamToolCall, 0, len(rawChoice.Delta.ToolCalls))

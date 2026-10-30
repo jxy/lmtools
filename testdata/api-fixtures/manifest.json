@@ -364,6 +364,13 @@
       ]
     },
     {
+      "id": "response-openai-vllm-reasoning",
+      "description": "vLLM Chat Completions reasoning in the reasoning field, and ALCF gateway errors sent as chunks",
+      "kinds": [
+        "response"
+      ]
+    },
+    {
       "id": "response-openai-llamacpp-length",
       "description": "llama.cpp Chat Completions token limit stops inside readable reasoning",
       "kinds": [

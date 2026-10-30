@@ -1,0 +1,8 @@
+{
+  "id": "response-openai-vllm-reasoning",
+  "description": "vLLM Chat Completions reasoning in the reasoning field, and ALCF gateway errors sent as chunks",
+  "kinds": [
+    "response"
+  ],
+  "provider": "openai"
+}

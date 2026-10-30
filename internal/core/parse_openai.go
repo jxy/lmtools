@@ -59,6 +59,7 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 			Message      struct {
 				Content          json.RawMessage `json:"content"`
 				ReasoningContent string          `json:"reasoning_content"`
+				Reasoning        string          `json:"reasoning"`
 				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -118,8 +119,8 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 	}
 
 	var blocks []Block
-	if msg.ReasoningContent != "" {
-		blocks = append(blocks, openAIChatReasoningBlock(msg.ReasoningContent))
+	if reasoning, ok := openAIChatReasoning(msg.ReasoningContent, msg.Reasoning); ok {
+		blocks = append(blocks, reasoning)
 	}
 	content, err := parseOpenAIChatContent(msg.Content)
 	if err != nil {
@@ -135,10 +136,35 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 	}, nil
 }
 
-const openAIChatReasoningType = "reasoning_content"
+// Chat Completions backends return reasoning in a field beside content:
+// reasoning_content, or reasoning, which newer vLLM sends. Each block keeps the
+// field it came in as its type, and a replay writes the same field. Responses
+// reasoning items already use the type "reasoning".
+const (
+	openAIChatReasoningType      = "reasoning_content"
+	openAIChatReasoningFieldType = "chat_reasoning"
+)
 
 func openAIChatReasoningBlock(text string) ReasoningBlock {
 	return ReasoningBlock{Provider: "openai", Type: openAIChatReasoningType, Text: text}
+}
+
+// openAIChatReasoning reads the two reasoning fields of a Chat message or
+// delta. A backend that fills both sends the same text twice, so
+// reasoning_content wins.
+func openAIChatReasoning(reasoningContent, reasoning string) (ReasoningBlock, bool) {
+	switch {
+	case reasoningContent != "":
+		return openAIChatReasoningBlock(reasoningContent), true
+	case reasoning != "":
+		return ReasoningBlock{Provider: "openai", Type: openAIChatReasoningFieldType, Text: reasoning}, true
+	default:
+		return ReasoningBlock{}, false
+	}
+}
+
+func isOpenAIChatReasoning(block ReasoningBlock) bool {
+	return block.Provider == "openai" && (block.Type == openAIChatReasoningType || block.Type == openAIChatReasoningFieldType)
 }
 
 func openAIChatIncompleteReason(finishReason string) string {

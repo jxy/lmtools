@@ -24,6 +24,7 @@ import (
 // OpenAIMessage represents a message in OpenAI format
 type OpenAIMessage struct {
 	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	Reasoning        string             `json:"reasoning,omitempty"`
 	Role             string             `json:"role"`
 	Content          OpenAIContentUnion `json:"content,omitempty"` // string or []OpenAIContent
 	ToolCalls        []OpenAIToolCall   `json:"tool_calls,omitempty"`
