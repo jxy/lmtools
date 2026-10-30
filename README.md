@@ -384,10 +384,16 @@ prompt, and `-tool-auto-approve` is not needed.
 
 A round's calls are all shown before the first question, and each question
 names the call it is about, for example `[2/3] Allow grep?`. At a tool
-approval prompt, `y` or `yes` approves; `n`, `no`, or an empty reply denies.
+approval prompt, `y` or `yes` approves; `n` or `no` denies.
 `a` or `all` approves this call and every later call in the round that would
 ask; the question offers it when there are such calls, and at any other
-question it approves the one call. In the REPL
+question it approves the one call. Enter alone gives the answer in capitals:
+`[y/n/A = this and the rest, ...]` while later calls would ask, and
+`[Y/n ...]` at the last or only one, so Enter approves the call and, where
+offered, the rest of the round. Asking to run again a call that may already
+have run is the exception, `[y/N ...]`: there Enter denies. Input typed
+before a question appears is discarded, so it cannot answer the question,
+and input that ends without an answer denies. In the REPL
 editor, Enter submits the answer; Ctrl-D on an empty answer denies. A question
 also takes `/show output [N]`, `/help`, which explains the answers, and `/ed`,
 and asks again afterwards; any other line that starts with `/` gets a note
@@ -424,7 +430,8 @@ the editor exits, review the draft and press Enter to submit, type to append,
 or use `/ed` again. Editor exit and queued input do not submit the answer.
 The final text is interpreted the same way whether typed or edited:
 `y`/`yes` approves, `a`/`all` approves this call and the rest of the round,
-`n`/`no`/empty denies, and other text becomes the user-provided denial reason.
+an empty answer is what Enter gives, `n`/`no` denies, and other text becomes
+the user-provided denial reason.
 Use `//ed` when the literal text `/ed` should be part of the reason.
 An oversized approval answer is discarded through its last continuation line
 and denies the call without a reason.
@@ -445,7 +452,7 @@ Sending a file to the provider is disclosure, so a `view_image` call is
 approved the way a command is. A whitelist rule naming the tool and the file
 or its directory admits it without a prompt, a blacklist rule naming them
 refuses it, and otherwise interactive `lmc` shows the path and asks `Send
-shot.png (image/png, 48213 bytes) to the model? [y/N or reason; /ed to edit]`, `-tool-auto-approve`
+shot.png (image/png, 48213 bytes) to the model? [Y/n or reason; /ed to edit]`, `-tool-auto-approve`
 approves it, and when no prompt can be answered it is denied; a denial prints
 the rule that would have allowed it. The image is saved once, inside the tool
 result in the session, and `-show` lists it under the result without printing
@@ -635,10 +642,10 @@ Tools: 2
 
 [2/2] Command: ["go","test","./internal/core"]
 
-[1/2] Allow git? [y/N, a = this and the rest, or reason; /ed to edit]:
+[1/2] Allow git? [y/n/A = this and the rest, or reason; /ed to edit]:
   > y
 
-[2/2] Allow go? [y/N or reason; /ed to edit]:
+[2/2] Allow go? [Y/n or reason; /ed to edit]:
   > y
 
 Running 2 tools in parallel...
@@ -770,7 +777,7 @@ HTTP server is whatever `headers` carries; `lmc` does not run an OAuth flow.
 An MCP call is approved the way a command is. A whitelist rule naming the
 server, or the server and tool, admits it without a prompt, a blacklist rule
 refuses it, and otherwise interactive `lmc` shows the server, tool, and
-arguments and asks `Call github/list_issues? [y/N or reason; /ed to edit]`; `-tool-auto-approve`
+arguments and asks `Call github/list_issues? [Y/n or reason; /ed to edit]`; `-tool-auto-approve`
 approves it, and when no prompt can be answered it is denied with the rule
 that would have allowed it. The result's text reaches the model as the tool
 output. Images in the result are attached the way `view_image` attaches a

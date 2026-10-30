@@ -9,8 +9,8 @@ import (
 
 // composeAnswer uses the normal turn reader and editor. The completed text is
 // classified only after submission, so an edited y/yes is an approval too. A
-// command other than /ed runs, and reask shows the question again.
-func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine, reask func()) (inputLine, error) {
+// command other than /ed runs, and reask shows q again.
+func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine, reask func(), q question) (inputLine, error) {
 	owner, _ := a.answers.(*inputOwner)
 	terminal := owner != nil && owner.terminal && owner.term != nil
 	first := &initial
@@ -68,7 +68,7 @@ func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine, reas
 		} else if isREPLCommand(text) {
 			command, arg := splitREPLCommand(text)
 			if command != "/ed" {
-				a.questionCommand(ctx, text, true)
+				a.questionCommand(ctx, text, q)
 				reask()
 				continue
 			}
@@ -97,7 +97,11 @@ func (a *cliApprover) composeAnswer(ctx context.Context, initial inputLine, reas
 		} else {
 			draft = edited
 		}
-		a.notifier.Infof("Enter submits the answer; type to append or use /ed to revise. y/yes approves; other text denies.")
+		if q.enterApproves {
+			a.notifier.Infof("Enter submits the answer; type to append or use /ed to revise. An empty answer, y/yes, or a/all approves; other text denies.")
+		} else {
+			a.notifier.Infof("Enter submits the answer; type to append or use /ed to revise. y/yes approves; other text denies.")
+		}
 	}
 }
 

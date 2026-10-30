@@ -71,9 +71,9 @@ func TestApprover_EdgeCases(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "deny with empty input",
+			name:     "approve with Enter",
 			input:    "\n",
-			expected: false,
+			expected: true,
 		},
 		{
 			name:     "deny with random input",
@@ -110,7 +110,7 @@ func TestApprover_EdgeCases(t *testing.T) {
 			if result.Approved != tt.expected {
 				t.Errorf("Approve() = %v, expected %v", result, tt.expected)
 			}
-			if len(notifier.messages) == 0 || notifier.messages[0] != "  Allow ls? [y/N or reason; /ed to edit]: " {
+			if len(notifier.messages) == 0 || notifier.messages[0] != "  Allow ls? [Y/n or reason; /ed to edit]: " {
 				t.Fatalf("approval prompt = %#v", notifier.messages)
 			}
 		})
@@ -124,6 +124,8 @@ type approverEntryPoint struct {
 	invoke    func(*cliApprover, context.Context) (core.Approval, error)
 	prompt    string
 	eofNotice string
+	// enterApproves says an empty answer approves.
+	enterApproves bool
 }
 
 func approverEntryPoints() []approverEntryPoint {
@@ -133,8 +135,9 @@ func approverEntryPoints() []approverEntryPoint {
 			invoke: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
 				return a.Approve(ctx, core.UniversalCommandArgs{Command: []string{"ls"}})
 			},
-			prompt:    "  Allow ls? [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n  No interactive input available; denying by default.\n",
+			prompt:        "  Allow ls? [Y/n or reason; /ed to edit]: ",
+			eofNotice:     "\n  No interactive input available; denying by default.\n",
+			enterApproves: true,
 		},
 		{
 			name: "ApproveImage",
@@ -144,8 +147,9 @@ func approverEntryPoints() []approverEntryPoint {
 				return a.ApproveImage(ctx, core.ViewImageArgs{Path: "plots/shot.png"},
 					core.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgo=", Name: "shot.png"})
 			},
-			prompt:    "  Send shot.png (image/png, 8 bytes) to the model? [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n  No interactive input available; denying by default.\n",
+			prompt:        "  Send shot.png (image/png, 8 bytes) to the model? [Y/n or reason; /ed to edit]: ",
+			eofNotice:     "\n  No interactive input available; denying by default.\n",
+			enterApproves: true,
 		},
 		{
 			name: "ApproveMCP",
@@ -154,8 +158,9 @@ func approverEntryPoints() []approverEntryPoint {
 				// names the server and tool the way a rule would.
 				return a.ApproveMCP(ctx, core.MCPCall{Server: "github", Tool: "list_issues", Arguments: json.RawMessage(`{"repo":"a/b"}`)})
 			},
-			prompt:    "  Call github/list_issues? [y/N or reason; /ed to edit]: ",
-			eofNotice: "\n  No interactive input available; denying by default.\n",
+			prompt:        "  Call github/list_issues? [Y/n or reason; /ed to edit]: ",
+			eofNotice:     "\n  No interactive input available; denying by default.\n",
+			enterApproves: true,
 		},
 		{
 			name: "ApproveRerun",
@@ -195,6 +200,9 @@ func TestApproverAnswerTerminatedByEOFIsTheAnswer(t *testing.T) {
 		{name: "yes then Ctrl-D approves", input: "  YES  ", expected: true},
 		{name: "n then Ctrl-D denies without the no-input notice", input: "n"},
 		{name: "Ctrl-D alone keeps the fail-safe denial and its notice", input: "", wantNotice: true},
+		// Spaces are no answer: only a submitted empty answer is Enter.
+		{name: "spaces then Ctrl-D keeps the fail-safe denial", input: "   ", wantNotice: true},
+		{name: "a tab then Ctrl-D keeps the fail-safe denial", input: "\t", wantNotice: true},
 	}
 
 	for _, entry := range approverEntryPoints() {
@@ -245,6 +253,13 @@ func TestApproverReturnsDenialReason(t *testing.T) {
 				wantReason := test.reason
 				if entry.name == "ApproveToolRoundLimitReset" {
 					wantReason = "" // This confirmation does not produce a tool result.
+				}
+				if entry.enterApproves && strings.TrimSpace(test.input) == "" {
+					// A blank answer is Enter, which approves here.
+					if err != nil || !decision.Approved {
+						t.Fatalf("decision=%+v error=%v, want approval", decision, err)
+					}
+					return
 				}
 				if err != nil || decision.Approved || decision.Reason != wantReason {
 					t.Fatalf("decision=%+v error=%v, want denial reason %q", decision, err, wantReason)
@@ -511,25 +526,114 @@ func TestApproverQuestionSpellsOutControlsInTheName(t *testing.T) {
 	if _, err := approver.Approve(context.Background(), core.UniversalCommandArgs{Command: []string{"\x1b[2Jrm"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(notifier.messages) == 0 || notifier.messages[0] != `  Allow "\u001b[2Jrm"? [y/N or reason; /ed to edit]: ` {
+	if len(notifier.messages) == 0 || notifier.messages[0] != `  Allow "\u001b[2Jrm"? [Y/n or reason; /ed to edit]: ` {
 		t.Fatalf("question = %#v", notifier.messages)
 	}
 }
 
 func TestParseApprovalAnswer(t *testing.T) {
-	for answer, want := range map[string]core.Approval{
-		"y":      {Approved: true},
-		" YES ":  {Approved: true},
-		"a":      {Approved: true, Rest: true},
-		"All":    {Approved: true, Rest: true},
-		"":       {},
-		"n":      {},
-		"No":     {},
-		"use rg": {Reason: "use rg"},
-	} {
-		if got := parseApprovalAnswer(answer); got != want {
-			t.Errorf("parseApprovalAnswer(%q) = %+v, want %+v", answer, got, want)
+	for _, enterApproves := range []bool{false, true} {
+		empty := core.Approval{}
+		if enterApproves {
+			empty = core.Approval{Approved: true, Rest: true}
 		}
+		for answer, want := range map[string]core.Approval{
+			"y":      {Approved: true},
+			" YES ":  {Approved: true},
+			"a":      {Approved: true, Rest: true},
+			"All":    {Approved: true, Rest: true},
+			"":       empty,
+			"  ":     empty,
+			"n":      {},
+			"No":     {},
+			"use rg": {Reason: "use rg"},
+		} {
+			if got := parseApprovalAnswer(answer, enterApproves); got != want {
+				t.Errorf("parseApprovalAnswer(%q, %v) = %+v, want %+v", answer, enterApproves, got, want)
+			}
+		}
+	}
+}
+
+// Enter answers a command question with yes, and with a when later calls in
+// the round would ask, and says so, since the answer line stays empty. A
+// rerun keeps no as its default, and input that ends without an answer
+// denies every question.
+func TestApproverEnterTakesTheDefault(t *testing.T) {
+	ls := core.UniversalCommandArgs{Command: []string{"ls"}}
+	inRound := func(index, total, remaining int) context.Context {
+		return core.WithApprovalTarget(context.Background(), core.ApprovalTarget{Index: index, Total: total, Remaining: remaining})
+	}
+	for _, tt := range []struct {
+		name   string
+		ctx    context.Context
+		ask    func(*cliApprover, context.Context) (core.Approval, error)
+		input  string
+		prompt string
+		want   core.Approval
+		said   string
+	}{
+		{
+			name:   "first of three",
+			ctx:    inRound(0, 3, 2),
+			ask:    func(a *cliApprover, ctx context.Context) (core.Approval, error) { return a.Approve(ctx, ls) },
+			input:  "\n",
+			prompt: "[1/3] Allow ls? [y/n/A = this and the rest, or reason; /ed to edit]: ",
+			want:   core.Approval{Approved: true, Rest: true},
+			said:   "  Approved this call and the remaining 2 calls.\n",
+		},
+		{
+			name:   "last of three",
+			ctx:    inRound(2, 3, 0),
+			ask:    func(a *cliApprover, ctx context.Context) (core.Approval, error) { return a.Approve(ctx, ls) },
+			input:  "\n",
+			prompt: "[3/3] Allow ls? [Y/n or reason; /ed to edit]: ",
+			want:   core.Approval{Approved: true, Rest: true},
+			said:   "  Approved.\n",
+		},
+		{
+			name:   "y needs no notice",
+			ctx:    inRound(0, 3, 2),
+			ask:    func(a *cliApprover, ctx context.Context) (core.Approval, error) { return a.Approve(ctx, ls) },
+			input:  "y\n",
+			prompt: "[1/3] Allow ls? [y/n/A = this and the rest, or reason; /ed to edit]: ",
+			want:   core.Approval{Approved: true},
+		},
+		{
+			name:   "n denies",
+			ctx:    inRound(0, 3, 2),
+			ask:    func(a *cliApprover, ctx context.Context) (core.Approval, error) { return a.Approve(ctx, ls) },
+			input:  "n\n",
+			prompt: "[1/3] Allow ls? [y/n/A = this and the rest, or reason; /ed to edit]: ",
+		},
+		{
+			name:   "end of input",
+			ctx:    inRound(0, 3, 2),
+			ask:    func(a *cliApprover, ctx context.Context) (core.Approval, error) { return a.Approve(ctx, ls) },
+			prompt: "[1/3] Allow ls? [y/n/A = this and the rest, or reason; /ed to edit]: ",
+			said:   "No interactive input available; denying by default.",
+		},
+		{
+			name: "rerun",
+			ctx:  context.Background(),
+			ask: func(a *cliApprover, ctx context.Context) (core.Approval, error) {
+				return a.ApproveRerun(ctx, core.ToolCall{ID: "call-1", Name: "universal_command"})
+			},
+			input:  "\n",
+			prompt: "  Run universal_command again? It may already have run. [y/N or reason; /ed to edit]: ",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			notifier := &mockNotifier{}
+			approval, err := tt.ask(newCLIApproverWithReader(notifier, strings.NewReader(tt.input)), tt.ctx)
+			if err != nil || approval != tt.want {
+				t.Fatalf("approval = %+v, err = %v, want %+v", approval, err, tt.want)
+			}
+			said := strings.Join(notifier.messages, "")
+			if !strings.Contains(said, tt.prompt) || !strings.Contains(said, tt.said) || (tt.said == "" && strings.Contains(said, "Approved")) {
+				t.Fatalf("said %q", said)
+			}
+		})
 	}
 }
 

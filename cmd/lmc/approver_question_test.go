@@ -15,7 +15,7 @@ func TestApproverNeverTakesACommandAsAnAnswer(t *testing.T) {
 		approved                  bool
 	}{
 		{name: "unknown command", input: "/exit\ny\n", approved: true, note: "  At a question, /help and /ed work.\n  To give a reason that starts with /, begin it with //.\n"},
-		{name: "help", input: "/help\nn\n", note: "n, no, or Enter denies it; other text denies it and is your reason."},
+		{name: "help", input: "/help\nn\n", note: "  Enter, a, or all approves this call and the rest of the round;\n  y or yes approves this call alone.\n  n or no denies it; other text denies it and is your reason.\n"},
 		{name: "show without output", input: "/show last\nn\n", note: "At a question, /help and /ed work"},
 		{name: "escaped reason", input: "//etc is the wrong place\n", reason: "/etc is the wrong place"},
 		{name: "command then end of input", input: "/show output 1"},
@@ -67,8 +67,8 @@ func TestRoundLimitQuestionRunsCommands(t *testing.T) {
 func TestQuestionHelpFitsEightyColumns(t *testing.T) {
 	a := newCLIApproverWithReader(&mockNotifier{}, strings.NewReader(""))
 	a.showOutput = func(context.Context, string) {}
-	for _, compose := range []bool{true, false} {
-		for _, line := range strings.Split(a.questionGuide(compose)+a.questionCommandsNote(compose), "\n") {
+	for _, q := range []question{{compose: true, enterApproves: true}, {compose: true}, {}} {
+		for _, line := range strings.Split(a.questionGuide(q)+a.questionCommandsNote(q.compose), "\n") {
 			if len(line) > 79 {
 				t.Errorf("%d bytes: %q", len(line), line)
 			}

@@ -99,7 +99,9 @@ destinations when specified. A program found outside the system directories is
 named. Arguments spanning lines, such as scripts, are shown line by line.
 Then each call that needs approval is asked about by number and name.
 y or yes approves. a or all approves this call and the rest of the round.
-Enter, n, or no declines. Other text declines with your reason.
+Enter answers with the capital letter: [y/n/A] approves this call and the rest of
+the round, and [Y/n], at the last or only question, approves the call.
+n or no declines. Other text declines with your reason.
 /ed edits a reason; continuation lines work as at the normal prompt.
 At a question, /show output [N] and /help run, other commands get a note, and
 the question is asked again. A reason starting with / begins with //.
@@ -107,7 +109,8 @@ Ctrl-C cancels the turn. Ctrl-D on an empty answer declines.
 Input typed before an approval question cannot answer it.
 A command whose program or working directory is missing shows Cannot start now:
 under its review; it is still asked about and run, since an earlier call may create it.
-An unknown earlier outcome is shown before asking whether to run that call again.
+An unknown earlier outcome is shown before asking whether to run that call again;
+that question is [y/N], and Enter declines it.
 Results appear in order as calls finish, quoted under each call; long output shows
 its first and last lines, and the note under it names the /show output N that
 prints it whole, at the prompt or at the next question (/tool-output full shows

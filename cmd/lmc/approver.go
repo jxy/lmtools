@@ -88,10 +88,12 @@ func newCLIApproverWithReader(notifier core.Notifier, input io.Reader) *cliAppro
 // for an answer missing because input ended, a question cancelled, and
 // input typed before the question that was discarded. remaining counts the
 // later calls an answer of "a" approves along with this one; zero means the
-// answer is not offered.
+// answer is not offered. enterApproves makes an empty answer the same as
+// "a"; otherwise it denies. Input that ends without an answer denies either
+// way.
 type question struct {
 	prompt, eofNotice, cancelNotice, discardedNotice string
-	compose                                          bool
+	compose, enterApproves                           bool
 	remaining                                        int
 	// lead opens the question, before any notice: a named question
 	// starts after an empty line, apart from the calls listed above it.
@@ -102,21 +104,31 @@ type question struct {
 // it asks about any of them, and says which call each question is about; such
 // a question starts the line with the call's number. A question asked without
 // a round, such as a rerun, sits under the call's review block, aligned with
-// its detail column.
-func toolQuestion(ctx context.Context, ask, eofNotice, cancelNotice string) question {
+// its detail column. enterApproves makes Enter approve the call, and the rest
+// of the round where later calls would ask.
+func toolQuestion(ctx context.Context, ask, eofNotice, cancelNotice string, enterApproves bool) question {
 	q := question{
 		compose:         true,
-		prompt:          tools.DetailIndent + ask + toolApprovalChoices,
+		enterApproves:   enterApproves,
 		eofNotice:       "\n" + tools.DetailIndent + eofNotice + "\n",
 		cancelNotice:    "\n" + tools.DetailIndent + cancelNotice + "\n",
 		discardedNotice: tools.DetailIndent + discardedInputNotice + "\n",
 	}
-	if target, ok := core.ApprovalTargetFrom(ctx); ok {
-		choices := toolApprovalChoices
-		if target.Remaining > 0 {
-			choices = toolApprovalChoicesWithRest
-			q.remaining = target.Remaining
-		}
+	target, inRound := core.ApprovalTargetFrom(ctx)
+	if inRound {
+		q.remaining = target.Remaining
+	}
+	choices := toolApprovalChoices
+	switch {
+	case enterApproves && q.remaining > 0:
+		choices = toolApprovalChoicesAll
+	case enterApproves:
+		choices = toolApprovalChoicesYes
+	case q.remaining > 0:
+		choices = toolApprovalChoicesWithRest
+	}
+	q.prompt = tools.DetailIndent + ask + choices
+	if inRound {
 		q.prompt = fmt.Sprintf("[%d/%d] %s%s", target.Index+1, target.Total, ask, choices)
 		q.lead = "\n"
 	}
@@ -133,7 +145,11 @@ func commandName(args core.UniversalCommandArgs) string {
 // question appeared and dropped, so it could not answer the question.
 const discardedInputNotice = "Discarded input typed before this question."
 
+// The capital letter is what Enter answers. A command, image, or MCP call
+// takes Y, or A where later calls in the round would ask; a rerun takes N.
 const (
+	toolApprovalChoicesYes      = "[Y/n or reason; /ed to edit]: "
+	toolApprovalChoicesAll      = "[y/n/A = this and the rest, or reason; /ed to edit]: "
 	toolApprovalChoices         = "[y/N or reason; /ed to edit]: "
 	toolApprovalChoicesWithRest = "[y/N, a = this and the rest, or reason; /ed to edit]: "
 )
@@ -146,6 +162,7 @@ func (a *cliApprover) Approve(ctx context.Context, args core.UniversalCommandArg
 		"Allow "+commandName(args)+"? ",
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
+		true,
 	))
 }
 
@@ -157,6 +174,7 @@ func (a *cliApprover) ApproveImage(ctx context.Context, _ core.ViewImageArgs, im
 	return a.ask(ctx, toolQuestion(ctx, send,
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
+		true,
 	))
 }
 
@@ -168,6 +186,7 @@ func (a *cliApprover) ApproveMCP(ctx context.Context, call core.MCPCall) (core.A
 	return a.ask(ctx, toolQuestion(ctx, ask,
 		"No interactive input available; denying by default.",
 		"Approval prompt cancelled.",
+		true,
 	))
 }
 
@@ -180,6 +199,7 @@ func (a *cliApprover) ApproveRerun(ctx context.Context, call core.ToolCall) (cor
 	return a.ask(ctx, toolQuestion(ctx, ask,
 		"No interactive input available; not running it again.",
 		"Rerun prompt cancelled.",
+		false,
 	))
 }
 
@@ -240,7 +260,7 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 	for {
 		got, err = a.answers.answer(ctx, readBound, show)
 		if err == nil && q.compose && !got.eof {
-			got, err = a.composeAnswer(ctx, got, reask)
+			got, err = a.composeAnswer(ctx, got, reask, q)
 		}
 		// A question that composes its answer runs commands as they come;
 		// a plain one runs a command here and asks again. A command is
@@ -248,7 +268,7 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		if err != nil || got.eof || q.compose || !isREPLCommand(strings.TrimSpace(got.text)) {
 			break
 		}
-		a.questionCommand(ctx, strings.TrimSpace(got.text), false)
+		a.questionCommand(ctx, strings.TrimSpace(got.text), q)
 	}
 	if err == nil {
 		err = ctx.Err()
@@ -289,9 +309,10 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		}
 		// An answer and the end of input arrive together when the operator
 		// types y and then Ctrl-D; reading only the end would turn their
-		// approval into a denial. The absence of an answer is an empty line,
-		// which keeps the fail-safe denial the [y/N] default promises.
-		if got.text == "" && !got.tooLong {
+		// approval into a denial. Input that ends with no answer denies,
+		// whatever Enter would have answered: only a submitted empty answer
+		// is Enter, and blanks with no Enter after them are no answer.
+		if strings.TrimSpace(got.text) == "" && !got.tooLong {
 			a.notifier.Promptf("%s", q.eofNotice)
 			return core.Approval{}, nil
 		}
@@ -303,23 +324,28 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		a.notifier.Warnf("Approval response is too long; denying without a reason.")
 		return core.Approval{}, nil
 	}
-	approval := parseApprovalAnswer(got.text)
-	if approval.Rest && q.remaining > 0 {
+	approval := parseApprovalAnswer(got.text, q.enterApproves)
+	switch {
+	case approval.Rest && q.remaining > 0:
 		a.notifier.Promptf("%sApproved this call and the remaining %s.\n", tools.DetailIndent, core.Plural(q.remaining, "call"))
+	case approval.Approved && strings.TrimSpace(got.text) == "":
+		// Enter leaves the answer line empty; say what it answered.
+		a.notifier.Promptf("%sApproved.\n", tools.DetailIndent)
 	}
 	return approval, nil
 }
 
 // parseApprovalAnswer classifies a submitted answer. y or yes approves; a or
 // all approves the rest of the round too, which is this call alone when no
-// later call would ask; n, no, or nothing denies; anything else denies with
-// the text as the reason.
-func parseApprovalAnswer(line string) core.Approval {
+// later call would ask; n or no denies; anything else denies with the text
+// as the reason. An empty answer counts as a when enterApproves, and as n
+// otherwise.
+func parseApprovalAnswer(line string, enterApproves bool) core.Approval {
 	text := strings.TrimSpace(line)
 	switch {
 	case isAffirmativeAnswer(text):
 		return core.Approval{Approved: true}
-	case strings.EqualFold(text, "a") || strings.EqualFold(text, "all"):
+	case strings.EqualFold(text, "a") || strings.EqualFold(text, "all") || (text == "" && enterApproves):
 		return core.Approval{Approved: true, Rest: true}
 	case text == "" || strings.EqualFold(text, "n") || strings.EqualFold(text, "no"):
 		return core.Approval{}
@@ -339,18 +365,17 @@ func isAffirmativeAnswer(line string) bool {
 
 // questionCommand runs a command typed at a question: /show output prints an
 // output the transcript shortened, and /help explains the answers. Anything
-// else gets a note, so a command never becomes an answer. compose says the
-// question takes a reason and /ed.
-func (a *cliApprover) questionCommand(ctx context.Context, text string, compose bool) {
+// else gets a note, so a command never becomes an answer.
+func (a *cliApprover) questionCommand(ctx context.Context, text string, q question) {
 	command, argument := splitREPLCommand(text)
 	field, rest, _ := strings.Cut(argument, " ")
 	switch {
 	case command == "/show" && field == "output" && a.showOutput != nil:
 		a.showOutput(ctx, strings.TrimSpace(rest))
 	case command == "/help":
-		a.notifier.Promptf("%s", tools.Wrap(a.questionGuide(compose), a.columns))
+		a.notifier.Promptf("%s", tools.Wrap(a.questionGuide(q), a.columns))
 	default:
-		a.notifier.Promptf("%s\n", tools.Wrap(a.questionCommandsNote(compose), a.columns))
+		a.notifier.Promptf("%s\n", tools.Wrap(a.questionCommandsNote(q.compose), a.columns))
 	}
 }
 
@@ -388,14 +413,20 @@ func listed(items []string) string {
 
 // questionGuide explains the answers a question takes and the commands it
 // understands.
-func (a *cliApprover) questionGuide(compose bool) string {
+func (a *cliApprover) questionGuide(q question) string {
 	indent := tools.DetailIndent
 	var b strings.Builder
-	if compose {
+	switch {
+	case q.compose && q.enterApproves:
+		b.WriteString(indent + "Enter, a, or all approves this call and the rest of the round;\n")
+		b.WriteString(indent + "y or yes approves this call alone.\n")
+		b.WriteString(indent + "n or no denies it; other text denies it and is your reason.\n")
+		b.WriteString(indent + "/ed edits the answer; to give a reason that starts with /, begin it with //.\n")
+	case q.compose:
 		b.WriteString(indent + "y or yes approves this call; a or all approves it and the rest of the round.\n")
 		b.WriteString(indent + "n, no, or Enter denies it; other text denies it and is your reason.\n")
 		b.WriteString(indent + "/ed edits the answer; to give a reason that starts with /, begin it with //.\n")
-	} else {
+	default:
 		b.WriteString(indent + "y or yes continues; n, no, Enter, or other text stops here.\n")
 	}
 	if a.showOutput != nil {

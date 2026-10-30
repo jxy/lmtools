@@ -82,8 +82,11 @@ func (n *questionNotifier) Errorf(format string, args ...interface{}) { n.record
 
 func (n *questionNotifier) Promptf(format string, args ...interface{}) {
 	message := n.record(format, args...)
-	if strings.HasSuffix(message, "[y/N]: ") || strings.HasSuffix(message, toolApprovalChoices) {
-		n.shown <- struct{}{}
+	for _, choices := range []string{"[y/N]: ", toolApprovalChoices, toolApprovalChoicesWithRest, toolApprovalChoicesYes, toolApprovalChoicesAll} {
+		if strings.HasSuffix(message, choices) {
+			n.shown <- struct{}{}
+			return
+		}
 	}
 }
 
@@ -152,7 +155,8 @@ func TestTerminalQuestionDropsInputTypedBeforeIt(t *testing.T) {
 		approved bool
 		noted    bool
 	}{
-		{name: "y without Enter, then Enter", before: "y", answer: "\n"},
+		// Enter alone approves, so a kept n would have denied.
+		{name: "n without Enter, then Enter", before: "n", answer: "\n", approved: true},
 		{name: "a line typed during generation, then no", before: "yes\n", answer: "n\n", noted: true},
 		{name: "a line typed during generation, then yes", before: "no\n", answer: "yes\n", approved: true, noted: true},
 	} {

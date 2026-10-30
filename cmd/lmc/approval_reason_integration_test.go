@@ -37,6 +37,7 @@ func TestTerminalToolDenialReasonReachesModelAndSession(t *testing.T) {
 		{name: "edit history", input: "/ed 1\n", editorMode: "identity", seed: "Review the files.", reason: "Review the files."},
 		{name: "edit regex", input: "/ed ^Review\n", editorMode: "identity", seed: "Review the files.", reason: "Review the files."},
 		{name: "edited yes approves", input: "/ed\n", editorMode: "wait", editorInput: "yes\n", approved: true},
+		{name: "Enter approves", input: "\n", approved: true},
 		{name: "EOF discards edited yes", input: "/ed\n", editorMode: "wait", editorInput: "yes\n", submit: "\x04"},
 		{name: "append to edited yes", input: "/ed\n", editorMode: "wait", editorInput: "yes\n", appendText: " but do not create files.", reason: "yes but do not create files."},
 		{name: "queued yes waits for review", input: "/ed\ny\n", editorMode: "success", reason: "draft"},
@@ -115,7 +116,7 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 			r := startREPLUnderTerminal(t, server.URL, nil, flags...)
 			r.expect(t, freshPrompt)
 			r.typeKeys(t, "Review the files.\n")
-			r.expect(t, "[1/1] Allow touch? "+strings.TrimRight(toolApprovalChoices, " ")+"\r\n"+approvalPrompt)
+			r.expect(t, "[1/1] Allow touch? "+strings.TrimRight(toolApprovalChoicesYes, " ")+"\r\n"+approvalPrompt)
 			r.typeKeys(t, test.input)
 			if test.editorMode != "" {
 				if test.editorMode == "wait" {

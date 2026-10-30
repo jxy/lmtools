@@ -137,7 +137,7 @@ func TestTerminalContinuedInputPreservesLiteralText(t *testing.T) {
 						t.Fatal(err)
 					}
 					a := newApprover(ui.NewREPLNotifier(io.Discard), owner)
-					line, err := a.composeAnswer(ctx, initial, func() {})
+					line, err := a.composeAnswer(ctx, initial, func() {}, question{compose: true, enterApproves: true})
 					if err != nil || line.tooLong || line.eof {
 						t.Fatalf("approval=%+v err=%v", line, err)
 					}

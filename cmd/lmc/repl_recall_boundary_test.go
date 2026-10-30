@@ -53,7 +53,7 @@ func TestTerminalRecallCountsPayloadBytes(t *testing.T) {
 							t.Fatal(err)
 						}
 						a := newApprover(ui.NewREPLNotifier(io.Discard), owner)
-						line, err := a.composeAnswer(ctx, initial, func() {})
+						line, err := a.composeAnswer(ctx, initial, func() {}, question{compose: true, enterApproves: true})
 						if err != nil || line.eof {
 							t.Fatalf("approval input=%+v err=%v", line, err)
 						}

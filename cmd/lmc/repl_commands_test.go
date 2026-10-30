@@ -492,6 +492,19 @@ func TestREPLToolsHelpDescribesTheStartCheck(t *testing.T) {
 	}
 }
 
+// The tools help says what Enter answers, as the questions take it: yes
+// at a call's question, no at the question to run a call again.
+func TestREPLToolsHelpDescribesEnter(t *testing.T) {
+	for _, want := range []string{"[y/n/A] approves this call and the rest of", "[Y/n]", "n or no declines.", "that question is [y/N], and Enter declines it."} {
+		if !strings.Contains(replToolsHelp, want) {
+			t.Errorf("tools help lacks %q:\n%s", want, replToolsHelp)
+		}
+	}
+	if strings.Contains(replToolsHelp, "Enter, n, or no declines") {
+		t.Errorf("tools help still says Enter declines:\n%s", replToolsHelp)
+	}
+}
+
 // /model and /effort change the turns that follow, and only those.
 func TestREPLModelAndEffortChangeTheNextTurn(t *testing.T) {
 	server := mockserver.NewMockServer(numberedAnswers())

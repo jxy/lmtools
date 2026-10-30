@@ -204,8 +204,8 @@ func TestTerminalEditorWrapsALongApprovalQuestion(t *testing.T) {
 	go func() { _, err := a.Approve(ctx, core.UniversalCommandArgs{Command: []string{"ls"}}); errs <- err }()
 	// 39 cells a row: the question, then rows after the continuation marker.
 	for _, row := range []string{
-		"[1/2] Allow ls? [y/N, a = this and the \r\n",
-		"  : rest, or reason; /ed to edit]:\r\n",
+		"[1/2] Allow ls? [y/n/A = this and the r\r\n",
+		"  : est, or reason; /ed to edit]:\r\n",
 	} {
 		if err := screen.Expect(row, time.Second); err != nil {
 			t.Fatal(err)
