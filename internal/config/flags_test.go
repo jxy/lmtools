@@ -170,7 +170,7 @@ func TestParseFlagsCustom(t *testing.T) {
 		System:              "sys",
 		SystemExplicitlySet: true, // -s flag was provided
 		Timeout:             10 * time.Minute,
-		Retries:             3,                // Default value
+		Retries:             10,               // Default value, retry.DefaultMaxRetries
 		ToolTimeout:         60 * time.Second, // Default value
 		MaxToolRounds:       64,               // Default value
 		MaxToolParallel:     8,                // Default value

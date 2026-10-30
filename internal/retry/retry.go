@@ -29,10 +29,15 @@ type Config struct {
 	LoggerFromContext func(context.Context) Logger
 }
 
+// DefaultMaxRetries is how many more times a failed request is sent when
+// the caller names no count: eleven attempts in all. lmc's -retries
+// defaults to it.
+const DefaultMaxRetries = 10
+
 // DefaultConfig returns default retry configuration
 func DefaultConfig() *Config {
 	return &Config{
-		MaxRetries:     10,
+		MaxRetries:     DefaultMaxRetries,
 		InitialBackoff: 1 * time.Second,
 		MaxBackoff:     30 * time.Second,
 		BackoffFactor:  2.0,

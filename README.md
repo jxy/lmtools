@@ -994,7 +994,9 @@ Requests and logging:
 
 - `-timeout duration`
 - `-retries int`: How many more times to send a request that failed, waiting
-  longer before each attempt. Default 3. A request is sent again after HTTP
+  longer before each attempt, from about a second up to a minute. Default 10,
+  so a request that keeps failing is given up after a few minutes; Ctrl-C
+  ends the wait. A request is sent again after HTTP
   408, 425, 429, or 5xx, after a connection error before the response, and
   when a stream reports one of those failures before any content, as Argo
   does with `Streaming response failed`. A retried 5xx or stream failure is

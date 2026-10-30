@@ -9,6 +9,7 @@ import (
 	"lmtools/internal/mcp"
 	"lmtools/internal/prompts"
 	"lmtools/internal/providerconfig"
+	"lmtools/internal/retry"
 	"os"
 	"strings"
 	"time"
@@ -196,7 +197,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 
 	// Retry configuration
-	fs.IntVar(&cfg.Retries, "retries", 3, "number of retry attempts for failed requests")
+	fs.IntVar(&cfg.Retries, "retries", retry.DefaultMaxRetries, "number of retry attempts for failed requests")
 
 	// Session Options
 	fs.StringVar(&cfg.Resume, "resume", "", "resume session or branch by ID/path")
