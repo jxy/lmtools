@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // checkStreamStart reads at most maxStreamStartBytes of a stream while it
@@ -31,6 +32,8 @@ type streamStartError struct {
 	url     string
 	status  int
 	message string
+	// reason is the error's message alone, short, for a status line.
+	reason string
 }
 
 func (e *streamStartError) Error() string {
@@ -74,11 +77,11 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 			inEvent = true
 		}
 		if inEvent && (len(line) == 0 || readErr != nil) {
-			kind, status, message := judgeStreamData(bytes.TrimSpace(data))
-			if kind == eventError && retryableStatus(status) {
-				return &streamStartError{method: req.Method, url: redactedURL(req.URL), status: status, message: message}
+			event := judgeStreamData(bytes.TrimSpace(data))
+			if event.kind == eventError && retryableStatus(event.status) {
+				return &streamStartError{method: req.Method, url: redactedURL(req.URL), status: event.status, message: event.message, reason: event.reason}
 			}
-			if kind != eventEmpty {
+			if event.kind != eventEmpty {
 				break
 			}
 			data, inEvent = data[:0], false
@@ -142,11 +145,19 @@ const (
 	eventError                      // an error
 )
 
-// judgeStreamData judges the data of one event; for an error it also
-// returns the HTTP status the error stands for and its message.
-func judgeStreamData(data []byte) (streamEvent, int, string) {
+// judgment is what checkStreamStart makes of the data of one event. For an
+// error it also holds the HTTP status the error stands for, or 0, its
+// message with its type and code, and the message alone as a short reason.
+type judgment struct {
+	kind            streamEvent
+	status          int
+	message, reason string
+}
+
+// judgeStreamData judges the data of one event.
+func judgeStreamData(data []byte) judgment {
 	if len(data) == 0 {
-		return eventEmpty, 0, ""
+		return judgment{kind: eventEmpty}
 	}
 	var event struct {
 		Type     string          `json:"type"`
@@ -157,30 +168,27 @@ func judgeStreamData(data []byte) (streamEvent, int, string) {
 		Choices json.RawMessage `json:"choices"`
 	}
 	if json.Unmarshal(data, &event) != nil {
-		return eventContent, 0, "" // [DONE], or not an event this check knows
+		return judgment{kind: eventContent} // [DONE], or not an event this check knows
 	}
 	switch {
 	case present(event.Error):
 		// Argo, OpenAI Chat, Anthropic's error event, and Google.
-		status, message := streamErrorStatus(event.Error, false)
-		return eventError, status, message
+		return judgeStreamError(event.Error, false)
 	case event.Type == "error":
 		// A Responses error event: the code and message sit beside the
 		// event's type.
-		status, message := streamErrorStatus(data, true)
-		return eventError, status, message
+		return judgeStreamError(data, true)
 	case event.Type == "response.failed":
-		status, message := streamErrorStatus(event.Response.Error, false)
-		return eventError, status, message
+		return judgeStreamError(event.Response.Error, false)
 	}
 	switch event.Type {
 	case "message_start", "ping", "response.created", "response.in_progress", "response.queued":
-		return eventEmpty, 0, ""
+		return judgment{kind: eventEmpty}
 	}
 	if present(event.Choices) && emptyChoices(event.Choices) {
-		return eventEmpty, 0, ""
+		return judgment{kind: eventEmpty}
 	}
-	return eventContent, 0, ""
+	return judgment{kind: eventContent}
 }
 
 // emptyChoices reports whether the choices of a Chat chunk carry nothing
@@ -238,24 +246,25 @@ var streamErrorStatuses = map[string]int{
 	"rate_limit_error":    http.StatusTooManyRequests,     // Anthropic
 }
 
-// streamErrorStatus reads the error of an error event: the HTTP status it
+// judgeStreamError reads the error of an error event: the HTTP status it
 // stands for, or 0 when it names none this check knows, and its message.
 // A status in the message comes first, since Argo's code is internal_error
 // whatever went wrong; then a numeric code, as Google sends; then the type;
 // then a code string. ignoreType is for a Responses error event, whose type
 // field names the event.
-func streamErrorStatus(raw json.RawMessage, ignoreType bool) (int, string) {
+func judgeStreamError(raw json.RawMessage, ignoreType bool) judgment {
 	var fields struct {
 		Message string          `json:"message"`
 		Type    string          `json:"type"`
 		Code    json.RawMessage `json:"code"`
 	}
 	if json.Unmarshal(raw, &fields) != nil {
-		var message string
-		if json.Unmarshal(raw, &message) == nil {
-			return 0, message
+		message := string(raw)
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			message = text
 		}
-		return 0, string(raw)
+		return judgment{kind: eventError, message: message, reason: shortReason(message)}
 	}
 	if ignoreType {
 		fields.Type = ""
@@ -265,18 +274,34 @@ func streamErrorStatus(raw json.RawMessage, ignoreType bool) (int, string) {
 	if json.Unmarshal(fields.Code, &code) != nil {
 		_ = json.Unmarshal(fields.Code, &number)
 	}
-	message := describeStreamError(fields.Message, fields.Type, code, number)
-	if match := argoErrorCode.FindStringSubmatch(fields.Message); match != nil {
-		status, _ := strconv.Atoi(match[1])
-		return status, message
+	found := judgment{kind: eventError, message: describeStreamError(fields.Message, fields.Type, code, number)}
+	found.reason = shortReason(fields.Message)
+	if found.reason == "" {
+		found.reason = shortReason(found.message)
 	}
-	if number >= 100 && number <= 599 {
-		return number, message
+	switch match := argoErrorCode.FindStringSubmatch(fields.Message); {
+	case match != nil:
+		found.status, _ = strconv.Atoi(match[1])
+	case number >= 100 && number <= 599:
+		found.status = number
+	case fields.Type != "":
+		found.status = streamErrorStatuses[strings.ToLower(fields.Type)]
+	default:
+		found.status = streamErrorStatuses[strings.ToLower(code)]
 	}
-	if fields.Type != "" {
-		return streamErrorStatuses[strings.ToLower(fields.Type)], message
+	return found
+}
+
+// maxReasonRunes bounds the reason a retry shows on a status line.
+const maxReasonRunes = 60
+
+// shortReason puts text on one line and cuts it to maxReasonRunes.
+func shortReason(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if utf8.RuneCountInString(text) <= maxReasonRunes {
+		return text
 	}
-	return streamErrorStatuses[strings.ToLower(code)], message
+	return string([]rune(text)[:maxReasonRunes])
 }
 
 // describeStreamError writes an error event's message the way lmc's stream

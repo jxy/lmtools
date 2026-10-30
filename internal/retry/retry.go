@@ -133,6 +133,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 	}
 
 	var lastErr error
+	var lastReason string
 	var overrideBackoff time.Duration
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
 		// Wait before retry (except first attempt)
@@ -144,7 +145,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 				backoff = overrideBackoff
 				overrideBackoff = 0 // Reset after use
 			}
-			reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1, Delay: backoff})
+			reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1, Delay: backoff, Reason: lastReason})
 
 			// Try to get request logger from context first
 			logger := r.getLogger(ctx)
@@ -177,6 +178,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 			}
 			if isRetryableTransportError(err) {
 				lastErr = errors.WrapError("execute request", fmt.Errorf("attempt %d: %s %s -> %v", attempt+1, req.Method, req.URL, err))
+				lastReason = transportReason(err)
 				continue
 			}
 			// Permanent error
@@ -192,6 +194,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 		// Drain and close response body for connection reuse
 		DrainAndClose(resp)
 		lastErr = errors.WrapError("HTTP request", fmt.Errorf("attempt %d: %s %s -> HTTP %d", attempt+1, req.Method, req.URL, resp.StatusCode))
+		lastReason = fmt.Sprintf("HTTP %d", resp.StatusCode)
 
 		// Parse Retry-After header if present
 		if retryAfter := ExtractRetryAfter(resp); retryAfter > 0 {
@@ -220,6 +223,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 	logger := r.getLogger(ctx)
 
 	var lastErr error
+	var lastReason string
 	var overrideBackoff time.Duration
 
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
@@ -230,7 +234,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 				backoff = overrideBackoff
 				overrideBackoff = 0
 			}
-			reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1, Delay: backoff})
+			reportProgress(ctx, Progress{Attempt: attempt + 1, Total: r.config.MaxRetries + 1, Delay: backoff, Reason: lastReason})
 
 			// Try to get request logger from context first
 			if logger != nil {
@@ -262,6 +266,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 				}
 			}
 			lastErr = errors.WrapError("HTTP response", fmt.Errorf("HTTP %d response", resp.StatusCode))
+			lastReason = fmt.Sprintf("HTTP %d", resp.StatusCode)
 			if retryAfter := ExtractRetryAfter(resp); retryAfter > 0 {
 				nextBackoff := r.calculateBackoff(attempt)
 				if retryAfter > nextBackoff {
@@ -284,8 +289,11 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 					if logger != nil {
 						logger.Errorf("%v", err)
 					}
+					lastReason = streamErr.reason
 				} else if !isRetryableTransportError(err) {
 					return nil, errors.WrapError("execute request", err)
+				} else {
+					lastReason = transportReason(err)
 				}
 			}
 			lastErr = err
@@ -298,6 +306,15 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 	}
 
 	return nil, errors.WrapError("max retries exceeded", lastErr)
+}
+
+// transportReason names a retried connection failure in a few words.
+func transportReason(err error) string {
+	var netErr net.Error
+	if stdErrors.As(err, &netErr) && netErr.Timeout() {
+		return "a timeout"
+	}
+	return "a connection error"
 }
 
 func isRetryableTransportError(err error) bool {

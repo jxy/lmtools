@@ -2,8 +2,10 @@ package retry
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,9 +38,42 @@ func TestProgressReportsAttemptsAndWait(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer resp.Body.Close()
-			if len(events) != 3 || events[0] != (Progress{Attempt: 1, Total: 2}) || events[1].Attempt != 2 || events[1].Total != 2 || events[1].Delay <= 0 || events[2] != (Progress{Attempt: 2, Total: 2}) {
+			if len(events) != 3 || events[0] != (Progress{Attempt: 1, Total: 2}) || events[1].Attempt != 2 || events[1].Total != 2 || events[1].Delay <= 0 || events[1].Reason != "HTTP 503" || events[2] != (Progress{Attempt: 2, Total: 2}) {
 				t.Fatalf("events=%+v", events)
 			}
 		})
+	}
+}
+
+// A retried connection failure is named in a few words: the error text
+// holds addresses and is no reason to show.
+func TestProgressNamesConnectionFailures(t *testing.T) {
+	for _, tt := range []struct {
+		err    error
+		reason string
+	}{
+		{timeoutError{}, "a timeout"},
+		{temporaryError{}, "a connection error"},
+		{io.ErrUnexpectedEOF, "a connection error"},
+	} {
+		var calls atomic.Int32
+		transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if calls.Add(1) == 1 {
+				return nil, tt.err
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
+		})
+		client := newClient(clientOptions{transport: transport, retryConfig: &Config{MaxRetries: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 1}})
+		var events []Progress
+		ctx := WithProgress(context.Background(), func(p Progress) { events = append(events, p) })
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.test", nil)
+		resp, err := client.Do(ctx, req, "lmc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if len(events) != 3 || events[1].Reason != tt.reason {
+			t.Errorf("%v: events=%+v, want reason %q", tt.err, events, tt.reason)
+		}
 	}
 }

@@ -230,8 +230,9 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
   `Waiting for response...`, `Thinking...` while the model thinks without
   showing text, `Writing tool call NAME...` while it writes a call's
   arguments, and `Running NAME...` while commands run. It appears only on an
-  empty line and clears when output starts. Retries show their delay and
-  attempt count. The usage line of each response gives its time, and in a turn
+  empty line and clears when output starts. Retries show their delay,
+  attempt count, and reason, such as `after HTTP 503` or the error a stream
+  reported. The usage line of each response gives its time, and in a turn
   with tool calls every response is numbered. The session ID appears once
   established. `/info` shows the endpoint, API, session, tools, and settings.
   All UI text is plain: no colors or styling. Cursor controls are used only

@@ -22,6 +22,23 @@ const (
 		"data: [DONE]\n\n"
 )
 
+// The reason a retry shows is the provider's message alone, on one line and
+// cut short; an error with no message is named by its type and code.
+func TestStreamErrorReasonIsShort(t *testing.T) {
+	long := strings.Repeat("overloaded ", 20)
+	for data, want := range map[string]string{
+		`{"error": {"message": "Streaming response failed", "type": "internal_error", "code": "internal_error"}}`:      "Streaming response failed",
+		`{"error": {"message": "Error code: 503 - {'error':\n  {'message': 'busy'}}", "type": "InternalServerError"}}`: "Error code: 503 - {'error': {'message': 'busy'}}",
+		`{"error": {"type": "server_error", "code": "boom"}}`:                                                          "type: server_error, code: boom",
+		`{"error": "plain text"}`:                                     "plain text",
+		`{"error": {"message": "` + long + `", "type": "api_error"}}`: strings.TrimSpace(long)[:maxReasonRunes],
+	} {
+		if got := judgeStreamData([]byte(data)).reason; got != want {
+			t.Errorf("reason of %s = %q, want %q", data, got, want)
+		}
+	}
+}
+
 func TestJudgeStreamDataNamesErrorStatuses(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -63,9 +80,9 @@ func TestJudgeStreamDataNamesErrorStatuses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kind, status, message := judgeStreamData([]byte(tt.data))
-			if kind != tt.kind || status != tt.status || (tt.message != "" && message != tt.message) {
-				t.Fatalf("judgeStreamData() = %v, %d, %q; want %v, %d, %q", kind, status, message, tt.kind, tt.status, tt.message)
+			got := judgeStreamData([]byte(tt.data))
+			if got.kind != tt.kind || got.status != tt.status || (tt.message != "" && got.message != tt.message) {
+				t.Fatalf("judgeStreamData() = %+v; want %v, %d, %q", got, tt.kind, tt.status, tt.message)
 			}
 		})
 	}
@@ -154,6 +171,10 @@ func TestClientRetriesErrorEventBeforeContent(t *testing.T) {
 		"crlf lines":                  strings.ReplaceAll(keepalive+filter+argoStreamFailure, "\n", "\r\n"),
 		"other fields and stray text": "id: 1\nretry: 3000\nevent: chunk\nstray text\n" + argoStreamFailure,
 	} {
+		reason := "Streaming response failed"
+		if strings.Contains(failure, "Overloaded") {
+			reason = "Overloaded"
+		}
 		t.Run(name, func(t *testing.T) {
 			transport, sent := streamReplies("text/event-stream; charset=utf-8", failure, answerStream)
 			logger := &recordingLogger{}
@@ -166,7 +187,7 @@ func TestClientRetriesErrorEventBeforeContent(t *testing.T) {
 			if len(bodies) != 2 || bodies[0].closes != 1 {
 				t.Fatalf("attempts = %d, first body closed %d times", len(bodies), bodies[0].closes)
 			}
-			if len(progress) != 3 || progress[1].Delay <= 0 || progress[2].Attempt != 2 {
+			if len(progress) != 3 || progress[1].Delay <= 0 || progress[1].Reason != reason || progress[2].Attempt != 2 {
 				t.Fatalf("progress = %+v", progress)
 			}
 			if len(logger.errors) != 1 || !strings.Contains(logger.errors[0], "POST https://argo.test/v1/chat/completions -> error event before any content (as HTTP 5") || strings.Contains(logger.errors[0], "secret") {

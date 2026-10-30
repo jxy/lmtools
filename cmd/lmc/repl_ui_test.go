@@ -160,6 +160,29 @@ func TestBasicTerminalProgressUsesCompletePlainLines(t *testing.T) {
 	}
 }
 
+// A retry's status says why the attempt before failed. The reason can be a
+// provider's message, so both kinds of status spell out hidden characters.
+func TestProgressShowsWhyItRetries(t *testing.T) {
+	var inline bytes.Buffer
+	screen := &replScreen{statusOut: &inline, inlineStatus: true}
+	p := &turnProgress{screen: screen}
+	p.report(retry.Progress{Attempt: 2, Total: 4, Delay: 1125 * time.Millisecond, Reason: "Streaming response failed"})
+	p.stop()
+	if !strings.Contains(inline.String(), "Retrying in 1.125s (attempt 2/4) after Streaming response failed...") {
+		t.Fatalf("inline status=%q", inline.String())
+	}
+
+	var plain bytes.Buffer
+	p = &turnProgress{screen: &replScreen{statusOut: &plain}}
+	p.report(retry.Progress{Attempt: 2, Total: 3, Delay: time.Second, Reason: "HTTP 503"})
+	p.report(retry.Progress{Attempt: 3, Total: 3, Delay: time.Second, Reason: "busy\x1b[2J"})
+	p.stop()
+	want := "Retrying in 1s (attempt 2/3) after HTTP 503...\nRetrying in 1s (attempt 3/3) after busy\\u001b[2J...\n"
+	if plain.String() != want {
+		t.Fatalf("plain status=%q, want %q", plain.String(), want)
+	}
+}
+
 func TestREPLDisplayTogglesLeaveRequestsAndStdoutUnchanged(t *testing.T) {
 	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
 		response := openAITextResponse("answer")

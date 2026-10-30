@@ -76,7 +76,13 @@ func (p *turnProgress) report(event retry.Progress) {
 	p.cancelLocked()
 	if event.Delay > 0 {
 		p.phase = phaseIdle
-		p.screen.setStatus(fmt.Sprintf("Retrying in %s (attempt %d/%d)...", event.Delay.Round(time.Millisecond), event.Attempt, event.Total))
+		status := fmt.Sprintf("Retrying in %s (attempt %d/%d)", event.Delay.Round(time.Millisecond), event.Attempt, event.Total)
+		if event.Reason != "" {
+			// A stream's error message comes from the provider; the
+			// screen spells out any hidden character in it.
+			status += " after " + event.Reason
+		}
+		p.screen.setStatus(status + "...")
 		return
 	}
 	p.screen.setStatus("")
@@ -243,7 +249,7 @@ func (s *replScreen) setStatus(text string) {
 	}
 	if !s.inlineStatus {
 		if text != "" {
-			_, _ = fmt.Fprintln(s.statusOut, text)
+			_, _ = fmt.Fprintln(s.statusOut, core.VisibleText(text))
 			s.answerLast, s.newlines = false, 1
 		}
 		return
