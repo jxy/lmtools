@@ -527,10 +527,9 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 		_ = execCfg.LogRequestFn(body) // Ignore error
 	}
 
-	// Send request using retry client
+	// Send request using retry client, retried as the turn's first request is
 	if execCfg.RetryClient != nil {
-		// Use "lmc-tool" as component name for tool follow-up requests
-		return execCfg.RetryClient.Do(ctx, req, "lmc-tool")
+		return execCfg.RetryClient.Do(ctx, req, "lmc")
 	}
 
 	// Fallback to direct HTTP client if no retry client provided

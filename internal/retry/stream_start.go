@@ -24,9 +24,10 @@ const (
 	streamStartLineBytes = 64 << 10
 )
 
-// streamStartError is an error event that opened a 200 event stream, ahead
-// of any content, standing for a status worth retrying. The provider found
-// the failure after it had sent its headers, so only the stream shows it.
+// streamStartError is a failure that opened a 200 event stream, ahead of
+// any content: an error event standing for a status worth retrying, or the
+// stream ending or breaking off. The provider failed after it had sent its
+// headers, so only the stream shows it.
 type streamStartError struct {
 	method  string
 	url     string
@@ -34,23 +35,32 @@ type streamStartError struct {
 	message string
 	// reason is the error's message alone, short, for a status line.
 	reason string
+	// cause is the read error that ended the stream, when no error event
+	// did.
+	cause error
 }
 
 func (e *streamStartError) Error() string {
+	if e.cause != nil {
+		return fmt.Sprintf("%s %s -> stream ended before any content: %v", e.method, e.url, e.cause)
+	}
 	return fmt.Sprintf("%s %s -> error event before any content (as HTTP %d): %s", e.method, e.url, e.status, e.message)
 }
 
 // checkStreamStart reads a 200 event stream up to its first event with
 // content, and returns the error event found ahead of it if the event
-// stands for a status worth retrying; the caller then closes the body.
-// Otherwise it puts back what it read, so the body still reads whole, and
-// returns nil. It reads events as lmc's stream parser does: the data lines
-// of an event are joined with newlines and judged at the blank line that
-// ends the event, or where the stream ends, and comments and other fields
-// are passed over. So are events that carry nothing yet: Chat chunks with
-// no choices, as Azure's filter results come, or with no more than a role
-// in their deltas; Anthropic message_start and ping; Responses
-// response.created, response.in_progress, and response.queued.
+// stands for a status worth retrying, or the read error that ended the
+// stream ahead of it if a connection lost before the response would be
+// retried; the caller then closes the body. Nothing has reached the caller
+// either way. Otherwise it puts back what it read, so the body still reads
+// whole, and returns nil. It reads events as lmc's stream parser does: the
+// data lines of an event are joined with newlines and judged at the blank
+// line that ends the event, or where the stream ends, and comments and
+// other fields are passed over. So are events that carry nothing yet: Chat
+// chunks with no choices, as Azure's filter results come, or with no more
+// than a role in their deltas; Anthropic message_start and ping; Responses
+// response.created, response.in_progress, and response.queued. An event
+// whose last line a broken connection cut off is not judged.
 func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError {
 	if resp.StatusCode != http.StatusOK || resp.Body == nil || !isEventStream(resp.Header) {
 		return nil
@@ -61,6 +71,7 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 	var data []byte // the data lines of the event being read, joined
 	var inEvent bool
 	var readErr error
+	settled := false // an event with content, or an error not worth retrying
 	for read.Len() < maxStreamStartBytes {
 		line, err := reader.ReadSlice('\n')
 		read.Write(line)
@@ -68,6 +79,9 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 			break // a line this long is content
 		}
 		readErr = err
+		// A read error other than the end cuts off the line it stops in,
+		// and no event can be judged from what is left of it.
+		cut := readErr != nil && readErr != io.EOF && len(line) > 0 && !bytes.HasSuffix(line, []byte("\n"))
 		line = bytes.TrimRight(line, "\r\n")
 		if value, ok := dataField(line); ok {
 			if inEvent {
@@ -76,12 +90,13 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 			data = append(data, value...)
 			inEvent = true
 		}
-		if inEvent && (len(line) == 0 || readErr != nil) {
+		if inEvent && !cut && (len(line) == 0 || readErr != nil) {
 			event := judgeStreamData(bytes.TrimSpace(data))
 			if event.kind == eventError && retryableStatus(event.status) {
 				return &streamStartError{method: req.Method, url: redactedURL(req.URL), status: event.status, message: event.message, reason: event.reason}
 			}
 			if event.kind != eventEmpty {
+				settled = true
 				break
 			}
 			data, inEvent = data[:0], false
@@ -89,6 +104,9 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 		if readErr != nil {
 			break
 		}
+	}
+	if readErr != nil && !settled && isRetryableTransportError(readErr) {
+		return &streamStartError{method: req.Method, url: redactedURL(req.URL), reason: transportReason(readErr), cause: readErr}
 	}
 	rest := io.Reader(reader)
 	if readErr != nil {

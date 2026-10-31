@@ -3,12 +3,23 @@ package retry
 import (
 	"context"
 	"io"
+	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// Every wait before an attempt tops out at a minute, whatever the provider,
+// and lmc's tool rounds wait as its first request does.
+func TestEveryRetryConfigCapsWaitsAtAMinute(t *testing.T) {
+	for _, provider := range []string{"", "lmc", constants.ProviderArgo, constants.ProviderAnthropic, constants.ProviderOpenAI, constants.ProviderGoogle} {
+		if got := ProviderConfig(provider).MaxBackoff; got != time.Minute {
+			t.Errorf("ProviderConfig(%q).MaxBackoff = %v, want 1m", provider, got)
+		}
+	}
+}
 
 func TestRetry(t *testing.T) {
 	t.Run("success on first attempt", func(t *testing.T) {

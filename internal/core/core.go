@@ -628,10 +628,22 @@ scanLoop:
 	}
 
 	if err := scanner.Err(); err != nil {
-		return accumulated.String(), allToolCalls, err
+		return accumulated.String(), allToolCalls, streamReadError(ctx, logFile, err)
 	}
 
 	return accumulated.String(), allToolCalls, nil
+}
+
+// streamReadError names a failure to read a response stream, such as a
+// connection that closed partway, and notes it in the stream's log file,
+// which otherwise ends without a word about why. A cancelled read is
+// returned as it is.
+func streamReadError(ctx context.Context, logFile io.Writer, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(logFile, "# read error: %v\n", err)
+	return fmt.Errorf("read response stream: %w", err)
 }
 
 // handleArgoStream handles Argo's plain text streaming format
@@ -659,7 +671,7 @@ func handleArgoStream(ctx context.Context, body io.ReadCloser, logFile *os.File,
 				return Response{Text: accumulated.String()}, nil
 			}
 			if err != nil {
-				return Response{Text: accumulated.String()}, err
+				return Response{Text: accumulated.String()}, streamReadError(ctx, logFile, err)
 			}
 		}
 	}

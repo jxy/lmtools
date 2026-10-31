@@ -34,40 +34,34 @@ type Config struct {
 // defaults to it.
 const DefaultMaxRetries = 10
 
+// maxBackoff caps the wait before every attempt, whatever the provider.
+const maxBackoff = 60 * time.Second
+
 // DefaultConfig returns default retry configuration
 func DefaultConfig() *Config {
 	return &Config{
 		MaxRetries:     DefaultMaxRetries,
 		InitialBackoff: 1 * time.Second,
-		MaxBackoff:     30 * time.Second,
+		MaxBackoff:     maxBackoff,
 		BackoffFactor:  2.0,
 	}
 }
 
+// providerConfigs holds the providers whose retries differ from
+// DefaultConfig's; every other provider, lmc's requests and tool rounds
+// among them, uses DefaultConfig.
 var providerConfigs = map[string]Config{
 	constants.ProviderOpenAI: {
 		MaxRetries:     8,
 		InitialBackoff: 2 * time.Second,
-		MaxBackoff:     60 * time.Second,
+		MaxBackoff:     maxBackoff,
 		BackoffFactor:  2.0,
 	},
 	constants.ProviderGoogle: {
 		MaxRetries:     8,
 		InitialBackoff: 1 * time.Second,
-		MaxBackoff:     20 * time.Second,
+		MaxBackoff:     maxBackoff,
 		BackoffFactor:  1.5,
-	},
-	constants.ProviderArgo: {
-		MaxRetries:     10,
-		InitialBackoff: 1 * time.Second,
-		MaxBackoff:     60 * time.Second,
-		BackoffFactor:  2.0,
-	},
-	"lmc": {
-		MaxRetries:     10,
-		InitialBackoff: 1 * time.Second,
-		MaxBackoff:     60 * time.Second,
-		BackoffFactor:  2.0,
 	},
 }
 

@@ -45,6 +45,8 @@ const (
 // exit.
 func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, inputStr string, plan *session.RequestPlan) (out turnOutcome, err error) {
 	ctx = logger.WithNewRequestCounter(ctx)
+	start := time.Now()
+	defer func() { logRequestEnd(ctx, start, err) }()
 	if env.progress != nil {
 		ctx = retry.WithProgress(ctx, env.progress.report)
 		defer env.progress.stop()
@@ -642,6 +644,21 @@ func isShellBarewordRune(r rune) bool {
 		strings.ContainsRune("@%_+=:,./-", r)
 }
 
+// logRequestEnd records in the file log the error a turn's request ended
+// with: sending it, reading its response, or a tool round after it. The
+// caller reports the error on its diagnostic stream, and the file keeps it
+// beside the attempts that came before. A cancelled request is the
+// operator's doing, noted at info level.
+func logRequestEnd(ctx context.Context, start time.Time, err error) {
+	switch {
+	case err == nil:
+	case ctx.Err() != nil:
+		logger.From(ctx).Infof("Request cancelled after %v: %v", time.Since(start), err)
+	default:
+		logger.From(ctx).FileErrorf("Request failed after %v: %v", time.Since(start), err)
+	}
+}
+
 // retryLogger keeps the retry loop's per-attempt failures off the terminal.
 // The retry is already on screen as a status, and the final failure is
 // reported once by the caller; the record keeps its ERROR severity in the
@@ -681,18 +698,10 @@ func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (
 
 	startTime := time.Now()
 	resp, err := retryClient.Do(ctx, req, "lmc")
-	// Handle error with response cleanup
+	// Handle error with response cleanup; executeRequest logs it
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
-		}
-		if ctx.Err() != nil {
-			// A cancelled request is the operator's doing, not a failure
-			// to put on the terminal.
-			logger.From(ctx).Infof("Request cancelled after %v: %v", time.Since(startTime), err)
-		} else {
-			// The caller reports the returned error on its diagnostic stream.
-			logger.From(ctx).FileErrorf("Request failed after %v: %v", time.Since(startTime), err)
 		}
 		return nil, err
 	}

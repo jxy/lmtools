@@ -60,7 +60,10 @@ func readProcessLog(t *testing.T, dir string) string {
 	return contents.String()
 }
 
-func TestSendRequestFailureLogging(t *testing.T) {
+// A request's failure is logged once at ERROR with its request identity and
+// cause, and shown once on the terminal by the caller; a cancellation is
+// noted at info level and shown nowhere.
+func TestRequestFailureLogging(t *testing.T) {
 	for _, level := range []string{"INFO", "WARN", "ERROR"} {
 		for _, cancelled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/cancelled=%v", level, cancelled), func(t *testing.T) {
@@ -92,10 +95,12 @@ func TestSendRequestFailureLogging(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				start := time.Now()
 				_, requestErr := sendWithRetry(ctx, req, &cfg)
 				if requestErr == nil {
 					t.Fatal("request unexpectedly succeeded")
 				}
+				logRequestEnd(ctx, start, requestErr)
 				if !cancelled {
 					_ = reportError(notifier, requestErr)
 				}

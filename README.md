@@ -1018,8 +1018,9 @@ Requests and logging:
   ends the wait. A request is sent again after HTTP
   408, 425, 429, or 5xx, after a connection error before the response, and
   when a stream reports one of those failures before any content, as Argo
-  does with `Streaming response failed`. A retried 5xx or stream failure is
-  written to the log file.
+  does with `Streaming response failed`, or ends before any content. Tool
+  rounds wait as the first request does. A retried 5xx or stream failure is
+  written to the log file, and so is the error a request finally fails with.
 - `-log-dir string`: Default `~/.lmc/logs`.
 - `-log-level string`: `DEBUG`, `INFO`, `WARN`, or `ERROR`.
 

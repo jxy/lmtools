@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -218,7 +219,6 @@ func TestClientReturnsOtherStreamsWhole(t *testing.T) {
 		{"long answer", "text/event-stream", content + strings.Repeat(content, 20000)},
 		{"line too long to judge", "text/event-stream", longLine + argoStreamFailure},
 		{"empty events past the limit", "text/event-stream", manyPings + argoStreamFailure},
-		{"empty stream", "text/event-stream", ""},
 		{"not an event stream", "application/json", `{"error": {"message": "Streaming response failed", "type": "internal_error"}}`},
 		{"legacy argo text", "text/plain; charset=utf-8", argoStreamFailure},
 	}
@@ -264,8 +264,9 @@ func TestClientReturnsTheLastAttemptUnread(t *testing.T) {
 }
 
 type failingBody struct {
-	data string
-	err  error
+	data   string
+	err    error
+	closes int
 }
 
 func (b *failingBody) Read(p []byte) (int, error) {
@@ -277,24 +278,112 @@ func (b *failingBody) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (b *failingBody) Close() error { return nil }
+func (b *failingBody) Close() error { b.closes++; return nil }
 
-// A connection lost while the stream is checked reaches the caller after
-// the bytes that came before it, as it would have unchecked.
-func TestClientPassesOnAReadErrorWhileChecking(t *testing.T) {
-	start := ": ping\n\n" + `data: {"choices":[],"prompt_filter_results":[]}` + "\n\ndata: {\"cho"
+// failingReplies answers every attempt with a 200 event stream that sends
+// start and then fails with err, or answers with answerStream from attempt
+// answerFrom on, when it is above zero. It returns the failing bodies it
+// handed out.
+func failingReplies(start string, err error, answerFrom int) (http.RoundTripper, func() []*failingBody) {
+	var mu sync.Mutex
+	var sent []*failingBody
+	attempts := 0
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &failingBody{data: start, err: io.ErrUnexpectedEOF}, Request: req}, nil
+		mu.Lock()
+		defer mu.Unlock()
+		attempts++
+		body := io.NopCloser(strings.NewReader(answerStream))
+		if answerFrom <= 0 || attempts < answerFrom {
+			failing := &failingBody{data: start, err: err}
+			sent = append(sent, failing)
+			body = failing
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: body, Request: req}, nil
 	})
-	req, _ := http.NewRequest(http.MethodPost, "https://argo.test/v1/chat/completions", strings.NewReader("{}"))
-	resp, err := streamCheckingClient(transport, 2, nil).Do(context.Background(), req, "lmc")
-	if err != nil {
-		t.Fatal(err)
+	return transport, func() []*failingBody {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]*failingBody(nil), sent...)
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if string(data) != start || !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("read %q, %v", data, err)
+}
+
+// A stream that ends, or whose connection breaks, before any content has
+// shown the caller nothing, so it is sent again as a connection lost before
+// the response would be. Argo sent a 200 on 2026-10-30 and then nothing for
+// almost four minutes before the connection closed.
+func TestClientRetriesAStreamThatEndsBeforeContent(t *testing.T) {
+	created := `data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress","error":null}}` + "\n\n"
+	for _, tt := range []struct {
+		name  string
+		start string
+		err   error
+	}{
+		{"nothing, then the connection breaks", "", io.ErrUnexpectedEOF},
+		{"empty stream", "", io.EOF},
+		{"start events, then the end", ": ping\n\n" + created, io.EOF},
+		{"start events, then the connection breaks", ": ping\n\n" + created, io.ErrUnexpectedEOF},
+		{"the connection breaks inside an event", created[:40], io.ErrUnexpectedEOF},
+		{"the connection breaks inside an event's second line", "data: {\"type\": \"response.created\",\ndata: \"response\": {\"id\"", io.ErrUnexpectedEOF},
+		{"the connection breaks after an event's data", strings.TrimSuffix(created, "\n"), io.ErrUnexpectedEOF},
+		{"the connection is reset", ": ping\n\n", syscall.ECONNRESET},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			transport, sent := failingReplies(tt.start, tt.err, 2)
+			logger := &recordingLogger{}
+			var progress []Progress
+			ctx := WithProgress(context.Background(), func(p Progress) { progress = append(progress, p) })
+			if got := readStream(t, ctx, streamCheckingClient(transport, 2, logger)); got != answerStream {
+				t.Fatalf("stream = %q, want the answer", got)
+			}
+			if bodies := sent(); len(bodies) != 1 || bodies[0].closes != 1 {
+				t.Fatalf("failed attempts = %d, want 1 closed body", len(bodies))
+			}
+			if len(progress) != 3 || progress[1].Delay <= 0 || progress[1].Reason != "a connection error" {
+				t.Fatalf("progress = %+v", progress)
+			}
+			if len(logger.errors) != 1 || !strings.Contains(logger.errors[0], "POST https://argo.test/v1/chat/completions -> stream ended before any content: "+tt.err.Error()) {
+				t.Fatalf("logged = %q", logger.errors)
+			}
+		})
+	}
+}
+
+// A connection lost after content, or on the last attempt, reaches the
+// caller after the bytes that came before it, as it would have unchecked,
+// and so does a failure that a connection lost before the response would
+// not be retried for.
+func TestClientPassesOnAReadErrorAfterContent(t *testing.T) {
+	content := `data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}` + "\n"
+	unknown := errors.New("tls: bad record MAC")
+	for _, tt := range []struct {
+		name     string
+		start    string
+		err      error
+		retries  int
+		attempts int
+	}{
+		{"after content", ": ping\n\n" + content + "\ndata: {\"cho", io.ErrUnexpectedEOF, 2, 1},
+		{"in the event with content", ": ping\n\n" + content, io.ErrUnexpectedEOF, 2, 1},
+		{"before content on the last attempt", ": ping\n\n", io.ErrUnexpectedEOF, 2, 3},
+		{"before content with no retries", ": ping\n\n", io.ErrUnexpectedEOF, 0, 1},
+		{"a failure not retried", ": ping\n\n", unknown, 2, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			transport, sent := failingReplies(tt.start, tt.err, 0)
+			req, _ := http.NewRequest(http.MethodPost, "https://argo.test/v1/chat/completions", strings.NewReader("{}"))
+			resp, err := streamCheckingClient(transport, tt.retries, nil).Do(context.Background(), req, "lmc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			data, err := io.ReadAll(resp.Body)
+			if string(data) != tt.start || !errors.Is(err, tt.err) {
+				t.Fatalf("read %q, %v", data, err)
+			}
+			if got := len(sent()); got != tt.attempts {
+				t.Fatalf("attempts = %d, want %d", got, tt.attempts)
+			}
+		})
 	}
 }
 

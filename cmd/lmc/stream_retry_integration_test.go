@@ -15,7 +15,8 @@ import (
 const argoStreamFailure = `data: {"error": {"message": "Streaming response failed", "type": "internal_error", "code": "internal_error"}}` + "\n\n"
 
 // A stream that fails before any content is sent again, for the first
-// request of a turn and for a tool round, and the failures are logged.
+// request of a turn and for a tool round, and the failures are logged: an
+// error event, or a stream that ends with nothing in it.
 func TestCLIRetriesStreamFailingBeforeContent(t *testing.T) {
 	arguments := `{"command":["/usr/bin/printf","TOOL_OK"]}`
 	call := map[string]interface{}{"index": 0, "id": "call_retry", "type": "function", "function": map[string]interface{}{"name": "universal_command", "arguments": arguments}}
@@ -23,31 +24,42 @@ func TestCLIRetriesStreamFailingBeforeContent(t *testing.T) {
 	toolCall := "data: " + string(chunk) + "\n\ndata: [DONE]\n\n"
 	answer := `data: {"choices":[{"index":0,"delta":{"content":"DONE_OK"},"finish_reason":null}]}` + "\n\n" +
 		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
-	server, requests := completionServer(t,
-		completionReply{[]byte(argoStreamFailure), true},
-		completionReply{[]byte(toolCall), true},
-		completionReply{[]byte(argoStreamFailure), true},
-		completionReply{[]byte(answer), true},
-	)
-	logDir := t.TempDir()
-	stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), false, true, "-log-dir", logDir, "-retries", "1", "-tool", "-tool-auto-approve"), "run the tool")
-	if err != nil || stdout != "DONE_OK" || strings.Contains(stderr, "Streaming response failed") {
-		t.Fatalf("stdout=%q stderr=%s err=%v", stdout, stderr, err)
-	}
-	reqs := requests()
-	if len(reqs) != 4 || reqs[0] != reqs[1] || reqs[2] != reqs[3] || !strings.Contains(reqs[2], "TOOL_OK") {
-		t.Fatalf("requests=%q", reqs)
-	}
-	logs, err := filepath.Glob(filepath.Join(logDir, "*_lmc_*.log"))
-	if err != nil || len(logs) != 1 {
-		t.Fatalf("logs=%v err=%v", logs, err)
-	}
-	data, err := os.ReadFile(logs[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Count(string(data), "error event before any content (as HTTP 500): Streaming response failed (type: internal_error, code: internal_error)"); got != 2 {
-		t.Fatalf("logged %d stream failures, want 2:\n%s", got, data)
+	for _, tt := range []struct {
+		name    string
+		failure string
+		logged  string
+	}{
+		{"error event", argoStreamFailure, "error event before any content (as HTTP 500): Streaming response failed (type: internal_error, code: internal_error)"},
+		{"empty stream", "", "stream ended before any content: EOF"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, requests := completionServer(t,
+				completionReply{[]byte(tt.failure), true},
+				completionReply{[]byte(toolCall), true},
+				completionReply{[]byte(tt.failure), true},
+				completionReply{[]byte(answer), true},
+			)
+			logDir := t.TempDir()
+			stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), false, true, "-log-dir", logDir, "-retries", "1", "-tool", "-tool-auto-approve"), "run the tool")
+			if err != nil || stdout != "DONE_OK" || strings.Contains(stderr, "Streaming response failed") {
+				t.Fatalf("stdout=%q stderr=%s err=%v", stdout, stderr, err)
+			}
+			reqs := requests()
+			if len(reqs) != 4 || reqs[0] != reqs[1] || reqs[2] != reqs[3] || !strings.Contains(reqs[2], "TOOL_OK") {
+				t.Fatalf("requests=%q", reqs)
+			}
+			logs, err := filepath.Glob(filepath.Join(logDir, "*_lmc_*.log"))
+			if err != nil || len(logs) != 1 {
+				t.Fatalf("logs=%v err=%v", logs, err)
+			}
+			data, err := os.ReadFile(logs[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(string(data), tt.logged); got != 2 {
+				t.Fatalf("logged %d stream failures, want 2:\n%s", got, data)
+			}
+		})
 	}
 }
 

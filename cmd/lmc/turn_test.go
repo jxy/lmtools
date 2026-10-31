@@ -12,8 +12,10 @@ import (
 	"lmtools/internal/mockserver"
 	"lmtools/internal/session"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -611,5 +613,38 @@ func TestRunTurnReportsALaterAnswerLeftUnsavedWhenClaimingFails(t *testing.T) {
 	}
 	if got := strings.Count(te.stdout.String(), "running it"); got != 2 {
 		t.Fatalf("stdout = %q, want both answers presented", te.stdout.String())
+	}
+}
+
+// A turn that fails leaves the error it ended with in the log file, next to
+// the attempts before it, since the REPL and a single run print it only on
+// the terminal. Here the stream's connection closes partway, as Argo's did
+// on 2026-10-30, and the error names the stream it broke.
+func TestRunTurnLogsTheErrorItEndsWith(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n: hi\n\r\n")
+		_ = buf.Flush()
+	}))
+	defer server.Close()
+	te := newTurnTestEnvAt(t, server.URL, streamOn)
+
+	_, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "hello"})
+	if err == nil || err.Error() != "read response stream: unexpected EOF" {
+		t.Fatalf("runTurn() error = %v, want read response stream: unexpected EOF", err)
+	}
+	var logged strings.Builder
+	files, _ := filepath.Glob(filepath.Join(te.env.logDir, "*.log"))
+	for _, file := range files {
+		data, _ := os.ReadFile(file)
+		logged.Write(data)
+	}
+	if !strings.Contains(logged.String(), "[ERROR]") || !regexp.MustCompile(`Request failed after \S+: read response stream: unexpected EOF`).MatchString(logged.String()) {
+		t.Fatalf("log files = %q, want the turn's error at ERROR", logged.String())
 	}
 }

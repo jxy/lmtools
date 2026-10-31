@@ -134,10 +134,12 @@ func NewClientForTesting(timeout time.Duration, maxRetries int, logger Logger, l
 // inside a 200 event stream before any content, as it would retry the HTTP
 // status the failure stands for. Argo reports "Streaming response failed"
 // this way, and passes on a backend's 503 as an error event naming
-// "Error code: 503". On every attempt but the last, Do reads such a stream
-// up to its first event with content, puts back what it read, and only then
-// returns the response. The last attempt's stream is returned unread, so a
-// failure that outlasts the retries reaches the caller's parser as before.
+// "Error code: 503". A stream that ends or breaks off before any content is
+// retried as a connection lost before the response would be. On every
+// attempt but the last, Do reads such a stream up to its first event with
+// content, puts back what it read, and only then returns the response. The
+// last attempt's stream is returned unread, so a failure that outlasts the
+// retries reaches the caller's parser as before.
 //
 // apiproxy leaves this off: its idle heartbeat to the client starts when the
 // upstream response arrives, so the client would get no pings during the
