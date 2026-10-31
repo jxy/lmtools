@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"lmtools/internal/core"
 	cliui "lmtools/internal/ui"
 	toolui "lmtools/internal/ui/tools"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -305,6 +310,111 @@ func TestResponsePresenterMarksSignatureOnlyThinkingAsOmitted(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "sig_only_must_not_print") {
 		t.Fatalf("stderr exposed signature-only reasoning: %q", stderr.String())
+	}
+}
+
+// responsesReasoning is a Responses reasoning item with summary, or without
+// one when summary is empty.
+func responsesReasoning(summary string) core.ReasoningBlock {
+	block := core.ReasoningBlock{Provider: "openai", Type: "reasoning", EncryptedContent: "encrypted_must_not_print", Summary: json.RawMessage(`[]`)}
+	if summary != "" {
+		block.Summary = json.RawMessage(fmt.Sprintf(`[{"type":"summary_text","text":%q}]`, summary))
+	}
+	return block
+}
+
+// Consecutive Responses reasoning items share one section, as they do when
+// streamed: an item without a summary adds nothing to a section with text,
+// and a run of them shows one omitted section.
+func TestResponsePresenterJoinsConsecutiveResponsesReasoning(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		blocks []core.Block
+		want   string
+	}{
+		{
+			name:   "summaries",
+			blocks: []core.Block{responsesReasoning(""), responsesReasoning("Checked the inputs."), responsesReasoning(""), responsesReasoning("Wrote the answer.")},
+			want:   "--- thinking ---\nChecked the inputs.\nWrote the answer.\n--- end thinking ---\n\n",
+		},
+		{
+			name:   "no summaries",
+			blocks: []core.Block{responsesReasoning(""), responsesReasoning(""), responsesReasoning("")},
+			want:   "--- thinking ---\n[omitted by provider]\n--- end thinking ---\n\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			presenter := newResponsePresenter(&stdout, &stderr, true)
+			presenter.HandleResponseComplete(core.Response{Text: "answer", Blocks: append(tt.blocks, core.TextBlock{Text: "answer"})})
+			if stderr.String() != tt.want || stdout.String() != "answer" {
+				t.Fatalf("stderr = %q, stdout = %q; want %q and the answer", stderr.String(), stdout.String(), tt.want)
+			}
+		})
+	}
+}
+
+// responsesReasoningStream streams items reasoning items without a summary,
+// then answer, as Argo did for a pro mode request on 2026-10-30.
+func responsesReasoningStream(items int, answer string) string {
+	var b strings.Builder
+	var output []string
+	for i := 0; i < items; i++ {
+		item := fmt.Sprintf(`{"id":"rs_%d","type":"reasoning","summary":[],"encrypted_content":"enc"}`, i)
+		fmt.Fprintf(&b, "data: {\"type\":\"response.output_item.added\",\"output_index\":%d,\"item\":{\"id\":\"rs_%d\",\"type\":\"reasoning\",\"summary\":[]}}\n\n", i, i)
+		fmt.Fprintf(&b, "data: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":%s}\n\n", i, item)
+		output = append(output, item)
+	}
+	message := fmt.Sprintf(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}`, answer)
+	fmt.Fprintf(&b, "data: {\"type\":\"response.output_item.added\",\"output_index\":%d,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n", items)
+	fmt.Fprintf(&b, "data: {\"type\":\"response.output_text.delta\",\"output_index\":%d,\"content_index\":0,\"delta\":%q}\n\n", items, answer)
+	fmt.Fprintf(&b, "data: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":%s}\n\n", items, message)
+	output = append(output, message)
+	fmt.Fprintf(&b, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[%s],\"usage\":{\"input_tokens\":5,\"output_tokens\":9,\"output_tokens_details\":{\"reasoning_tokens\":7},\"total_tokens\":14}}}\n\n", strings.Join(output, ","))
+	return b.String()
+}
+
+// streamedResponsesScreen runs a turn whose Responses stream is stream, with
+// thinking shown, and returns what the answer and the thinking put on one
+// screen.
+func streamedResponsesScreen(t *testing.T, stream string) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer server.Close()
+	te := newTurnTestEnvAt(t, server.URL, "-openai-responses", "-stream", "-show-thinking")
+	var screen bytes.Buffer
+	te.env.stdout, te.env.stderr, te.env.answersOnScreen = &screen, &screen, true
+	if _, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "think"}); err != nil {
+		t.Fatal(err)
+	}
+	return screen.String()
+}
+
+// A streamed Responses answer shows reasoning items without a summary where
+// they happened: one omitted section before the answer.
+func TestStreamedResponsesShowReasoningBeforeTheAnswer(t *testing.T) {
+	screen := streamedResponsesScreen(t, responsesReasoningStream(3, "DONE_OK"))
+	want := thinkingStartMarker + "\n" + omittedThinkingText + "\n" + thinkingEndMarker + "\n\nDONE_OK"
+	if !strings.HasPrefix(screen, want) || strings.Count(screen, thinkingStartMarker) != 1 {
+		t.Fatalf("screen = %q, want it to start with %q", screen, want)
+	}
+}
+
+// A summary that only the terminal snapshot carries still shows, after the
+// answer, when the item's done event left it out.
+func TestStreamedResponsesShowASummaryFromTheTerminalSnapshot(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning"}}`,
+		`data: {"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"DONE_OK"}`,
+		`data: {"type":"response.completed","response":{"status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Late summary."}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"DONE_OK"}]}]}}`,
+	}, "\n\n") + "\n\n"
+	screen := streamedResponsesScreen(t, stream)
+	if !strings.Contains(screen, "DONE_OK\n\n"+thinkingStartMarker+"\nLate summary.\n"+thinkingEndMarker) {
+		t.Fatalf("screen = %q, want the late summary after the answer", screen)
 	}
 }
 

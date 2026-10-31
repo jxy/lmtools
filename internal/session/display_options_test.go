@@ -113,6 +113,38 @@ func TestShowThinkingQuotesSavedReasoning(t *testing.T) {
 	}
 }
 
+// Consecutive Responses reasoning items share one section, as they did live;
+// other blocks keep a section each.
+func TestShowThinkingJoinsConsecutiveResponsesReasoning(t *testing.T) {
+	ctx := setupCoordinatorTestEnv(t)
+	sess := createPlanSession(t, "system")
+	appendPlanMessage(t, ctx, sess, core.RoleUser, "question")
+	store := NewStore(sess, core.NewTestLogger(false))
+	responses := func(summary string) core.ReasoningBlock {
+		block := core.ReasoningBlock{Provider: "openai", Type: "reasoning", EncryptedContent: "enc", Summary: json.RawMessage(`[]`)}
+		if summary != "" {
+			block.Summary = json.RawMessage(`[{"type":"summary_text","text":"` + summary + `"}]`)
+		}
+		return block
+	}
+	if _, _, err := store.SaveAssistantResponse(ctx, core.Response{
+		Text: "answer",
+		Blocks: []core.Block{
+			responses(""), responses(""), responses("Checked the inputs."), responses("Wrote the answer."),
+			core.TextBlock{Text: "answer"},
+			responses(""), responses(""),
+		},
+	}, "test-model"); err != nil {
+		t.Fatal(err)
+	}
+	got := showWith(t, sess, ShowOptions{Thinking: true})
+	want := "--- thinking ---\n| Checked the inputs.\n| Wrote the answer.\n--- end thinking ---\n" +
+		"--- thinking ---\n| [omitted by provider]\n--- end thinking ---\nanswer\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("thinking display:\n%s\nwant it to contain\n%s", got, want)
+	}
+}
+
 // Saved tool rounds wrap within the width /show is given, as live rounds do.
 func TestShowWrapsToolRoundsWithinColumns(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)

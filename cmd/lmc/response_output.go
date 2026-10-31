@@ -156,23 +156,33 @@ func answerBlocksMatch(response core.Response) bool {
 
 func (p *responsePresenter) renderResponseBlocks(response core.Response, includeAnswer bool) bool {
 	presented := false
+	incomplete := response.IncompleteReason != ""
+	var previous core.Block
 	for _, candidate := range response.Blocks {
-		switch block := candidate.(type) {
-		case core.TextBlock:
-			if includeAnswer {
-				p.writeAnswer(block.Text)
+		block, isReasoning := candidate.(core.ReasoningBlock)
+		if !isReasoning {
+			p.finishThinking(incomplete)
+			if text, ok := candidate.(core.TextBlock); ok && includeAnswer {
+				p.writeAnswer(text.Text)
 			}
-		case core.ReasoningBlock:
-			text := core.ReasoningTextForDisplay(block)
-			if text == "" && !shouldPresentEmptyReasoning(block) {
-				continue
-			}
-			p.startThinking()
-			p.writeThinking(text)
-			p.finishThinking(response.IncompleteReason != "")
-			presented = true
+			previous = candidate
+			continue
 		}
+		text := core.ReasoningTextForDisplay(block)
+		if text == "" && !shouldPresentEmptyReasoning(block) {
+			continue
+		}
+		if !p.thinkingActive || !core.ContinuesReasoningSection(previous, block) {
+			p.finishThinking(incomplete)
+			p.startThinking()
+		} else if text != "" && p.thinking.wrote {
+			p.writeThinking("\n")
+		}
+		p.writeThinking(text)
+		presented = true
+		previous = candidate
 	}
+	p.finishThinking(incomplete)
 	return presented
 }
 

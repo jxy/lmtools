@@ -83,3 +83,16 @@ func ReasoningTextForDisplay(block ReasoningBlock) string {
 	}
 	return foreignReasoningSummaryText(block)
 }
+
+// ContinuesReasoningSection reports whether block, which follows previous in
+// a response, shows in previous's thinking section. Consecutive OpenAI
+// Responses reasoning items share one section, as their stream shows them;
+// every other reasoning block has its own.
+func ContinuesReasoningSection(previous Block, block ReasoningBlock) bool {
+	before, ok := previous.(ReasoningBlock)
+	return ok && isResponsesReasoning(before) && isResponsesReasoning(block)
+}
+
+func isResponsesReasoning(block ReasoningBlock) bool {
+	return block.Provider == "openai" && block.Type == "reasoning"
+}

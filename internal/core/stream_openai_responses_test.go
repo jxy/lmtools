@@ -330,7 +330,9 @@ func TestOpenAIResponsesStreamInterleavedReasoningHasOneSection(t *testing.T) {
 			ends++
 		}
 	}
-	if starts != 1 || ends != 1 || visible.String() != "One Two donedone" {
+	// The second item's text starts on its own line; deltas that alternate
+	// between items still share the section.
+	if starts != 1 || ends != 1 || visible.String() != "One \nTwo donedone" {
 		t.Fatalf("visible=%q starts=%d ends=%d", visible.String(), starts, ends)
 	}
 	blocks := state.Blocks()
@@ -384,6 +386,139 @@ func TestOpenAIResponsesStreamReasoningEndsBeforeAnswer(t *testing.T) {
 	events := state.drainResponseStreamEvents()
 	if len(events) != 1 || events[0].Type != ResponseStreamReasoningEnd || events[0].Incomplete {
 		t.Fatalf("events before answer=%#v, want completed reasoning end", events)
+	}
+}
+
+// Reasoning items open the section where they appear, so items without
+// readable text show before the answer, in one section; the terminal snapshot
+// does not open it again.
+func TestOpenAIResponsesStreamShowsReasoningWithoutTextBeforeTheAnswer(t *testing.T) {
+	state := NewOpenAIResponsesStreamState()
+	_, _, before := parseResponsesTestEvents(t, state,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"SECRET"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"rs_2","type":"reasoning","summary":[]}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"rs_2","type":"reasoning","summary":[],"encrypted_content":"SECRET"}}`,
+		`{"type":"response.output_item.added","output_index":2,"item":{"id":"msg_1","type":"message","content":[]}}`)
+	if len(before) != 1 || before[0].Type != ResponseStreamReasoningStart {
+		t.Fatalf("events before the answer = %#v, want one section start", before)
+	}
+	answer, _, done, err := state.ParseLine(`data: {"type":"response.output_text.delta","output_index":2,"delta":"Answer"}`)
+	if err != nil || answer != "Answer" || done {
+		t.Fatalf("answer=%q done=%v error=%v", answer, done, err)
+	}
+	if events := state.drainResponseStreamEvents(); len(events) != 1 || events[0].Type != ResponseStreamReasoningEnd || events[0].Incomplete {
+		t.Fatalf("events with the answer = %#v, want the section to end first", events)
+	}
+	_, _, after := parseResponsesTestEvents(t, state,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"SECRET"},{"id":"rs_2","type":"reasoning","summary":[],"encrypted_content":"SECRET"},{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"Answer"}]}]}}`)
+	if len(after) != 0 {
+		t.Fatalf("events at completion = %#v, want none", after)
+	}
+}
+
+// An item whose done event carries no text can get its summary from the
+// terminal snapshot; it shows then, after the answer, and an item that
+// already showed text keeps it.
+func TestOpenAIResponsesStreamShowsSummaryFromTheTerminalSnapshot(t *testing.T) {
+	state := NewOpenAIResponsesStreamState()
+	_, _, events := parseResponsesTestEvents(t, state,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Streamed."}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"rs_2","type":"reasoning","summary":[]}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"rs_2","type":"reasoning"}}`,
+		`{"type":"response.output_text.delta","output_index":2,"delta":"Answer"}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Streamed. More."}]},{"id":"rs_2","type":"reasoning","summary":[{"type":"summary_text","text":"From the snapshot."}]},{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"Answer"}]}]}}`)
+	var shown []string
+	for _, event := range events {
+		switch event.Type {
+		case ResponseStreamReasoningStart:
+			shown = append(shown, "start")
+		case ResponseStreamReasoningDelta:
+			shown = append(shown, event.Text)
+		case ResponseStreamReasoningEnd:
+			shown = append(shown, "end")
+		}
+	}
+	want := []string{"start", "Streamed.", "end", "start", "From the snapshot.", "end"}
+	if !reflect.DeepEqual(shown, want) {
+		t.Fatalf("shown = %q, want %q", shown, want)
+	}
+}
+
+// An item whose done event carries no text shows every part the terminal
+// snapshot carries, summary and content: its first part does not close the
+// item to the rest.
+func TestOpenAIResponsesStreamShowsEveryPartOfTheTerminalSnapshot(t *testing.T) {
+	state := NewOpenAIResponsesStreamState()
+	_, _, events := parseResponsesTestEvents(t, state,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"First summary part."},{"type":"summary_text","text":"Second summary part."}],"content":[{"type":"reasoning_text","text":"Reasoning text."}]}]}}`)
+	var shown []string
+	for _, event := range events {
+		switch event.Type {
+		case ResponseStreamReasoningStart:
+			shown = append(shown, "start")
+		case ResponseStreamReasoningDelta:
+			shown = append(shown, event.Text)
+		case ResponseStreamReasoningEnd:
+			shown = append(shown, "end")
+		}
+	}
+	want := []string{"start", "First summary part.", "\n", "Second summary part.", "\n", "Reasoning text.", "end"}
+	if !reflect.DeepEqual(shown, want) {
+		t.Fatalf("shown = %q, want %q", shown, want)
+	}
+}
+
+// A tool call ends the reasoning before it as complete, as the Chat stream
+// does; the presenter marks a section that is still open incomplete.
+func TestOpenAIResponsesStreamReasoningEndsBeforeToolCall(t *testing.T) {
+	state := NewOpenAIResponsesStreamState()
+	_, calls, events := parseResponsesTestEvents(t, state,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Planning."}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Planning."}],"encrypted_content":"SECRET"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Planning."}],"encrypted_content":"SECRET"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]}}`)
+	var types []ResponseStreamEventType
+	for _, event := range events {
+		types = append(types, event.Type)
+	}
+	want := []ResponseStreamEventType{ResponseStreamReasoningStart, ResponseStreamReasoningDelta, ResponseStreamReasoningEnd, ResponseStreamToolCallStart}
+	if !reflect.DeepEqual(types, want) || events[2].Incomplete || len(calls) != 1 {
+		t.Fatalf("events = %#v, calls = %#v; want %v with the section complete", events, calls, want)
+	}
+}
+
+// Each reasoning item's summary starts on its own line of the section.
+func TestOpenAIResponsesStreamSeparatesReasoningItems(t *testing.T) {
+	state := NewOpenAIResponsesStreamState()
+	_, _, events := parseResponsesTestEvents(t, state,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"First."}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"First."}]}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"rs_2","type":"reasoning","summary":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_2","output_index":1,"summary_index":0,"delta":"Second."}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"rs_2","type":"reasoning","summary":[{"type":"summary_text","text":"Second."}]}}`,
+		`{"type":"response.completed"}`)
+	var visible strings.Builder
+	var starts, ends int
+	for _, event := range events {
+		switch event.Type {
+		case ResponseStreamReasoningStart:
+			starts++
+		case ResponseStreamReasoningDelta:
+			visible.WriteString(event.Text)
+		case ResponseStreamReasoningEnd:
+			ends++
+		}
+	}
+	if visible.String() != "First.\nSecond." || starts != 1 || ends != 1 {
+		t.Fatalf("visible=%q starts=%d ends=%d", visible.String(), starts, ends)
 	}
 }
 

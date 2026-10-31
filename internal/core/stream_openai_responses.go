@@ -59,12 +59,19 @@ type responsesStreamItem struct {
 	complete       bool
 	fullArguments  bool
 	reasoningParts []*responsesStreamPart
-	reasoningEnded bool
-	textParts      []*responsesStreamPart
-	fullContent    bool
-	fullSummary    bool
-	// startReported records that a tool call start event went out for the
-	// item, so a repeated output_item.added cannot announce it twice.
+	// reasoningClosed records that the item takes no more reasoning text: it
+	// ended after showing some, or the stream ended. An item that ended
+	// without showing any stays open, since an abbreviated done event can
+	// leave the summary to the terminal snapshot, and the section the item
+	// opened would otherwise end up with nothing. It is decided when the item
+	// ends, so the snapshot's first part cannot close the item to the rest.
+	reasoningClosed bool
+	textParts       []*responsesStreamPart
+	fullContent     bool
+	fullSummary     bool
+	// startReported records that the item was announced, a tool call by its
+	// start event and a reasoning item by the section it opens, so a
+	// repeated output_item.added cannot announce it twice.
 	startReported bool
 }
 
@@ -77,6 +84,7 @@ type OpenAIResponsesStreamState struct {
 	itemsByIndex     map[int]*responsesStreamItem
 	streamEvents     []ResponseStreamEvent
 	reasoningOpen    bool
+	reasoningWrote   bool // the open section has text; a new part starts on its own line
 	text             strings.Builder
 	unidentifiedText *responsesStreamItem
 	usage            *Usage
@@ -116,7 +124,7 @@ func (s *OpenAIResponsesStreamState) parseLine(line string) (string, []ToolCall,
 	if data == "[DONE]" {
 		s.terminal = true
 		for _, item := range s.items {
-			item.reasoningEnded = true
+			item.reasoningClosed = true
 		}
 		text, err := s.remainingText()
 		if err != nil {
@@ -199,10 +207,20 @@ func (s *OpenAIResponsesStreamState) parseLine(line string) (string, []ToolCall,
 			return "", nil, false, nil
 		}
 		if event.Type == "response.output_item.done" {
-			item.reasoningEnded = true
+			item.reasoningClosed = item.showedReasoning()
+		}
+		// A reasoning item opens the section where it appears, as a thinking
+		// block's start does on the Anthropic wire: an item that carries no
+		// readable text then still shows before the answer.
+		if item.fieldString("type") == "reasoning" && !item.startReported {
+			item.startReported = true
+			s.openReasoning()
 		}
 		if event.Type == "response.output_item.added" && item.isTool() && !item.startReported {
 			item.startReported = true
+			// The reasoning before the call is complete, as the Chat stream
+			// treats it.
+			s.finishReasoning(false)
 			s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamToolCallStart, Text: item.fieldString("name")})
 		}
 		if item.fieldString("type") == "message" {
@@ -532,24 +550,35 @@ func (s *OpenAIResponsesStreamState) reasoningPart(item *responsesStreamItem, ki
 }
 
 func (s *OpenAIResponsesStreamState) reasoningDelta(item *responsesStreamItem, kind string, index int, text string) {
-	if text == "" || item.reasoningEnded {
+	if text == "" || item.reasoningClosed {
 		return
 	}
+	item.startReported = true
+	s.openReasoning()
+	part := s.reasoningPart(item, kind, index)
+	if part.text.Len() == 0 && s.reasoningWrote {
+		s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningDelta, ReasoningType: "reasoning", Text: "\n"})
+	}
+	part.text.WriteString(text)
+	s.reasoningWrote = true
+	s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningDelta, ReasoningType: "reasoning", Text: text})
+}
+
+// showedReasoning reports whether any of the item's reasoning text was shown.
+func (item *responsesStreamItem) showedReasoning() bool {
+	for _, part := range item.reasoningParts {
+		if part.text.Len() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *OpenAIResponsesStreamState) openReasoning() {
 	if !s.reasoningOpen {
 		s.reasoningOpen = true
 		s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningStart, ReasoningType: "reasoning"})
 	}
-	part := s.reasoningPart(item, kind, index)
-	if part.text.Len() == 0 {
-		for i := range item.reasoningParts {
-			if item.reasoningParts[i].text.Len() > 0 {
-				s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningDelta, ReasoningType: "reasoning", Text: "\n"})
-				break
-			}
-		}
-	}
-	part.text.WriteString(text)
-	s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamReasoningDelta, ReasoningType: "reasoning", Text: text})
 }
 
 func (s *OpenAIResponsesStreamState) reasoningSnapshot(item *responsesStreamItem, kind string, index int, text string) {
@@ -564,6 +593,7 @@ func (s *OpenAIResponsesStreamState) reasoningSnapshot(item *responsesStreamItem
 func (s *OpenAIResponsesStreamState) finishReasoning(incomplete bool) {
 	if s.reasoningOpen {
 		s.reasoningOpen = false
+		s.reasoningWrote = false
 		s.streamEvents = append(s.streamEvents, ResponseStreamEvent{
 			Type: ResponseStreamReasoningEnd, ReasoningType: "reasoning", Incomplete: incomplete,
 		})

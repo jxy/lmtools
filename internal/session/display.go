@@ -261,7 +261,8 @@ func displayMessageWithToolsTo(w io.Writer, ref lineageMessageRef, interaction *
 
 // printSavedThinking shows the visible reasoning text saved with an answer,
 // quoted between the markers a live turn uses. Opaque reasoning shows as
-// omitted, as it did live.
+// omitted, and consecutive Responses reasoning items share one section, as
+// they did live.
 func printSavedThinking(w io.Writer, ref lineageMessageRef, notifier core.Notifier) {
 	blocks, ok, err := loadMessageBlocks(ref.path, ref.message.ID)
 	if err != nil {
@@ -273,12 +274,14 @@ func printSavedThinking(w io.Writer, ref lineageMessageRef, notifier core.Notifi
 	if !ok {
 		return
 	}
-	for _, block := range blocks {
-		reasoning, isReasoning := block.(core.ReasoningBlock)
-		if !isReasoning {
-			continue
+	// A section collects the texts of the blocks shown in it.
+	var section []string
+	open := false
+	flush := func() {
+		if !open {
+			return
 		}
-		text := strings.TrimRight(core.ReasoningTextForDisplay(reasoning), "\n")
+		text := strings.Join(section, "\n")
 		if text == "" {
 			text = "[omitted by provider]"
 		}
@@ -291,5 +294,23 @@ func printSavedThinking(w io.Writer, ref lineageMessageRef, notifier core.Notifi
 			}
 		}
 		fmt.Fprintln(w, "--- end thinking ---")
+		section, open = nil, false
 	}
+	var previous core.Block
+	for _, block := range blocks {
+		reasoning, isReasoning := block.(core.ReasoningBlock)
+		if !isReasoning {
+			flush()
+		} else {
+			if !core.ContinuesReasoningSection(previous, reasoning) {
+				flush()
+			}
+			open = true
+			if text := strings.TrimRight(core.ReasoningTextForDisplay(reasoning), "\n"); text != "" {
+				section = append(section, text)
+			}
+		}
+		previous = block
+	}
+	flush()
 }

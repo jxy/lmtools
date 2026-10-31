@@ -880,9 +880,13 @@ Output controls:
   stderr. It is presentation-only: it does not enable reasoning or alter the
   request. The assistant answer remains unchanged on stdout in both streaming
   and non-streaming modes. Signatures, encrypted content, and opaque redacted
-  payloads are never printed; a returned Anthropic thinking block without
-  visible text is shown as `[omitted by provider]`. Each block is delimited by
-  `--- thinking ---` and `--- end thinking ---`; an unterminated stream uses
+  payloads are never printed; a returned Anthropic thinking block, or a run of
+  Responses reasoning items, without visible text is shown as
+  `[omitted by provider]` where the thinking happened, before the answer or
+  tool call that follows it; a summary that arrives only with the finished
+  response shows after the answer. Each block is delimited by `--- thinking ---` and
+  `--- end thinking ---`, and consecutive Responses reasoning items share one
+  block with each summary on its own line; an unterminated stream uses
   `--- end thinking (incomplete) ---`. When stderr is a terminal each line
   of thinking starts with `| ` and wraps at the terminal width, and control
   characters are shown as `\uXXXX`; redirected stderr keeps the text as
