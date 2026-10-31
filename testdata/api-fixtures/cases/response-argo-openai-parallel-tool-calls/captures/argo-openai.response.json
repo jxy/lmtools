@@ -1,0 +1,80 @@
+{
+  "id": "iRblatXLDpWkw-UPl_DK6Q4",
+  "object": "chat.completion",
+  "created": 1793398413,
+  "model": "gemini4argon",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_g_AY89a19C0lh1idsKbaeuYtlBSFeRwPpT_y2IiphE7RBRp2jZLOASZ0aMRq30VXIKgbnyZLTQ8dZRuT4u5zNSKrpOQB9PuME_Wv59Inu_Yr8z01b3AcXTvxCNC0666bhOA2PrA2QLRSvnh-EK6lTNFijvvMg0OqtzMgkooUqEaF47yyvbR2Y1jdrmUBx8FzLEtUdruCAQFsr1GDe6Ll4z_0",
+            "type": "function",
+            "function": {
+              "name": "universal_command",
+              "arguments": "{\"command\": [\"/bin/echo\", \"ALPHA\"]}"
+            },
+            "extra_content": {
+              "google": {
+                "thought_signature": "AY89a19C0lh1idsKbaeuYtlBSFeRwPpT/y2IiphE7RBRp2jZLOASZ0aMRq30VXIKgbnyZLTQ8dZRuT4u5zNSKrpOQB9PuME/Wv59Inu/Yr8z01b3AcXTvxCNC0666bhOA2PrA2QLRSvnh+EK6lTNFijvvMg0OqtzMgkooUqEaF47yyvbR2Y1jdrmUBx8FzLEtUdruCAQFsr1GDe6Ll4z"
+              }
+            }
+          },
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "universal_command",
+              "arguments": "{\"command\": [\"/bin/echo\", \"BRAVO\"]}"
+            }
+          },
+          {
+            "id": "call_2",
+            "type": "function",
+            "function": {
+              "name": "universal_command",
+              "arguments": "{\"command\": [\"/bin/echo\", \"CHARLIE\"]}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls",
+      "google": {
+        "finish_reason": "STOP"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1162,
+    "completion_tokens": 98,
+    "total_tokens": 1260,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 17
+    },
+    "google": {
+      "candidates_token_count": 81,
+      "candidates_tokens_details": [
+        {
+          "modality": "TEXT",
+          "token_count": 81
+        }
+      ],
+      "prompt_token_count": 1162,
+      "prompt_tokens_details": [
+        {
+          "modality": "TEXT",
+          "token_count": 1162
+        }
+      ],
+      "thoughts_token_count": 17,
+      "total_token_count": 1260,
+      "traffic_type": "ON_DEMAND"
+    }
+  }
+}

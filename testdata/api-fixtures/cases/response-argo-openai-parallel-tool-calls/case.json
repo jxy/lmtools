@@ -1,0 +1,8 @@
+{
+  "id": "response-argo-openai-parallel-tool-calls",
+  "description": "Argo gemini4argon reply with three parallel tool calls, the first carrying a thought signature in extra_content",
+  "kinds": [
+    "response"
+  ],
+  "provider": "argo-openai"
+}

@@ -317,10 +317,16 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 	var parts []OpenAIContent
 	var textBuilder strings.Builder
 	hasNonText := false
+	// A Gemini thought signature block stands in front of the call it was
+	// sent with, as responseBlocksFromParts writes it, and goes back with
+	// that call. One in front of text belongs to the text, which has no
+	// place for it here.
+	pendingSignature := ""
 
 	for _, block := range blocks {
 		switch v := block.(type) {
 		case TextBlock:
+			pendingSignature = ""
 			textBuilder.WriteString(v.Text)
 			parts = append(parts, OpenAIContent{
 				Type: "text",
@@ -331,6 +337,9 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 			if v.Provider == "openai" && v.Type == openAIThinkingChunkType {
 				hasNonText = true
 				parts = append(parts, openAIThinkingContent(v))
+			}
+			if v.Provider == "google" && v.Type == "thought_signature" {
+				pendingSignature = v.Signature
 			}
 
 		case ImageBlock:
@@ -384,6 +393,7 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 					},
 				}
 				toolCalls = append(toolCalls, toolCall)
+				pendingSignature = ""
 				continue
 			}
 			toolCall := OpenAIToolCall{
@@ -395,6 +405,10 @@ func ConvertBlocksToOpenAIContentTyped(blocks []Block) (OpenAIContentUnion, []Op
 			}
 			if len(v.Input) > 0 {
 				toolCall.Function.Arguments = string(v.Input)
+			}
+			if pendingSignature != "" {
+				toolCall.ExtraContent = &OpenAIToolCallExtraContent{Google: &OpenAIGoogleExtraContent{ThoughtSignature: pendingSignature}}
+				pendingSignature = ""
 			}
 			toolCalls = append(toolCalls, toolCall)
 

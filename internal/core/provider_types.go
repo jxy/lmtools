@@ -162,6 +162,32 @@ type OpenAIToolCall struct {
 	Type     string             `json:"type"`
 	Function OpenAIFunctionCall `json:"function"`
 	Custom   *OpenAICustomCall  `json:"custom,omitempty"`
+	// ExtraContent carries a Gemini thought signature back to the backend
+	// that sent it with the call.
+	ExtraContent *OpenAIToolCallExtraContent `json:"extra_content,omitempty"`
+}
+
+// OpenAIToolCallExtraContent is where Gemini's OpenAI compatible format puts
+// a function call's thought signature: extra_content.google.thought_signature.
+// Gemini 3 and later reject a function call of the current turn sent back
+// without it.
+type OpenAIToolCallExtraContent struct {
+	Google *OpenAIGoogleExtraContent `json:"google,omitempty"`
+}
+
+// OpenAIGoogleExtraContent holds the Google fields of a tool call's extra
+// content.
+type OpenAIGoogleExtraContent struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
+// openAIToolCallThoughtSignature returns the thought signature in a tool
+// call's extra content, if there is one.
+func openAIToolCallThoughtSignature(extra *OpenAIToolCallExtraContent) string {
+	if extra == nil || extra.Google == nil {
+		return ""
+	}
+	return extra.Google.ThoughtSignature
 }
 
 // OpenAIFunctionCall represents a function call in OpenAI format
@@ -191,6 +217,9 @@ func (tc OpenAIToolCall) MarshalJSON() ([]byte, error) {
 	m["function"] = tc.Function
 	if tc.Custom != nil {
 		m["custom"] = tc.Custom
+	}
+	if tc.ExtraContent != nil {
+		m["extra_content"] = tc.ExtraContent
 	}
 	return json.Marshal(m)
 }

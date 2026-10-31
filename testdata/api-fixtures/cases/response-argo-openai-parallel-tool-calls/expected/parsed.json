@@ -1,0 +1,36 @@
+{
+  "text": "",
+  "tool_calls": [
+    {
+      "args": {
+        "command": [
+          "/bin/echo",
+          "ALPHA"
+        ]
+      },
+      "id": "call_g_AY89a19C0lh1idsKbaeuYtlBSFeRwPpT_y2IiphE7RBRp2jZLOASZ0aMRq30VXIKgbnyZLTQ8dZRuT4u5zNSKrpOQB9PuME_Wv59Inu_Yr8z01b3AcXTvxCNC0666bhOA2PrA2QLRSvnh-EK6lTNFijvvMg0OqtzMgkooUqEaF47yyvbR2Y1jdrmUBx8FzLEtUdruCAQFsr1GDe6Ll4z_0",
+      "name": "universal_command",
+      "thought_signature": "AY89a19C0lh1idsKbaeuYtlBSFeRwPpT/y2IiphE7RBRp2jZLOASZ0aMRq30VXIKgbnyZLTQ8dZRuT4u5zNSKrpOQB9PuME/Wv59Inu/Yr8z01b3AcXTvxCNC0666bhOA2PrA2QLRSvnh+EK6lTNFijvvMg0OqtzMgkooUqEaF47yyvbR2Y1jdrmUBx8FzLEtUdruCAQFsr1GDe6Ll4z"
+    },
+    {
+      "args": {
+        "command": [
+          "/bin/echo",
+          "BRAVO"
+        ]
+      },
+      "id": "call_1",
+      "name": "universal_command"
+    },
+    {
+      "args": {
+        "command": [
+          "/bin/echo",
+          "CHARLIE"
+        ]
+      },
+      "id": "call_2",
+      "name": "universal_command"
+    }
+  ]
+}

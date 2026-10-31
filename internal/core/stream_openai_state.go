@@ -182,6 +182,9 @@ func (s *OpenAIStreamState) appendToolCall(delta ParsedOpenAIStreamToolCall) {
 	if delta.Type != "" {
 		partial.Type = delta.Type
 	}
+	if delta.ThoughtSignature != "" {
+		partial.ThoughtSignature = delta.ThoughtSignature
+	}
 	if delta.Name != "" {
 		if partial.Name == "" {
 			s.streamEvents = append(s.streamEvents, ResponseStreamEvent{Type: ResponseStreamToolCallStart, Text: delta.Name})

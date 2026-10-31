@@ -15,7 +15,7 @@ func ParseResponseProjection(provider string, data []byte) (map[string]interface
 	)
 
 	switch provider {
-	case "openai":
+	case "openai", "argo-openai":
 		text, toolCalls, err = parseOpenAIResponseWithTools(data, false)
 	case "openai-responses":
 		return parseOpenAIResponsesFixtureProjection(data)
@@ -99,6 +99,9 @@ func projectParsedResponse(provider, text string, toolCalls []ToolCall) map[stri
 		}
 		if toolCall.AssistantContent != "" {
 			item["assistant_content"] = toolCall.AssistantContent
+		}
+		if toolCall.ThoughtSignature != "" {
+			item["thought_signature"] = toolCall.ThoughtSignature
 		}
 		if len(toolCall.Args) > 0 {
 			var decoded interface{}

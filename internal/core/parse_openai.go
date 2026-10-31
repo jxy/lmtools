@@ -70,6 +70,7 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 						Name  string `json:"name"`
 						Input string `json:"input"`
 					} `json:"custom"`
+					ExtraContent *OpenAIToolCallExtraContent `json:"extra_content"`
 				} `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -108,10 +109,11 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 			continue
 		}
 		toolCalls = append(toolCalls, ToolCall{
-			ID:   tc.ID,
-			Type: "function",
-			Name: tc.Function.Name,
-			Args: normalizeOpenAIToolArguments(tc.Function.Arguments),
+			ID:               tc.ID,
+			Type:             "function",
+			Name:             tc.Function.Name,
+			Args:             normalizeOpenAIToolArguments(tc.Function.Arguments),
+			ThoughtSignature: openAIToolCallThoughtSignature(tc.ExtraContent),
 		})
 	}
 

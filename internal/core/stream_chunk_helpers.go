@@ -23,6 +23,9 @@ type ParsedOpenAIStreamToolCall struct {
 	Name        string
 	Arguments   string
 	Input       string
+	// ThoughtSignature is the Gemini thought signature that came with the
+	// call in extra_content.
+	ThoughtSignature string
 }
 
 type ParsedOpenAIStreamChoice struct {
@@ -120,6 +123,7 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 						Name  string `json:"name"`
 						Input string `json:"input"`
 					} `json:"custom"`
+					ExtraContent *OpenAIToolCallExtraContent `json:"extra_content"`
 				} `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
@@ -176,13 +180,14 @@ func ParseOpenAIStreamChunk(data []byte) (ParsedOpenAIStreamChunk, error) {
 					input = toolCall.Custom.Input
 				}
 				choice.ToolCalls = append(choice.ToolCalls, ParsedOpenAIStreamToolCall{
-					ChoiceIndex: rawChoice.Index,
-					Index:       toolCall.Index,
-					ID:          toolCall.ID,
-					Type:        toolType,
-					Name:        name,
-					Arguments:   arguments,
-					Input:       input,
+					ChoiceIndex:      rawChoice.Index,
+					Index:            toolCall.Index,
+					ID:               toolCall.ID,
+					Type:             toolType,
+					Name:             name,
+					Arguments:        arguments,
+					Input:            input,
+					ThoughtSignature: openAIToolCallThoughtSignature(toolCall.ExtraContent),
 				})
 			}
 		}
