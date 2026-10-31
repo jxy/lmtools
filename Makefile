@@ -37,7 +37,7 @@ test: test-unit
 
 # Run unit tests
 test-unit:
-	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy
+	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures
 
 # Run integration tests (requires built binaries)
 test-integration: build
@@ -52,7 +52,7 @@ test-all: test-unit test-integration test-e2e
 
 # Run tests with coverage for all packages
 coverage:
-	go test -race -coverprofile=coverage.out ./internal/... ./cmd/lmc ./cmd/apiproxy
+	go test -race -coverprofile=coverage.out ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report saved to coverage.html"
 	@go tool cover -func=coverage.out | grep "total:" | awk '{print "Total coverage: " $$3}'
