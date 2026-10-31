@@ -3,7 +3,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -180,25 +182,75 @@ func TestConsumeSSEStreamBuffersMultiLineData(t *testing.T) {
 	}
 }
 
-func TestEnsureAnthropicTextPreamble(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	handler, err := NewAnthropicStreamHandler(recorder, "claude-3-sonnet", context.Background())
-	if err != nil {
-		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
-	}
-
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
-	}
-
-	events := parseSimpleSSEEvents(recorder.Body.String())
-	if len(events) != 2 {
-		t.Fatalf("len(events) = %d, want 2", len(events))
-	}
-	if events[0].Event != "message_start" {
-		t.Fatalf("first event = %q, want message_start", events[0].Event)
-	}
-	if events[1].Event != "content_block_start" {
-		t.Fatalf("second event = %q, want content_block_start", events[1].Event)
+// A converted stream opens its text block with the first text. A reply that
+// only calls tools then has no empty text block in front of them, and one
+// with neither leaves no block open. Blocks are numbered in the order they
+// start, and every one that starts is stopped once.
+func TestAnthropicStreamOpensTheTextBlockWithTheFirstText(t *testing.T) {
+	googleCall := `{"functionCall":{"name":"lookup","args":{"q":1}}}`
+	for _, tt := range []struct {
+		name   string
+		render func([]byte, string) ([]byte, error)
+		stream string
+		want   []string
+	}{
+		{
+			name:   "openai tool call only",
+			render: renderAnthropicStreamFromOpenAI,
+			stream: `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":1}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n",
+			want:   []string{"start tool_use 0", "stop 0"},
+		},
+		{
+			name:   "openai text only",
+			render: renderAnthropicStreamFromOpenAI,
+			stream: `data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n",
+			want:   []string{"start text 0", "stop 0"},
+		},
+		{
+			name:   "openai neither",
+			render: renderAnthropicStreamFromOpenAI,
+			stream: `data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n",
+		},
+		{
+			name:   "google function call only",
+			render: renderAnthropicStreamFromGoogle,
+			stream: `data: {"candidates":[{"content":{"parts":[` + googleCall + `]},"finishReason":"STOP"}]}` + "\n\n",
+			want:   []string{"start tool_use 0", "stop 0"},
+		},
+		{
+			name:   "google text, then a function call",
+			render: renderAnthropicStreamFromGoogle,
+			stream: `data: {"candidates":[{"content":{"parts":[{"text":"Looking"},` + googleCall + `]},"finishReason":"STOP"}]}` + "\n\n",
+			want:   []string{"start text 0", "stop 0", "start tool_use 1", "stop 1"},
+		},
+		{
+			name:   "legacy argo text",
+			render: renderAnthropicStreamFromArgo,
+			stream: "Hello",
+			want:   []string{"start text 0", "stop 0"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := tt.render([]byte(tt.stream), "test-model")
+			if err != nil {
+				t.Fatalf("render error = %v", err)
+			}
+			var blocks []string
+			events := projectAnthropicStream(string(body))
+			for _, event := range events {
+				switch event["event"] {
+				case "content_block_start":
+					blocks = append(blocks, fmt.Sprintf("start %v %v", event["block_type"], event["index"]))
+				case "content_block_stop":
+					blocks = append(blocks, fmt.Sprintf("stop %v", event["index"]))
+				}
+			}
+			if !reflect.DeepEqual(blocks, tt.want) {
+				t.Fatalf("content blocks = %q, want %q\n%s", blocks, tt.want, body)
+			}
+			if last := events[len(events)-1]["event"]; last != "message_stop" {
+				t.Fatalf("last event = %v, want message_stop\n%s", last, body)
+			}
+		})
 	}
 }

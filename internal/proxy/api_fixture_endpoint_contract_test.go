@@ -889,7 +889,7 @@ func renderAnthropicStreamFromOpenAI(raw []byte, model string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return nil, err
 	}
 	parser := NewOpenAIStreamParser(handler)
@@ -905,7 +905,7 @@ func renderAnthropicStreamFromGoogle(raw []byte, model string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return nil, err
 	}
 	parser := NewGoogleStreamParser(handler)
@@ -921,7 +921,7 @@ func renderAnthropicStreamFromArgo(raw []byte, model string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return nil, err
 	}
 	parser := NewArgoStreamParser(handler)

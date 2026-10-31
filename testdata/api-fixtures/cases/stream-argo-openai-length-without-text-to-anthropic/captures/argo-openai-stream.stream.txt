@@ -1,0 +1,4 @@
+data: {"id": "chatcmpl-170aa2d8b5764cf0b68ff70a", "object": "chat.completion.chunk", "created": 1793398179, "model": "gemini4argon", "choices": [{"index": 0, "delta": {}, "finish_reason": "length", "google": {"finish_reason": "MAX_TOKENS"}}], "usage": {"prompt_tokens": 53, "completion_tokens": 30, "total_tokens": 83, "prompt_tokens_details": {"cached_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 27}, "google": {"candidates_token_count": 3, "candidates_tokens_details": [{"modality": "TEXT", "token_count": 3}], "prompt_token_count": 53, "prompt_tokens_details": [{"modality": "TEXT", "token_count": 53}], "thoughts_token_count": 27, "total_token_count": 83, "traffic_type": "ON_DEMAND"}}}
+
+data: [DONE]
+

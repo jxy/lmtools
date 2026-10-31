@@ -1,0 +1,12 @@
+{
+  "id": "stream-argo-openai-length-without-text-to-anthropic",
+  "description": "Argo gemini4argon stream that reaches its token limit while reasoning, with no text or tool call, projected to Anthropic events",
+  "kinds": [
+    "stream"
+  ],
+  "stream_source": "argo-openai",
+  "stream_target": "anthropic",
+  "models": {
+    "openai": "gemini4argon"
+  }
+}

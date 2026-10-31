@@ -1,0 +1,18 @@
+[
+  {
+    "event": "message_start",
+    "model": "gemini4argon",
+    "role": "assistant"
+  },
+  {
+    "event": "message_delta",
+    "stop_reason": "max_tokens",
+    "usage": {
+      "input_tokens": 53,
+      "output_tokens": 30
+    }
+  },
+  {
+    "event": "message_stop"
+  }
+]

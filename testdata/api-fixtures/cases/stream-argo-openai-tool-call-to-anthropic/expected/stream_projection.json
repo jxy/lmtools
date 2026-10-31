@@ -1,0 +1,34 @@
+[
+  {
+    "event": "message_start",
+    "model": "gemini4argon",
+    "role": "assistant"
+  },
+  {
+    "block_type": "tool_use",
+    "event": "content_block_start",
+    "index": 0,
+    "name": "universal_command"
+  },
+  {
+    "delta_type": "input_json_delta",
+    "event": "content_block_delta",
+    "index": 0,
+    "partial_json": "{\"command\": [\"/bin/echo\", \"TOOL_MARKER_42\"]}"
+  },
+  {
+    "event": "content_block_stop",
+    "index": 0
+  },
+  {
+    "event": "message_delta",
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 1144,
+      "output_tokens": 60
+    }
+  },
+  {
+    "event": "message_stop"
+  }
+]

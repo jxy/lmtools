@@ -28,13 +28,6 @@ func (s *Server) ensureStreamingResponseOK(ctx context.Context, provider string,
 	return nil
 }
 
-func ensureAnthropicTextPreamble(handler *AnthropicStreamHandler) error {
-	if err := handler.SendMessageStart(); err != nil {
-		return err
-	}
-	return handler.SendContentBlockStart(0, "text")
-}
-
 func consumeSSEStream(reader io.Reader, onData func(event string, data json.RawMessage) error) error {
 	scanner := NewSSEScanner(reader)
 	var currentEvent string
@@ -173,7 +166,7 @@ func (s *Server) streamFromOpenAI(ctx context.Context, anthReq *AnthropicRequest
 	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
 	defer stopHeartbeat()
 
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return err
 	}
 
@@ -196,7 +189,7 @@ func (s *Server) streamFromGoogle(ctx context.Context, anthReq *AnthropicRequest
 	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
 	defer stopHeartbeat()
 
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return err
 	}
 
@@ -234,7 +227,7 @@ func (s *Server) streamLegacyArgo(ctx context.Context, anthReq *AnthropicRequest
 	}
 	defer body.Close()
 
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return err
 	}
 
@@ -274,7 +267,7 @@ func (s *Server) streamNativeArgoOpenAI(ctx context.Context, anthReq *AnthropicR
 	stopHeartbeat := s.startAnthropicIdleHeartbeat(ctx, handler)
 	defer stopHeartbeat()
 
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		return err
 	}
 

@@ -139,15 +139,19 @@ func TestAPIFixtureStreamingTranslations(t *testing.T) {
 				t.Fatalf("ReadCaseFile(%q) error = %v", streamPath, err)
 			}
 
+			source, err := apifixtures.ParseCaptureTarget(meta.StreamSource + "-stream")
+			if err != nil {
+				t.Fatalf("ParseCaptureTarget(%q) error = %v", meta.StreamSource, err)
+			}
 			switch {
-			case meta.StreamSource == "openai" && meta.StreamTarget == "anthropic":
+			case source.Provider == "openai" && meta.StreamTarget == "anthropic":
 				recorder := newFlushableRecorder()
 				handler, err := NewAnthropicStreamHandler(recorder, meta.Models["openai"], context.Background())
 				if err != nil {
 					t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 				}
-				if err := ensureAnthropicTextPreamble(handler); err != nil {
-					t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+				if err := handler.SendMessageStart(); err != nil {
+					t.Fatalf("SendMessageStart() error = %v", err)
 				}
 				parser := NewOpenAIStreamParser(handler)
 				if err := parser.Parse(strings.NewReader(string(rawStream))); err != nil {

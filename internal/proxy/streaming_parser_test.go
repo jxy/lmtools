@@ -13,8 +13,8 @@ func TestOpenAIStreamParser_SharedStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -58,8 +58,8 @@ func TestAnthropicStreamHandler_ParsedStateHelpersCloseTextAndReuseToolBlock(t *
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 	if err := handler.SendTextDelta("Before tool"); err != nil {
 		t.Fatalf("SendTextDelta() error = %v", err)
@@ -134,8 +134,8 @@ func TestOpenAIStreamParser_UsageAfterFinishReasonCompletesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -169,8 +169,8 @@ func TestOpenAIStreamParserStopSequencesArePerChoice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -203,8 +203,8 @@ func TestOpenAIStreamParserUsesChoiceIndexForToolBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -235,8 +235,8 @@ func TestAnthropicStreamHandler_ParsedToolBlocksUseCompositeKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	first, err := handler.BeginParsedToolUseBlockForOpenAIKey(openAIStreamToolKey{ChoiceIndex: 0, ToolIndex: 0}, "toolu_a", "tool_a")
@@ -251,8 +251,9 @@ func TestAnthropicStreamHandler_ParsedToolBlocksUseCompositeKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginParsedToolUseBlockForOpenAIKey(reuse) error = %v", err)
 	}
-	if first != 1 || second != 2 || reused != first {
-		t.Fatalf("block indexes first/second/reused = %d/%d/%d, want 1/2/1", first, second, reused)
+	// No text came before the tools, so the first tool block is block 0.
+	if first != 0 || second != 1 || reused != first {
+		t.Fatalf("block indexes first/second/reused = %d/%d/%d, want 0/1/0", first, second, reused)
 	}
 	if count := strings.Count(recorder.Body.String(), `"type":"tool_use"`); count != 2 {
 		t.Fatalf("tool_use starts = %d, want 2\nbody=%s", count, recorder.Body.String())
@@ -265,8 +266,8 @@ func TestOpenAIStreamParserAggregatesMultiChoiceFinishReasons(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -291,8 +292,8 @@ func TestOpenAIStreamParserFlushesAllStopTailsOnEOFAfterFinishReason(t *testing.
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -319,8 +320,8 @@ func TestOpenAIStreamParserFlushesStopTailBeforeReturningTruncatedStream(t *test
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"abcX\"}}]}\n\n"
@@ -342,8 +343,8 @@ func TestOpenAIStreamParserBuffersFunctionToolUntilName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -378,8 +379,8 @@ func TestOpenAIStreamParserBuffersCustomToolUntilName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -414,8 +415,8 @@ func TestGoogleStreamParser_SharedStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -454,8 +455,8 @@ func TestGoogleStreamParser_FinishChunkStillEmitsText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -619,8 +620,8 @@ func TestOpenAIStreamParser_WarnsOnUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -656,8 +657,8 @@ func TestGoogleStreamParser_WarnsOnUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 
 	stream := strings.Join([]string{
@@ -792,7 +793,7 @@ func TestOpenAIStreamParserThinkingContentTransitionKeepsAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
+	if err := handler.SendMessageStart(); err != nil {
 		t.Fatal(err)
 	}
 	stream := `data: {"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"private thinking"}],"closed":true},{"type":"text","text":"AUD"}]}}]}

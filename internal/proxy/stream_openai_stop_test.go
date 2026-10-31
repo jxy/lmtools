@@ -130,8 +130,8 @@ func TestOpenAIStreamParserAcceptsNoSpaceDataLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 	stream := strings.Join([]string{
 		`data:{"choices":[{"index":0,"delta":{"content":"hello"}}]}`,
@@ -183,8 +183,8 @@ func TestOpenAIStreamParserStopSequencesDoNotTouchToolArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 	stream := strings.Join([]string{
 		`data: {"choices":[{"index":0,"delta":{"content":"hello <ST"}}]}`,
@@ -330,8 +330,8 @@ func TestOpenAIStreamParserIgnoresToolDeltaAfterLocalTextStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAnthropicStreamHandler() error = %v", err)
 	}
-	if err := ensureAnthropicTextPreamble(handler); err != nil {
-		t.Fatalf("ensureAnthropicTextPreamble() error = %v", err)
+	if err := handler.SendMessageStart(); err != nil {
+		t.Fatalf("SendMessageStart() error = %v", err)
 	}
 	stream := strings.Join([]string{
 		`data: {"choices":[{"index":0,"delta":{"content":"hello <STOP> hidden"}}]}`,

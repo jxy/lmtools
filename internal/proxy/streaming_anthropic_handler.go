@@ -11,11 +11,17 @@ import (
 
 // StreamingState tracks the state of a streaming response.
 type StreamingState struct {
-	MessageID        string
-	TextSent         bool
+	MessageID string
+	TextSent  bool
+	// TextBlockStarted is set once the text block's content_block_start is
+	// sent. The text block opens with the first text, so a reply that has
+	// none, such as one that only calls tools, sends no empty text block.
+	TextBlockStarted bool
 	TextBlockClosed  bool
-	ToolIndex        *int
-	LastToolIndex    int
+	// BlockCount is how many content blocks have started. Blocks are
+	// numbered in the order they start, so the text block, when there is
+	// one, is block 0, and the tool blocks follow it.
+	BlockCount       int
 	AccumulatedText  string
 	InputTokens      int
 	OutputTokens     int
@@ -69,10 +75,17 @@ func (h *AnthropicStreamHandler) SendMessageStart() error {
 
 // SendContentBlockStart sends a content_block_start event.
 func (h *AnthropicStreamHandler) SendContentBlockStart(index int, blockType string) error {
+	h.mu.Lock()
+	h.state.noteBlockStarted(index)
+	if blockType == "text" {
+		h.state.TextBlockStarted = true
+	}
+	h.mu.Unlock()
 	return h.SendEvent(EventContentBlockStart, NewContentBlockStart(index, blockType))
 }
 
-// SendTextDelta sends a text delta.
+// SendTextDelta sends a text delta, opening the text block first if this is
+// the reply's first text.
 func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 	h.mu.Lock()
 	if h.state.TextBlockClosed {
@@ -81,16 +94,37 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 		return nil
 	}
 
+	start := !h.state.TextBlockStarted
+	if start {
+		h.state.TextBlockStarted = true
+		h.state.noteBlockStarted(0)
+	}
 	h.state.TextSent = true
 	h.state.AccumulatedText += text
 	h.mu.Unlock()
 
+	if start {
+		if err := h.SendEvent(EventContentBlockStart, NewContentBlockStart(0, "text")); err != nil {
+			return err
+		}
+	}
 	return h.SendEvent(EventContentBlockDelta, NewTextDelta(0, text))
 }
 
 // SendToolUseStart sends a tool_use block start.
 func (h *AnthropicStreamHandler) SendToolUseStart(index int, toolID, name string) error {
+	h.mu.Lock()
+	h.state.noteBlockStarted(index)
+	h.mu.Unlock()
 	return h.SendEvent(EventContentBlockStart, NewToolUseStart(index, toolID, name))
+}
+
+// noteBlockStarted counts the block at index among the started ones. The
+// caller must hold the handler's lock.
+func (s *StreamingState) noteBlockStarted(index int) {
+	if index >= s.BlockCount {
+		s.BlockCount = index + 1
+	}
 }
 
 // SendToolInputDelta sends tool input delta.
@@ -223,36 +257,29 @@ func (h *AnthropicStreamHandler) FinishStream(stopReason string, usage *Anthropi
 	return nil
 }
 
-// Complete completes the stream by closing open blocks and sending completion events.
+// Complete completes the stream by closing open blocks and sending completion
+// events. Every block that started is closed, in order; a reply with no text
+// and no tool calls, such as one a content filter stopped, ends with none.
 func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 	h.mu.Lock()
-	needToCloseText := !h.state.TextBlockClosed && (h.state.TextSent || h.state.AccumulatedText != "")
+	pendingText := !h.state.TextBlockClosed && h.state.AccumulatedText != "" && !h.state.TextSent
 	accumulatedText := h.state.AccumulatedText
-	textSent := h.state.TextSent
-	toolIndex := h.state.ToolIndex
-	lastToolIndex := h.state.LastToolIndex
-	hasParsedToolBlocks := len(h.state.ParsedToolBlocks) > 0
 	h.mu.Unlock()
 
-	if needToCloseText {
-		if accumulatedText != "" && !textSent {
-			if err := h.SendTextDelta(accumulatedText); err != nil {
-				return handleStreamError(h.ctx, h, "AnthropicComplete", err)
-			}
-		}
-		if err := h.SendContentBlockStop(0); err != nil {
+	if pendingText {
+		if err := h.SendTextDelta(accumulatedText); err != nil {
 			return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 		}
-		h.mu.Lock()
-		h.state.TextBlockClosed = true
-		h.mu.Unlock()
 	}
 
-	if toolIndex != nil || hasParsedToolBlocks {
-		for i := 1; i <= lastToolIndex; i++ {
-			if err := h.SendContentBlockStop(i); err != nil {
-				return handleStreamError(h.ctx, h, "AnthropicComplete", err)
-			}
+	h.mu.Lock()
+	h.state.TextBlockClosed = true
+	blocks := h.state.BlockCount
+	h.mu.Unlock()
+
+	for i := 0; i < blocks; i++ {
+		if err := h.SendContentBlockStop(i); err != nil {
+			return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 		}
 	}
 
@@ -332,14 +359,15 @@ func (h *AnthropicStreamHandler) CloseParsedTextBlockIfNeeded() error {
 			return err
 		}
 	}
-	if err := h.SendContentBlockStop(0); err != nil {
-		return err
-	}
 
 	h.mu.Lock()
 	h.state.TextBlockClosed = true
+	started := h.state.TextBlockStarted
 	h.mu.Unlock()
-	return nil
+	if !started {
+		return nil
+	}
+	return h.SendContentBlockStop(0)
 }
 
 func (h *AnthropicStreamHandler) BeginParsedToolUseBlock(streamIndex *int, toolID, name string) (int, error) {
@@ -369,12 +397,8 @@ func (h *AnthropicStreamHandler) beginParsedToolUseBlock(key *openAIStreamToolKe
 	}
 
 	h.mu.Lock()
-	if key != nil {
-		index := key.ToolIndex
-		h.state.ToolIndex = &index
-	}
-	h.state.LastToolIndex++
-	blockIndex := h.state.LastToolIndex
+	blockIndex := h.state.BlockCount
+	h.state.BlockCount++
 	if key != nil {
 		h.state.ParsedToolBlocks[*key] = blockIndex
 	}
