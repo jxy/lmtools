@@ -81,7 +81,7 @@ func TestAnthropicAdaptiveThinkingNonStreaming(t *testing.T) {
 			"-api-key-file", apiKeyFile,
 			"-model", "claude-opus-4-7",
 			"-effort", "high",
-			"-show-thinking",
+			thinkingOn,
 			"-no-session",
 		},
 		"Test Anthropic non-streaming", WithTempLogDir(t))
@@ -89,7 +89,7 @@ func TestAnthropicAdaptiveThinkingNonStreaming(t *testing.T) {
 		t.Fatalf("lmc non-streaming with thinking failed: %v\nstderr: %s", err, stderr)
 	}
 	if stdout != "Final answer" {
-		t.Fatalf("stdout with -show-thinking = %q, want final answer text only", stdout)
+		t.Fatalf("stdout with the thinking display = %q, want final answer text only", stdout)
 	}
 	if !strings.Contains(stderr, "--- thinking ---\nI should answer clearly.\n--- end thinking ---\n\n") {
 		t.Fatalf("stderr missing thinking summary: %s", stderr)
@@ -123,7 +123,7 @@ func TestAnthropicShowThinkingPreservesJSONStdout(t *testing.T) {
 			"-model", "claude-opus-4-7",
 			"-effort", "high",
 			"-json",
-			"-show-thinking",
+			thinkingOn,
 			"-no-session",
 		},
 		"Return JSON", WithTempLogDir(t))
@@ -203,11 +203,11 @@ func TestAnthropicShowThinkingStaysQuietWhenAdaptiveThinkingReturnsNoBlock(t *te
 				"-api-key-file", apiKeyFile,
 				"-model", "claude-opus-4-7",
 				"-effort", "high",
-				"-show-thinking",
+				thinkingOn,
 				"-no-session",
 			}
 			if stream {
-				args = append(args, "-stream")
+				args = append(args, streamOn)
 			}
 			stdout, stderr, err := runLmcCommand(t, lmcBin, args, "Simple question")
 			if err != nil {
@@ -309,10 +309,10 @@ func TestAnthropicStreamingMode(t *testing.T) {
 			"-provider", "anthropic",
 			"-provider-url", server.URL + "/v1",
 			"-api-key-file", apiKeyFile,
-			"-stream",
+			streamOn,
 			"-model", "claude-opus-4-7",
 			"-effort", "high",
-			"-show-thinking",
+			thinkingOn,
 			"-no-session",
 		},
 		"Test Anthropic streaming", WithLogDir(logDir))

@@ -66,7 +66,7 @@ func TestOpenAIStreamingMode(t *testing.T) {
 			"-provider", "openai",
 			"-provider-url", server.URL + "/v1",
 			"-api-key-file", apiKeyFile,
-			"-stream",
+			streamOn,
 			"-model", "gpt-5",
 			"-no-session",
 		},

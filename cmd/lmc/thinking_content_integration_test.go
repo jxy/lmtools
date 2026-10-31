@@ -26,7 +26,7 @@ func TestCLIThinkingContentHistoryAndThinking(t *testing.T) {
 				}
 				body := completionFixture(t, "response-openai-thinking-content", file)
 				server, requests := completionServer(t, completionReply{body, stream}, completionReply{body, stream}, completionReply{body, stream})
-				args := completionArgs(t, server.URL, dir, false, stream, "-log-dir", t.TempDir(), "-repl", fmt.Sprintf("-show-thinking=%v", show))
+				args := completionArgs(t, server.URL, dir, false, stream, "-log-dir", t.TempDir(), "-repl", fmt.Sprintf("-hide-thinking=%v", !show))
 				stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), args, "first\nsecond\n")
 				if err != nil || stdout != "AUDIT_OK\n\nAUDIT_OK\n" {
 					t.Fatalf("stdout=%q stderr=%s err=%v", stdout, stderr, err)
@@ -159,7 +159,7 @@ func TestCLIThinkingContentToolFollowupReplaysThinking(t *testing.T) {
 				file = "openai-stream.stream.txt"
 			}
 			server, requests := completionServer(t, completionReply{payload, stream}, completionReply{completionFixture(t, "response-openai-thinking-content", file), stream})
-			stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), false, stream, "-log-dir", t.TempDir(), "-tool", "-tool-auto-approve", "-show-thinking"), "run tool")
+			stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), false, stream, "-log-dir", t.TempDir(), "-tool", "-tool-auto-approve", thinkingOn), "run tool")
 			if err != nil || stdout != "AUDIT_OK" {
 				t.Fatalf("stdout=%q stderr=%s err=%v", stdout, stderr, err)
 			}

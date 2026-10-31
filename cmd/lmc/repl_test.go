@@ -824,14 +824,14 @@ func TestREPLRegenerationLeavesTheImagesForThePrompt(t *testing.T) {
 	_ = w.Close()
 
 	args := []string{
-		"-provider", "openai", "-provider-url", server.URL() + "/v1", "-model", "gpt-test",
+		"-provider", "openai", "-provider-url", server.URL() + "/v1", "-chat-completions", "-model", "gpt-test",
 		"-log-dir", t.TempDir(), "-sessions-dir", sessionsDir,
 		"-branch", session.GetSessionID(sess.Path) + "/0001", "-image", image,
 	}
 	if err := runWithArgs(t, r, args...); err == nil || !strings.Contains(err.Error(), "-image needs a user turn") {
 		t.Fatalf("single run error = %v, want the image refused", err)
 	}
-	if err := runWithArgs(t, r, append([]string{"-repl", "-stream=false"}, args...)...); err != nil {
+	if err := runWithArgs(t, r, append([]string{"-repl", "-no-stream"}, args...)...); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	requests := server.GetRequests()

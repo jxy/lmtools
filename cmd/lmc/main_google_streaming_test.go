@@ -118,7 +118,7 @@ func TestGoogleStreamingMode(t *testing.T) {
 			"-provider", "google",
 			"-provider-url", server.URL + "/v1beta",
 			"-api-key-file", apiKeyFile,
-			"-stream",
+			streamOn,
 			"-model", "gemini-2.5-pro",
 			"-no-session",
 		},

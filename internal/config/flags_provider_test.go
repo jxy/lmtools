@@ -130,64 +130,36 @@ func TestProviderValidation(t *testing.T) {
 	}
 }
 
-// TestOpenAIResponsesFlagValidation covers which providers may use
-// -openai-responses. Argo serves its own /v1/responses in native mode only.
-func TestOpenAIResponsesFlagValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		args    []string
-		wantErr string
+// The Responses API is the default where the provider has one, and
+// -chat-completions turns it off. Everywhere else it is off, and
+// -chat-completions is accepted there, since it asks for what happens anyway.
+func TestOpenAIResponsesDefault(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want bool
 	}{
-		{
-			name: "openai provider",
-			args: []string{"-provider", "openai", "-openai-responses", "-api-key-file", "test.key"},
-		},
-		{
-			name: "argo provider",
-			args: []string{"-provider", "argo", "-openai-responses", "-argo-user", "test"},
-		},
-		{
-			name:    "argo legacy",
-			args:    []string{"-provider", "argo", "-openai-responses", "-argo-legacy", "-argo-user", "test"},
-			wantErr: "invalid flag combination: -openai-responses cannot be used with -argo-legacy",
-		},
-		{
-			name:    "anthropic provider",
-			args:    []string{"-provider", "anthropic", "-openai-responses", "-api-key-file", "test.key"},
-			wantErr: "invalid flag combination: -openai-responses requires -provider openai or -provider argo",
-		},
-		{
-			name:    "google provider",
-			args:    []string{"-provider", "google", "-openai-responses", "-api-key-file", "test.key"},
-			wantErr: "invalid flag combination: -openai-responses requires -provider openai or -provider argo",
-		},
-		{
-			name:    "embed mode",
-			args:    []string{"-provider", "openai", "-openai-responses", "-e", "-api-key-file", "test.key"},
-			wantErr: "invalid flag combination: -openai-responses is only supported in chat mode",
-		},
-	}
-
-	for _, tt := range tests {
+		{"openai", []string{"-provider", "openai", "-api-key-file", "test.key"}, true},
+		{"openai chat", []string{"-provider", "openai", "-chat-completions", "-api-key-file", "test.key"}, false},
+		{"argo", []string{"-provider", "argo", "-argo-user", "test"}, true},
+		{"argo chat", []string{"-provider", "argo", "-chat-completions", "-argo-user", "test"}, false},
+		{"argo legacy", []string{"-provider", "argo", "-argo-legacy", "-argo-user", "test"}, false},
+		{"argo legacy chat", []string{"-provider", "argo", "-argo-legacy", "-chat-completions", "-argo-user", "test"}, false},
+		{"empty provider", []string{"-provider", "", "-argo-user", "test"}, true},
+		{"anthropic", []string{"-provider", "anthropic", "-api-key-file", "test.key"}, false},
+		{"anthropic chat", []string{"-provider", "anthropic", "-chat-completions", "-api-key-file", "test.key"}, false},
+		{"google", []string{"-provider", "google", "-api-key-file", "test.key"}, false},
+		{"google chat", []string{"-provider", "google", "-chat-completions", "-api-key-file", "test.key"}, false},
+		{"embed", []string{"-provider", "openai", "-e", "-api-key-file", "test.key"}, false},
+		{"embed chat", []string{"-provider", "openai", "-e", "-chat-completions", "-api-key-file", "test.key"}, false},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, err := ParseFlags(tt.args)
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("ParseFlags(%v) error = nil, want %q", tt.args, tt.wantErr)
-				}
-				if err.Error() != tt.wantErr {
-					t.Fatalf("ParseFlags(%v) error = %q, want %q", tt.args, err.Error(), tt.wantErr)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("ParseFlags(%v) error = %v", tt.args, err)
 			}
-			if !cfg.OpenAIResponses {
-				t.Fatalf("cfg.OpenAIResponses = false, want true")
-			}
-			if !cfg.RequestOptions().OpenAIResponses {
-				t.Fatalf("RequestOptions().OpenAIResponses = false, want true")
+			if cfg.OpenAIResponses != tt.want || cfg.RequestOptions().OpenAIResponses != tt.want {
+				t.Fatalf("ParseFlags(%v) OpenAIResponses = %v, want %v", tt.args, cfg.OpenAIResponses, tt.want)
 			}
 		})
 	}

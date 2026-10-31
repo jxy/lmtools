@@ -79,7 +79,7 @@ func TestOpenAIResponsesToolLoopAccumulatesInput(t *testing.T) {
 				"-provider-url", server.URL + "/v1",
 				"-api-key-file", apiKeyFile,
 				"-model", "gpt-5",
-				"-openai-responses",
+				responsesOn,
 				"-tool",
 				"-tool-whitelist", whitelistFile,
 				"-tool-auto-approve",

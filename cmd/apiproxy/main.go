@@ -71,9 +71,10 @@ Provider Options:
   -argo-dev                  Use the Argo dev environment instead of prod
   -argo-test                 Use the Argo test environment instead of prod
   -argo-legacy               Use legacy Argo /api/v1/resource chat endpoints
-  -openai-responses          Forward /v1/responses to the provider's own Responses
-                            API instead of converting it (openai, and argo gpt*
-                            models; not valid with -argo-legacy)
+  -chat-completions          Convert /v1/responses requests to chat completions
+                            instead of forwarding them to the provider's own
+                            Responses API, which openai and argo gpt* models
+                            get by default
 
 Model Options:
   -model-map REGEX=MODEL     Map matching request models to a backend model
@@ -91,7 +92,6 @@ Logging Options:
 
 Other Options:
   -version                   Print version information and exit
-  -no-color                  Disable colored output
 
 Examples:
   # Start proxy with Argo provider
@@ -117,50 +117,80 @@ Examples:
 		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
+// commandLine holds what apiproxy's flags set.
+type commandLine struct {
+	host string
+	port int
+
+	// Configuration
+	providerOpts            providerconfig.Options
+	modelMapSpecs           repeatableStringFlag
+	maxRequestBodySize      int64
+	sessionsDir             string
+	stripEncryptedReasoning bool
+
+	// Logging
+	logLevel  string
+	logFormat string
+
+	showVersion bool
+}
+
+// registerFlags defines apiproxy's flags. printUsage lists them by hand, so
+// TestUsageListsEveryFlag compares the two.
+func registerFlags(fs *flag.FlagSet, c *commandLine) {
+	// Server flags
+	fs.StringVar(&c.host, "host", "127.0.0.1", "Host to bind the server to")
+	fs.IntVar(&c.port, "port", 8082, "Port to bind the server to")
+
+	// Configuration flags
+	providerconfig.RegisterFlags(fs, &c.providerOpts, providerconfig.Defaults{Provider: constants.ProviderArgo})
+	fs.Var(&c.modelMapSpecs, "model-map", "Map matching request models to a backend model as REGEX=MODEL (repeatable, first match wins)")
+	fs.Int64Var(&c.maxRequestBodySize, "max-request-body-size", defaultMaxRequestBodySizeMB,
+		fmt.Sprintf("Maximum request body size in MB (matches OpenAI's %dMB payload limit)", defaultMaxRequestBodySizeMB))
+	fs.StringVar(&c.sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
+	fs.BoolVar(&c.stripEncryptedReasoning, "strip-encrypted-reasoning", false, "Strip unusable encrypted reasoning state from direct Responses requests (recovery mode)")
+
+	// Logging flags
+	fs.StringVar(&c.logLevel, "log-level", "INFO", "Log level (DEBUG, INFO, WARN, ERROR)")
+	fs.StringVar(&c.logFormat, "log-format", "text", "Log format (text, json)")
+
+	fs.BoolVar(&c.showVersion, "version", false, "Print version information and exit")
+}
+
+// removedFlags answers the flags apiproxy replaced with what to use instead.
+var removedFlags = providerconfig.RemovedFlags{
+	"openai-responses": "apiproxy forwards /v1/responses to the provider's Responses API by default, and -chat-completions converts it",
+}
+
+// parseCommandLine parses args on fs. A removed flag is an error that names
+// its replacement.
+func parseCommandLine(fs *flag.FlagSet, args []string) (commandLine, error) {
+	var cl commandLine
+	registerFlags(fs, &cl)
+	removedFlags.Register(fs)
+	if err := fs.Parse(args); err != nil {
+		return cl, err
+	}
+	return cl, removedFlags.Err(fs)
+}
+
 func main() {
 	// Set custom usage function
 	flag.Usage = func() { printUsage(os.Stderr) }
-	// Parse command-line flags
-	var (
-		host string
-		port int
-
-		// Configuration
-		providerOpts            providerconfig.Options
-		modelMapSpecs           repeatableStringFlag
-		maxRequestBodySize      int64
-		sessionsDir             string
-		stripEncryptedReasoning bool
-
-		// Logging
-		logLevel  string
-		logFormat string
-	)
-
-	// Server flags
-	flag.StringVar(&host, "host", "127.0.0.1", "Host to bind the server to")
-	flag.IntVar(&port, "port", 8082, "Port to bind the server to")
-
-	// Configuration flags
-	providerconfig.RegisterFlags(flag.CommandLine, &providerOpts, providerconfig.Defaults{Provider: constants.ProviderArgo})
-	flag.Var(&modelMapSpecs, "model-map", "Map matching request models to a backend model as REGEX=MODEL (repeatable, first match wins)")
-	flag.Int64Var(&maxRequestBodySize, "max-request-body-size", defaultMaxRequestBodySizeMB,
-		fmt.Sprintf("Maximum request body size in MB (matches OpenAI's %dMB payload limit)", defaultMaxRequestBodySizeMB))
-	flag.StringVar(&sessionsDir, "sessions-dir", "", "Stateful Responses API sessions directory (default: ~/.apiproxy/sessions)")
-	flag.BoolVar(&stripEncryptedReasoning, "strip-encrypted-reasoning", false, "Strip unusable encrypted reasoning state from direct Responses requests (recovery mode)")
-
-	// Logging flags
-	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (DEBUG, INFO, WARN, ERROR)")
-	flag.StringVar(&logFormat, "log-format", "text", "Log format (text, json)")
-
-	showVersion := flag.Bool("version", false, "Print version information and exit")
-
-	flag.Parse()
-	if *showVersion {
+	// Parse command-line flags; flag.CommandLine exits on its own errors, so
+	// what returns is a removed flag.
+	cl, err := parseCommandLine(flag.CommandLine, os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if cl.showVersion {
 		fmt.Println(version.String("apiproxy"))
 		return
 	}
-	maxRequestBodySizeBytes, err := requestBodyLimitBytes(maxRequestBodySize)
+	providerOpts := cl.providerOpts
+	maxRequestBodySizeBytes, err := requestBodyLimitBytes(cl.maxRequestBodySize)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to validate configuration: %v\n", err)
 		os.Exit(1)
@@ -181,8 +211,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	modelMapRules := make([]proxy.ModelMapRule, 0, len(modelMapSpecs))
-	for _, spec := range modelMapSpecs {
+	modelMapRules := make([]proxy.ModelMapRule, 0, len(cl.modelMapSpecs))
+	for _, spec := range cl.modelMapSpecs {
 		rule, err := proxy.ParseModelMapSpec(spec)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Invalid -model-map %q: %v\n", spec, err)
@@ -201,11 +231,11 @@ func main() {
 		ArgoEnv:                 providerOpts.ArgoEnv,
 		Provider:                providerOpts.Provider,
 		ProviderURL:             providerOpts.ProviderURL,
-		OpenAIResponses:         providerOpts.OpenAIResponses,
-		StripEncryptedReasoning: stripEncryptedReasoning,
+		ChatCompletions:         providerOpts.ChatCompletions,
+		StripEncryptedReasoning: cl.stripEncryptedReasoning,
 		ModelMapRules:           modelMapRules,
 		MaxRequestBodySize:      maxRequestBodySizeBytes,
-		SessionsDir:             sessionsDir,
+		SessionsDir:             cl.sessionsDir,
 	}
 
 	// Validate configuration
@@ -216,8 +246,8 @@ func main() {
 
 	// Configure logging
 	if err := logger.InitializeWithOptions(
-		logger.WithLevel(logLevel),
-		logger.WithFormat(logFormat),
+		logger.WithLevel(cl.logLevel),
+		logger.WithFormat(cl.logFormat),
 		logger.WithStderr(true),
 		logger.WithFile(false),
 		logger.WithComponent("apiproxy"),
@@ -233,7 +263,7 @@ func main() {
 	}
 
 	httpServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", host, port),
+		Addr:         fmt.Sprintf("%s:%d", cl.host, cl.port),
 		Handler:      server,
 		ReadTimeout:  15 * time.Minute,
 		WriteTimeout: 15 * time.Minute,
@@ -243,7 +273,7 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		// No request context available at startup
-		logger.GetLogger().Infof("Starting API proxy server on %s:%d", host, port)
+		logger.GetLogger().Infof("Starting API proxy server on %s:%d", cl.host, cl.port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			// No request context available during startup error
 			logger.GetLogger().Errorf("Failed to start server: %v", err)

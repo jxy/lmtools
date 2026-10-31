@@ -45,12 +45,13 @@ func TestRegisterFlagsParsesProviderOptions(t *testing.T) {
 		"-argo-user", "alice",
 		"-argo-test",
 		"-argo-legacy",
+		"-chat-completions",
 	})
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if opts.Provider != constants.ProviderOpenAI || opts.ProviderURL != "http://localhost:8080/v1" || opts.APIKeyFile != "key.txt" {
+	if opts.Provider != constants.ProviderOpenAI || opts.ProviderURL != "http://localhost:8080/v1" || opts.APIKeyFile != "key.txt" || !opts.ChatCompletions {
 		t.Fatalf("provider fields not parsed: %#v", opts)
 	}
 	if opts.ArgoUser != "alice" || !opts.ArgoTest || !opts.ArgoLegacy {

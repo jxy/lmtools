@@ -40,9 +40,6 @@ const (
 	// ErrEmbedWithTool is shown when trying to use embed mode with tools
 	ErrEmbedWithTool = "invalid flag combination: embed mode cannot be used with tool"
 
-	// ErrEmbedWithStream is shown when trying to use embed mode with streaming
-	ErrEmbedWithStream = "invalid flag combination: embed mode cannot be used with stream"
-
 	// ErrEmbedWithSession is shown when trying to use embed mode with session flags
 	ErrEmbedWithSession = "invalid flag combination: embed mode cannot be used with session flags (-resume, -branch)"
 )

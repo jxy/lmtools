@@ -26,9 +26,10 @@ type Config struct {
 	ProviderURL   string
 	ModelMapRules []ModelMapRule
 
-	// OpenAIResponses forwards /v1/responses to the provider's own Responses API
-	// instead of converting it. Valid for openai and native argo only.
-	OpenAIResponses bool
+	// ChatCompletions converts /v1/responses requests to the provider's
+	// chat/completions instead of forwarding them to its own Responses API,
+	// which OpenAI and native Argo (gpt* models) otherwise get.
+	ChatCompletions bool
 
 	// StripEncryptedReasoning removes opaque encrypted reasoning state from
 	// direct Responses requests as an opt-in recovery measure.
@@ -59,10 +60,6 @@ func (c *Config) Validate() error {
 	if !constants.IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid -provider: %s, must be one of: %s",
 			c.Provider, constants.JoinedProviders())
-	}
-
-	if err := providerconfig.ValidateResponsesAPIFlag(c.Provider, c.OpenAIResponses, c.ArgoLegacy); err != nil {
-		return err
 	}
 
 	if ok, _ := evaluateProviderCredentials(c.Provider, newProviderCredentialState(c)); !ok {

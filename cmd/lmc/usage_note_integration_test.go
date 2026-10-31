@@ -124,7 +124,7 @@ data: {"type":"message_stop"}`,
 			"-provider-url", server.URL,
 			"-api-key-file", apiKeyFile,
 			"-model", "claude-sonnet-5",
-			"-stream",
+			streamOn,
 			"-no-session",
 		},
 		"say something")

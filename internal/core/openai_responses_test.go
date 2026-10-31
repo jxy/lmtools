@@ -127,7 +127,7 @@ func TestBuildOpenAIResponsesRequestReasoningModeAndContext(t *testing.T) {
 }
 
 // Without reasoning.summary OpenAI returns reasoning items with an empty
-// summary, so -show-thinking has nothing to print.
+// summary, so the thinking display has nothing to print.
 func TestBuildOpenAIResponsesRequestAsksForTheReasoningSummary(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -875,7 +875,7 @@ func TestArgoResponsesParsesResponsesPayloadForGPTOnly(t *testing.T) {
 	}
 }
 
-// TestArgoResponsesDefaultModelRoutesConsistently covers `lmc -openai-responses`
+// TestArgoResponsesDefaultModelRoutesConsistently covers lmc on the Responses API
 // with no -model: the builder falls back to Argo's default chat model, which is a
 // gpt* model, so the parser must resolve the same default instead of treating the
 // empty model as non-gpt and parsing a Responses payload as chat/completions.

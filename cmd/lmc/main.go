@@ -246,7 +246,7 @@ func run(notifier core.Notifier) error {
 
 	warnUnusedReasoningControls(cfg, notifier)
 	if note := argoChatHidesThinking(opts); cfg.ShowThinking && note != "" {
-		notifier.Warnf("-show-thinking: %s", note)
+		notifier.Warnf("%s", note)
 	}
 
 	// Initialize logging
@@ -332,14 +332,14 @@ func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
 	if providers.UsesResponsesAPIWire(cfg.Provider, cfg.Model, cfg.OpenAIResponses, cfg.ArgoLegacy) {
 		return
 	}
-	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API-only controls; ignoring them because the request does not use -openai-responses on a Responses-capable provider and model")
+	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API controls; ignoring them because the request does not use the Responses API, which OpenAI and Argo gpt* models use unless -chat-completions is given")
 }
 
 // argoChatHidesThinking explains why a gpt model on Argo's chat completions
-// route answers without thinking, and returns "" for any other route. OpenAI's
-// Chat Completions API returns no reasoning text and Argo adds none; its
-// Responses route returns a summary when the request asks for one, which an
-// -effort does there.
+// route, which -chat-completions selects, answers without thinking, and
+// returns "" for any other route. OpenAI's Chat Completions API returns no
+// reasoning text and Argo adds none; its Responses route returns a summary
+// when the request asks for one, which an -effort does there.
 func argoChatHidesThinking(opts core.RequestOptions) string {
 	model := core.EffectiveChatModel(opts)
 	if opts.Embed || opts.ArgoLegacy || constants.NormalizeProvider(opts.Provider) != constants.ProviderArgo ||
@@ -347,7 +347,7 @@ func argoChatHidesThinking(opts core.RequestOptions) string {
 		providers.UsesResponsesAPIWire(opts.Provider, model, opts.OpenAIResponses, opts.ArgoLegacy) {
 		return ""
 	}
-	return fmt.Sprintf("Argo's chat completions route returns no thinking for %s; use -openai-responses with -effort to get reasoning summaries", model)
+	return fmt.Sprintf("Argo's chat completions route returns no thinking for %s; without -chat-completions, the Responses API returns reasoning summaries with -effort", model)
 }
 
 // connectMCPServers starts the servers -mcp-config names and attaches their

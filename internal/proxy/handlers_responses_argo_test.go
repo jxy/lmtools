@@ -66,7 +66,6 @@ func newArgoResponsesTestServer(t *testing.T, respond func(*http.Request) (*http
 		Provider:           constants.ProviderArgo,
 		ProviderURL:        "http://argo.local/argoapi",
 		ArgoUser:           "argo-user",
-		OpenAIResponses:    true,
 		ModelMapRules:      rules,
 		MaxRequestBodySize: fixtureMaxBodySize,
 		SessionsDir:        t.TempDir(),
@@ -314,34 +313,76 @@ func TestArgoConversationsResolveLocalStateFirst(t *testing.T) {
 	}
 }
 
-func TestArgoResponsesConvertsWithoutFlag(t *testing.T) {
-	var sawPath string
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		sawPath = r.URL.Path
-		return jsonRoundTripResponse(http.StatusOK, OpenAIResponse{
-			ID:      "chatcmpl_1",
-			Object:  "chat.completion",
-			Model:   "gpt5",
-			Choices: []OpenAIChoice{{Index: 0, Message: OpenAIMessage{Role: "assistant", Content: "hello"}}},
-		}), nil
-	})
-	config := &Config{
-		Provider:           constants.ProviderArgo,
-		ProviderURL:        "http://argo.local/argoapi",
-		ArgoUser:           "argo-user",
-		MaxRequestBodySize: fixtureMaxBodySize,
-		SessionsDir:        t.TempDir(),
+// responseOutputText joins the output_text parts of a Responses payload's
+// output items.
+func responseOutputText(resp map[string]interface{}) string {
+	var text strings.Builder
+	output, _ := resp["output"].([]interface{})
+	for _, item := range output {
+		message, _ := item.(map[string]interface{})
+		parts, _ := message["content"].([]interface{})
+		for _, part := range parts {
+			if p, _ := part.(map[string]interface{}); p["type"] == "output_text" {
+				s, _ := p["text"].(string)
+				text.WriteString(s)
+			}
+		}
 	}
-	client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
-	server := NewTestServerDirectWithClient(t, config, client)
+	return text.String()
+}
 
-	_ = requestJSON(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
-		"model": "gpt5",
-		"input": "hi",
-	})
+// -chat-completions converts a Responses request that would otherwise be
+// forwarded to the provider's Responses API, on Argo and OpenAI alike.
+func TestResponsesConvertWithChatCompletions(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		config   Config
+		model    string
+		wantPath string
+	}{
+		{
+			name:     "argo",
+			config:   Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "argo-user"},
+			model:    "gpt5",
+			wantPath: "/argoapi/v1/chat/completions",
+		},
+		{
+			name:     "openai",
+			config:   Config{Provider: constants.ProviderOpenAI, ProviderURL: "http://openai.local/v1", ProviderKeySet: ProviderKeySet{OpenAIAPIKey: "k"}},
+			model:    "gpt-5",
+			wantPath: "/v1/chat/completions",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var sawPath string
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				sawPath = r.URL.Path
+				return jsonRoundTripResponse(http.StatusOK, OpenAIResponse{
+					ID:      "chatcmpl_1",
+					Object:  "chat.completion",
+					Model:   tt.model,
+					Choices: []OpenAIChoice{{Index: 0, Message: OpenAIMessage{Role: "assistant", Content: "hello"}}},
+				}), nil
+			})
+			config := tt.config
+			config.ChatCompletions = true
+			config.MaxRequestBodySize = fixtureMaxBodySize
+			config.SessionsDir = t.TempDir()
+			client := retry.NewClientWithTransport(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger, transport)
+			server := NewTestServerDirectWithClient(t, &config, client)
 
-	if sawPath != "/argoapi/v1/chat/completions" {
-		t.Fatalf("upstream path = %q, want converted chat/completions route without -openai-responses", sawPath)
+			resp := requestJSON(t, server, http.MethodPost, "/v1/responses", map[string]interface{}{
+				"model": tt.model,
+				"input": "hi",
+			})
+
+			if sawPath != tt.wantPath {
+				t.Fatalf("upstream path = %q, want the converted %s route with -chat-completions", sawPath, tt.wantPath)
+			}
+			if text := responseOutputText(resp); resp["object"] != "response" || text != "hello" {
+				t.Fatalf("response = %#v, want a converted Responses object whose text is hello", resp)
+			}
+		})
 	}
 }
 
@@ -355,7 +396,7 @@ func TestResponsesPassthroughTargetSelection(t *testing.T) {
 		wantOtherDirect bool
 	}{
 		{
-			name:            "openai always direct",
+			name:            "openai direct by default",
 			config:          &Config{Provider: constants.ProviderOpenAI, ProviderURL: "http://openai.local/v1", ProviderKeySet: ProviderKeySet{OpenAIAPIKey: "k"}},
 			wantOK:          true,
 			wantURL:         "http://openai.local/v1/responses",
@@ -363,24 +404,28 @@ func TestResponsesPassthroughTargetSelection(t *testing.T) {
 			wantOtherDirect: true,
 		},
 		{
-			name:            "argo with flag is gpt only",
-			config:          &Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "u", OpenAIResponses: true},
+			name:   "openai with -chat-completions",
+			config: &Config{Provider: constants.ProviderOpenAI, ProviderURL: "http://openai.local/v1", ProviderKeySet: ProviderKeySet{OpenAIAPIKey: "k"}, ChatCompletions: true},
+		},
+		{
+			name:            "argo direct for gpt only",
+			config:          &Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "u"},
 			wantOK:          true,
 			wantURL:         "http://argo.local/argoapi/v1/responses",
 			wantGPTDirect:   true,
 			wantOtherDirect: false,
 		},
 		{
-			name:   "argo without flag",
-			config: &Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "u"},
+			name:   "argo with -chat-completions",
+			config: &Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "u", ChatCompletions: true},
 		},
 		{
-			name:   "argo legacy ignores flag",
-			config: &Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "u", OpenAIResponses: true, ArgoLegacy: true},
+			name:   "argo legacy",
+			config: &Config{Provider: constants.ProviderArgo, ProviderURL: "http://argo.local/argoapi", ArgoUser: "u", ArgoLegacy: true},
 		},
 		{
 			name:   "anthropic",
-			config: &Config{Provider: constants.ProviderAnthropic, ProviderURL: "http://anthropic.local/v1", ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "k"}, OpenAIResponses: true},
+			config: &Config{Provider: constants.ProviderAnthropic, ProviderURL: "http://anthropic.local/v1", ProviderKeySet: ProviderKeySet{AnthropicAPIKey: "k"}},
 		},
 	}
 

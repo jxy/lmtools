@@ -555,7 +555,7 @@ func TestREPLSaysWhenTheRouteReturnsNoThinking(t *testing.T) {
 	loop, _, notes := newTestLoop(t, te)
 	loop.base.Provider = constants.ProviderArgo
 	loop.base.Model = "claudeopus55"
-	const warning = "Warning: Argo's chat completions route returns no thinking for gpt6astra; use -openai-responses with -effort to get reasoning summaries."
+	const warning = "Warning: Argo's chat completions route returns no thinking for gpt6astra; without -chat-completions, the Responses API returns reasoning summaries with -effort."
 	for _, command := range []string{"/model gpt6astra", "/thinking on", "/model claudeopus55", "/model gpt6astra", "/thinking off", "/model gpt6astra"} {
 		loop.interpretInput(command)
 	}

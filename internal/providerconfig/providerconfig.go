@@ -1,6 +1,7 @@
 package providerconfig
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"lmtools/internal/auth"
@@ -9,15 +10,18 @@ import (
 )
 
 type Options struct {
-	Provider        string
-	ProviderURL     string
-	APIKeyFile      string
-	ArgoUser        string
-	ArgoDev         bool
-	ArgoTest        bool
-	ArgoLegacy      bool
-	ArgoEnv         string
-	OpenAIResponses bool
+	Provider    string
+	ProviderURL string
+	APIKeyFile  string
+	ArgoUser    string
+	ArgoDev     bool
+	ArgoTest    bool
+	ArgoLegacy  bool
+	ArgoEnv     string
+	// ChatCompletions is -chat-completions: use the provider's
+	// chat/completions route where it also has a Responses API, which is
+	// used otherwise. It changes nothing for a provider without one.
+	ChatCompletions bool
 }
 
 type Defaults struct {
@@ -38,26 +42,52 @@ func RegisterFlags(fs *flag.FlagSet, opts *Options, defaults Defaults) {
 	fs.StringVar(&opts.Provider, "provider", provider, "provider: argo, openai, google, anthropic")
 	fs.StringVar(&opts.ProviderURL, "provider-url", "", "custom provider API endpoint")
 	fs.StringVar(&opts.APIKeyFile, "api-key-file", "", "path to API key file (required for openai/google/anthropic; optional alternative for argo)")
-	fs.BoolVar(&opts.OpenAIResponses, "openai-responses", false, "use the OpenAI Responses API (/v1/responses) instead of chat/completions; supported by -provider openai and -provider argo (argo gpt* models only)")
+	fs.BoolVar(&opts.ChatCompletions, "chat-completions", false, "use the provider's chat/completions route instead of its Responses API (/v1/responses), which -provider openai and argo gpt* models use by default")
 }
 
-// ValidateResponsesAPIFlag reports whether -openai-responses is usable with the
-// selected provider. Only OpenAI and native Argo expose a Responses endpoint;
-// legacy Argo has no /v1/responses route at all.
-func ValidateResponsesAPIFlag(provider string, openaiResponses, argoLegacy bool) error {
-	if !openaiResponses {
-		return nil
+// RemovedFlags maps the name of a bool flag a binary no longer has to what
+// replaced it, so a script that still passes one is told what to use instead
+// of "flag provided but not defined". Register them on the set being parsed,
+// never on one printed as usage, and check Err after parsing.
+type RemovedFlags map[string]string
+
+// removedFlag stands in for a removed bool flag. It takes no value, like the
+// flag it replaces, so -name and -name=false both parse and Err answers them.
+type removedFlag struct{}
+
+func (removedFlag) String() string   { return "" }
+func (removedFlag) Set(string) error { return nil }
+func (removedFlag) IsBoolFlag() bool { return true }
+
+func (r RemovedFlags) Register(fs *flag.FlagSet) {
+	for name := range r {
+		fs.Var(removedFlag{}, name, "")
 	}
+}
+
+// Err names every removed flag the parsed command line gave, with its
+// replacement.
+func (r RemovedFlags) Err(fs *flag.FlagSet) error {
+	var errs []error
+	fs.Visit(func(f *flag.Flag) {
+		if replacement, ok := r[f.Name]; ok {
+			errs = append(errs, fmt.Errorf("-%s was removed: %s", f.Name, replacement))
+		}
+	})
+	return errors.Join(errs...)
+}
+
+// ResponsesAPIAvailable reports whether the provider exposes a Responses
+// endpoint. Which models use it is providers.UsesResponsesAPIWire's call. An
+// empty provider is Argo, as Normalize makes it.
+func ResponsesAPIAvailable(provider string, argoLegacy bool) bool {
 	switch constants.NormalizeProvider(provider) {
 	case constants.ProviderOpenAI:
-		return nil
-	case constants.ProviderArgo:
-		if argoLegacy {
-			return fmt.Errorf("invalid flag combination: -openai-responses cannot be used with -argo-legacy")
-		}
-		return nil
+		return true
+	case constants.ProviderArgo, "":
+		return !argoLegacy
 	default:
-		return fmt.Errorf("invalid flag combination: -openai-responses requires -provider openai or -provider argo")
+		return false
 	}
 }
 
@@ -88,7 +118,7 @@ func (o *Options) Normalize() error {
 	if o.ArgoEnv == "" {
 		o.ArgoEnv = ResolveArgoEnvironment(o.ArgoDev, o.ArgoTest)
 	}
-	return ValidateResponsesAPIFlag(o.Provider, o.OpenAIResponses, o.ArgoLegacy)
+	return nil
 }
 
 func ValidateArgoEnvironmentFlags(dev, test bool) error {

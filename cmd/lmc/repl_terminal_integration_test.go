@@ -49,15 +49,15 @@ func startREPLWithTerminalType(t *testing.T, url string, stdout, stderr *os.File
 	}
 	t.Cleanup(func() { _ = pty.Close() })
 	r := &replUnderTerminal{pty: pty, screen: pty.Screen(), exited: make(chan error, 1), sessionsDir: t.TempDir()}
-	args := append([]string{
-		"-repl", "-stream=false",
+	args := withEarlierDefaults(append([]string{
+		"-repl", "-no-stream",
 		"-provider", "openai",
 		"-provider-url", url + "/v1",
 		"-api-key-file", writeTestAPIKeyFile(t, "test-key"),
 		"-model", "gpt-test",
 		"-sessions-dir", r.sessionsDir,
 		"-log-dir", t.TempDir(),
-	}, extra...)
+	}, extra...))
 	r.cmd = exec.Command(getLmcBinary(t), args...)
 	r.cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "TERM="+terminalType)
 	if stdout != nil {

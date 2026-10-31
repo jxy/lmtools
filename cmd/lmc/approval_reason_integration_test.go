@@ -106,7 +106,7 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 			defer server.Close()
 			flags := []string{"-tool", "-tool-include", "universal_command", "-retries", "0"}
 			if responses {
-				flags = append(flags, "-openai-responses")
+				flags = append(flags, responsesOn)
 			}
 			var editor testEditor
 			if test.editorMode != "" {

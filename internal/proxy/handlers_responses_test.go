@@ -657,6 +657,7 @@ func TestOpenAIResponsesArgoOpenAIConvertsInstructionRolesToSystem(t *testing.T)
 	})
 	config := &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        "http://argo.local/v1",
 		ArgoUser:           "test-key",
 		MaxRequestBodySize: fixtureMaxBodySize,
@@ -732,6 +733,7 @@ func TestOpenAIResponsesArgoOpenAIAdaptsCustomToolsToFunctions(t *testing.T) {
 	})
 	config := &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        "http://argo.local/v1",
 		ArgoUser:           "test-key",
 		MaxRequestBodySize: fixtureMaxBodySize,

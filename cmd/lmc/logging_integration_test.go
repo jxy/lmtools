@@ -172,7 +172,7 @@ func TestStreamingLogging(t *testing.T) {
 
 	// Test streaming request with custom log directory
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-stream", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", streamOn, "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
 		"Stream this message", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run streaming: %v\nStderr: %s", err, stderr)

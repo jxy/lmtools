@@ -384,7 +384,7 @@ func streamedResponsesScreen(t *testing.T, stream string) string {
 		_, _ = io.WriteString(w, stream)
 	}))
 	defer server.Close()
-	te := newTurnTestEnvAt(t, server.URL, "-openai-responses", "-stream", "-show-thinking")
+	te := newTurnTestEnvAt(t, server.URL, responsesOn, streamOn, thinkingOn)
 	var screen bytes.Buffer
 	te.env.stdout, te.env.stderr, te.env.answersOnScreen = &screen, &screen, true
 	if _, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "think"}); err != nil {

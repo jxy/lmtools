@@ -137,7 +137,6 @@ func TestParseFlagsInvalidCombos(t *testing.T) {
 		args    []string
 		wantErr string
 	}{
-		{"embed+stream", []string{"-argo-user", "testuser", "-e", "-stream"}, "embed mode cannot be used with stream"},
 		{"embed+resume", []string{"-argo-user", "testuser", "-e", "-resume", "123"}, "embed mode cannot be used with session flags"},
 		{"embed+branch", []string{"-argo-user", "testuser", "-e", "-branch", "123/456"}, "embed mode cannot be used with session flags"},
 	}
@@ -154,19 +153,21 @@ func TestParseFlagsInvalidCombos(t *testing.T) {
 }
 
 func TestParseFlagsCustom(t *testing.T) {
-	args := []string{"-model", "modelA", "-argo-user", "alice", "-s", "sys", "-stream"}
+	args := []string{"-model", "modelA", "-argo-user", "alice", "-s", "sys"}
 	cfg, err := ParseFlags(args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := Config{
-		Model:      "modelA",
-		StreamChat: true,
+		Model:        "modelA",
+		StreamChat:   true,
+		ShowThinking: true,
 		Options: providerconfig.Options{
 			ArgoUser: "alice",
 			ArgoEnv:  "prod",
 			Provider: "argo",
 		},
+		OpenAIResponses:     true,
 		System:              "sys",
 		SystemExplicitlySet: true, // -s flag was provided
 		Timeout:             10 * time.Minute,
@@ -339,22 +340,22 @@ func TestParseFlagsLeavesSchemaSemanticsToProvider(t *testing.T) {
 }
 
 func TestParseFlagsShowThinkingIsPresentationOnly(t *testing.T) {
-	base, err := ParseFlags([]string{"-argo-user", "alice"})
+	shown, err := ParseFlags([]string{"-argo-user", "alice"})
 	if err != nil {
 		t.Fatalf("ParseFlags(base) failed: %v", err)
 	}
-	shown, err := ParseFlags([]string{"-argo-user", "alice", "-show-thinking"})
+	hidden, err := ParseFlags([]string{"-argo-user", "alice", "-hide-thinking"})
 	if err != nil {
-		t.Fatalf("ParseFlags(-show-thinking) failed: %v", err)
-	}
-	if base.ShowThinking {
-		t.Fatal("ShowThinking defaults to true, want false")
+		t.Fatalf("ParseFlags(-hide-thinking) failed: %v", err)
 	}
 	if !shown.ShowThinking {
-		t.Fatal("ShowThinking = false after -show-thinking")
+		t.Fatal("ShowThinking defaults to false, want true")
 	}
-	if !reflect.DeepEqual(base.RequestOptions(), shown.RequestOptions()) {
-		t.Fatalf("-show-thinking changed provider RequestOptions:\nbase:  %+v\nshown: %+v", base.RequestOptions(), shown.RequestOptions())
+	if hidden.ShowThinking {
+		t.Fatal("ShowThinking = true after -hide-thinking")
+	}
+	if !reflect.DeepEqual(shown.RequestOptions(), hidden.RequestOptions()) {
+		t.Fatalf("-hide-thinking changed provider RequestOptions:\nshown:  %+v\nhidden: %+v", shown.RequestOptions(), hidden.RequestOptions())
 	}
 }
 
@@ -513,17 +514,21 @@ func TestParseFlagsREPLRefusals(t *testing.T) {
 	}
 }
 
-// -repl turns streaming on unless -stream was given, and -stream=false keeps
-// it off.
-func TestParseFlagsREPLStreams(t *testing.T) {
+// Chat streams unless -no-stream is given; embed mode and -show, which send
+// no chat, do not, and -no-stream there is accepted.
+func TestParseFlagsStreamsByDefault(t *testing.T) {
 	for _, tc := range []struct {
 		args   []string
 		stream bool
 	}{
+		{args: []string{}, stream: true},
+		{args: []string{"-no-stream"}, stream: false},
 		{args: []string{"-repl"}, stream: true},
-		{args: []string{"-repl", "-stream=false"}, stream: false},
-		{args: []string{"-repl", "-stream"}, stream: true},
-		{args: []string{}, stream: false},
+		{args: []string{"-repl", "-no-stream"}, stream: false},
+		{args: []string{"-e"}, stream: false},
+		{args: []string{"-e", "-no-stream"}, stream: false},
+		{args: []string{"-show", "0001"}, stream: false},
+		{args: []string{"-show", "0001", "-no-stream"}, stream: false},
 	} {
 		cfg, err := ParseFlags(append([]string{"-argo-user", "testuser"}, tc.args...))
 		if err != nil {
@@ -544,7 +549,7 @@ func TestParseFlagsRejectsLeftoverArguments(t *testing.T) {
 		want string
 	}{
 		{name: "prompt", args: []string{"-argo-user", "u", "what is this"}, want: "reads the prompt from standard input"},
-		{name: "boolean value", args: []string{"-argo-user", "u", "-stream", "false", "-repl"}, want: "-stream=false"},
+		{name: "boolean value", args: []string{"-argo-user", "u", "-hide-thinking", "false", "-repl"}, want: "-hide-thinking=false"},
 		{name: "before version", args: []string{"extra", "-version"}, want: `unexpected argument "extra"`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -553,5 +558,38 @@ func TestParseFlagsRejectsLeftoverArguments(t *testing.T) {
 				t.Fatalf("ParseFlags(%q) error = %v, want one containing %q", tt.args, err, tt.want)
 			}
 		})
+	}
+}
+
+// -stream, -show-thinking, and -openai-responses gave way to -no-stream,
+// -hide-thinking, and -chat-completions when their modes became the
+// defaults. A script that still passes one, either way round, is told what
+// replaced it, and the help lists only the new flags.
+func TestParseFlagsNamesTheReplacementOfARemovedFlag(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-stream"}, []string{"-stream was removed", "-no-stream"}},
+		{[]string{"-stream=false"}, []string{"-stream was removed", "-no-stream"}},
+		{[]string{"-show-thinking=false"}, []string{"-show-thinking was removed", "-hide-thinking"}},
+		{[]string{"-openai-responses"}, []string{"-openai-responses was removed", "-chat-completions"}},
+		{[]string{"-stream", "-show-thinking", "-openai-responses=false"}, []string{"-stream was removed", "-show-thinking was removed", "-openai-responses was removed"}},
+		{[]string{"-stream", "false", "-repl"}, []string{"-stream was removed"}},
+	} {
+		_, err := ParseFlags(append([]string{"-argo-user", "u"}, tt.args...))
+		for _, want := range tt.want {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("ParseFlags(%q) error = %v, want one containing %q", tt.args, err, want)
+			}
+		}
+	}
+
+	fs := flag.NewFlagSet("lmc", flag.ContinueOnError)
+	registerFlags(fs, &Config{})
+	for name := range removedFlags {
+		if fs.Lookup(name) != nil {
+			t.Errorf("the help lists the removed flag -%s", name)
+		}
 	}
 }

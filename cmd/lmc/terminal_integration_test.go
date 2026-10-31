@@ -106,15 +106,15 @@ func TestTerminalSingleRunDropsInputTypedDuringGeneration(t *testing.T) {
 			defer pty.Close()
 			screen := pty.Screen()
 
-			cmd := exec.Command(lmcBin,
+			cmd := exec.Command(lmcBin, withEarlierDefaults([]string{
 				"-provider", "openai",
-				"-provider-url", provider.URL+"/v1",
+				"-provider-url", provider.URL + "/v1",
 				"-api-key-file", writeTestAPIKeyFile(t, "test-key"),
 				"-model", "gpt-test",
 				"-no-session",
 				"-tool",
 				"-log-dir", t.TempDir(),
-			)
+			})...)
 			cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
 			if err := pty.Start(cmd); err != nil {
 				t.Fatalf("start lmc: %v", err)

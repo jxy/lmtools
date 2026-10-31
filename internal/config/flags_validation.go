@@ -7,6 +7,7 @@ import (
 	"lmtools/internal/auth"
 	"lmtools/internal/core"
 	"lmtools/internal/prompts"
+	"lmtools/internal/providerconfig"
 	"lmtools/internal/providers"
 	"os"
 	"strings"
@@ -14,7 +15,6 @@ import (
 
 type explicitFlagState struct {
 	noSession bool
-	stream    bool
 }
 
 func applyExplicitFlags(fs *flag.FlagSet, cfg *Config) explicitFlagState {
@@ -26,8 +26,6 @@ func applyExplicitFlags(fs *flag.FlagSet, cfg *Config) explicitFlagState {
 			cfg.SystemExplicitlySet = true
 		case "no-session":
 			explicit.noSession = true
-		case "stream":
-			explicit.stream = true
 		}
 	})
 
@@ -73,18 +71,18 @@ func validateREPLFlags(cfg Config) error {
 	return nil
 }
 
-// applyREPLDefaults turns streaming on for -repl, unless -stream was given,
-// which -stream=false then keeps off.
-func applyREPLDefaults(cfg *Config, explicit explicitFlagState) {
-	if cfg.REPL && !explicit.stream {
-		cfg.StreamChat = true
-	}
+// applyModeDefaults sets the modes a chat runs in unless a flag turns them
+// off: streaming, the thinking display, and the Responses API where the
+// provider has one. Embed mode and -show send no chat, so they do not
+// stream, and embed mode has no Responses route. A flag that turns off a
+// mode that is already off changes nothing and is accepted.
+func applyModeDefaults(cfg *Config) {
+	cfg.StreamChat = !cfg.NoStream && !cfg.Embed && cfg.Show == ""
+	cfg.ShowThinking = !cfg.HideThinking
+	cfg.OpenAIResponses = !cfg.ChatCompletions && !cfg.Embed && providerconfig.ResponsesAPIAvailable(cfg.Provider, cfg.ArgoLegacy)
 }
 
 func validateModeFlagCombinations(cfg Config) error {
-	if cfg.Embed && cfg.StreamChat {
-		return fmt.Errorf(prompts.ErrEmbedWithStream)
-	}
 	if cfg.Embed && cfg.EnableTool {
 		return fmt.Errorf(prompts.ErrEmbedWithTool)
 	}
@@ -102,10 +100,6 @@ func validateOutputFlags(cfg *Config) error {
 	if cfg.Embed && (cfg.Effort != "" || cfg.ReasoningMode != "" || cfg.ReasoningContext != "" || cfg.JSONMode || cfg.JSONSchemaPath != "") {
 		return fmt.Errorf("invalid flag combination: -effort, -reasoning-mode, -reasoning-context, -json, and -json-schema are only supported in chat mode")
 	}
-	if cfg.OpenAIResponses && cfg.Embed {
-		return fmt.Errorf("invalid flag combination: -openai-responses is only supported in chat mode")
-	}
-
 	if cfg.Effort != "" && !isValidEffortFlag(cfg.Effort) {
 		return fmt.Errorf("-effort must be one of: none, minimal, low, medium, high, xhigh, max")
 	}
@@ -171,7 +165,7 @@ func validateSessionFlagCombinations(cfg Config) error {
 		return fmt.Errorf("invalid flag combination: -delete cannot be used with other session flags")
 	}
 
-	if cfg.Show != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.Delete != "" || cfg.ShowSessions || cfg.NoSession || cfg.Embed || cfg.StreamChat) {
+	if cfg.Show != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.Delete != "" || cfg.ShowSessions || cfg.NoSession || cfg.Embed) {
 		return fmt.Errorf("invalid flag combination: -show cannot be used with other session or operation flags")
 	}
 

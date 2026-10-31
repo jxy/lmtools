@@ -47,7 +47,7 @@ func validateDeveloperWire(cfg RequestOptions, model string) error {
 	if provider == constants.ProviderArgo && providers.UsesResponsesAPIWire(provider, model, cfg.OpenAIResponses, cfg.ArgoLegacy) {
 		return nil
 	}
-	return fmt.Errorf("provider %q model %q cannot preserve the developer role; use -provider openai or Argo -openai-responses with a gpt* model, or supply a system instruction with -s", provider, model)
+	return fmt.Errorf("provider %q model %q cannot preserve the developer role; use -provider openai or an Argo gpt* model without -chat-completions, or supply a system instruction with -s", provider, model)
 }
 
 func validateDeveloperMessages(cfg RequestOptions, model string, messages []TypedMessage) error {

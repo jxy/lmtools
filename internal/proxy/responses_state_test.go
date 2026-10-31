@@ -1833,6 +1833,7 @@ func TestOpenAIResponsesInputTokensArgoNonClaudeUsesEstimate(t *testing.T) {
 
 	config := &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        "http://argo.local",
 		ProviderKeySet:     ProviderKeySet{ArgoAPIKey: "argo-key"},
 		ArgoUser:           "fixture-user",

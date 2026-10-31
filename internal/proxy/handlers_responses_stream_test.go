@@ -38,6 +38,7 @@ func TestOpenAIResponsesConvertedOpenAIStreamRequiresDoneMarker(t *testing.T) {
 
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
@@ -147,6 +148,7 @@ func TestOpenAIResponsesStreamArgoOpenAIUsesUpstreamStreaming(t *testing.T) {
 
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
@@ -641,6 +643,7 @@ func TestOpenAIResponsesStreamArgoOpenAIMalformedChunkSendsResponseFailed(t *tes
 
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,
@@ -686,6 +689,7 @@ func TestOpenAIResponsesStreamArgoOpenAIErrorChunkSendsResponseFailed(t *testing
 
 	handler, cleanup := NewTestServer(t, &Config{
 		Provider:           constants.ProviderArgo,
+		ChatCompletions:    true,
 		ProviderURL:        backend.URL,
 		ArgoUser:           "test-key",
 		MaxRequestBodySize: constants.DefaultMaxRequestBodySize,

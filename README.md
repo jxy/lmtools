@@ -41,25 +41,24 @@ pseudo-version naming the commit for a build from an untagged checkout.
 For chat and embeddings, `lmc` reads the input from stdin and writes the result
 to stdout. Typed at a terminal, the input ends with Ctrl-D at the start of a
 line, and Ctrl-C ends the run. `lmc` takes no positional arguments: a word
-left after the flags, such as a prompt or the `false` of `-stream false`, is
+left after the flags, such as a prompt or the `false` of `-tool false`, is
 an error, since every flag after it would go unread. Give a boolean flag its
-value with `=`, as in `-stream=false`.
+value with `=`, as in `-tool=false`.
 
 ### Chat
 
 ```bash
-# Chat with the default Argo provider.
+# Chat with the default Argo provider. The answer streams to stdout, and
+# provider-returned thinking summaries print on stderr.
 echo "Tell me a story" | lmc -argo-user "$USER"
 
-# Stream the answer.
-echo "Tell me a story" | lmc -argo-user "$USER" -stream
+# Wait for the whole answer, and hide the thinking.
+echo "Tell me a story" | lmc -argo-user "$USER" -no-stream -hide-thinking
 
-# Show provider-returned thinking summaries on stderr while keeping the answer on stdout.
-# Argo's gpt* models, such as the default gpt5, return them only through the Responses API.
-echo "Solve this carefully" | lmc -argo-user "$USER" \
-  -openai-responses \
-  -effort high \
-  -show-thinking
+# Ask for reasoning summaries. Argo's gpt* models, such as the default gpt5,
+# return them through the Responses API, which lmc uses for them, when the
+# request sets an effort.
+echo "Solve this carefully" | lmc -argo-user "$USER" -effort high
 
 # Ask about an image. Repeat -image to attach several; the prompt may be empty.
 echo "What is wrong in this screenshot?" | lmc -argo-user "$USER" \
@@ -71,17 +70,17 @@ echo "Explain quantum computing" | lmc \
   -api-key-file "$HOME/.openai-key" \
   -model gpt-5
 
-# Use OpenAI's Responses API instead of Chat Completions.
+# Use OpenAI's Chat Completions API instead of the Responses API.
 echo "Return three bullet points" | lmc \
   -provider openai \
   -api-key-file "$HOME/.openai-key" \
-  -openai-responses
+  -chat-completions
 
-# Use Argo's Responses API, which serves gpt* models.
+# Use Argo's chat completions route for a gpt* model.
 echo "Return three bullet points" | lmc \
   -argo-user "$USER" \
   -model gpt5 \
-  -openai-responses
+  -chat-completions
 
 # Print the equivalent curl command instead of sending the request.
 echo "Explain quantum computing" | lmc \
@@ -273,8 +272,8 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
 - If another run changes the session, the loop continues in a fork, as a
   single run does, and names it. If an answer that was shown could not be
   saved, the loop stops rather than continue from a session without it.
-- `-repl` turns streaming on unless `-stream` is given, so `-stream=false`
-  keeps it off. It cannot be used with `-e`, `-print-curl`,
+- `-repl` streams as a single run does, so `-no-stream` keeps
+  streaming off. It cannot be used with `-e`, `-print-curl`,
   `-show-sessions`, `-show`, `-delete`, `-list-models`, or `-no-session`.
   With a terminal on stdin it needs to open that terminal again by its
   name, and stops at startup, naming the terminal and the reason, when it
@@ -840,18 +839,20 @@ Provider and credentials:
 Mode and model:
 
 - `-model string`: Model name. The default depends on the provider.
-- `-e`: Generate embeddings instead of chat. Embed mode turns off sessions and
-  rejects `-stream`, `-tool`, `-resume`, `-branch`, `-openai-responses`, and the
-  output controls.
+- `-e`: Generate embeddings instead of chat. Embed mode turns off sessions,
+  does not stream or use the Responses API, and rejects `-tool`, `-resume`,
+  `-branch`, and the output controls.
 - `-list-models`: List the models the provider reports.
-- `-stream`: Stream the chat response.
+- `-no-stream`: Wait for the whole answer instead of streaming it. A chat
+  streams by default; `-show` and embed mode do not stream.
 - `-repl`: Read one turn per line from stdin until it ends, continuing one
   session. See [Conversation Loop](#conversation-loop).
-- `-openai-responses`: Send the chat through the provider's Responses API
-  instead of chat completions. Requires `-provider openai` or `-provider argo`,
-  and does not combine with `-argo-legacy`. On Argo it applies to `gpt*` models,
+- `-chat-completions`: Send the chat through the provider's chat completions
+  route instead of its Responses API. `lmc` uses the Responses API by default
+  for `-provider openai`, and for Argo `gpt*` models without `-argo-legacy`,
   which are the models Argo serves at `/v1/responses`; other Argo models keep
-  their usual routing.
+  their usual routing. The other providers, `-argo-legacy`, and embed mode
+  keep their own API, and the flag changes nothing there.
 - `-print-curl`: Print the equivalent `curl` command and exit without sending
   the request. With `-resume` or `-branch`, `lmc` reads session history and
   writes nothing back. With `-resume -tool`, it substitutes placeholder results
@@ -861,8 +862,9 @@ Output controls:
 
 - `-s string`: System prompt.
 - `-developer string`: Add a developer instruction immediately before the
-  invocation's first new user turn. Supports `-provider openai` and Argo
-  `gpt*` with `-openai-responses`. The instruction is saved and replayed with
+  invocation's first new user turn. Supports `-provider openai`, and Argo
+  `gpt*` models on the Responses API, which `-chat-completions` turns off. The
+  instruction is saved and replayed with
   its developer role. On resume, supplying the flag adds another instruction;
   omitting it keeps the saved instructions. In a REPL it is consumed once the
   first user turn is committed. It requires prompt text or an image and cannot
@@ -877,10 +879,11 @@ Output controls:
   requests, any effort other than `none` also sends `reasoning.summary="auto"`
   so the reasoning items carry a readable summary beside the encrypted
   reasoning. A model that reasons only briefly may return no summary.
-- `-show-thinking`: Print provider-returned visible thinking summaries to
-  stderr. It is presentation-only: it does not enable reasoning or alter the
-  request. The assistant answer remains unchanged on stdout in both streaming
-  and non-streaming modes. Signatures, encrypted content, and opaque redacted
+- `-hide-thinking`: Hide the provider-returned visible thinking summaries,
+  which `lmc` prints to stderr by default. The display is presentation-only:
+  hiding it does not turn reasoning off or alter the request. The assistant
+  answer remains unchanged on stdout in both streaming and non-streaming
+  modes. Signatures, encrypted content, and opaque redacted
   payloads are never printed; a returned Anthropic thinking block, or a run of
   Responses reasoning items, without visible text is shown as
   `[omitted by provider]` where the thinking happened, before the answer or
@@ -899,15 +902,16 @@ Output controls:
   reasoning text/summary events are supported and retained in session history.
   A server may return thinking by default without an `-effort` flag. OpenAI's
   Chat Completions API returns no reasoning text, and Argo's chat completions
-  route adds none for `gpt*` models. `lmc` warns when `-show-thinking` meets
-  that route, and a REPL warns at `/thinking on`, or at `/model` while the
-  display is on. Use `-openai-responses` with `-effort` to get their reasoning
-  summaries.
+  route adds none for `gpt*` models. `lmc` warns when the thinking display
+  meets that route, which `-chat-completions` selects, and a REPL warns
+  at `/thinking on`, or at `/model` while the display is on. The Responses
+  API with an `-effort` returns their reasoning summaries.
 - `-reasoning-mode string`: Responses API reasoning mode: `standard` or `pro`
-  (`pro` applies to GPT-5.6 only). `lmc` emits it only on an effective
-  `-openai-responses` path and otherwise warns and ignores it.
+  (`pro` applies to GPT-5.6 only). `lmc` emits it only on the Responses API
+  (OpenAI, or Argo `gpt*`, without `-chat-completions`) and otherwise warns
+  and ignores it.
 - `-reasoning-context string`: Responses API reasoning context: `auto`,
-  `current_turn`, or `all_turns`. Same `-openai-responses` restriction as
+  `current_turn`, or `all_turns`. Same Responses API restriction as
   `-reasoning-mode`.
 - `-max-tokens int`: Maximum output tokens. `0` (the default) uses the provider
   default. Anthropic-wire requests — the `anthropic` provider and Argo `claude*`
@@ -929,7 +933,7 @@ Chat Completions places the schema under `response_format.json_schema`;
 Responses places it under `text.format`.
 
 Thinking chunks stay separate from the answer and are retained in session
-history; add `-show-thinking` to display them. A malformed Chat Completions
+history, and shown unless `-hide-thinking` is given. A malformed Chat Completions
 stream stops the turn with an error and retains already received text and
 thinking. Pending tool calls from that response cannot run.
 
@@ -1066,10 +1070,12 @@ apiproxy -host 0.0.0.0 -port 8080 \
 - `-model-map REGEX=MODEL_NAME`: Map matching request models to a backend model.
   Repeat it to add rules; the first match wins.
 - `-argo-dev`, `-argo-test`, `-argo-legacy`
-- `-openai-responses`: Forward `/v1/responses` to Argo's own Responses API for
-  `gpt*` models instead of converting it. Requires `-provider openai` or
-  `-provider argo`, and does not combine with `-argo-legacy`. `-provider openai`
-  forwards `/v1/responses` upstream with or without this flag.
+- `-chat-completions`: Convert `/v1/responses` requests to the provider's
+  chat completions instead of forwarding them to its own Responses API. By
+  default the proxy forwards them with `-provider openai`, and with
+  `-provider argo` for `gpt*` backend models unless `-argo-legacy` is given.
+  The other providers convert them either way, and the flag changes nothing
+  there.
 - `-host string`: Bind host. Default `127.0.0.1`.
 - `-port int`: Bind port. Default `8082`.
 - `-sessions-dir string`: Local Responses API state directory. Default `~/.apiproxy/sessions`.
@@ -1245,8 +1251,11 @@ codex exec --profile apiproxy "summarize this repository"
 
 The proxy now sends `gpt-5.5` requests to Argo as `gpt55`. Codex speaks the
 Responses API (`wire_api` defaults to `responses` and takes no other value), so
-its traffic arrives at `POST /v1/responses`. Against Argo that is the converted
-path, with the [limitations](#converted-responses-limitations) that implies.
+its traffic arrives at `POST /v1/responses`, and the proxy forwards it to
+Argo's Responses API for a `gpt*` backend model such as `gpt55` (see
+[Direct Argo Backend](#direct-argo-backend)). Other models, and every model
+under `-chat-completions`, take the converted path, with the
+[limitations](#converted-responses-limitations) that implies.
 
 `apiproxy` authenticates to the backend with its own credentials and ignores
 client ones, so `env_key` is unnecessary; if your Codex version requires it,
@@ -1276,7 +1285,12 @@ Both binaries route native Argo requests by the prefix of the model that reaches
 Argo, which for `apiproxy` is the model after `-model-map`:
 
 - Models starting with `claude` use Argo's Anthropic-compatible `/v1/messages` wire format.
-- All other models use Argo's OpenAI-compatible `/v1/chat/completions` wire format.
+- Models starting with `gpt` use Argo's Responses API at `/v1/responses` for an
+  `lmc` chat and for a request that reaches `apiproxy` at `/v1/responses`.
+  `-chat-completions` sends them to `/v1/chat/completions` instead.
+- All other models, and `gpt` models in requests that reach `apiproxy` at
+  `/v1/messages` or `/v1/chat/completions`, use Argo's OpenAI-compatible
+  `/v1/chat/completions` wire format.
 - `-argo-legacy` forces the older Argo chat and streamchat endpoints.
 
 ## Responses API Compatibility
@@ -1288,7 +1302,8 @@ wire format.
 ### Direct OpenAI Backend
 
 With `-provider openai`, the proxy maps the model and forwards `/v1/responses`
-to OpenAI's own Responses API. In this mode it:
+to OpenAI's own Responses API, unless `-chat-completions` converts the requests
+to OpenAI's chat completions. When it forwards them, it:
 
 - Preserves OpenAI Responses request bodies, including valid OpenAI fields the compatibility layer does not understand.
 - With `-strip-encrypted-reasoning`, makes an explicit exception to raw
@@ -1303,14 +1318,15 @@ to OpenAI's own Responses API. In this mode it:
 ### Direct Argo Backend
 
 Argo serves an OpenAI-compatible Responses API at
-`<argo-host>/argoapi/v1/responses` for its `gpt*` models. That backend is still
-experimental, so the proxy uses it only when you pass `-openai-responses`:
+`<argo-host>/argoapi/v1/responses` for its `gpt*` models, and the proxy uses it
+by default. `-chat-completions` converts those requests to Argo's chat
+completions instead:
 
 ```bash
-apiproxy -provider argo -argo-user "$USER" -openai-responses
+apiproxy -provider argo -argo-user "$USER" -chat-completions
 ```
 
-In this mode the proxy:
+Without `-chat-completions`, the proxy:
 
 - Forwards `/v1/responses` requests for `gpt*` backend models to Argo with the
   request body preserved byte-for-byte, apart from `-model-map` rewriting or
@@ -1318,7 +1334,8 @@ In this mode the proxy:
   unchanged apart from restoring the client-visible model alias. Streams pass
   through the same way.
 - Still converts requests for every other Argo model, so one proxy serves both
-  paths. `-openai-responses` does not combine with `-argo-legacy`.
+  paths. `-argo-legacy` has no Responses route, so the proxy converts every
+  request there.
 - Resolves lifecycle routes (`GET`/`DELETE` `/v1/responses/{id}`, `cancel`,
   `input_items`) and Conversations routes against local state first, then falls
   back to Argo, so converted responses stay retrievable while passed-through IDs
@@ -1329,9 +1346,10 @@ In this mode the proxy:
 
 ### Converted Backends
 
-With `-provider anthropic`, `-provider google`, or `-provider argo` on a model
-that does not use OpenAI Responses upstream, the proxy rewrites the request as a
-portable backend call and builds a Responses-shaped result from the reply.
+With `-provider anthropic`, `-provider google`, `-chat-completions`, or
+`-provider argo` on a model that does not use OpenAI Responses upstream, the
+proxy rewrites the request as a portable backend call and builds a
+Responses-shaped result from the reply.
 
 Request conversion:
 
@@ -1377,8 +1395,8 @@ Streaming conversion:
 ### Converted Responses Limitations
 
 Conversion approximates OpenAI's Responses API rather than replacing it. It
-applies to every path except `-provider openai` and
-`-provider argo -openai-responses` on a `gpt*` model. Known gaps:
+applies to every path except `-provider openai`, and `-provider argo` on a
+`gpt*` model, without `-chat-completions`. Known gaps:
 
 - The proxy rejects OpenAI prompt templates (`prompt`), which have no portable provider representation.
 - The proxy does not run OpenAI-hosted tools such as web search and file search.
@@ -1443,8 +1461,8 @@ applies to every path except `-provider openai` and
 - Confirm that the selected `-provider` has credentials or a `-provider-url`.
 - For Argo, check whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
 - When a converted Responses request loses an OpenAI-only field, switch to
-  `-provider openai`, or to `-provider argo -openai-responses` on a `gpt*` model,
-  for direct Responses API passthrough.
+  `-provider openai`, or to a `gpt*` model on `-provider argo`, without
+  `-chat-completions`, for direct Responses API passthrough.
 - When Codex ignores your profile and still talks to OpenAI, move the profile
   into `~/.codex/<name>.config.toml` with top-level keys and delete the old
   `[profiles.<name>]` table. Codex 0.134.0 and later read neither that table nor

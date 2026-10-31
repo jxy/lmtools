@@ -39,7 +39,7 @@ func TestREPLInterruptedAnswerKeepsWhatWasRead(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer server.Close()
-	te := newTurnTestEnvAt(t, server.URL, "-stream")
+	te := newTurnTestEnvAt(t, server.URL, streamOn)
 	loop, w, notifier := newTestLoop(t, te)
 	loop.env.stdout = answer
 	typeTurns(t, w, "tell a story\n", false)

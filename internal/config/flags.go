@@ -21,10 +21,12 @@ type Config struct {
 	MaxToolParallel  int    `json:"max_tool_parallel,omitempty"`
 	Model            string // model to use
 	Embed            bool   // whether to run in embed mode
-	StreamChat       bool   // whether to use streaming chat mode
+	NoStream         bool   // -no-stream: wait for the whole answer
+	StreamChat       bool   // whether to use streaming chat mode; ParseFlags derives it from NoStream
 	REPL             bool   // read turns until the end of input, continuing one conversation
 	PrintCurl        bool   // print the equivalent curl command instead of sending the request
-	ShowThinking     bool   // print visible provider-returned thinking summaries to stderr
+	HideThinking     bool   // -hide-thinking: leave thinking summaries off the display
+	ShowThinking     bool   // print visible provider-returned thinking summaries to stderr; ParseFlags derives it from HideThinking
 	Effort           string // reasoning effort hint
 	ReasoningMode    string // OpenAI Responses reasoning.mode (standard, pro)
 	ReasoningContext string // OpenAI Responses reasoning.context (auto, current_turn, all_turns)
@@ -36,6 +38,7 @@ type Config struct {
 	ImageDetail      string            // OpenAI detail hint applied to every -image
 	Images           []core.ImageBlock // -image files loaded at parse time as data URLs
 	providerconfig.Options
+	OpenAIResponses     bool          // chat through the provider's Responses API where the model has one; ParseFlags derives it from ChatCompletions
 	System              string        // system prompt for chat
 	SystemExplicitlySet bool          // whether -s flag was explicitly provided
 	Developer           string        // pending developer instruction for the first new user turn
@@ -85,8 +88,12 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	registerFlags(fs, &cfg)
+	removedFlags.Register(fs)
 
 	if err := fs.Parse(args); err != nil {
+		return cfg, err
+	}
+	if err := removedFlags.Err(fs); err != nil {
 		return cfg, err
 	}
 	if fs.NArg() > 0 {
@@ -106,7 +113,7 @@ func ParseFlags(args []string) (Config, error) {
 	if err := applyEmbedModeDefaults(&cfg, explicit); err != nil {
 		return cfg, err
 	}
-	applyREPLDefaults(&cfg, explicit)
+	applyModeDefaults(&cfg)
 
 	if err := validateModeFlagCombinations(cfg); err != nil {
 		return cfg, err
@@ -157,15 +164,15 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.Embed, "e", false, "enable embed mode instead of chat")
 
 	// Chat Options
-	fs.BoolVar(&cfg.StreamChat, "stream", false, "use streaming chat mode")
-	fs.BoolVar(&cfg.REPL, "repl", false, "read one turn per line from stdin until it ends, continuing one session; turns streaming on unless -stream is given")
+	fs.BoolVar(&cfg.NoStream, "no-stream", false, "wait for the whole answer instead of streaming it")
+	fs.BoolVar(&cfg.REPL, "repl", false, "read one turn per line from stdin until it ends, continuing one session")
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
-	fs.BoolVar(&cfg.ShowThinking, "show-thinking", false, "print provider-returned thinking summaries to stderr (does not enable reasoning)")
+	fs.BoolVar(&cfg.HideThinking, "hide-thinking", false, "hide the provider-returned thinking summaries lmc prints to stderr; the request and its reasoning are unchanged")
 	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
-	fs.StringVar(&cfg.Developer, "developer", "", "developer instruction saved before the first new user turn (OpenAI or Argo gpt* with -openai-responses)")
+	fs.StringVar(&cfg.Developer, "developer", "", "developer instruction saved before the first new user turn (OpenAI, or Argo gpt* without -chat-completions)")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
-	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "Responses API reasoning mode: standard, pro (requires -openai-responses; pro is GPT-5.6 only)")
-	fs.StringVar(&cfg.ReasoningContext, "reasoning-context", "", "Responses API reasoning context: auto, current_turn, all_turns (requires -openai-responses)")
+	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "Responses API reasoning mode: standard, pro (pro is GPT-5.6 only)")
+	fs.StringVar(&cfg.ReasoningContext, "reasoning-context", "", "Responses API reasoning context: auto, current_turn, all_turns")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "maximum output tokens (0 uses provider default; Claude defaults to 128000 for Opus, 64000 otherwise)")
 	fs.BoolVar(&cfg.JSONMode, "json", false, "request JSON object output")
 	fs.StringVar(&cfg.JSONSchemaPath, "json-schema", "", "path to JSON schema file passed to the provider for structured output")
@@ -243,8 +250,8 @@ Examples:
   # Use custom provider endpoint (no API key required)
   echo "Hello" | %s -provider openai -provider-url http://localhost:8080/v1
 
-  # Stream chat response
-  echo "Tell me a story" | %s -argo-user myuser -stream
+  # Wait for the whole answer instead of streaming it, without the thinking
+  echo "Tell me a story" | %s -argo-user myuser -no-stream -hide-thinking
 
   # Ask about an image (repeat -image to attach several)
   echo "What is in this picture?" | %s -argo-user myuser -image photo.png
@@ -311,13 +318,22 @@ func (c Config) RequestOptions() core.RequestOptions {
 	}
 }
 
+// removedFlags answers the mode flags lmc replaced when their modes became
+// the defaults.
+var removedFlags = providerconfig.RemovedFlags{
+	"stream":           "lmc streams by default, and -no-stream waits for the whole answer",
+	"show-thinking":    "lmc shows thinking by default, and -hide-thinking hides it",
+	"openai-responses": "lmc uses the Responses API by default where the provider has one, and -chat-completions uses chat/completions",
+}
+
 // unexpectedArgumentError refuses a word the flag parser could not place. The
 // parser stops at the first such word and leaves every flag after it unread,
-// so `-stream false -repl` would otherwise run without -repl and say nothing.
+// so `-hide-thinking false -repl` would otherwise run without -repl and say
+// nothing.
 func unexpectedArgumentError(arg string) error {
 	switch strings.ToLower(arg) {
 	case "true", "false", "t", "f", "1", "0":
-		return fmt.Errorf("unexpected argument %q: give a boolean flag its value with =, as in -stream=false", arg)
+		return fmt.Errorf("unexpected argument %q: give a boolean flag its value with =, as in -hide-thinking=false", arg)
 	}
 	return fmt.Errorf("unexpected argument %q: lmc reads the prompt from standard input, as in echo 'question' | lmc", arg)
 }

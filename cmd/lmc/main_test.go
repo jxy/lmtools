@@ -66,7 +66,7 @@ func TestArgoChatHidesThinking(t *testing.T) {
 		opts core.RequestOptions
 		want string
 	}{
-		{"gpt on the chat route", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra"}, "Argo's chat completions route returns no thinking for gpt6astra; use -openai-responses with -effort to get reasoning summaries"},
+		{"gpt on the chat route", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra"}, "Argo's chat completions route returns no thinking for gpt6astra; without -chat-completions, the Responses API returns reasoning summaries with -effort"},
 		{"default model", core.RequestOptions{Provider: constants.ProviderArgo}, "returns no thinking for gpt5;"},
 		{"Responses route", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra", OpenAIResponses: true}, ""},
 		{"claude", core.RequestOptions{Provider: constants.ProviderArgo, Model: "claudeopus55"}, ""},
@@ -240,31 +240,77 @@ func TestBuildPrintCurlRequestArgoUserAddsAuthorizationHeader(t *testing.T) {
 	got := renderCurlCommand(rb.Request, rb.Body)
 	assertContainsAll(t, got, []string{
 		"-H 'Authorization: Bearer testuser'",
-		"http://argo.example.test/v1/chat/completions",
+		"http://argo.example.test/v1/responses",
 		"fresh preview",
 	})
 }
 
-// Native Argo routes render the request in the wire's dialect, anthropic for
-// claude models and openai for the rest, and both must still ask for an
-// uncompressed stream: Argo releases a compressed event stream only when the
-// response ends.
-func TestBuildStreamingArgoRequestAsksForUncompressedStream(t *testing.T) {
-	for _, model := range []string{"claudeopus4", "gpt4o"} {
-		t.Run(model, func(t *testing.T) {
-			cfg, err := config.ParseFlags([]string{
-				"-argo-user", "testuser",
-				"-model", model,
-				"-provider-url", "http://argo.example.test",
-				"-stream",
-				"-no-session",
-			})
+// A chat streams by default, through the Responses API where the provider
+// and model have it; -chat-completions keeps Chat Completions, and the other
+// routes keep their own API.
+func TestDefaultChatRequestStreamsOnItsRoute(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		path string
+	}{
+		{"argo gpt", []string{"-argo-user", "testuser", "-model", "gpt6astra", "-provider-url", "http://argo.example.test"}, "/v1/responses"},
+		{"argo gpt on chat", []string{"-argo-user", "testuser", "-model", "gpt6astra", "-provider-url", "http://argo.example.test", "-chat-completions"}, "/v1/chat/completions"},
+		{"argo claude", []string{"-argo-user", "testuser", "-model", "claudeopus55", "-provider-url", "http://argo.example.test"}, "/v1/messages"},
+		{"openai", []string{"-provider", "openai", "-model", "gpt-5", "-provider-url", "http://example.test/v1"}, "/v1/responses"},
+		{"anthropic", []string{"-provider", "anthropic", "-api-key-file", writeTestAPIKeyFile(t, "key"), "-provider-url", "http://example.test/v1"}, "/v1/messages"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := config.ParseFlags(append(tt.args, "-no-session"))
 			if err != nil {
 				t.Fatalf("ParseFlags() error = %v", err)
 			}
 			rb, err := buildHTTPRequest(context.Background(), &cfg, cfg.RequestOptions(), nil, "hello")
 			if err != nil {
 				t.Fatalf("buildHTTPRequest() error = %v", err)
+			}
+			if rb.Request.URL.Path != tt.path {
+				t.Fatalf("path = %q, want %q", rb.Request.URL.Path, tt.path)
+			}
+			var body struct {
+				Stream bool `json:"stream"`
+			}
+			if err := json.Unmarshal(rb.Body, &body); err != nil || !body.Stream {
+				t.Fatalf("body = %s, error = %v; want a streamed request", rb.Body, err)
+			}
+		})
+	}
+}
+
+// Native Argo routes render the request in the wire's dialect, anthropic for
+// claude models, Responses for gpt models, and chat completions with
+// -chat-completions, and each must still ask for an uncompressed stream: Argo
+// releases a compressed event stream only when the response ends.
+func TestBuildStreamingArgoRequestAsksForUncompressedStream(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		path string
+	}{
+		{"messages", []string{"-model", "claudeopus4"}, "/v1/messages"},
+		{"responses", []string{"-model", "gpt4o"}, "/v1/responses"},
+		{"chat completions", []string{"-model", "gpt4o", "-chat-completions"}, "/v1/chat/completions"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := config.ParseFlags(append([]string{
+				"-argo-user", "testuser",
+				"-provider-url", "http://argo.example.test",
+				"-no-session",
+			}, tt.args...))
+			if err != nil {
+				t.Fatalf("ParseFlags() error = %v", err)
+			}
+			rb, err := buildHTTPRequest(context.Background(), &cfg, cfg.RequestOptions(), nil, "hello")
+			if err != nil {
+				t.Fatalf("buildHTTPRequest() error = %v", err)
+			}
+			if rb.Request.URL.Path != tt.path {
+				t.Fatalf("path = %q, want %q", rb.Request.URL.Path, tt.path)
 			}
 			if got := rb.Request.Header.Get("Accept-Encoding"); got != "identity" {
 				t.Fatalf("Accept-Encoding = %q, want identity", got)
@@ -298,6 +344,7 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	cfg, err := config.ParseFlags([]string{
 		"-provider", "openai",
 		"-provider-url", "http://example.test/v1",
+		"-chat-completions",
 		"-resume", session.GetSessionID(sess.Path),
 		"-print-curl",
 	})

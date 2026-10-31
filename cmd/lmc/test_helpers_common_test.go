@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,28 @@ type LmcCommandOption func(*lmcCommandConfig)
 type lmcCommandConfig struct {
 	logDir       string
 	useCustomLog bool
+	lmcDefaults  bool
+}
+
+// WithLmcDefaults runs the binary in lmc's own default modes instead of the
+// earlier ones runLmcCommand pins (earlierModeFlags).
+func WithLmcDefaults() LmcCommandOption {
+	return func(c *lmcCommandConfig) {
+		c.lmcDefaults = true
+	}
+}
+
+// withEarlierDefaults puts earlierModeFlags before args, so a test that
+// needs one of the modes passes streamOn, thinkingOn, or responsesOn. -repl
+// streamed then as now, so it keeps streaming.
+func withEarlierDefaults(args []string) []string {
+	var pinned []string
+	for _, flag := range earlierModeFlags {
+		if flag != "-no-stream" || !slices.Contains(args, "-repl") {
+			pinned = append(pinned, flag)
+		}
+	}
+	return append(pinned, args...)
 }
 
 func WithLogDir(dir string) LmcCommandOption {
@@ -75,6 +98,9 @@ func runLmcCommand(t *testing.T, lmcBin string, args []string, input string, opt
 	config := &lmcCommandConfig{}
 	for _, opt := range opts {
 		opt(config)
+	}
+	if !config.lmcDefaults {
+		args = withEarlierDefaults(args)
 	}
 	if config.useCustomLog {
 		args = append(args, "-log-dir", config.logDir)

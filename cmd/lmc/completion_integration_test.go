@@ -77,10 +77,10 @@ func completionArgs(t *testing.T, url, sessionsDir string, responses, stream boo
 		"-provider", "openai", "-provider-url", url + "/v1",
 		"-api-key-file", writeTestAPIKeyFile(t, "test-key"), "-model", "gemma-test",
 		"-retries", "0", "-sessions-dir", sessionsDir,
-		fmt.Sprintf("-stream=%t", stream),
+		fmt.Sprintf("-no-stream=%t", !stream),
 	}
 	if responses {
-		args = append(args, "-openai-responses")
+		args = append(args, responsesOn)
 	}
 	return append(args, extra...)
 }
@@ -137,7 +137,7 @@ func TestCLIIncompleteCapturedResponsesPersistPartialContent(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			dir := t.TempDir()
 			server, requests := completionServer(t, completionReply{completionFixture(t, tc.caseID, tc.file), tc.stream})
-			stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, dir, tc.responses, tc.stream, "-max-tokens", "8", "-show-thinking"), "Answer the question")
+			stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, dir, tc.responses, tc.stream, "-max-tokens", "8", thinkingOn), "Answer the question")
 			assertCompletionError(t, err, stderr, "output token limit reached")
 			if stdout != tc.text {
 				t.Fatalf("stdout = %q, want retained partial answer %q", stdout, tc.text)
@@ -278,7 +278,7 @@ func TestCLIIncompleteToolsNeverExecuteOnResume(t *testing.T) {
 				server, requests := completionServer(t,
 					completionWire(t, responses, stream, "partial answer", "partial reasoning", "length", command),
 					completionWire(t, responses, stream, "recovered", "", "stop", nil))
-				args := completionArgs(t, server.URL, dir, responses, stream, "-tool", "-tool-auto-approve", "-show-thinking")
+				args := completionArgs(t, server.URL, dir, responses, stream, "-tool", "-tool-auto-approve", thinkingOn)
 				stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), args, "Run the tool")
 				assertCompletionError(t, err, stderr, "partial answer retained")
 				if stdout != "partial answer" || len(requests()) != 1 {
@@ -456,7 +456,7 @@ func TestCLIShowThinkingWithoutEffortUsesReturnedContent(t *testing.T) {
 					}
 				}
 				server, requests := completionServer(t, completionReply{completionFixture(t, caseID, file), stream})
-				stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), responses, stream, "-show-thinking"), "Calculate 19 times 23")
+				stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), responses, stream, thinkingOn), "Calculate 19 times 23")
 				if err != nil || stdout != "437" || !strings.Contains(stderr, "--- thinking ---") || strings.Contains(stderr, "-effort") || strings.Contains(stderr, "No visible thinking") {
 					t.Fatalf("stdout=%q, err=%v, stderr:\n%s", stdout, err, stderr)
 				}

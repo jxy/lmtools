@@ -11,12 +11,12 @@ func TestDeveloperFlagValidation(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"openai_chat", []string{"-provider", "openai"}, ""},
-		{"openai_responses", []string{"-provider", "openai", "-openai-responses"}, ""},
-		{"argo_chat", []string{"-provider", "argo", "-model", "gpt5"}, "cannot preserve the developer role"},
-		{"argo_responses", []string{"-provider", "argo", "-model", "gpt5", "-openai-responses"}, ""},
-		{"argo_default_model", []string{"-provider", "argo"}, "cannot preserve the developer role"},
-		{"argo_responses_default_model", []string{"-provider", "argo", "-openai-responses"}, ""},
+		{"openai_chat", []string{"-provider", "openai", "-chat-completions"}, ""},
+		{"openai_responses", []string{"-provider", "openai"}, ""},
+		{"argo_chat", []string{"-provider", "argo", "-model", "gpt5", "-chat-completions"}, "cannot preserve the developer role"},
+		{"argo_responses", []string{"-provider", "argo", "-model", "gpt5"}, ""},
+		{"argo_chat_default_model", []string{"-provider", "argo", "-chat-completions"}, "cannot preserve the developer role"},
+		{"argo_responses_default_model", []string{"-provider", "argo"}, ""},
 		{"anthropic", []string{"-provider", "anthropic"}, "cannot preserve the developer role"},
 		{"google", []string{"-provider", "google"}, "cannot preserve the developer role"},
 		{"argo_claude", []string{"-provider", "argo", "-model", "claude-opus-4-7"}, "cannot preserve the developer role"},

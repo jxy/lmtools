@@ -73,7 +73,7 @@ func TestAnthropicShowThinkingAcrossToolRounds(t *testing.T) {
 			"-api-key-file", apiKeyFile,
 			"-model", "claude-opus-4-7",
 			"-effort", "high",
-			"-show-thinking",
+			thinkingOn,
 			"-tool",
 			"-tool-whitelist", whitelistFile,
 			"-tool-auto-approve",

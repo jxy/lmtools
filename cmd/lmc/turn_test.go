@@ -35,6 +35,19 @@ func newTurnTestEnv(t *testing.T, server *mockserver.MockServer, extraFlags ...s
 	return newTurnTestEnvAt(t, server.URL(), extraFlags...)
 }
 
+// earlierModeFlags pin the modes lmc ran in before streaming, the thinking
+// display, and the Responses API became its defaults. The tests were written
+// for them, and the mocks serve buffered Chat Completions. A later flag wins,
+// so a test that needs one of the modes passes streamOn, thinkingOn, or
+// responsesOn after them.
+var earlierModeFlags = []string{"-no-stream", "-hide-thinking", "-chat-completions"}
+
+const (
+	streamOn    = "-no-stream=false"
+	thinkingOn  = "-hide-thinking=false"
+	responsesOn = "-chat-completions=false"
+)
+
 // newTurnTestEnvAt is newTurnTestEnv for a provider served at baseURL by a
 // test's own handler.
 func newTurnTestEnvAt(t *testing.T, baseURL string, extraFlags ...string) turnTestEnv {
@@ -62,7 +75,8 @@ func newTurnTestEnvAt(t *testing.T, baseURL string, extraFlags ...string) turnTe
 		"-provider-url", baseURL + "/v1",
 		"-model", "gpt-test",
 		"-retries", "0",
-	}, extraFlags...)
+	}, earlierModeFlags...)
+	args = append(args, extraFlags...)
 	cfg, err := config.ParseFlags(args)
 	if err != nil {
 		t.Fatalf("ParseFlags(%v) error = %v", args, err)

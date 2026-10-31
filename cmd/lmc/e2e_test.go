@@ -465,7 +465,7 @@ func TestE2E_StreamingMode(t *testing.T) {
 	// Use test helper to capture streaming output and log directory
 	logDir := t.TempDir()
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "dave", "-model", "gpt4o", "-stream", "-provider-url", server.URL, "-sessions-dir", sessionsDir, "-log-dir", logDir},
+		[]string{"-argo-user", "dave", "-model", "gpt4o", streamOn, "-provider-url", server.URL, "-sessions-dir", sessionsDir, "-log-dir", logDir},
 		"Test streaming response")
 	if err != nil {
 		t.Fatalf("Failed to run streaming command: %v\nStderr: %s", err, stderr)

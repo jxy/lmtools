@@ -7,8 +7,8 @@ import (
 )
 
 // responsesPassthroughTarget describes the upstream Responses API a request is
-// forwarded to verbatim. OpenAI always has one; Argo has one when the server was
-// started with -openai-responses.
+// forwarded to verbatim. OpenAI and native Argo have one, which
+// -chat-completions turns off.
 type responsesPassthroughTarget struct {
 	URL string
 	// Provider is the credential/retry provider for the upstream call.
@@ -22,10 +22,11 @@ func (t responsesPassthroughTarget) logName(kind string) string {
 }
 
 // responsesPassthroughTarget resolves the upstream Responses API for the configured
-// provider. ok is false when the provider has no direct Responses backend or its URL
-// is unset, in which case /v1/responses uses the converted path instead.
+// provider. ok is false when the provider has no direct Responses backend, its URL
+// is unset, or -chat-completions is set, in which case /v1/responses uses the
+// converted path instead.
 func (s *Server) responsesPassthroughTarget() (responsesPassthroughTarget, bool) {
-	if s == nil || s.config == nil || s.endpoints == nil {
+	if s == nil || s.config == nil || s.endpoints == nil || s.config.ChatCompletions {
 		return responsesPassthroughTarget{}, false
 	}
 	var target responsesPassthroughTarget
@@ -37,7 +38,7 @@ func (s *Server) responsesPassthroughTarget() (responsesPassthroughTarget, bool)
 			Configure: s.configureOpenAIRequest,
 		}
 	case constants.ProviderArgo:
-		if !s.config.OpenAIResponses || s.useLegacyArgo() {
+		if s.useLegacyArgo() {
 			return responsesPassthroughTarget{}, false
 		}
 		// Responses is an OpenAI-wire API, so authenticate it exactly like Argo's
@@ -65,14 +66,10 @@ func (s *Server) responsesPassthroughEnabled() bool {
 }
 
 // useDirectResponsesForModel reports whether a model-bearing Responses request is
-// forwarded verbatim rather than converted. The proxy forwards to OpenAI with or
-// without -openai-responses, which is the one place it diverges from the shared
-// providers.UsesResponsesAPIWire rule; Argo needs the flag and serves /v1/responses
-// for gpt* models only, so other Argo models still take the converted path.
+// forwarded verbatim rather than converted. providers.UsesResponsesAPIWire decides,
+// as it does for lmc: Argo serves /v1/responses for gpt* models only, so other
+// Argo models still take the converted path.
 func (s *Server) useDirectResponsesForModel(mappedModel string) bool {
-	if !s.responsesPassthroughEnabled() {
-		return false
-	}
-	return s.config.Provider == constants.ProviderOpenAI ||
-		providers.UsesResponsesAPIWire(s.config.Provider, mappedModel, s.config.OpenAIResponses, s.config.ArgoLegacy)
+	return s.responsesPassthroughEnabled() &&
+		providers.UsesResponsesAPIWire(s.config.Provider, mappedModel, !s.config.ChatCompletions, s.config.ArgoLegacy)
 }

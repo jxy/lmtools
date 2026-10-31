@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"lmtools/internal/auth"
 	"lmtools/internal/constants"
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -114,6 +116,53 @@ func TestUsageAdvertisesRequestBodyDefault(t *testing.T) {
 	}
 	if want := "(default: " + strconv.FormatInt(defaultMaxRequestBodySizeMB, 10) + ")"; !strings.Contains(line, want) {
 		t.Fatalf("usage line = %q, want it to advertise %q", line, want)
+	}
+}
+
+// printUsage is written by hand, so nothing ties it to the flags
+// registerFlags defines: it listed a -no-color flag that never existed.
+func TestUsageListsEveryFlag(t *testing.T) {
+	fs := flag.NewFlagSet("apiproxy", flag.ContinueOnError)
+	registerFlags(fs, &commandLine{})
+	registered := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) { registered[f.Name] = true })
+
+	var usage bytes.Buffer
+	printUsage(&usage)
+	listed := map[string]bool{}
+	for _, match := range regexp.MustCompile(`(?m)^  -([a-z][a-z0-9-]*)`).FindAllStringSubmatch(usage.String(), -1) {
+		listed[match[1]] = true
+	}
+
+	for name := range registered {
+		if !listed[name] {
+			t.Errorf("usage does not list -%s", name)
+		}
+	}
+	for name := range listed {
+		if !registered[name] {
+			t.Errorf("usage lists -%s, which is not a flag", name)
+		}
+	}
+	for name := range removedFlags {
+		if registered[name] {
+			t.Errorf("registerFlags defines the removed flag -%s", name)
+		}
+	}
+}
+
+// -openai-responses forwarded /v1/responses to Argo's Responses API, which is
+// the default now; a script that still passes it is told so.
+func TestRemovedFlagsNameTheirReplacement(t *testing.T) {
+	for _, args := range [][]string{{"-openai-responses"}, {"-openai-responses=false"}} {
+		_, err := parseCommandLine(flag.NewFlagSet("apiproxy", flag.ContinueOnError), args)
+		if err == nil || !strings.Contains(err.Error(), "-openai-responses was removed") || !strings.Contains(err.Error(), "-chat-completions") {
+			t.Fatalf("parseCommandLine(%q) error = %v, want it to name -chat-completions", args, err)
+		}
+	}
+	cl, err := parseCommandLine(flag.NewFlagSet("apiproxy", flag.ContinueOnError), []string{"-chat-completions"})
+	if err != nil || !cl.providerOpts.ChatCompletions {
+		t.Fatalf("parseCommandLine(-chat-completions) = %+v, %v; want ChatCompletions set", cl.providerOpts, err)
 	}
 }
 
