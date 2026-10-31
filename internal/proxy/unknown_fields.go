@@ -10,10 +10,51 @@ import (
 	"sync"
 )
 
+// unknownFieldWarnings remembers the unknown fields a server has warned
+// about, by where they came from, so that each is a warning once and is
+// logged at DEBUG after that. A backend that adds fields of its own, as
+// Argo's Gemini route adds google and extra_content, adds them to every
+// response, and a warning for each said nothing new.
+type unknownFieldWarnings struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+type unknownFieldWarningsKey struct{}
+
+func newUnknownFieldWarnings() *unknownFieldWarnings {
+	return &unknownFieldWarnings{seen: make(map[string]bool)}
+}
+
+// withUnknownFieldWarnings makes warnUnknownFields remember, in warnings,
+// the fields it warns about under ctx.
+func withUnknownFieldWarnings(ctx context.Context, warnings *unknownFieldWarnings) context.Context {
+	return context.WithValue(ctx, unknownFieldWarningsKey{}, warnings)
+}
+
+// firstSeen returns the fields of source not warned about before, and
+// remembers them.
+func (w *unknownFieldWarnings) firstSeen(source string, fields []string) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var fresh []string
+	for _, field := range fields {
+		key := source + "\x00" + field
+		if !w.seen[key] {
+			w.seen[key] = true
+			fresh = append(fresh, field)
+		}
+	}
+	return fresh
+}
+
 func warnUnknownFields(ctx context.Context, jsonData []byte, v interface{}, source string) {
 	warnUnknownFieldsWithDisposition(ctx, jsonData, v, source, "ignored")
 }
 
+// warnUnknownFieldsWithDisposition warns about the fields of jsonData that v
+// has no place for. Under a server, a field is a warning the first time it
+// comes from source, and DEBUG after that.
 func warnUnknownFieldsWithDisposition(ctx context.Context, jsonData []byte, v interface{}, source, disposition string) {
 	log := logger.From(ctx)
 	if !log.IsWarnEnabled() {
@@ -30,7 +71,15 @@ func warnUnknownFieldsWithDisposition(ctx context.Context, jsonData []byte, v in
 	if disposition == "" {
 		disposition = "ignored"
 	}
-	list := strings.Join(unknownFields, ", ")
+	fresh := unknownFields
+	if warnings, _ := ctx.Value(unknownFieldWarningsKey{}).(*unknownFieldWarnings); warnings != nil {
+		fresh = warnings.firstSeen(source, unknownFields)
+	}
+	if len(fresh) == 0 {
+		log.Debugf("Unknown JSON fields in %s (%s): %s", source, disposition, strings.Join(unknownFields, ", "))
+		return
+	}
+	list := strings.Join(fresh, ", ")
 	if truncated {
 		list += ", and more"
 	}

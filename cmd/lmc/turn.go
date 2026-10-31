@@ -41,6 +41,10 @@ type turnEnv struct {
 	columns       func() int
 	// served is the model the provider last said answered.
 	served string
+	// hiddenThinkingNoted records that the run has said a provider returned
+	// no visible thinking for its reasoning; every turn's presenter shares
+	// it, so the note is given once a run.
+	hiddenThinkingNoted bool
 }
 
 func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input *inputOwner) *turnEnv {

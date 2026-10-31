@@ -69,6 +69,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		presenter.quoteThinking(env.columns)
 	}
 	presenter.notifier = env.notifier
+	presenter.hiddenThinkingNoted = &env.hiddenThinkingNoted
 	if env.progress != nil {
 		presenter.progress = env.progress
 	}

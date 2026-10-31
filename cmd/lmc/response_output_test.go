@@ -130,6 +130,26 @@ func TestResponsePresenterReportsMissingVisibleThinking(t *testing.T) {
 	}
 }
 
+// A provider that hides its thinking hides it on every response, so the note
+// is given once: for the turn's tool rounds, which share a presenter, and for
+// the run's later turns, whose presenters share the run's record.
+func TestResponsePresenterNotesMissingVisibleThinkingOnce(t *testing.T) {
+	reasoning := 120
+	response := core.Response{Text: "answer", Usage: &core.Usage{ReasoningTokens: &reasoning}}
+	var noted bool
+	var stderr bytes.Buffer
+	for turn := 0; turn < 2; turn++ {
+		presenter := newResponsePresenter(io.Discard, &stderr, true)
+		presenter.notifier = cliui.NewNotifierWithWriter(&stderr)
+		presenter.hiddenThinkingNoted = &noted
+		presenter.HandleResponseComplete(response)
+		presenter.HandleResponseComplete(response)
+	}
+	if got := strings.Count(stderr.String(), "No visible thinking"); got != 1 {
+		t.Fatalf("notes = %d, want 1:\n%s", got, stderr.String())
+	}
+}
+
 func TestResponsePresenterUsesFinalCompletionForThinkingMarker(t *testing.T) {
 	for _, reason := range []string{"", "max_output_tokens"} {
 		t.Run(reason, func(t *testing.T) {

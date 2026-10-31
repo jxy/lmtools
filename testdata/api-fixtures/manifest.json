@@ -411,6 +411,13 @@
       "kinds": [
         "response"
       ]
+    },
+    {
+      "id": "response-argo-openai-content-filter",
+      "description": "Argo gemini4argon reply to a prompt its safety filter refused: no content, every count zero",
+      "kinds": [
+        "response"
+      ]
     }
   ]
 }

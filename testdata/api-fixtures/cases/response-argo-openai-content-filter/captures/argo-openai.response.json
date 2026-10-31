@@ -1,0 +1,34 @@
+{
+  "id": "YBvlaozWMoyI0ekPt4ymkQY",
+  "object": "chat.completion",
+  "created": 1793399649,
+  "model": "gemini4argon",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": null
+      },
+      "finish_reason": "content_filter",
+      "google": {
+        "block_reason": "SAFETY"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "google": {
+      "traffic_type": "ON_DEMAND"
+    }
+  }
+}

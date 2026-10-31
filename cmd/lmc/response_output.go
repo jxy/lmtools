@@ -37,7 +37,13 @@ type responsePresenter struct {
 	// notifier carries the presenter's own note, in the run's style; a
 	// presenter without one writes no note.
 	notifier core.Notifier
-	thinking thinkingText
+	// hiddenThinkingNoted records that the note about reasoning that came
+	// back with no visible thinking was given. A provider that hides it
+	// hides it on every response, so the note is given once: once for the
+	// presenter, or once for the run when executeRequest shares the run's
+	// record.
+	hiddenThinkingNoted *bool
+	thinking            thinkingText
 
 	thinkingActive       bool
 	thinkingEnded        bool
@@ -51,10 +57,11 @@ type responsePresenter struct {
 
 func newResponsePresenter(answer, diagnostics io.Writer, showThinking bool) *responsePresenter {
 	p := &responsePresenter{
-		answer:       answer,
-		diagnostics:  diagnostics,
-		showThinking: showThinking,
-		separate:     true,
+		answer:              answer,
+		diagnostics:         diagnostics,
+		showThinking:        showThinking,
+		separate:            true,
+		hiddenThinkingNoted: new(bool),
 	}
 	p.thinking.out = diagnostics
 	p.thinking.reset()
@@ -128,9 +135,10 @@ func (p *responsePresenter) HandleResponseComplete(response core.Response) {
 
 	// Adaptive models often answer without thinking at all; only reasoning
 	// the provider counted and did not show is worth a note.
-	if reasoning := reportedReasoningTokens(response.Usage); p.notifier != nil && p.showThinking && !presentedThinking && reasoning > 0 {
+	if reasoning := reportedReasoningTokens(response.Usage); p.notifier != nil && p.showThinking && !presentedThinking && reasoning > 0 && !*p.hiddenThinkingNoted {
 		p.separateDiagnosticsFromAnswer()
 		p.notifier.Infof("No visible thinking was returned for %d reasoning tokens.", reasoning)
+		*p.hiddenThinkingNoted = true
 	}
 
 	if response.Usage != nil || len(response.ToolCalls) > 0 {

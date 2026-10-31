@@ -14,13 +14,17 @@ import (
 type ProxyMiddleware struct {
 	next   http.Handler
 	config *Config
+	// unknownFields remembers, for the server's lifetime, the unknown JSON
+	// fields already warned about.
+	unknownFields *unknownFieldWarnings
 }
 
 // NewProxyMiddleware creates the proxy middleware
 func NewProxyMiddleware(next http.Handler, config *Config) http.Handler {
 	return &ProxyMiddleware{
-		next:   next,
-		config: config,
+		next:          next,
+		config:        config,
+		unknownFields: newUnknownFieldWarnings(),
 	}
 }
 
@@ -38,6 +42,7 @@ func (m *ProxyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Request-ID", requestID)
 	ctx = context.WithValue(ctx, logger.RequestIDKey{}, requestID)
+	ctx = withUnknownFieldWarnings(ctx, m.unknownFields)
 
 	// 3. Apply request body size limit. The unwrapped body is kept so an
 	// oversized upload can be drained before the connection closes, and so it

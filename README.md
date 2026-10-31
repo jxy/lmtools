@@ -101,7 +101,8 @@ Tokens: input 100 (cached 40) | output 19 (reasoning 12) | total 119
 ```
 
 Cache and reasoning counts appear when the provider reports a non-zero value;
-total counts appear whenever reported. Parentheses identify counts explicitly
+total counts appear whenever reported. A response whose counts are all zero,
+as a provider reports for a prompt it refused, gets no line. Parentheses identify counts explicitly
 reported within input or output token details; separate counts keep their reported
 scope. Counts are not added together to invent a total. Responses without counts
 print nothing. REPL tool follow-ups are labeled `Tokens (response N)`, and
@@ -895,7 +896,7 @@ Output controls:
   of thinking starts with `| ` and wraps at the terminal width, and control
   characters are shown as `\uXXXX`; redirected stderr keeps the text as
   returned. If the provider counts reasoning tokens and returns no visible
-  thinking, lmc says so. Anthropic's `summarized` display is its readable
+  thinking, lmc says so, once a run. Anthropic's `summarized` display is its readable
   thinking mode; adaptive thinking may skip thinking for a simple request,
   which needs no note.
   Compatible Chat Completions servers' `reasoning_content` and Responses

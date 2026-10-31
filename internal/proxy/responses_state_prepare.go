@@ -387,17 +387,22 @@ func appendOpenAIResponsesCommitMessages(ctx context.Context, commitSession *ses
 	if len(assistantBlocks) > 0 {
 		assistantResponse.Blocks = assistantBlocks
 	}
-	entries = append(entries, session.MessageEntry{
-		Message: session.Message{
-			Role:             core.RoleAssistant,
-			Content:          assistantResponse.Text,
-			ThoughtSignature: assistantResponse.ThoughtSignature,
-			Timestamp:        time.Now(),
-			Model:            originalModel,
-		},
-		ToolCalls: assistantResponse.ToolCalls,
-		Blocks:    assistantResponse.Blocks,
-	})
+	// A reply with nothing in it, as a content filter leaves, adds no
+	// assistant message. An empty one would go to the backend with the next
+	// request, and backends refuse an assistant message with no content.
+	if core.ResponseHasContent(assistantResponse) {
+		entries = append(entries, session.MessageEntry{
+			Message: session.Message{
+				Role:             core.RoleAssistant,
+				Content:          assistantResponse.Text,
+				ThoughtSignature: assistantResponse.ThoughtSignature,
+				Timestamp:        time.Now(),
+				Model:            originalModel,
+			},
+			ToolCalls: assistantResponse.ToolCalls,
+			Blocks:    assistantResponse.Blocks,
+		})
+	}
 	return session.AppendMessagesWithBlocks(ctx, commitSession, entries)
 }
 

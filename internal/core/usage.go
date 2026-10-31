@@ -177,6 +177,19 @@ func (u *Usage) hasAny() bool {
 		u.CacheReadInputTokens != nil || u.CacheCreationInputTokens != nil || u.ReasoningTokens != nil
 }
 
+// countsNothing reports whether u holds counts and every one is zero.
+func (u *Usage) countsNothing() bool {
+	if u == nil || !u.hasAny() {
+		return false
+	}
+	for _, count := range []*int{u.InputTokens, u.OutputTokens, u.TotalTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens, u.ReasoningTokens} {
+		if count != nil && *count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // MergedWith returns the union of u and next, preferring next where both
 // report a count. Streams need the merge because providers split one
 // response's counts across events: Anthropic reports input tokens on
@@ -241,6 +254,12 @@ func (u *Usage) DisplaySummary() string {
 func notifyTokenUsage(notifier Notifier, usage *Usage, toolCalls bool) {
 	if notifier == nil {
 		return
+	}
+	if usage.countsNothing() {
+		// A provider that refused a prompt, as a content filter does, reports
+		// every count as zero; a line of zeros says nothing the error that
+		// follows does not.
+		usage = nil
 	}
 	if reporter, ok := notifier.(interface{ ReportUsage(*Usage, bool) }); ok {
 		reporter.ReportUsage(usage, toolCalls)
