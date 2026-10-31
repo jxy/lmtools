@@ -183,6 +183,57 @@ func TestProgressShowsWhyItRetries(t *testing.T) {
 	}
 }
 
+// A reason too long for the inline status keeps its start and its end, so
+// Argo's rate limit message still says what went wrong; a printed status
+// keeps all of it.
+func TestRetryStatusFitsTheReasonToTheLine(t *testing.T) {
+	const reason = "Your requests to gpt-6-astra for aiops-cels-gpt-6-astra in eastus2 have exceeded token rate limit."
+	const prefix = "Retrying in 9.079s (attempt 5/11) after "
+	for _, tt := range []struct {
+		columns int
+		want    string
+	}{
+		{160, reason},
+		{120, "Your requests to gpt-6-astra for ... eastus2 have exceeded token rate limit."},
+		{80, "Your requests ... token rate limit."},
+	} {
+		var inline bytes.Buffer
+		columns := tt.columns
+		p := &turnProgress{screen: &replScreen{statusOut: &inline, inlineStatus: true, columns: func() int { return columns }}}
+		p.report(retry.Progress{Attempt: 5, Total: 11, Delay: 9079 * time.Millisecond, Reason: reason})
+		p.stop()
+		if want := prefix + tt.want + "..."; !strings.Contains(inline.String(), want) || statusCells(want) > columns-1 {
+			t.Errorf("%d columns: status=%q, want %q within the line", columns, inline.String(), want)
+		}
+	}
+
+	var plain bytes.Buffer
+	p := &turnProgress{screen: &replScreen{statusOut: &plain, columns: func() int { return 80 }}}
+	p.report(retry.Progress{Attempt: 5, Total: 11, Delay: 9079 * time.Millisecond, Reason: reason})
+	p.stop()
+	if want := prefix + reason + "...\n"; plain.String() != want {
+		t.Errorf("plain status=%q, want %q", plain.String(), want)
+	}
+}
+
+// A reason that does not fit keeps its first sentence when that fits.
+func TestFitReasonKeepsTheFirstSentence(t *testing.T) {
+	for _, tt := range []struct {
+		text  string
+		cells int
+		want  string
+	}{
+		{"HTTP 503", 40, "HTTP 503"},
+		{"The server had an error while processing your request. Sorry about that! You can retry your request.", 60, "The server had an error while processing your request."},
+		{"Rate limit reached for gpt-4o in organization org-abc. Please try again in 2.3s.", 36, "Rate limit ... organization org-abc."},
+		{"overloaded", 2, "..."},
+	} {
+		if got := fitReason(tt.text, tt.cells); got != tt.want || (statusCells(got) > tt.cells && got != "...") {
+			t.Errorf("fitReason(%q, %d) = %q, want %q", tt.text, tt.cells, got, tt.want)
+		}
+	}
+}
+
 func TestREPLDisplayTogglesLeaveRequestsAndStdoutUnchanged(t *testing.T) {
 	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
 		response := openAITextResponse("answer")

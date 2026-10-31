@@ -292,8 +292,11 @@ func judgeStreamError(raw json.RawMessage, ignoreType bool) judgment {
 	return found
 }
 
-// maxReasonRunes bounds the reason a retry shows on a status line.
-const maxReasonRunes = 60
+// maxReasonRunes bounds the reason a retry passes on. It keeps a provider's
+// whole message, such as Argo's "Your requests to gpt-6-astra for ... have
+// exceeded token rate limit.", for the status line to shorten to its width;
+// a cut at 60 runes left only the deployment's name.
+const maxReasonRunes = 400
 
 // shortReason puts text on one line and cuts it to maxReasonRunes.
 func shortReason(text string) string {

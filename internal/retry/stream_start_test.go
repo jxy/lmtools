@@ -22,16 +22,19 @@ const (
 		"data: [DONE]\n\n"
 )
 
-// The reason a retry shows is the provider's message alone, on one line and
-// cut short; an error with no message is named by its type and code.
+// The reason a retry shows is the provider's message alone, on one line,
+// whole unless it is very long; an error with no message is named by its
+// type and code.
 func TestStreamErrorReasonIsShort(t *testing.T) {
-	long := strings.Repeat("overloaded ", 20)
+	long := strings.Repeat("overloaded ", 60)
+	rateLimit := "Your requests to gpt-6-astra for aiops-cels-gpt-6-astra in eastus2 have exceeded token rate limit."
 	for data, want := range map[string]string{
 		`{"error": {"message": "Streaming response failed", "type": "internal_error", "code": "internal_error"}}`:      "Streaming response failed",
 		`{"error": {"message": "Error code: 503 - {'error':\n  {'message': 'busy'}}", "type": "InternalServerError"}}`: "Error code: 503 - {'error': {'message': 'busy'}}",
 		`{"error": {"type": "server_error", "code": "boom"}}`:                                                          "type: server_error, code: boom",
-		`{"error": "plain text"}`:                                     "plain text",
-		`{"error": {"message": "` + long + `", "type": "api_error"}}`: strings.TrimSpace(long)[:maxReasonRunes],
+		`{"error": "plain text"}`:                                          "plain text",
+		`{"error": {"message": "` + long + `", "type": "api_error"}}`:      strings.TrimSpace(long)[:maxReasonRunes],
+		`{"error": {"message": "` + rateLimit + `", "type": "api_error"}}`: rateLimit,
 	} {
 		if got := judgeStreamData([]byte(data)).reason; got != want {
 			t.Errorf("reason of %s = %q, want %q", data, got, want)

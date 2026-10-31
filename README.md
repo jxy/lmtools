@@ -234,7 +234,8 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
   arguments, and `Running NAME...` while commands run. It appears only on an
   empty line and clears when output starts. Retries show their delay,
   attempt count, and reason, such as `after HTTP 503` or the error a stream
-  reported. The usage line of each response gives its time, and in a turn
+  reported; a reason too long for the line keeps its first sentence, then
+  its start and end with `...` between. The usage line of each response gives its time, and in a turn
   with tool calls every response is numbered. The session ID appears once
   established. `/info` shows the endpoint, API, session, tools, and settings.
   All UI text is plain: no colors or styling. Cursor controls are used only

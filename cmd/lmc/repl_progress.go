@@ -79,8 +79,10 @@ func (p *turnProgress) report(event retry.Progress) {
 		status := fmt.Sprintf("Retrying in %s (attempt %d/%d)", event.Delay.Round(time.Millisecond), event.Attempt, event.Total)
 		if event.Reason != "" {
 			// A stream's error message comes from the provider; the
-			// screen spells out any hidden character in it.
-			status += " after " + event.Reason
+			// screen spells out any hidden character in it, and an inline
+			// status shortens it to the line.
+			status += " after "
+			status += p.screen.fitStatusPart(core.VisibleText(event.Reason), status, "...")
 		}
 		p.screen.setStatus(status + "...")
 		return
@@ -284,12 +286,72 @@ func (s *replScreen) drawStatusLocked(text string) {
 	if text == "" {
 		return
 	}
-	width := 0
-	for _, r := range text {
-		width += editRuneWidth(r)
-	}
+	width := statusCells(text)
 	_, _ = io.WriteString(s.statusOut, text)
 	s.status = terminalArea{widths: []int{width}, cursorCol: width}
+}
+
+// fitStatusPart shortens part, shown in an inline status between before and
+// after, to the cells the line leaves it; a status printed as a line of its
+// own keeps all of it.
+func (s *replScreen) fitStatusPart(part, before, after string) string {
+	s.mu.Lock()
+	inline, columns := s.inlineStatus, 80
+	if s.columns != nil {
+		columns = s.columns()
+	}
+	s.mu.Unlock()
+	if !inline {
+		return part
+	}
+	return fitReason(part, columns-1-statusCells(before)-statusCells(after))
+}
+
+// fitReason shortens a provider's message to cells terminal cells when it
+// does not fit: to its first sentence, which says what failed, and then by
+// whole words from the middle, since such a sentence tends to say where at
+// its start and what went wrong at its end.
+func fitReason(text string, cells int) string {
+	if statusCells(text) <= cells {
+		return text
+	}
+	if end := strings.Index(text, ". "); end > 0 {
+		text = text[:end+1]
+		if statusCells(text) <= cells {
+			return text
+		}
+	}
+	// Each word kept takes its cells and one space beside it; words come
+	// from the end and the start in turn, the end first.
+	words := strings.Fields(text)
+	var head, tail []string
+	used := len("...")
+	for i, j, fromEnd := 0, len(words)-1, true; i <= j; fromEnd = !fromEnd {
+		k := i
+		if fromEnd {
+			k = j
+		}
+		if used += statusCells(words[k]) + 1; used > cells {
+			break
+		}
+		if fromEnd {
+			tail = append([]string{words[k]}, tail...)
+			j--
+		} else {
+			head = append(head, words[k])
+			i++
+		}
+	}
+	return strings.Join(append(append(head, "..."), tail...), " ")
+}
+
+// statusCells counts the terminal cells text takes on a status line.
+func statusCells(text string) int {
+	cells := 0
+	for _, r := range text {
+		cells += editRuneWidth(r)
+	}
+	return cells
 }
 
 func (s *replScreen) clearStatusLocked() {
