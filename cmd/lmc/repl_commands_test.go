@@ -546,6 +546,32 @@ func TestREPLModelAndEffortChangeTheNextTurn(t *testing.T) {
 	}
 }
 
+// Argo's chat route returns no thinking for gpt models: turning the thinking
+// display on with one, or choosing one while the display is on, says so.
+func TestREPLSaysWhenTheRouteReturnsNoThinking(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	loop, _, notes := newTestLoop(t, te)
+	loop.base.Provider = constants.ProviderArgo
+	loop.base.Model = "claudeopus55"
+	const warning = "Warning: Argo's chat completions route returns no thinking for gpt6astra; use -openai-responses with -effort to get reasoning summaries."
+	for _, command := range []string{"/model gpt6astra", "/thinking on", "/model claudeopus55", "/model gpt6astra", "/thinking off", "/model gpt6astra"} {
+		loop.interpretInput(command)
+	}
+	if got := notes.count(warning); got != 2 {
+		t.Fatalf("warned %d times, want after /thinking on and the next /model gpt6astra; notes = %q", got, notes.all())
+	}
+	loop.base.OpenAIResponses = true
+	loop.interpretInput("/thinking on")
+	if got := notes.count(warning); got != 2 {
+		t.Fatalf("warned on the Responses route; notes = %q", notes.all())
+	}
+	if len(server.GetRequests()) != 0 {
+		t.Fatal("commands contacted the provider")
+	}
+}
+
 func TestREPLHelpAlignsEveryDescription(t *testing.T) {
 	lines := strings.Split(replHelpText(), "\n")
 	if !strings.HasPrefix(lines[1], "  /help") {

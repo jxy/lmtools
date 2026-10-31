@@ -55,7 +55,9 @@ echo "Tell me a story" | lmc -argo-user "$USER"
 echo "Tell me a story" | lmc -argo-user "$USER" -stream
 
 # Show provider-returned thinking summaries on stderr while keeping the answer on stdout.
+# Argo's gpt* models, such as the default gpt5, return them only through the Responses API.
 echo "Solve this carefully" | lmc -argo-user "$USER" \
+  -openai-responses \
   -effort high \
   -show-thinking
 
@@ -870,7 +872,10 @@ Output controls:
   `high`, `xhigh`, or `max`. On Anthropic-wire requests, any supported
   non-`none` effort also enables `thinking.type="adaptive"` with
   `thinking.display="summarized"` so the returned thinking blocks contain the
-  visible summary rather than only an encrypted signature.
+  visible summary rather than only an encrypted signature. On Responses
+  requests, any effort other than `none` also sends `reasoning.summary="auto"`
+  so the reasoning items carry a readable summary beside the encrypted
+  reasoning. A model that reasons only briefly may return no summary.
 - `-show-thinking`: Print provider-returned visible thinking summaries to
   stderr. It is presentation-only: it does not enable reasoning or alter the
   request. The assistant answer remains unchanged on stdout in both streaming
@@ -887,7 +892,12 @@ Output controls:
   which needs no note.
   Compatible Chat Completions servers' `reasoning_content` and Responses
   reasoning text/summary events are supported and retained in session history.
-  A server may return thinking by default without an `-effort` flag.
+  A server may return thinking by default without an `-effort` flag. OpenAI's
+  Chat Completions API returns no reasoning text, and Argo's chat completions
+  route adds none for `gpt*` models. `lmc` warns when `-show-thinking` meets
+  that route, and a REPL warns at `/thinking on`, or at `/model` while the
+  display is on. Use `-openai-responses` with `-effort` to get their reasoning
+  summaries.
 - `-reasoning-mode string`: Responses API reasoning mode: `standard` or `pro`
   (`pro` applies to GPT-5.6 only). `lmc` emits it only on an effective
   `-openai-responses` path and otherwise warns and ignores it.

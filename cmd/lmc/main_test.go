@@ -57,6 +57,32 @@ func TestMainHelpFlags(t *testing.T) {
 	}
 }
 
+// Only a gpt model on Argo's chat completions route gets the note: the
+// Responses route returns summaries, and other models and providers return
+// what they return.
+func TestArgoChatHidesThinking(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		opts core.RequestOptions
+		want string
+	}{
+		{"gpt on the chat route", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra"}, "Argo's chat completions route returns no thinking for gpt6astra; use -openai-responses with -effort to get reasoning summaries"},
+		{"default model", core.RequestOptions{Provider: constants.ProviderArgo}, "returns no thinking for gpt5;"},
+		{"Responses route", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra", OpenAIResponses: true}, ""},
+		{"claude", core.RequestOptions{Provider: constants.ProviderArgo, Model: "claudeopus55"}, ""},
+		{"legacy route", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra", ArgoLegacy: true}, ""},
+		{"openai", core.RequestOptions{Provider: constants.ProviderOpenAI, Model: "gpt-5"}, ""},
+		{"embed", core.RequestOptions{Provider: constants.ProviderArgo, Model: "gpt6astra", Embed: true}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := argoChatHidesThinking(tt.opts)
+			if (tt.want == "") != (got == "") || !strings.Contains(got, tt.want) {
+				t.Fatalf("note = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPersistAssistantOnlyWarnsButDoesNotFailOnSaveError(t *testing.T) {
 	notifier := core.NewTestNotifier()
 	err := persistAssistantOnly(

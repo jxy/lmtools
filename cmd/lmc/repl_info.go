@@ -204,12 +204,21 @@ func (l *replLoop) setDisplay(command, value string) {
 	if command == "/thinking" {
 		l.env.cfg.ShowThinking = enabled
 		l.env.notifier.Infof("Thinking display %s; reasoning settings are unchanged.", value)
+		l.warnHiddenThinking()
 	} else {
 		l.hideUsage = !enabled
 		if n, ok := l.env.notifier.(interface{ SetUsageEnabled(bool) }); ok {
 			n.SetUsageEnabled(enabled)
 		}
 		l.env.notifier.Infof("Token display %s.", value)
+	}
+}
+
+// warnHiddenThinking says when the thinking display is on for a model whose
+// route returns no thinking.
+func (l *replLoop) warnHiddenThinking() {
+	if note := argoChatHidesThinking(l.base); l.env.cfg.ShowThinking && note != "" {
+		l.env.notifier.Warnf("%s.", note)
 	}
 }
 

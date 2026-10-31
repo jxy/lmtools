@@ -245,6 +245,9 @@ func run(notifier core.Notifier) error {
 	opts := cfg.RequestOptions()
 
 	warnUnusedReasoningControls(cfg, notifier)
+	if note := argoChatHidesThinking(opts); cfg.ShowThinking && note != "" {
+		notifier.Warnf("-show-thinking: %s", note)
+	}
 
 	// Initialize logging
 	logDir, err := setupLogging(cfg, notifier)
@@ -330,6 +333,21 @@ func warnUnusedReasoningControls(cfg config.Config, notifier core.Notifier) {
 		return
 	}
 	notifier.Warnf("-reasoning-mode/-reasoning-context are Responses API-only controls; ignoring them because the request does not use -openai-responses on a Responses-capable provider and model")
+}
+
+// argoChatHidesThinking explains why a gpt model on Argo's chat completions
+// route answers without thinking, and returns "" for any other route. OpenAI's
+// Chat Completions API returns no reasoning text and Argo adds none; its
+// Responses route returns a summary when the request asks for one, which an
+// -effort does there.
+func argoChatHidesThinking(opts core.RequestOptions) string {
+	model := core.EffectiveChatModel(opts)
+	if opts.Embed || opts.ArgoLegacy || constants.NormalizeProvider(opts.Provider) != constants.ProviderArgo ||
+		!providers.ArgoModelSupportsResponses(model) ||
+		providers.UsesResponsesAPIWire(opts.Provider, model, opts.OpenAIResponses, opts.ArgoLegacy) {
+		return ""
+	}
+	return fmt.Sprintf("Argo's chat completions route returns no thinking for %s; use -openai-responses with -effort to get reasoning summaries", model)
 }
 
 // connectMCPServers starts the servers -mcp-config names and attaches their

@@ -237,6 +237,7 @@ func (l *replLoop) setModel(model string) {
 	}
 	l.base.Model = model
 	l.env.notifier.Infof("Model set to %s for the next turns (%s API).", model, replAPIName(l.base))
+	l.warnHiddenThinking()
 }
 
 // setEffort takes what -effort takes, in any case, or default, which sends

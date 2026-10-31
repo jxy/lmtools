@@ -74,10 +74,18 @@ func openAIResponsesRequestMap(payload PreparedRequestPayload) map[string]interf
 // openAIResponsesReasoningConfig builds the OpenAI Responses `reasoning` object
 // from effort, mode, and context. reasoning.mode and reasoning.context are
 // OpenAI Responses-only controls and only apply on this path.
+//
+// An effort other than none also asks for the reasoning summary, as -effort
+// requests summarized thinking on the Anthropic wire: without
+// reasoning.summary the reasoning items carry only encrypted content.
+// "auto" picks the most detailed summarizer the model has.
 func openAIResponsesReasoningConfig(payload PreparedRequestPayload) map[string]interface{} {
 	reasoning := map[string]interface{}{}
 	if effort := openAIReasoningEffort(payload.Effort); effort != "" {
 		reasoning["effort"] = effort
+		if effort != "none" {
+			reasoning["summary"] = "auto"
+		}
 	}
 	if mode := openAIReasoningMode(payload.ReasoningMode); mode != "" {
 		reasoning["mode"] = mode

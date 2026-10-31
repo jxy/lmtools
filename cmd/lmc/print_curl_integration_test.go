@@ -44,6 +44,28 @@ func TestPrintCurlFreshDoesNotSendOrCreateSession(t *testing.T) {
 	}
 }
 
+// -show-thinking with a gpt model on Argo's chat route says how to get
+// thinking; on the Responses route an effort asks for the summary.
+func TestPrintCurlShowThinkingOnArgoGPT(t *testing.T) {
+	lmcBin := getLmcBinary(t)
+	server := mockserver.NewMockServer()
+	t.Cleanup(server.Close)
+	args := []string{"-argo-user", "testuser", "-model", "gpt6astra", "-provider-url", server.URL(), "-sessions-dir", t.TempDir(), "-show-thinking", "-print-curl"}
+	const warning = "Warning: -show-thinking: Argo's chat completions route returns no thinking for gpt6astra; use -openai-responses with -effort to get reasoning summaries"
+
+	stdout, stderr, err := runLmcCommand(t, lmcBin, args, "think")
+	if err != nil || !strings.Contains(stderr, warning) || !strings.Contains(stdout, "/chat/completions") {
+		t.Fatalf("chat route: err=%v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	stdout, stderr, err = runLmcCommand(t, lmcBin, append(args, "-openai-responses", "-effort", "high"), "think")
+	if err != nil || strings.Contains(stderr, "no thinking") || !strings.Contains(stdout, `"reasoning":{"effort":"high","summary":"auto"}`) {
+		t.Fatalf("Responses route: err=%v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if got := len(server.GetRequests()); got != 0 {
+		t.Fatalf("mock server received %d requests, want 0", got)
+	}
+}
+
 func TestPrintCurlResumeIsReadOnly(t *testing.T) {
 	lmcBin := getLmcBinary(t)
 	server := mockserver.NewMockServer(mockserver.WithDefaultResponse("resume response"))

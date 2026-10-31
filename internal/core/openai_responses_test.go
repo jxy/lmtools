@@ -126,6 +126,60 @@ func TestBuildOpenAIResponsesRequestReasoningModeAndContext(t *testing.T) {
 	}
 }
 
+// Without reasoning.summary OpenAI returns reasoning items with an empty
+// summary, so -show-thinking has nothing to print.
+func TestBuildOpenAIResponsesRequestAsksForTheReasoningSummary(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  RequestOptions
+		want map[string]interface{}
+	}{
+		{"effort", RequestOptions{Effort: "medium"}, map[string]interface{}{"effort": "medium", "summary": "auto"}},
+		{"minimal effort", RequestOptions{Effort: "Minimal"}, map[string]interface{}{"effort": "minimal", "summary": "auto"}},
+		{"no reasoning", RequestOptions{Effort: "none"}, map[string]interface{}{"effort": "none"}},
+		{"mode alone", RequestOptions{ReasoningMode: "pro"}, map[string]interface{}{"mode": "pro"}},
+		{"no effort", RequestOptions{}, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.cfg
+			cfg.Provider = "argo"
+			cfg.Model = "gpt6astra"
+			cfg.OpenAIResponses = true
+			_, body, err := BuildRequest(cfg, "Think.")
+			if err != nil {
+				t.Fatalf("BuildRequest() error = %v", err)
+			}
+			var decoded struct {
+				Reasoning map[string]interface{} `json:"reasoning"`
+			}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("request body is invalid JSON: %v", err)
+			}
+			if !reflect.DeepEqual(decoded.Reasoning, tt.want) {
+				t.Fatalf("reasoning = %#v, want %#v", decoded.Reasoning, tt.want)
+			}
+		})
+	}
+}
+
+// Chat Completions has no reasoning summary to ask for; the effort goes alone.
+func TestBuildOpenAIChatRequestSendsEffortAlone(t *testing.T) {
+	_, body, err := BuildRequest(RequestOptions{Provider: "argo", Model: "gpt6astra", Effort: "high"}, "Think.")
+	if err != nil {
+		t.Fatalf("BuildRequest() error = %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("request body is invalid JSON: %v", err)
+	}
+	if decoded["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v, want high", decoded["reasoning_effort"])
+	}
+	if _, ok := decoded["reasoning"]; ok {
+		t.Fatalf("chat request carries reasoning: %s", body)
+	}
+}
+
 func TestBuildOpenAIResponsesRequestPreservesCustomTools(t *testing.T) {
 	cfg := RequestOptions{
 		Provider:        "openai",
