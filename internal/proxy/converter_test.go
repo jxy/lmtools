@@ -34,8 +34,8 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				},
 			},
 			expected: &OpenAIRequest{
-				Model:     "gpt-4",
-				MaxTokens: intPtr(1000),
+				Model:               "gpt-4",
+				MaxCompletionTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
 						Role:    core.RoleUser,
@@ -58,8 +58,8 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				},
 			},
 			expected: &OpenAIRequest{
-				Model:     "gpt-4",
-				MaxTokens: intPtr(1000),
+				Model:               "gpt-4",
+				MaxCompletionTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
 						Role:    core.RoleSystem,
@@ -85,8 +85,8 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				},
 			},
 			expected: &OpenAIRequest{
-				Model:     "gpt-4",
-				MaxTokens: intPtr(1000),
+				Model:               "gpt-4",
+				MaxCompletionTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
 						Role:    core.RoleUser,
@@ -122,8 +122,8 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				},
 			},
 			expected: &OpenAIRequest{
-				Model:     "gpt-4",
-				MaxTokens: intPtr(1000),
+				Model:               "gpt-4",
+				MaxCompletionTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
 						Role:    core.RoleUser,
@@ -177,8 +177,8 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				},
 			},
 			expected: &OpenAIRequest{
-				Model:     "gpt-4",
-				MaxTokens: intPtr(1000),
+				Model:               "gpt-4",
+				MaxCompletionTokens: intPtr(1000),
 				Messages: []OpenAIMessage{
 					{
 						Role:    core.RoleUser,
@@ -217,8 +217,8 @@ func TestConvertAnthropicToOpenAI(t *testing.T) {
 				},
 			},
 			expected: &OpenAIRequest{
-				Model:     "gpt-4",
-				MaxTokens: intPtr(20000), // No longer capped, pass through as-is
+				Model:               "gpt-4",
+				MaxCompletionTokens: intPtr(20000), // No longer capped, pass through as-is
 				Messages: []OpenAIMessage{
 					{
 						Role:    core.RoleUser,

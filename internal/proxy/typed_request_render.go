@@ -67,12 +67,10 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*Op
 		Metadata:        cloneStringInterfaceMap(typed.Metadata),
 		ServiceTier:     serviceTierForOpenAI(typed.ServiceTier),
 	}
-	maxTokens := positiveIntPtr(typed.MaxTokens)
-	if openAIModelUsesMaxCompletionTokens(ctx.Model) {
-		openAIReq.MaxCompletionTokens = maxTokens
-	} else {
-		openAIReq.MaxTokens = maxTokens
-	}
+	// max_completion_tokens is the Chat Completions limit for every model,
+	// and the only one the reasoning models accept, so it is chosen whatever
+	// the model is called. lmc sends it too.
+	openAIReq.MaxCompletionTokens = positiveIntPtr(typed.MaxTokens)
 
 	messages := prependOpenAIInstructionMessages(prepared.Messages, typed.System, typed.Developer, ctx.Model)
 	messages = normalizeTypedMessagesForOpenAIChat(messages)
@@ -88,17 +86,14 @@ func renderTypedToOpenAIRequest(typed TypedRequest, ctx typedRenderContext) (*Op
 	return openAIReq, nil
 }
 
-func openAIModelUsesMaxCompletionTokens(model string) bool {
+// openAIModelUsesDeveloperRole reports whether a model takes system
+// instructions in the developer role: the gpt-5 family and the o-series.
+func openAIModelUsesDeveloperRole(model string) bool {
 	modelLower := strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(modelLower, "gpt-5") ||
 		strings.HasPrefix(modelLower, "o1") ||
 		strings.HasPrefix(modelLower, "o3") ||
 		strings.HasPrefix(modelLower, "o4")
-}
-
-func openAIModelUsesDeveloperRole(model string) bool {
-	// Same model family that uses max_completion_tokens also uses the developer role.
-	return openAIModelUsesMaxCompletionTokens(model)
 }
 
 func TypedToAnthropicRequest(typed TypedRequest, model string) (*AnthropicRequest, error) {

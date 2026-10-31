@@ -754,10 +754,10 @@ func TestAnthropicMessagesArgoOpenAIMappedChatCompletionsRetries400WithIncreased
 		if captured.Model != "gpt55" {
 			t.Fatalf("upstream model = %q, want gpt55", captured.Model)
 		}
-		if captured.MaxTokens == nil {
-			t.Fatalf("upstream max_tokens missing on attempt %d; request = %+v", len(attempts)+1, captured)
+		if captured.MaxCompletionTokens == nil || captured.MaxTokens != nil {
+			t.Fatalf("upstream token limit on attempt %d is not max_completion_tokens alone; request = %+v", len(attempts)+1, captured)
 		}
-		attempts = append(attempts, *captured.MaxTokens)
+		attempts = append(attempts, *captured.MaxCompletionTokens)
 		if len(attempts) == 1 {
 			return jsonRoundTripResponse(http.StatusBadRequest, map[string]interface{}{
 				"error": map[string]interface{}{"message": "Could not finish the message because max_tokens or model output limit was reached. Please try again with higher max_tokens."},
@@ -805,7 +805,7 @@ func TestAnthropicMessagesArgoOpenAIMappedChatCompletionsRetries400WithIncreased
 	if !intSlicesEqual(attempts, wantAttempts) {
 		t.Fatalf("max_tokens attempts = %v, want %v", attempts, wantAttempts)
 	}
-	for _, want := range []string{"[WARN]", "Argo OpenAI chat/completions returned 400", "max_tokens=100", "max_tokens=356", "retry 1/3"} {
+	for _, want := range []string{"[WARN]", "Argo OpenAI chat/completions returned 400", "max_completion_tokens=100", "max_completion_tokens=356", "retry 1/3"} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs)
 		}

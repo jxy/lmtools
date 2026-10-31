@@ -1,5 +1,5 @@
 {
-  "max_tokens": 256,
+  "max_completion_tokens": 256,
   "messages": [
     {
       "content": "Hello, this is a test",

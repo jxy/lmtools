@@ -18,5 +18,5 @@
       ]
     }
   ],
-  "max_tokens": 256
+  "max_completion_tokens": 256
 }
