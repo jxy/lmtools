@@ -51,19 +51,20 @@ func (e *streamStartError) Error() string {
 // content, and returns the error event found ahead of it if the event
 // stands for a status worth retrying, or the read error that ended the
 // stream ahead of it if a connection lost before the response would be
-// retried; the caller then closes the body. Nothing has reached the caller
-// either way. Otherwise it puts back what it read, so the body still reads
-// whole, and returns nil. It reads events as lmc's stream parser does: the
-// data lines of an event are joined with newlines and judged at the blank
-// line that ends the event, or where the stream ends, and comments and
-// other fields are passed over. So are events that carry nothing yet: Chat
-// chunks with no choices, as Azure's filter results come, or with no more
-// than a role in their deltas; Anthropic message_start and ping; Responses
-// response.created, response.in_progress, and response.queued. An event
-// whose last line a broken connection cut off is not judged.
-func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError {
+// retried, with what it read; the caller then logs that and closes the
+// body. Nothing has reached the caller either way. Otherwise it puts back
+// what it read, so the body still reads whole, and returns nil. It reads
+// events as lmc's stream parser does: the data lines of an event are joined
+// with newlines and judged at the blank line that ends the event, or where
+// the stream ends, and comments and other fields are passed over. So are
+// events that carry nothing yet: Chat chunks with no choices, as Azure's
+// filter results come, or with no more than a role in their deltas;
+// Anthropic message_start and ping; Responses response.created,
+// response.in_progress, and response.queued. An event whose last line a
+// broken connection cut off is not judged.
+func checkStreamStart(req *http.Request, resp *http.Response) ([]byte, *streamStartError) {
 	if resp.StatusCode != http.StatusOK || resp.Body == nil || !isEventStream(resp.Header) {
-		return nil
+		return nil, nil
 	}
 	body := resp.Body
 	reader := bufio.NewReaderSize(body, streamStartLineBytes)
@@ -93,7 +94,7 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 		if inEvent && !cut && (len(line) == 0 || readErr != nil) {
 			event := judgeStreamData(bytes.TrimSpace(data))
 			if event.kind == eventError && retryableStatus(event.status) {
-				return &streamStartError{method: req.Method, url: redactedURL(req.URL), status: event.status, message: event.message, reason: event.reason}
+				return read.Bytes(), &streamStartError{method: req.Method, url: redactedURL(req.URL), status: event.status, message: event.message, reason: event.reason}
 			}
 			if event.kind != eventEmpty {
 				settled = true
@@ -106,14 +107,14 @@ func checkStreamStart(req *http.Request, resp *http.Response) *streamStartError 
 		}
 	}
 	if readErr != nil && !settled && isRetryableTransportError(readErr) {
-		return &streamStartError{method: req.Method, url: redactedURL(req.URL), reason: transportReason(readErr), cause: readErr}
+		return read.Bytes(), &streamStartError{method: req.Method, url: redactedURL(req.URL), reason: transportReason(readErr), cause: readErr}
 	}
 	rest := io.Reader(reader)
 	if readErr != nil {
 		rest = errorReader{readErr}
 	}
 	resp.Body = replayedBody{Reader: io.MultiReader(bytes.NewReader(read.Bytes()), rest), Closer: body}
-	return nil
+	return nil, nil
 }
 
 // replayedBody reads what checkStreamStart took from a body and then the

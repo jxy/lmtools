@@ -180,7 +180,9 @@ func (c *Client) retryer(provider string) *Retryer {
 // repeat inference, on a POST the client made once — and once the attempts run
 // out the caller receives the final HTTP response, with its body still open.
 // With RetryStreamStartErrors, an error event that opens a 200 stream
-// resubmits it too.
+// resubmits it too. Each response Do throws away for another attempt is
+// logged at DEBUG, its head and what was read of its body, since the
+// caller logs only the response it gets.
 // GetBody makes a body rewindable at any size, and http.NewRequest sets it for
 // every in-memory body, so most requests in this repository retry. A body
 // without GetBody is read into memory below maxRetryBodySize precisely so it
@@ -255,7 +257,8 @@ func (c *Client) Do(ctx context.Context, req *http.Request, provider string) (*h
 		if err != nil || !c.streamStartErrors || attempts > retryer.config.MaxRetries {
 			return resp, err
 		}
-		if streamErr := checkStreamStart(reqClone, resp); streamErr != nil {
+		if read, streamErr := checkStreamStart(reqClone, resp); streamErr != nil {
+			logDiscardedResponse(retryer.getLogger(ctx), resp, read, attempts, retryer.config.MaxRetries+1)
 			resp.Body.Close()
 			return nil, streamErr
 		}

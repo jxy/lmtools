@@ -1458,7 +1458,8 @@ applies to every path except `-provider openai`, and `-provider argo` on a
   then streamed text arrives all at once.
 - Pass `-log-level DEBUG` to either binary to inspect request routing and conversion warnings.
   DEBUG wire logs include complete, unredacted request, response, and stream
-  bytes; they can contain credentials and grow without bound on long streams.
+  bytes, the responses of retried attempts among them; they can contain
+  credentials and grow without bound on long streams.
 - Confirm that the selected `-provider` has credentials or a `-provider-url`.
 - For Argo, check whether native mode or `-argo-legacy` matches the model and endpoint you intend to use.
 - When a converted Responses request loses an OpenAI-only field, switch to

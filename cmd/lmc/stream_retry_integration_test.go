@@ -73,3 +73,32 @@ func TestCLIReportsStreamFailureWithoutRetries(t *testing.T) {
 		t.Fatalf("stdout=%q requests=%d", stdout, len(requests()))
 	}
 }
+
+// At DEBUG, the log keeps a stream that was retried as it came, ahead of
+// the error it was retried for: its comments and the provider's request ID
+// are in no formatted message.
+func TestCLILogsTheStreamItRetriesAtDebug(t *testing.T) {
+	failure := ": upstream busy\n\n" + `data: {"error": {"message": "Streaming response failed", "type": "internal_error", "code": "internal_error", "request_id": "req_retried"}}` + "\n\n"
+	answer := `data: {"choices":[{"index":0,"delta":{"content":"DONE_OK"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	server, _ := completionServer(t, completionReply{[]byte(failure), true}, completionReply{[]byte(answer), true})
+	logDir := t.TempDir()
+	stdout, stderr, err := runLmcCommand(t, getLmcBinary(t), completionArgs(t, server.URL, t.TempDir(), false, true, "-log-dir", logDir, "-log-level", "DEBUG", "-retries", "1"), "hello")
+	if err != nil || stdout != "DONE_OK" {
+		t.Fatalf("stdout=%q stderr=%s err=%v", stdout, stderr, err)
+	}
+	logs, err := filepath.Glob(filepath.Join(logDir, "*_lmc_*.log"))
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("logs=%v err=%v", logs, err)
+	}
+	data, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	head := strings.Index(log, "WIRE BACKEND RESPONSE HEADERS (attempt 1/2, retried):\nHTTP/1.1 200 OK\r\n")
+	body := strings.Index(log, "WIRE BACKEND RESPONSE BODY (attempt 1/2, retried):\n"+failure)
+	failed := strings.Index(log, "error event before any content (as HTTP 500)")
+	if head < 0 || body < head || failed < body {
+		t.Fatalf("want the retried stream's head and body ahead of its error:\n%s", log)
+	}
+}

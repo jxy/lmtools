@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/constants"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,6 +86,32 @@ func TestRetry(t *testing.T) {
 
 		if atomic.LoadInt32(&attempts) != 3 {
 			t.Errorf("Expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+		}
+	})
+
+	t.Run("each response retried is logged at DEBUG", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&attempts, 1) == 1 {
+				w.Header().Set("X-Request-Id", "req_busy")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"busy"}`))
+				return
+			}
+			_, _ = w.Write([]byte("success"))
+		}))
+		defer server.Close()
+
+		logger := &recordingLogger{}
+		retryer := NewRetryer(&Config{MaxRetries: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 1}, logger)
+		req, _ := http.NewRequest("GET", server.URL, nil)
+		resp, err := retryer.Do(context.Background(), &http.Client{}, req, nil)
+		if err != nil {
+			t.Fatalf("Expected success, got error: %v", err)
+		}
+		resp.Body.Close()
+		if len(logger.debugs) != 2 || !strings.HasPrefix(logger.debugs[0], "WIRE BACKEND RESPONSE HEADERS (attempt 1/2, retried):\nHTTP/1.1 503 Service Unavailable\r\n") || !strings.Contains(logger.debugs[0], "X-Request-Id: req_busy\r\n") || logger.debugs[1] != "WIRE BACKEND RESPONSE BODY (attempt 1/2, retried):\n{\"error\":\"busy\"}" {
+			t.Fatalf("debug records = %q", logger.debugs)
 		}
 	})
 
@@ -399,12 +426,12 @@ func TestDrainAndClose(t *testing.T) {
 
 	t.Run("bounded drain", func(t *testing.T) {
 		body := &countingReadCloser{remaining: maxRetryDrainBytes * 2}
-		DrainAndClose(&http.Response{Body: body})
+		drained := DrainAndClose(&http.Response{Body: body})
 		if !body.closed {
 			t.Fatal("body was not closed")
 		}
-		if body.read > maxRetryDrainBytes {
-			t.Fatalf("read %d bytes, want <= %d", body.read, maxRetryDrainBytes)
+		if body.read > maxRetryDrainBytes || int64(len(drained)) != body.read {
+			t.Fatalf("read %d bytes and returned %d, want at most %d, all returned", body.read, len(drained), maxRetryDrainBytes)
 		}
 	})
 }

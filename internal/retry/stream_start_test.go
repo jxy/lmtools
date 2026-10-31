@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -95,10 +96,17 @@ func TestJudgeStreamDataNamesErrorStatuses(t *testing.T) {
 type recordingLogger struct {
 	mu     sync.Mutex
 	errors []string
+	debugs []string
 }
 
-func (l *recordingLogger) Infof(string, ...interface{})  {}
-func (l *recordingLogger) Debugf(string, ...interface{}) {}
+func (l *recordingLogger) Infof(string, ...interface{}) {}
+
+func (l *recordingLogger) Debugf(format string, args ...interface{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
+}
+
 func (l *recordingLogger) Errorf(format string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -343,6 +351,81 @@ func TestClientRetriesAStreamThatEndsBeforeContent(t *testing.T) {
 			}
 			if len(logger.errors) != 1 || !strings.Contains(logger.errors[0], "POST https://argo.test/v1/chat/completions -> stream ended before any content: "+tt.err.Error()) {
 				t.Fatalf("logged = %q", logger.errors)
+			}
+		})
+	}
+}
+
+// Each response Do throws away for another attempt is logged at DEBUG as
+// it came, since the caller logs only the one it gets: its head, and all
+// that was read of its body, including comments and request IDs that no
+// formatted error keeps. The bodies arrive a byte at a time and run past
+// the sizes a reader buffers.
+func TestClientLogsTheResponsesItDiscards(t *testing.T) {
+	padding := strings.Repeat("x", 40<<10)
+	eventStream := http.Header{"Content-Type": []string{"text/event-stream"}}
+	for _, tt := range []struct {
+		name   string
+		failed *http.Response // the first attempt, before its body
+		body   string
+		err    error // what the body fails with once read
+		head   string
+	}{
+		{
+			name:   "a status worth retrying",
+			failed: &http.Response{StatusCode: http.StatusServiceUnavailable, Proto: "HTTP/2.0", Status: "503 Service Unavailable", Header: http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_status"}}},
+			body:   `{"error":{"message":"busy ` + padding + `","request_id":"req_status"}}`,
+			err:    io.EOF,
+			head:   "HTTP/2.0 503 Service Unavailable\r\nContent-Type: application/json\r\nX-Request-Id: req_status\r\n\r\n",
+		},
+		{
+			name:   "an error event before any content",
+			failed: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"req_event"}}},
+			body:   ": " + padding + "\n\n" + `data: {"error": {"message": "Streaming response failed", "type": "internal_error", "request_id": "req_event"}}` + "\n\n",
+			err:    io.EOF,
+			head:   "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nX-Request-Id: req_event\r\n\r\n",
+		},
+		{
+			name:   "a connection broken before any content",
+			failed: &http.Response{StatusCode: http.StatusOK, Header: eventStream},
+			body:   ": ping\n\n" + `data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}` + "\n\n",
+			err:    io.ErrUnexpectedEOF,
+			head:   "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			attempts := 0
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				attempts++
+				if attempts > 1 {
+					return &http.Response{StatusCode: http.StatusOK, Header: eventStream, Body: io.NopCloser(strings.NewReader(answerStream)), Request: req}, nil
+				}
+				failed := *tt.failed
+				failed.Body = io.NopCloser(iotest.OneByteReader(&failingBody{data: tt.body, err: tt.err}))
+				failed.Request = req
+				return &failed, nil
+			})
+			logger := &recordingLogger{}
+			if got := readStream(t, context.Background(), streamCheckingClient(transport, 2, logger)); got != answerStream {
+				t.Fatalf("stream = %q, want the answer", got)
+			}
+			var wire []string
+			for _, record := range logger.debugs {
+				if strings.HasPrefix(record, "WIRE ") {
+					wire = append(wire, record)
+				}
+			}
+			want := []string{
+				"WIRE BACKEND RESPONSE HEADERS (attempt 1/3, retried):\n" + tt.head,
+				"WIRE BACKEND RESPONSE BODY (attempt 1/3, retried):\n" + tt.body,
+			}
+			if len(wire) != len(want) {
+				t.Fatalf("logged %d wire records, want the failed attempt's head and body: %.300q", len(wire), wire)
+			}
+			for i := range want {
+				if wire[i] != want[i] {
+					t.Fatalf("wire record %d = %d bytes %.300q, want %d bytes %.300q", i, len(wire[i]), wire[i], len(want[i]), want[i])
+				}
 			}
 		})
 	}

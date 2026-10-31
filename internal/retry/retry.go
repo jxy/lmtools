@@ -191,7 +191,7 @@ func (r *Retryer) Do(ctx context.Context, client *http.Client, req *http.Request
 		}
 
 		// Drain and close response body for connection reuse
-		DrainAndClose(resp)
+		logDiscardedResponse(r.getLogger(ctx), resp, DrainAndClose(resp), attempt+1, r.config.MaxRetries+1)
 		lastErr = errors.WrapError("HTTP request", fmt.Errorf("attempt %d: %s %s -> HTTP %d", attempt+1, req.Method, req.URL, resp.StatusCode))
 		lastReason = fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -258,6 +258,7 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 			if !r.shouldRetryResponse(resp) || attempt == r.config.MaxRetries {
 				return resp, nil
 			}
+			logDiscardedResponse(logger, resp, DrainAndClose(resp), attempt+1, r.config.MaxRetries+1)
 			// Log error response for debugging
 			if resp.StatusCode >= 500 {
 				if logger != nil {
@@ -275,7 +276,6 @@ func (r *Retryer) DoWithFunc(ctx context.Context, fn func() (*http.Response, err
 					}
 				}
 			}
-			DrainAndClose(resp)
 		} else {
 			if err != nil {
 				if stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
@@ -391,12 +391,39 @@ func (r *Retryer) calculateBackoff(attempt int) time.Duration {
 const maxRetryDrainBytes int64 = 64 * 1024
 
 // DrainAndClose drains a bounded response body prefix to enable connection reuse without blocking retries indefinitely.
-func DrainAndClose(resp *http.Response) {
+// It returns the bytes it drained, for the DEBUG log.
+func DrainAndClose(resp *http.Response) []byte {
 	if resp == nil || resp.Body == nil {
+		return nil
+	}
+	drained, _ := io.ReadAll(io.LimitReader(resp.Body, maxRetryDrainBytes))
+	resp.Body.Close()
+	return drained
+}
+
+// logDiscardedResponse records at DEBUG a response the retry loop throws
+// away for another attempt: its status line and headers, and body, what was
+// read of it. The caller logs only the response Do returns, so DEBUG's wire
+// log would otherwise keep nothing of the attempt but the error it was
+// retried for.
+func logDiscardedResponse(logger Logger, resp *http.Response, body []byte, attempt, attempts int) {
+	if logger == nil {
 		return
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRetryDrainBytes))
-	resp.Body.Close()
+	var head bytes.Buffer
+	proto := resp.Proto
+	if proto == "" {
+		proto = "HTTP/1.1"
+	}
+	status := resp.Status
+	if status == "" {
+		status = fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	fmt.Fprintf(&head, "%s %s\r\n", proto, status)
+	_ = resp.Header.Write(&head)
+	head.WriteString("\r\n")
+	logger.Debugf("WIRE BACKEND RESPONSE HEADERS (attempt %d/%d, retried):\n%s", attempt, attempts, head.Bytes())
+	logger.Debugf("WIRE BACKEND RESPONSE BODY (attempt %d/%d, retried):\n%s", attempt, attempts, body)
 }
 
 // ExtractRetryAfter extracts the Retry-After header value
