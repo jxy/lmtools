@@ -56,9 +56,9 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	if err != nil {
 		return out, err
 	}
-	logBuiltHTTPRequest(ctx, env.cfg, env.logDir, env.notifier, rb.Request, rb.Body)
+	logBuiltHTTPRequest(ctx, env.cfg, env.logDir, env.notifier, rb.Request, rb.Body, getOperationName(env.cfg))
 
-	resp, err := sendWithRetry(ctx, rb.Request, env.cfg)
+	resp, err := sendWithRetry(ctx, newRetryClient(ctx, env.cfg), rb.Request)
 	if err != nil {
 		return out, err
 	}
@@ -135,10 +135,10 @@ func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	retryClient := newRetryClient(ctx, env.cfg)
 
 	execCfg := core.ToolExecutionConfig{
-		Store:       store,
-		RetryClient: retryClient,
-		LogRequestFn: func(body []byte) error {
-			return logger.From(ctx).LogJSON(env.logDir, "tool_result_input", body)
+		Store: store,
+		Send: func(ctx context.Context, req *http.Request, body []byte) (*http.Response, error) {
+			logBuiltHTTPRequest(ctx, env.cfg, env.logDir, env.notifier, req, body, "tool_result_input")
+			return sendWithRetry(ctx, retryClient, req)
 		},
 		ActualModel: rb.Model,
 	}
@@ -562,7 +562,10 @@ func toolDefinitionsForOptions(opts core.RequestOptions) []core.ToolDefinition {
 	return core.AdvertisedTools(opts)
 }
 
-func logBuiltHTTPRequest(ctx context.Context, cfg *config.Config, logDir string, notifier core.Notifier, req *http.Request, body []byte) {
+// logBuiltHTTPRequest logs a request of the turn before it is sent, the
+// first or a tool round's: a summary, its body to a file named for opName,
+// and at DEBUG the request whole.
+func logBuiltHTTPRequest(ctx context.Context, cfg *config.Config, logDir string, notifier core.Notifier, req *http.Request, body []byte, opName string) {
 	// Log request details
 	var requestData map[string]interface{}
 	if err := json.Unmarshal(body, &requestData); err == nil {
@@ -573,7 +576,6 @@ func logBuiltHTTPRequest(ctx context.Context, cfg *config.Config, logDir string,
 	}
 
 	// Log request
-	opName := getOperationName(cfg)
 	if err := logger.From(ctx).LogJSON(logDir, opName, body); err != nil {
 		// Log error but don't fail the request - logging is not critical
 		notifier.Warnf("Failed to log request: %v", err)
@@ -678,12 +680,9 @@ func newRetryClient(ctx context.Context, cfg *config.Config) *retry.Client {
 	return client
 }
 
-// sendWithRetry sends the HTTP request with retry logic
-func sendWithRetry(ctx context.Context, req *http.Request, cfg *config.Config) (*http.Response, error) {
-	// Create pooled HTTP client with retry logic
-	retryClient := newRetryClient(ctx, cfg)
-
-	// Send request with retry using pooled client
+// sendWithRetry sends a request of the turn, the first or a tool round's,
+// through retryClient, and logs it going and the response coming back.
+func sendWithRetry(ctx context.Context, retryClient *retry.Client, req *http.Request) (*http.Response, error) {
 	// Redact API key from URL before logging
 	logURL := req.URL.String()
 	if req.URL.Query().Get("key") != "" {
@@ -800,11 +799,14 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 
 	// Make request
 	client := &http.Client{Timeout: cfg.Timeout}
+	logWireHTTPRequest(ctx, req, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.WrapError("fetch models", err)
 	}
 	defer resp.Body.Close()
+	logWireHTTPResponseHeaders(ctx, resp)
+	core.LogWireReads(resp, logger.From(ctx))
 
 	if resp.StatusCode != http.StatusOK {
 		body, err := limitio.ReadLimited(resp.Body, constants.MaxErrorResponseSize)

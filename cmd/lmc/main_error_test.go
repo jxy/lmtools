@@ -96,7 +96,7 @@ func TestRequestFailureLogging(t *testing.T) {
 					t.Fatal(err)
 				}
 				start := time.Now()
-				_, requestErr := sendWithRetry(ctx, req, &cfg)
+				_, requestErr := sendWithRetry(ctx, newRetryClient(ctx, &cfg), req)
 				if requestErr == nil {
 					t.Fatal("request unexpectedly succeeded")
 				}

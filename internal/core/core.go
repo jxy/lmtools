@@ -228,6 +228,7 @@ func HandleResponse(ctx context.Context, cfg RequestOptions, resp *http.Response
 // HandleResponseWithOptions processes an HTTP response with compatibility parse options.
 func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *http.Response, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
 	defer resp.Body.Close()
+	LogWireReads(resp, logger)
 
 	// Get provider, default to argo
 	provider := effectiveResponseProvider(cfg)
@@ -238,9 +239,6 @@ func HandleResponseWithOptions(ctx context.Context, cfg RequestOptions, resp *ht
 		errorData, err := limitio.ReadLimitedWithKind(resp.Body, constants.MaxErrorResponseSize, "API error response")
 		if err != nil {
 			errorData = []byte("failed to read error response")
-		}
-		if logger != nil && logger.IsDebugEnabled() {
-			logger.Debugf("WIRE BACKEND RESPONSE BODY:\n%s", string(errorData))
 		}
 		return Response{}, errors.NewHTTPError(resp.StatusCode, string(errorData))
 	}
@@ -374,15 +372,39 @@ func handleStreamingResponse(ctx context.Context, cfg RequestOptions, resp *http
 	return spec.handleStreamResponse(ctx, resp.Body, logger, notifier, output)
 }
 
+// LogWireReads makes each read of resp's body log what it read, as it is
+// read, when logger is at DEBUG. The log then holds the body as it came: a
+// stream with every event, comment, and line ending, in the order and the
+// pieces it arrived in, and a body whose read failed or ran over its limit
+// as far as it was read, though limitio.ReadLimited then returns none of
+// it. The stream_chat_output file holds what the stream parser made of a
+// stream.
+func LogWireReads(resp *http.Response, logger Logger) {
+	if logger != nil && logger.IsDebugEnabled() {
+		resp.Body = wireLoggedBody{ReadCloser: resp.Body, logger: logger}
+	}
+}
+
+// wireLoggedBody is a body LogWireReads logs the reads of.
+type wireLoggedBody struct {
+	io.ReadCloser
+	logger Logger
+}
+
+func (b wireLoggedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.logger.Debugf("WIRE BACKEND RESPONSE BODY:\n%s", p[:n])
+	}
+	return n, err
+}
+
 // handleNonStreamingResponse handles non-streaming responses
 func handleNonStreamingResponse(cfg RequestOptions, resp *http.Response, provider string, logger Logger, notifier Notifier, opts ResponseParseOptions) (Response, error) {
 	// Read response body with size limit from constants
 	data, err := limitio.ReadLimitedWithKind(resp.Body, constants.DefaultMaxResponseBodySize, "API response body")
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to read response body: %w", err)
-	}
-	if logger != nil && logger.IsDebugEnabled() {
-		logger.Debugf("WIRE BACKEND RESPONSE BODY:\n%s", string(data))
 	}
 
 	// Log response

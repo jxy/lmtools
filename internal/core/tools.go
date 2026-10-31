@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
-	"lmtools/internal/retry"
 	"net/http"
 	"strings"
 )
@@ -159,10 +158,12 @@ type ToolChoice struct {
 
 // ToolExecutionConfig contains configuration for tool execution
 type ToolExecutionConfig struct {
-	Store        SessionStore            // Session storage abstraction
-	RetryClient  *retry.Client           // The retry client to use for requests
-	LogRequestFn func(body []byte) error // Optional function to log requests
-	ActualModel  string                  // The actual model being used
+	Store SessionStore // Session storage abstraction
+	// Send logs a tool round's request, with body its bytes, and sends it,
+	// as the turn's first request was sent. Without it the request is sent
+	// once through a plain HTTP client.
+	Send        func(ctx context.Context, req *http.Request, body []byte) (*http.Response, error)
+	ActualModel string // The actual model being used
 	// Journal owns and records each round's calls. It is nil when nothing
 	// is persisted, with -no-session, and then no call is recorded.
 	Journal ToolJournal
@@ -522,17 +523,11 @@ func BuildAndSendFollowupRequest(ctx context.Context, cfg RequestOptions, execCf
 		return nil, fmt.Errorf("failed to build tool result request: %w", err)
 	}
 
-	// Log request if function provided
-	if execCfg.LogRequestFn != nil {
-		_ = execCfg.LogRequestFn(body) // Ignore error
+	if execCfg.Send != nil {
+		return execCfg.Send(ctx, req, body)
 	}
 
-	// Send request using retry client, retried as the turn's first request is
-	if execCfg.RetryClient != nil {
-		return execCfg.RetryClient.Do(ctx, req, "lmc")
-	}
-
-	// Fallback to direct HTTP client if no retry client provided
+	// Fallback to direct HTTP client if no sender provided
 	client := &http.Client{}
 	return client.Do(req)
 }

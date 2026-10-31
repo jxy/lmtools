@@ -590,8 +590,10 @@ func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 		Notifier: notifier,
 		Approver: approver,
 		ExecCfg: core.ToolExecutionConfig{
-			Store:       session.NewStore(sess, log),
-			RetryClient: retryClient,
+			Store: session.NewStore(sess, log),
+			Send: func(ctx context.Context, req *http.Request, _ []byte) (*http.Response, error) {
+				return retryClient.Do(ctx, req, "lmc")
+			},
 			ActualModel: cfg.Model,
 		},
 		Model:           cfg.Model,
