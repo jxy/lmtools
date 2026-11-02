@@ -748,36 +748,25 @@ func TestConcurrentSiblingCreation(t *testing.T) {
 			}()
 		}
 
-		// Wait for all goroutines to finish
-		go func() {
-			wg.Wait()
-			close(results)
-			close(errors)
-		}()
-
-		// Collect results
+		// Collect results once every goroutine has sent its one; both
+		// channels hold them all. A select over the two would stop at the
+		// first closed channel while the other still held results.
+		wg.Wait()
+		close(results)
+		close(errors)
 		var paths []string
+		for path := range results {
+			paths = append(paths, path)
+		}
 		lockErrors := 0
-		for {
-			select {
-			case err, ok := <-errors:
-				if !ok {
-					goto done
-				}
-				// Lock acquisition failures are expected in concurrent scenarios
-				if stderrors.Is(err, ErrLockHeld) || stderrors.Is(err, ErrLockTimeout) {
-					lockErrors++
-				} else {
-					t.Errorf("Unexpected error: %v", err)
-				}
-			case path, ok := <-results:
-				if !ok {
-					goto done
-				}
-				paths = append(paths, path)
+		for err := range errors {
+			// Lock acquisition failures are expected in concurrent scenarios
+			if stderrors.Is(err, ErrLockHeld) || stderrors.Is(err, ErrLockTimeout) {
+				lockErrors++
+			} else {
+				t.Errorf("Unexpected error: %v", err)
 			}
 		}
-	done:
 
 		// Verify all paths are unique
 		pathMap := make(map[string]bool)
