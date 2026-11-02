@@ -44,9 +44,6 @@ type MockLogger struct {
 }
 
 func (m *MockLogger) GetLogDir() string {
-	if m.logDir == "" {
-		return "/tmp"
-	}
 	return m.logDir
 }
 
@@ -54,9 +51,18 @@ func (m *MockLogger) LogJSON(logDir, prefix string, data []byte) error {
 	return nil
 }
 
+// CreateLogFile creates the log in the test's log directory. A test that
+// gives none gets the null device, so it leaves no file behind.
 func (m *MockLogger) CreateLogFile(logDir, prefix string) (*os.File, string, error) {
+	if logDir == "" {
+		f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		return f, os.DevNull, err
+	}
 	f, err := os.CreateTemp(logDir, prefix)
-	return f, f.Name(), err
+	if err != nil {
+		return nil, "", err
+	}
+	return f, f.Name(), nil
 }
 
 func (m *MockLogger) Debugf(format string, args ...interface{}) {

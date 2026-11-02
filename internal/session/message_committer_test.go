@@ -27,11 +27,7 @@ func TestMessageCommitterConflictHandling(t *testing.T) {
 // TestMessageCommitterOrphanCleanup tests cleanup of orphaned files
 func TestMessageCommitterOrphanCleanup(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "message_committer_orphan_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create orphaned files (txt and tools.json without matching json)
 	orphanID := "0000"
@@ -106,11 +102,7 @@ func TestMessageCommitterOrphanCleanup(t *testing.T) {
 // TestMessageCommitterEmptyContent tests handling of messages with no text content
 func TestMessageCommitterEmptyContent(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "message_committer_empty_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Stage a message with empty content
 	msg := Message{
@@ -159,11 +151,7 @@ func TestMessageCommitterEmptyContent(t *testing.T) {
 // TestMessageCommitterToolOnlyMessage tests messages with only tool interactions
 func TestMessageCommitterToolOnlyMessage(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "message_committer_tools_only_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Stage a message with only tool results (no text)
 	msg := Message{
@@ -233,11 +221,7 @@ func TestMessageCommitterToolOnlyMessage(t *testing.T) {
 // TestMessageCommitterRetryLogic tests the retry mechanism with conflicts
 func TestMessageCommitterRetryLogic(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "message_committer_retry_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create a message to commit
 	msg := Message{
@@ -271,11 +255,7 @@ func TestMessageCommitterRetryLogic(t *testing.T) {
 // TestMessageCommitterCommitInvariant tests the .json commit point invariant
 func TestMessageCommitterCommitInvariant(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "message_committer_invariant_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Test that files are committed in the correct order: .txt → .tools.json → .json
 	msg := Message{
@@ -344,11 +324,7 @@ func TestMessageCommitterCommitInvariant(t *testing.T) {
 // TestMessageCommitterConcurrentConflicts tests handling of concurrent writes
 func TestMessageCommitterConcurrentConflicts(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "message_committer_concurrent_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create multiple messages to commit concurrently
 	messages := []Message{

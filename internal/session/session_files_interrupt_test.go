@@ -10,11 +10,7 @@ import (
 // TestCommitFilesWithOrphanedFiles tests that commitFiles handles orphaned .txt/.tools.json files correctly
 func TestCommitFilesWithOrphanedFiles(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "commit-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Test case 1: Orphaned .txt file (no corresponding .json)
 	t.Run("OrphanedTxtFile", func(t *testing.T) {
@@ -187,11 +183,7 @@ func TestCommitFilesWithOrphanedFiles(t *testing.T) {
 
 // TestCommitFilesRollbackInterrupted tests that rollback works correctly on failure
 func TestCommitFilesRollbackInterrupted(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "rollback-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temp files
 	tmp1 := filepath.Join(tmpDir, "file1.tmp")
@@ -225,7 +217,7 @@ func TestCommitFilesRollbackInterrupted(t *testing.T) {
 	}
 
 	// Attempt commit - should fail and rollback
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err == nil {
 		t.Fatal("Expected error due to existing file")
 	}

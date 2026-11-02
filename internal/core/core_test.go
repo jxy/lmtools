@@ -29,11 +29,10 @@ func newCoreTestRequestConfig() TestRequestConfig {
 // TestBuildOpenAIToolResultRequest tests the OpenAI tool result request builder
 func TestBuildOpenAIToolResultRequest(t *testing.T) {
 	// Create a temporary API key file
-	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
+	apiKeyFile, err := os.CreateTemp(t.TempDir(), "test-api-key-*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp API key file: %v", err)
 	}
-	defer os.Remove(apiKeyFile.Name())
 	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
 		t.Fatalf("Failed to write API key: %v", err)
 	}
@@ -182,11 +181,10 @@ func TestBuildOpenAIToolResultRequest(t *testing.T) {
 // TestBuildAnthropicToolResultRequest tests the Anthropic tool result request builder
 func TestBuildAnthropicToolResultRequest(t *testing.T) {
 	// Create a temporary API key file
-	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
+	apiKeyFile, err := os.CreateTemp(t.TempDir(), "test-api-key-*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp API key file: %v", err)
 	}
-	defer os.Remove(apiKeyFile.Name())
 	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
 		t.Fatalf("Failed to write API key: %v", err)
 	}
@@ -358,11 +356,10 @@ func TestBuildToolResultRequestNoCacheError(t *testing.T) {
 // TestBuildGoogleToolResultRequest tests the Google tool result request builder
 func TestBuildGoogleToolResultRequest(t *testing.T) {
 	// Create a temporary API key file
-	apiKeyFile, err := os.CreateTemp("", "test-api-key-*.txt")
+	apiKeyFile, err := os.CreateTemp(t.TempDir(), "test-api-key-*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp API key file: %v", err)
 	}
-	defer os.Remove(apiKeyFile.Name())
 
 	// Write test API key
 	if _, err := apiKeyFile.WriteString("test-api-key"); err != nil {
@@ -519,8 +516,7 @@ func TestStreamingFallbackAccumulation(t *testing.T) {
 
 	// Create a temporary log directory
 	logDir := t.TempDir()
-	os.Setenv("LMC_LOG_DIR", logDir)
-	defer os.Unsetenv("LMC_LOG_DIR")
+	t.Setenv("LMC_LOG_DIR", logDir)
 
 	// Create request config with unknown provider
 	cfg := newCoreTestRequestConfig()
@@ -606,11 +602,10 @@ event: ping
 			reader := strings.NewReader(tt.input)
 
 			// Create temporary log file
-			logFile, err := os.CreateTemp("", "test-sse-*.log")
+			logFile, err := os.CreateTemp(t.TempDir(), "test-sse-*.log")
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
-			defer os.Remove(logFile.Name())
 			defer logFile.Close()
 
 			var collected []string
@@ -665,14 +660,16 @@ func (t *testLogger) Error(format string, args ...interface{})  {}
 func (t *testLogger) Debugf(format string, args ...interface{}) {}
 func (t *testLogger) IsDebugEnabled() bool                      { return false }
 func (t *testLogger) GetLogDir() string {
-	if t.logDir == "" {
-		return os.TempDir()
-	}
 	return t.logDir
 }
 
+// CreateLogFile creates the log in the test's log directory. A test that
+// gives none gets the null device, so it leaves no file behind.
 func (t *testLogger) CreateLogFile(dir string, prefix string) (*os.File, string, error) {
-	// Create temp file in the specified directory
+	if dir == "" {
+		f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		return f, os.DevNull, err
+	}
 	pattern := prefix + "_*"
 	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
@@ -681,8 +678,12 @@ func (t *testLogger) CreateLogFile(dir string, prefix string) (*os.File, string,
 	return f, f.Name(), nil
 }
 
+// LogJSON writes data to the test's log directory, and nowhere when the test
+// gives none, as the real logger skips an empty directory.
 func (t *testLogger) LogJSON(dir string, prefix string, data []byte) error {
-	// Create temp file in the specified directory
+	if dir == "" {
+		return nil
+	}
 	pattern := prefix + "_*.json"
 	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
@@ -1022,11 +1023,10 @@ func TestBuildToolResultRequest(t *testing.T) {
 			// Create temporary API key file if needed
 			var apiKeyFile string
 			if tt.provider != "argo" {
-				tmpFile, err := os.CreateTemp("", "test-api-key-*.txt")
+				tmpFile, err := os.CreateTemp(t.TempDir(), "test-api-key-*.txt")
 				if err != nil {
 					t.Fatalf("Failed to create temp API key file: %v", err)
 				}
-				defer os.Remove(tmpFile.Name())
 
 				if _, err := tmpFile.WriteString("test-api-key"); err != nil {
 					t.Fatalf("Failed to write API key: %v", err)

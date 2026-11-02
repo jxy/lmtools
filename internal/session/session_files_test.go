@@ -503,11 +503,7 @@ func TestIsAssistantMessage(t *testing.T) {
 
 // TestMessageStagingClose tests the Close method of MessageStaging
 func TestMessageStagingClose(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "staging_test_*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create staging with some files
 	staging := &MessageStaging{
@@ -555,11 +551,7 @@ func TestMessageStagingClose(t *testing.T) {
 
 // TestCommitFilesRollback tests the rollback functionality of commitFiles
 func TestCommitFilesRollback(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "commit_test_*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temporary files
 	tmp1 := filepath.Join(tmpDir, "tmp1")
@@ -596,7 +588,7 @@ func TestCommitFilesRollback(t *testing.T) {
 	}
 
 	// Attempt commit (should fail and rollback)
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err == nil {
 		t.Error("Expected error due to existing final3")
 		// Check if final3 was overwritten
@@ -900,11 +892,7 @@ func TestMessageCommitterConcurrentConflict(t *testing.T) {
 // TestOrphanCleanup tests that orphaned files are cleaned up during commit
 func TestOrphanCleanup(t *testing.T) {
 	// Create a temporary directory for the test session
-	testDir, err := os.MkdirTemp("", "orphan_test_*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(testDir)
+	testDir := t.TempDir()
 
 	// Create orphaned files (txt and tools.json without matching json)
 	orphanTxt := filepath.Join(testDir, "0001.txt")
@@ -988,11 +976,7 @@ func TestOrphanCleanup(t *testing.T) {
 
 // TestOrphanCleanupWithConflict tests orphan cleanup when there's a real conflict
 func TestOrphanCleanupWithConflict(t *testing.T) {
-	testDir, err := os.MkdirTemp("", "orphan_conflict_test_*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(testDir)
+	testDir := t.TempDir()
 
 	// Create a complete message (txt + json)
 	existingTxt := filepath.Join(testDir, "0001.txt")
@@ -1015,7 +999,7 @@ func TestOrphanCleanupWithConflict(t *testing.T) {
 	}
 
 	// Commit should fail due to real conflict
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err == nil {
 		t.Error("Commit should fail when there's a real conflict")
 	}

@@ -1,5 +1,9 @@
 version: "2"
 linters:
+  enable:
+    # Tests make temporary files with t.TempDir and set variables with
+    # t.Setenv, which undo both when the test ends.
+    - usetesting
   exclusions:
     generated: lax
     presets:

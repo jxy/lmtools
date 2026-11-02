@@ -77,11 +77,12 @@ func getLmcBinary(t *testing.T) string {
 	t.Helper()
 
 	buildOnce.Do(func() {
-		tmpDir, err := os.MkdirTemp("", "lmc-test-*")
+		tmpDir, err := os.MkdirTemp("", "lmc-test-*") //nolint:usetesting // every test shares the binary; TestMain removes it
 		if err != nil {
 			buildErr = err
 			return
 		}
+		sharedTestDirs = append(sharedTestDirs, tmpDir)
 
 		lmcBin := filepath.Join(tmpDir, "lmc.test")
 		cmd := exec.Command("go", "build", "-o", lmcBin, ".")

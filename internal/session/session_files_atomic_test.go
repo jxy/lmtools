@@ -12,11 +12,7 @@ import (
 // TestCommitFilesSuccess tests successful atomic rename of multiple files
 func TestCommitFilesSuccess(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "commit_files_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temporary files
 	tmp1 := filepath.Join(tmpDir, "tmp1.txt")
@@ -45,7 +41,7 @@ func TestCommitFilesSuccess(t *testing.T) {
 		{Tmp: tmp3, Final: final3},
 	}
 
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err != nil {
 		t.Fatalf("commitFiles failed: %v", err)
 	}
@@ -64,11 +60,7 @@ func TestCommitFilesSuccess(t *testing.T) {
 // TestCommitFilesRollbackAtomic tests rollback on failure (partial rename scenario)
 func TestCommitFilesRollbackAtomic(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "commit_files_rollback_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temporary files
 	tmp1 := filepath.Join(tmpDir, "tmp1.txt")
@@ -96,7 +88,7 @@ func TestCommitFilesRollbackAtomic(t *testing.T) {
 		{Tmp: tmp2, Final: final2}, // This will fail due to existing file
 	}
 
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err == nil {
 		t.Fatal("Expected commitFiles to fail due to conflict")
 	}
@@ -118,11 +110,7 @@ func TestCommitFilesRollbackAtomic(t *testing.T) {
 // TestCommitFilesOrphanedFileCleanup tests orphaned file cleanup (.txt/.tools.json without .json)
 func TestCommitFilesOrphanedFileCleanup(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "commit_files_orphan_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create orphaned files (no matching .json)
 	orphanedTxt := filepath.Join(tmpDir, "msg001.txt")
@@ -157,7 +145,7 @@ func TestCommitFilesOrphanedFileCleanup(t *testing.T) {
 		{Tmp: tmpJson, Final: filepath.Join(tmpDir, "msg001.json")}, // Commit point
 	}
 
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err != nil {
 		t.Fatalf("commitFiles failed: %v", err)
 	}
@@ -183,11 +171,7 @@ func TestCommitFilesOrphanedFileCleanup(t *testing.T) {
 // TestCommitFilesEmptyEntries tests handling of empty entries in file list
 func TestCommitFilesEmptyEntries(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "commit_files_empty_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create one valid file
 	tmp1 := filepath.Join(tmpDir, "tmp1.txt")
@@ -202,7 +186,7 @@ func TestCommitFilesEmptyEntries(t *testing.T) {
 		{Tmp: "nonexistent", Final: "shouldskip"},               // Non-existent file - should be skipped
 	}
 
-	_, err = commitFiles(context.Background(), files)
+	_, err := commitFiles(context.Background(), files)
 	if err != nil {
 		t.Fatalf("commitFiles failed: %v", err)
 	}
@@ -216,11 +200,7 @@ func TestCommitFilesEmptyEntries(t *testing.T) {
 // TestTryPlaceMessageFilesSuccess tests successful atomic placement of message files
 func TestTryPlaceMessageFilesSuccess(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "try_place_success_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temporary files
 	tmpTxt := filepath.Join(tmpDir, "tmp.txt")
@@ -289,11 +269,7 @@ func TestTryPlaceMessageFilesSuccess(t *testing.T) {
 // TestTryPlaceMessageFilesNoTools tests placement without tools file
 func TestTryPlaceMessageFilesNoTools(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "try_place_no_tools_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temporary files (no tools)
 	tmpTxt := filepath.Join(tmpDir, "tmp.txt")
@@ -348,11 +324,7 @@ func TestTryPlaceMessageFilesNoTools(t *testing.T) {
 // TestTryPlaceMessageFilesLockTimeout tests lock timeout handling
 func TestTryPlaceMessageFilesLockTimeout(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "try_place_lock_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create temporary files
 	tmpTxt := filepath.Join(tmpDir, "tmp.txt")
