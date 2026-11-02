@@ -18,9 +18,18 @@ type StreamingState struct {
 	// none, such as one that only calls tools, sends no empty text block.
 	TextBlockStarted bool
 	TextBlockClosed  bool
+	// TextIndex is the text block's number.
+	TextIndex int
+	// ThinkingStarted and ThinkingClosed follow the thinking block that
+	// carries a Chat reasoning field, and ThinkingSignature is the
+	// signature it ends with. Reasoning comes before the text and the tool
+	// calls, as Anthropic's thinking does.
+	ThinkingStarted   bool
+	ThinkingClosed    bool
+	ThinkingSignature string
 	// BlockCount is how many content blocks have started. Blocks are
-	// numbered in the order they start, so the text block, when there is
-	// one, is block 0, and the tool blocks follow it.
+	// numbered in the order they start: the thinking block, the text
+	// block, then the tool blocks, each when there is one.
 	BlockCount       int
 	AccumulatedText  string
 	InputTokens      int
@@ -79,6 +88,7 @@ func (h *AnthropicStreamHandler) SendContentBlockStart(index int, blockType stri
 	h.state.noteBlockStarted(index)
 	if blockType == "text" {
 		h.state.TextBlockStarted = true
+		h.state.TextIndex = index
 	}
 	h.mu.Unlock()
 	return h.SendEvent(EventContentBlockStart, NewContentBlockStart(index, blockType))
@@ -87,6 +97,9 @@ func (h *AnthropicStreamHandler) SendContentBlockStart(index int, blockType stri
 // SendTextDelta sends a text delta, opening the text block first if this is
 // the reply's first text.
 func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
+	if err := h.closeThinkingBlock(); err != nil {
+		return err
+	}
 	h.mu.Lock()
 	if h.state.TextBlockClosed {
 		h.mu.Unlock()
@@ -97,18 +110,65 @@ func (h *AnthropicStreamHandler) SendTextDelta(text string) error {
 	start := !h.state.TextBlockStarted
 	if start {
 		h.state.TextBlockStarted = true
-		h.state.noteBlockStarted(0)
+		h.state.TextIndex = h.state.BlockCount
+		h.state.noteBlockStarted(h.state.TextIndex)
 	}
+	index := h.state.TextIndex
 	h.state.TextSent = true
 	h.state.AccumulatedText += text
 	h.mu.Unlock()
 
 	if start {
-		if err := h.SendEvent(EventContentBlockStart, NewContentBlockStart(0, "text")); err != nil {
+		if err := h.SendEvent(EventContentBlockStart, NewContentBlockStart(index, "text")); err != nil {
 			return err
 		}
 	}
-	return h.SendEvent(EventContentBlockDelta, NewTextDelta(0, text))
+	return h.SendEvent(EventContentBlockDelta, NewTextDelta(index, text))
+}
+
+// SendThinkingDelta sends reasoning as thinking, opening the thinking block
+// first if this is the reply's first reasoning; the block ends with
+// signature, as an Anthropic thinking block ends with its own. Reasoning that
+// arrives once the text or a tool call has begun has no block to go in and is
+// dropped, as text that arrives after a tool call is.
+func (h *AnthropicStreamHandler) SendThinkingDelta(thinking, signature string) error {
+	h.mu.Lock()
+	if h.state.ThinkingClosed || (!h.state.ThinkingStarted && h.state.BlockCount > 0) {
+		h.mu.Unlock()
+		logger.From(h.ctx).Debugf("SendThinkingDelta called after the text or a tool call began, ignoring %d chars", len(thinking))
+		return nil
+	}
+	start := !h.state.ThinkingStarted
+	if start {
+		h.state.ThinkingStarted = true
+		h.state.ThinkingSignature = signature
+		h.state.noteBlockStarted(0)
+	}
+	h.mu.Unlock()
+
+	if start {
+		if err := h.SendEvent(EventContentBlockStart, NewContentBlockStart(0, "thinking")); err != nil {
+			return err
+		}
+	}
+	return h.SendEvent(EventContentBlockDelta, NewThinkingDelta(0, thinking))
+}
+
+// closeThinkingBlock ends an open thinking block with its signature.
+func (h *AnthropicStreamHandler) closeThinkingBlock() error {
+	h.mu.Lock()
+	if !h.state.ThinkingStarted || h.state.ThinkingClosed {
+		h.mu.Unlock()
+		return nil
+	}
+	h.state.ThinkingClosed = true
+	signature := h.state.ThinkingSignature
+	h.mu.Unlock()
+
+	if err := h.SendEvent(EventContentBlockDelta, NewSignatureDelta(0, signature)); err != nil {
+		return err
+	}
+	return h.SendContentBlockStop(0)
 }
 
 // SendToolUseStart sends a tool_use block start.
@@ -271,6 +331,9 @@ func (h *AnthropicStreamHandler) Complete(stopReason string) error {
 			return handleStreamError(h.ctx, h, "AnthropicComplete", err)
 		}
 	}
+	if err := h.closeThinkingBlock(); err != nil {
+		return handleStreamError(h.ctx, h, "AnthropicComplete", err)
+	}
 
 	h.mu.Lock()
 	h.state.TextBlockClosed = true
@@ -345,6 +408,9 @@ func (h *AnthropicStreamHandler) SetParsedUsage(inputTokens, outputTokens *int) 
 }
 
 func (h *AnthropicStreamHandler) CloseParsedTextBlockIfNeeded() error {
+	if err := h.closeThinkingBlock(); err != nil {
+		return err
+	}
 	h.mu.Lock()
 	if h.state.TextBlockClosed {
 		h.mu.Unlock()
@@ -363,11 +429,12 @@ func (h *AnthropicStreamHandler) CloseParsedTextBlockIfNeeded() error {
 	h.mu.Lock()
 	h.state.TextBlockClosed = true
 	started := h.state.TextBlockStarted
+	index := h.state.TextIndex
 	h.mu.Unlock()
 	if !started {
 		return nil
 	}
-	return h.SendContentBlockStop(0)
+	return h.SendContentBlockStop(index)
 }
 
 func (h *AnthropicStreamHandler) BeginParsedToolUseBlock(streamIndex *int, toolID, name string) (int, error) {

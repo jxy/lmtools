@@ -51,6 +51,30 @@ func NewTextDelta(index int, text string) ContentBlockDeltaEvent {
 	}
 }
 
+// NewThinkingDelta creates a thinking delta event payload
+func NewThinkingDelta(index int, thinking string) ContentBlockDeltaEvent {
+	return ContentBlockDeltaEvent{
+		Type:  EventContentBlockDelta,
+		Index: index,
+		Delta: DeltaContent{
+			Type:     "thinking_delta",
+			Thinking: thinking,
+		},
+	}
+}
+
+// NewSignatureDelta creates a signature delta event payload
+func NewSignatureDelta(index int, signature string) ContentBlockDeltaEvent {
+	return ContentBlockDeltaEvent{
+		Type:  EventContentBlockDelta,
+		Index: index,
+		Delta: DeltaContent{
+			Type:      "signature_delta",
+			Signature: signature,
+		},
+	}
+}
+
 // NewToolInputDelta creates a tool input delta event payload
 func NewToolInputDelta(index int, partialJSON string) ContentBlockDeltaEvent {
 	pj := partialJSON

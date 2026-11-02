@@ -119,6 +119,13 @@ func (p *OpenAIStreamParser) processChoice(choice core.ParsedOpenAIStreamChoice)
 		return nil
 	}
 
+	if reasoning, ok := core.OpenAIChatReasoning(choice.ReasoningContent, choice.Reasoning); ok {
+		thinking := chatReasoningThinkingBlock(reasoning)
+		if err := p.handler.SendThinkingDelta(thinking.Thinking, thinking.Signature); err != nil {
+			return err
+		}
+	}
+
 	if choice.Content != "" {
 		content := choice.Content
 		matched := false

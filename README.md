@@ -1173,7 +1173,9 @@ With `apiproxy` in front of a cluster:
   `previous_response_id` and `GET /v1/responses/{id}` fail. With
   `-chat-completions`, apiproxy converts `/v1/responses` to chat completions
   and keeps the responses itself, so both work, as does
-  `/v1/responses/input_tokens`; the converted answers carry no reasoning.
+  `/v1/responses/input_tokens`. The converted answers carry Minerva's
+  reasoning as reasoning items, and `/v1/messages` on this setup gives it as
+  thinking blocks.
 - Add `-models-url` for `/v1/models`.
 
 `-log-level DEBUG` logs every request in full, its `Authorization` header
@@ -1303,6 +1305,13 @@ Health check:
 Streaming `/v1/messages` responses emit Anthropic-format SSE. Once the upstream
 streaming request returns HTTP 200, `apiproxy` sends an `event: ping` keepalive
 whenever it has written no downstream SSE event for 15 seconds.
+
+From a Chat Completions backend, a `/v1/messages` answer carries the backend's
+reasoning (`reasoning_content` or `reasoning`) as a thinking block ahead of the
+text. Its signature starts with `lmtools-chat-reasoning:`: sent back in a later
+request, the block returns to the backend in the field it came from, while an
+Anthropic backend would refuse that signature. On a stream, reasoning that
+arrives after the text or a tool call began is dropped.
 
 `apiproxy` sets no absolute timeout on outbound provider requests, but its HTTP
 server applies 15-minute read and write timeouts, which bound a single request.
@@ -1549,7 +1558,13 @@ Response conversion:
 - Anthropic `tool_use` blocks and OpenAI Chat Completions `tool_calls` become
   Responses `function_call` or `custom_tool_call` output items, keeping tool-call
   arguments as JSON strings where possible.
-- Anthropic thinking blocks become Responses `reasoning` output items with summary text.
+- Anthropic thinking blocks, and the reasoning a Chat Completions backend
+  returns in `reasoning_content` or `reasoning`, become Responses `reasoning`
+  output items with summary text, which a stream sends as
+  `response.reasoning_summary_text.delta` events as it arrives. An item made
+  from Chat reasoning carries a marker as its `encrypted_content`, so a client
+  that sends the item back has the reasoning returned to the backend in the
+  field it came in.
 - Usage carries over when the backend reports it.
 - Converted responses store local state by default, so `previous_response_id`,
   response retrieval, input item listing, and conversation endpoints work without

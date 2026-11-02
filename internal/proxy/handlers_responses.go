@@ -117,6 +117,16 @@ func (s *Server) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	_ = s.sendJSONResponse(ctx, w, resp)
 }
 
+// chatReasoningThroughAnthropic prepares a converted Responses request for
+// the Anthropic request it is sent as. An OpenAI backend gets a Chat request
+// converted from that one, and its Chat reasoning crosses as marked thinking.
+func chatReasoningThroughAnthropic(typed TypedRequest, provider string) TypedRequest {
+	if constants.NormalizeProvider(provider) == constants.ProviderOpenAI {
+		typed.Messages = chatReasoningAsThinking(typed.Messages)
+	}
+	return typed
+}
+
 func (s *Server) forwardTypedAsAnthropic(ctx context.Context, typed TypedRequest, provider, mappedModel, originalModel string) (*AnthropicResponse, error) {
 	typed.Stream = false
 	if err := s.validateConvertedOpenAIChatToolSequence(typed, provider, mappedModel); err != nil {
@@ -140,7 +150,7 @@ func (s *Server) forwardTypedAsAnthropic(ctx context.Context, typed TypedRequest
 		return ConvertOpenAIToAnthropicWithToolNameRegistry(&openAIResp, originalModel, responseToolNameRegistryFromCoreTools(typed.Tools)), nil
 	}
 	typed = ensureResponsesAnthropicWireMaxTokens(typed, provider, mappedModel)
-	anthReq, err := TypedToAnthropicRequest(typed, mappedModel)
+	anthReq, err := TypedToAnthropicRequest(chatReasoningThroughAnthropic(typed, provider), mappedModel)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +370,7 @@ func (s *Server) handleConvertedOpenAIResponsesStream(w http.ResponseWriter, r *
 		return
 	}
 	typed = ensureResponsesAnthropicWireMaxTokens(typed, provider, mappedModel)
-	anthReq, err := TypedToAnthropicRequest(typed, mappedModel)
+	anthReq, err := TypedToAnthropicRequest(chatReasoningThroughAnthropic(typed, provider), mappedModel)
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "conversion_error", http.StatusBadRequest)
 		return

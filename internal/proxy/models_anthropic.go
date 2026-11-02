@@ -151,6 +151,10 @@ func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
 		if b.IsError {
 			m["is_error"] = true
 		}
+	case "thinking":
+		// One apiproxy made has both fields, as Anthropic's do.
+		m["thinking"] = b.Thinking
+		m["signature"] = b.Signature
 	default:
 		if b.Text != "" {
 			m["text"] = b.Text

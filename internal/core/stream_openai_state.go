@@ -87,7 +87,7 @@ func (s *OpenAIStreamState) ParseLine(line string) (string, []ToolCall, bool, er
 	for _, choice := range parsed.Choices {
 		state := s.choiceState(choice.Index)
 		blocks := choice.Blocks
-		if reasoning, ok := openAIChatReasoning(choice.ReasoningContent, choice.Reasoning); ok {
+		if reasoning, ok := OpenAIChatReasoning(choice.ReasoningContent, choice.Reasoning); ok {
 			blocks = append([]Block{reasoning}, blocks...)
 		}
 		for _, block := range blocks {

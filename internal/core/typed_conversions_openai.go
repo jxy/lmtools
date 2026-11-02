@@ -137,7 +137,7 @@ func FromOpenAITyped(messages []OpenAIMessage) []TypedMessage {
 
 		default:
 			if msg.Role == "assistant" {
-				if reasoning, ok := openAIChatReasoning(msg.ReasoningContent, msg.Reasoning); ok {
+				if reasoning, ok := OpenAIChatReasoning(msg.ReasoningContent, msg.Reasoning); ok {
 					typed.Blocks = append(typed.Blocks, reasoning)
 				}
 			}

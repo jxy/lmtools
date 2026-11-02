@@ -72,6 +72,11 @@ func ConvertOpenAIToAnthropicWithToolNameRegistry(resp *OpenAIResponse, original
 	// Convert message content
 	content := []AnthropicContentBlock{}
 
+	// Reasoning comes first, as Anthropic's thinking does.
+	if reasoning, ok := core.OpenAIChatReasoning(choice.Message.ReasoningContent, choice.Message.Reasoning); ok {
+		content = append(content, chatReasoningThinkingBlock(reasoning))
+	}
+
 	// Add text content if present
 	if choice.Message.Content != nil {
 		var text string

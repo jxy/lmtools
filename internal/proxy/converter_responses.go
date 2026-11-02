@@ -204,17 +204,23 @@ func responsesInputItemToTypedMessages(ctx context.Context, rawItem interface{},
 		status, _ := item["status"].(string)
 		encryptedContent, _ := item["encrypted_content"].(string)
 		summary := mustMarshalJSON(item["summary"])
+		var block core.Block = core.ReasoningBlock{
+			Provider:         "openai",
+			Type:             "reasoning",
+			ID:               id,
+			Status:           status,
+			Summary:          summary,
+			EncryptedContent: encryptedContent,
+			Raw:              raw,
+		}
+		// An item apiproxy made from Chat reasoning: its summary is the
+		// reasoning.
+		if reasoning, ok := chatReasoningFromMarker(encryptedContent, core.ReasoningTextForDisplay(core.ReasoningBlock{Summary: summary})); ok {
+			block = reasoning
+		}
 		return []core.TypedMessage{{
-			Role: string(core.RoleAssistant),
-			Blocks: []core.Block{core.ReasoningBlock{
-				Provider:         "openai",
-				Type:             "reasoning",
-				ID:               id,
-				Status:           status,
-				Summary:          summary,
-				EncryptedContent: encryptedContent,
-				Raw:              raw,
-			}},
+			Role:   string(core.RoleAssistant),
+			Blocks: []core.Block{block},
 		}}, nil
 	case "compaction":
 		encryptedContent, _ := item["encrypted_content"].(string)
@@ -909,10 +915,11 @@ func ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(resp *Anthrop
 		switch block.Type {
 		case "thinking", "redacted_thinking":
 			output = append(output, OpenAIResponsesOutputItem{
-				ID:      generateUUID("rs_"),
-				Type:    "reasoning",
-				Status:  "completed",
-				Summary: anthropicThinkingToResponsesSummary(block),
+				ID:               generateUUID("rs_"),
+				Type:             "reasoning",
+				Status:           "completed",
+				Summary:          anthropicThinkingToResponsesSummary(block),
+				EncryptedContent: chatReasoningMarker(block),
 			})
 		case "text":
 			if block.Text == "" {

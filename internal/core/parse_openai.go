@@ -119,7 +119,7 @@ func parseOpenAIResponseDetailed(data []byte, isEmbed bool) (Response, error) {
 	}
 
 	var blocks []Block
-	if reasoning, ok := openAIChatReasoning(msg.ReasoningContent, msg.Reasoning); ok {
+	if reasoning, ok := OpenAIChatReasoning(msg.ReasoningContent, msg.Reasoning); ok {
 		blocks = append(blocks, reasoning)
 	}
 	content, err := parseOpenAIChatContent(msg.Content)
@@ -149,10 +149,10 @@ func openAIChatReasoningBlock(text string) ReasoningBlock {
 	return ReasoningBlock{Provider: "openai", Type: openAIChatReasoningType, Text: text}
 }
 
-// openAIChatReasoning reads the two reasoning fields of a Chat message or
+// OpenAIChatReasoning reads the two reasoning fields of a Chat message or
 // delta. A backend that fills both sends the same text twice, so
 // reasoning_content wins.
-func openAIChatReasoning(reasoningContent, reasoning string) (ReasoningBlock, bool) {
+func OpenAIChatReasoning(reasoningContent, reasoning string) (ReasoningBlock, bool) {
 	switch {
 	case reasoningContent != "":
 		return openAIChatReasoningBlock(reasoningContent), true
@@ -163,7 +163,9 @@ func openAIChatReasoning(reasoningContent, reasoning string) (ReasoningBlock, bo
 	}
 }
 
-func isOpenAIChatReasoning(block ReasoningBlock) bool {
+// IsOpenAIChatReasoning reports whether block holds a Chat reasoning field,
+// which a Chat request sends back in the field it came in.
+func IsOpenAIChatReasoning(block ReasoningBlock) bool {
 	return block.Provider == "openai" && (block.Type == openAIChatReasoningType || block.Type == openAIChatReasoningFieldType)
 }
 

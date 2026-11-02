@@ -441,6 +441,11 @@ func warnUnsupportedAnthropicBlocks(ctx context.Context, target string, messages
 					warnDroppedField(ctx, "Anthropic", target, "content[].citations", "")
 				}
 			case "thinking":
+				// Chat reasoning apiproxy gave the client goes back to an
+				// OpenAI backend in its own field.
+				if target == "OpenAI" && chatReasoningMarker(block) != "" {
+					continue
+				}
 				warnDroppedField(ctx, "Anthropic", target, "content[].thinking", "thinking blocks are not part of target request messages")
 			default:
 				warnDroppedField(ctx, "Anthropic", target, "content[]."+block.Type, "unsupported content block type")

@@ -53,6 +53,9 @@ type responsesReasoningItemState struct {
 	Thinking    string
 	Signature   string
 	Data        string
+	// SummaryStarted reports that the item's summary part was announced,
+	// with the first thinking delta.
+	SummaryStarted bool
 }
 
 type anthropicStreamMessageDeltaEvent struct {
@@ -424,6 +427,8 @@ func (w *responsesStreamWriter) StartReasoningBlock(index int, block AnthropicCo
 	})
 }
 
+// WriteReasoningDelta streams thinking as the reasoning item's summary text,
+// in the summary events OpenAI sends, so a client shows it as it arrives.
 func (w *responsesStreamWriter) WriteReasoningDelta(index int, delta DeltaContent) error {
 	state, ok := w.reasoningItems[index]
 	if !ok {
@@ -431,7 +436,27 @@ func (w *responsesStreamWriter) WriteReasoningDelta(index int, delta DeltaConten
 	}
 	switch delta.Type {
 	case "thinking_delta":
+		if delta.Thinking == "" {
+			return nil
+		}
+		if !state.SummaryStarted {
+			state.SummaryStarted = true
+			if err := w.send("response.reasoning_summary_part.added", map[string]interface{}{
+				"item_id":       state.ItemID,
+				"output_index":  state.OutputIndex,
+				"summary_index": 0,
+				"part":          map[string]interface{}{"type": "summary_text", "text": ""},
+			}); err != nil {
+				return err
+			}
+		}
 		state.Thinking += delta.Thinking
+		return w.send("response.reasoning_summary_text.delta", map[string]interface{}{
+			"item_id":       state.ItemID,
+			"output_index":  state.OutputIndex,
+			"summary_index": 0,
+			"delta":         delta.Thinking,
+		})
 	case "signature_delta":
 		state.Signature += delta.Signature
 	}
@@ -443,12 +468,31 @@ func (w *responsesStreamWriter) CloseReasoningBlock(index int, status string) er
 	if !ok {
 		return nil
 	}
+	if state.SummaryStarted {
+		if err := w.send("response.reasoning_summary_text.done", map[string]interface{}{
+			"item_id":       state.ItemID,
+			"output_index":  state.OutputIndex,
+			"summary_index": 0,
+			"text":          state.Thinking,
+		}); err != nil {
+			return err
+		}
+		if err := w.send("response.reasoning_summary_part.done", map[string]interface{}{
+			"item_id":       state.ItemID,
+			"output_index":  state.OutputIndex,
+			"summary_index": 0,
+			"part":          map[string]interface{}{"type": "summary_text", "text": state.Thinking},
+		}); err != nil {
+			return err
+		}
+	}
 	item := w.output[state.OutputIndex]
 	item.Status = status
 	item.Summary = anthropicThinkingToResponsesSummary(AnthropicContentBlock{
 		Type:     state.BlockType,
 		Thinking: state.Thinking,
 	})
+	item.EncryptedContent = chatReasoningMarker(AnthropicContentBlock{Type: state.BlockType, Signature: state.Signature})
 	w.output[state.OutputIndex] = item
 	return w.send("response.output_item.done", map[string]interface{}{
 		"output_index": state.OutputIndex,
@@ -625,29 +669,13 @@ func (w *responsesStreamWriter) orderedReasoningIndexes() []int {
 
 func (s *responsesReasoningItemState) toCoreBlock() core.Block {
 	switch s.BlockType {
-	case "thinking":
-		raw := mustMarshalJSON(map[string]interface{}{
-			"type":      "thinking",
-			"thinking":  s.Thinking,
-			"signature": s.Signature,
-		})
-		return core.ReasoningBlock{
-			Provider:  "anthropic",
-			Type:      "thinking",
-			Text:      s.Thinking,
+	case "thinking", "redacted_thinking":
+		return anthropicReasoningToCore(AnthropicContentBlock{
+			Type:      s.BlockType,
+			Thinking:  s.Thinking,
 			Signature: s.Signature,
-			Raw:       raw,
-		}
-	case "redacted_thinking":
-		raw := mustMarshalJSON(map[string]interface{}{
-			"type": "redacted_thinking",
-			"data": s.Data,
+			Data:      s.Data,
 		})
-		return core.ReasoningBlock{
-			Provider: "anthropic",
-			Type:     "redacted_thinking",
-			Raw:      raw,
-		}
 	default:
 		return nil
 	}
@@ -901,6 +929,9 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 	finishReason := ""
 	seenDone := false
 	toolDeltas := newOpenAIChatToolDeltaBuffer(writer)
+	// Each run of reasoning becomes a reasoning item, which the text or tool
+	// call after it ends.
+	reasoningIndex, reasoningOpen := 0, false
 	scanner := NewSSEScanner(body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -925,6 +956,25 @@ func (s *Server) convertOpenAIChatStreamToResponses(ctx context.Context, body io
 		}
 		writer.SetUsageCounts(parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 		for _, choice := range parsed.Choices {
+			if reasoning, ok := core.OpenAIChatReasoning(choice.ReasoningContent, choice.Reasoning); ok {
+				thinking := chatReasoningThinkingBlock(reasoning)
+				if !reasoningOpen {
+					reasoningIndex++
+					reasoningOpen = true
+					if err := writer.StartReasoningBlock(reasoningIndex, AnthropicContentBlock{Type: thinking.Type, Signature: thinking.Signature}); err != nil {
+						return "", err
+					}
+				}
+				if err := writer.WriteReasoningDelta(reasoningIndex, DeltaContent{Type: "thinking_delta", Thinking: thinking.Thinking}); err != nil {
+					return "", err
+				}
+			}
+			if reasoningOpen && (choice.Content != "" || len(choice.ToolCalls) > 0) {
+				reasoningOpen = false
+				if err := writer.CloseReasoningBlock(reasoningIndex, "completed"); err != nil {
+					return "", err
+				}
+			}
 			if err := writer.WriteTextDelta(choice.Content); err != nil {
 				return "", err
 			}

@@ -590,14 +590,7 @@ func AnthropicBlocksToCoreWithToolNameRegistry(blocks []AnthropicContentBlock, r
 		case "text":
 			coreBlocks = append(coreBlocks, core.TextBlock{Text: block.Text})
 		case "thinking", "redacted_thinking":
-			raw := anthropicReasoningBlockRaw(block)
-			coreBlocks = append(coreBlocks, core.ReasoningBlock{
-				Provider:  "anthropic",
-				Type:      block.Type,
-				Text:      block.Thinking,
-				Signature: block.Signature,
-				Raw:       raw,
-			})
+			coreBlocks = append(coreBlocks, anthropicReasoningToCore(block))
 		case "tool_use":
 			name := block.Name
 			namespace := block.Namespace
@@ -683,6 +676,92 @@ func AnthropicBlocksToCoreWithToolNameRegistry(blocks []AnthropicContentBlock, r
 	}
 
 	return coreBlocks
+}
+
+// chatReasoningSignature starts the marker apiproxy gives Chat Completions
+// reasoning it hands a client as Anthropic thinking or a Responses reasoning
+// item: the signature of the thinking block, or the encrypted_content of the
+// item, the opaque field a client returns. The rest is the core block type,
+// which names the Chat field, so the reasoning goes back to the backend in
+// the field it came in.
+const chatReasoningSignature = "lmtools-chat-reasoning:"
+
+// chatReasoningThinkingBlock carries Chat reasoning to Anthropic clients and
+// through the conversions that read Anthropic thinking.
+func chatReasoningThinkingBlock(reasoning core.ReasoningBlock) AnthropicContentBlock {
+	return AnthropicContentBlock{
+		Type:      "thinking",
+		Thinking:  reasoning.Text,
+		Signature: chatReasoningSignature + reasoning.Type,
+	}
+}
+
+// chatReasoningFromMarker returns the Chat reasoning a marker names, with
+// text as its text.
+func chatReasoningFromMarker(marker, text string) (core.ReasoningBlock, bool) {
+	field, ok := strings.CutPrefix(marker, chatReasoningSignature)
+	reasoning := core.ReasoningBlock{Provider: "openai", Type: field, Text: text}
+	return reasoning, ok && core.IsOpenAIChatReasoning(reasoning)
+}
+
+// chatReasoningMarker returns the marker of a thinking block that holds Chat
+// reasoning, and "" for any other block.
+func chatReasoningMarker(block AnthropicContentBlock) string {
+	if _, ok := chatReasoningFromMarker(block.Signature, ""); ok && block.Type == "thinking" {
+		return block.Signature
+	}
+	return ""
+}
+
+// chatReasoningAsThinking marks the Chat reasoning in messages as thinking,
+// for an Anthropic request that becomes a Chat request again. core writes
+// reasoning from another provider into an Anthropic request as text, which a
+// Chat backend would take for its earlier answer; a marked thinking block
+// comes back out of the conversion as Chat reasoning.
+func chatReasoningAsThinking(messages []core.TypedMessage) []core.TypedMessage {
+	var out []core.TypedMessage
+	for i, msg := range messages {
+		var blocks []core.Block
+		for j, block := range msg.Blocks {
+			reasoning, ok := block.(core.ReasoningBlock)
+			if !ok || !core.IsOpenAIChatReasoning(reasoning) {
+				continue
+			}
+			if blocks == nil {
+				blocks = append([]core.Block(nil), msg.Blocks...)
+			}
+			thinking := chatReasoningThinkingBlock(reasoning)
+			blocks[j] = core.ReasoningBlock{Provider: "anthropic", Type: thinking.Type, Text: thinking.Thinking, Signature: thinking.Signature}
+		}
+		if blocks == nil {
+			continue
+		}
+		if out == nil {
+			out = append([]core.TypedMessage(nil), messages...)
+		}
+		out[i].Blocks = blocks
+	}
+	if out == nil {
+		return messages
+	}
+	return out
+}
+
+// anthropicReasoningToCore reads a thinking or redacted_thinking block, and
+// turns a block chatReasoningThinkingBlock made back into Chat reasoning.
+func anthropicReasoningToCore(block AnthropicContentBlock) core.ReasoningBlock {
+	if block.Type == "thinking" {
+		if reasoning, ok := chatReasoningFromMarker(block.Signature, block.Thinking); ok {
+			return reasoning
+		}
+	}
+	return core.ReasoningBlock{
+		Provider:  "anthropic",
+		Type:      block.Type,
+		Text:      block.Thinking,
+		Signature: block.Signature,
+		Raw:       anthropicReasoningBlockRaw(block),
+	}
 }
 
 func anthropicReasoningBlockRaw(block AnthropicContentBlock) json.RawMessage {

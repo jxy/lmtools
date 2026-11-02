@@ -66,29 +66,46 @@ func normalizeTypedMessagesForOpenAIChat(messages []core.TypedMessage) []core.Ty
 	return out
 }
 
+// omitReasoningOnlyMessagesForOpenAIChat removes the reasoning a Chat request
+// has no field for, and every message that holds nothing but reasoning. Chat
+// reasoning goes back in the field it came in, with the content of its
+// message, or, when a Responses reasoning item left it in a message of its
+// own, with the assistant message that follows.
 func omitReasoningOnlyMessagesForOpenAIChat(messages []core.TypedMessage) []core.TypedMessage {
 	if len(messages) == 0 {
 		return messages
 	}
 	out := make([]core.TypedMessage, 0, len(messages))
+	var carried []core.Block
 	for _, msg := range messages {
 		blocks := make([]core.Block, 0, len(msg.Blocks))
-		removedReasoning := false
+		reasoning := 0
 		for _, block := range msg.Blocks {
-			switch block.(type) {
-			case core.ReasoningBlock, *core.ReasoningBlock:
-				removedReasoning = true
-				continue
+			switch b := block.(type) {
+			case core.ReasoningBlock:
+				reasoning++
+				if core.IsOpenAIChatReasoning(b) {
+					blocks = append(blocks, block)
+				}
+			case *core.ReasoningBlock:
+				reasoning++
 			default:
 				blocks = append(blocks, block)
 			}
 		}
-		if removedReasoning {
-			if len(blocks) == 0 {
-				continue
+		assistant := msg.Role == string(core.RoleAssistant)
+		if reasoning > 0 && reasoning == len(msg.Blocks) {
+			if assistant {
+				carried = append(carried, blocks...)
 			}
+			continue
+		}
+		if assistant && len(carried) > 0 {
+			msg.Blocks = append(carried, blocks...)
+		} else if reasoning > 0 {
 			msg.Blocks = blocks
 		}
+		carried = nil
 		out = append(out, msg)
 	}
 	return out
