@@ -145,6 +145,9 @@ func (p *responsePresenter) HandleResponseComplete(response core.Response) {
 		p.separateDiagnosticsFromAnswer()
 	}
 	p.resetResponseState()
+	if answers, ok := p.answer.(*separatedAnswers); ok {
+		answers.endAnswer()
+	}
 }
 
 // Ordered blocks can preserve buffered text/thinking transitions only if their
@@ -304,4 +307,60 @@ func (p *responsePresenter) finishThinking(incomplete bool) {
 func (p *responsePresenter) Close() {
 	p.finishThinking(!p.thinkingEnded)
 	p.separateDiagnosticsFromAnswer()
+}
+
+// separatedAnswers writes answers to a stdout that is another file than the
+// notes and the tool transcript on stderr, which keep one answer off the next
+// where both share a screen. Here an empty line does, between the responses
+// of a turn and between the turns of a loop, and a loop's turn ends with a
+// newline. This is formatting for a reader: an answer can hold empty lines
+// itself, so it is no record format.
+type separatedAnswers struct {
+	out io.Writer
+	// newlines counts the newlines the output ends with, up to two.
+	newlines int
+	// wrote reports that the current answer wrote, and earlier that an
+	// earlier answer did.
+	wrote, earlier bool
+}
+
+func (a *separatedAnswers) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !a.wrote && a.earlier && a.newlines < 2 {
+		if _, err := io.WriteString(a.out, strings.Repeat("\n", 2-a.newlines)); err != nil {
+			return 0, err
+		}
+		a.newlines = 2
+	}
+	a.wrote = true
+	n, err := a.out.Write(p)
+	for _, b := range p[:n] {
+		if b != '\n' {
+			a.newlines = 0
+		} else if a.newlines < 2 {
+			a.newlines++
+		}
+	}
+	return n, err
+}
+
+// endAnswer ends the current answer, so the next one starts after an empty
+// line. The presenter calls it when a response is complete.
+func (a *separatedAnswers) endAnswer() {
+	if a.wrote {
+		a.wrote = false
+		a.earlier = true
+	}
+}
+
+// endTurn ends a loop's turn: the last answer ends with a newline, when it
+// wrote one without.
+func (a *separatedAnswers) endTurn() {
+	a.endAnswer()
+	if a.earlier && a.newlines == 0 {
+		_, _ = io.WriteString(a.out, "\n")
+		a.newlines = 1
+	}
 }

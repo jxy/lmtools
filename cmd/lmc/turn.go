@@ -29,8 +29,9 @@ type turnEnv struct {
 	stdout io.Writer
 	stderr io.Writer
 	// answersOnScreen reports that answers appear where stderr's notes do,
-	// so a note must be kept off the end of an answer. A loop whose stdout is
-	// not a terminal sends answers elsewhere, and separates them itself.
+	// so a note must be kept off the end of an answer. A single run whose
+	// stdout is another file than its stderr, and a loop whose stdout is not
+	// a terminal, send answers elsewhere and separate them there.
 	answersOnScreen bool
 	// answerLabel identifies provider text on an interactive terminal.
 	answerLabel string
@@ -72,7 +73,25 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 		quoteThinking:   columns != nil,
 		columns:         columns,
 	}
+	if !sameFile(os.Stdout, os.Stderr) {
+		env.stdout = &separatedAnswers{out: os.Stdout}
+		env.answersOnScreen = false
+	}
 	return env
+}
+
+// sameFile reports whether a and b are one file, such as the terminal both
+// write to, or the file or pipe a shell's 2>&1 gives both.
+func sameFile(a, b *os.File) bool {
+	aInfo, err := a.Stat()
+	if err != nil {
+		return false
+	}
+	bInfo, err := b.Stat()
+	if err != nil {
+		return false
+	}
+	return os.SameFile(aInfo, bInfo)
 }
 
 // turnInput is what one turn contributes: the prompt, and whether the turn

@@ -56,15 +56,14 @@ func TestTokenUsageNoteOnPlainChat(t *testing.T) {
 	defer server.Close()
 
 	apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
-	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{
-			"-provider", "openai",
-			"-provider-url", server.URL + "/v1",
-			"-api-key-file", apiKeyFile,
-			"-model", "gpt-5",
-			"-no-session",
-		},
-		"say something")
+	args := []string{
+		"-provider", "openai",
+		"-provider-url", server.URL + "/v1",
+		"-api-key-file", apiKeyFile,
+		"-model", "gpt-5",
+		"-no-session",
+	}
+	stdout, stderr, err := runLmcCommand(t, lmcBin, args, "say something")
 	if err != nil {
 		t.Fatalf("lmc failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
@@ -79,8 +78,19 @@ func TestTokenUsageNoteOnPlainChat(t *testing.T) {
 	if !strings.Contains(stderr, wantNote) {
 		t.Fatalf("stderr missing %q:\n%s", wantNote, stderr)
 	}
-	if got, want := stderr, "\n\n"+wantNote+"\n"; got != want {
+	// stdout is a pipe of its own, so the note needs no empty line to keep
+	// it off the answer.
+	if got, want := stderr, wantNote+"\n"; got != want {
 		t.Fatalf("stderr layout = %q, want %q", got, want)
+	}
+
+	// On one pipe, as 2>&1 gives them, it does.
+	combined, _, err := runLmcCommand(t, lmcBin, args, "say something", WithCombinedOutput())
+	if err != nil {
+		t.Fatalf("lmc failed: %v\noutput:\n%s", err, combined)
+	}
+	if got, want := combined, "plain answer\n\n"+wantNote+"\n"; got != want {
+		t.Fatalf("combined layout = %q, want %q", got, want)
 	}
 }
 
@@ -139,7 +149,7 @@ data: {"type":"message_stop"}`,
 	if !strings.Contains(stderr, wantNote) {
 		t.Fatalf("stderr missing %q:\n%s", wantNote, stderr)
 	}
-	if got, want := stderr, "\n\n"+wantNote+"\n"; got != want {
+	if got, want := stderr, wantNote+"\n"; got != want {
 		t.Fatalf("streaming stderr layout = %q, want %q", got, want)
 	}
 }
@@ -211,8 +221,8 @@ func TestTokenUsageNotePrecedesToolReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lmc failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if stdout != "running the commandfinal answer" {
-		t.Fatalf("stdout = %q, want both assistant messages in response order", stdout)
+	if stdout != "running the command\n\nfinal answer" {
+		t.Fatalf("stdout = %q, want both assistant messages in response order, an empty line apart", stdout)
 	}
 
 	firstNote := strings.Index(stderr, "Tokens: input 120 | output 30 | total 150")

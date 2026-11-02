@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -111,6 +112,35 @@ func sessionDirCount(t *testing.T, sessionsDir string) int {
 		}
 	}
 	return count
+}
+
+// A single run separates its answers on stdout when stdout is another file
+// than stderr. A shell's 2>&1 gives both one file, a copy of one descriptor,
+// where the notes on stderr separate them as on a terminal.
+func TestSameFileTellsOneFileFromTwo(t *testing.T) {
+	_, first, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe() error = %v", err)
+	}
+	defer first.Close()
+	_, second, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe() error = %v", err)
+	}
+	defer second.Close()
+	fd, err := syscall.Dup(int(first.Fd()))
+	if err != nil {
+		t.Fatalf("Dup() error = %v", err)
+	}
+	copied := os.NewFile(uintptr(fd), "copy")
+	defer copied.Close()
+
+	if !sameFile(first, copied) {
+		t.Fatal("sameFile(pipe, its copy) = false, want true")
+	}
+	if sameFile(first, second) {
+		t.Fatal("sameFile(pipe, another pipe) = true, want false")
+	}
 }
 
 func TestRunTurnCommitsAndSavesTheAnswer(t *testing.T) {

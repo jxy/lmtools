@@ -27,6 +27,7 @@ type lmcCommandConfig struct {
 	logDir       string
 	useCustomLog bool
 	lmcDefaults  bool
+	combined     bool
 }
 
 // WithLmcDefaults runs the binary in lmc's own default modes instead of the
@@ -48,6 +49,14 @@ func withEarlierDefaults(args []string) []string {
 		}
 	}
 	return append(pinned, args...)
+}
+
+// WithCombinedOutput gives stdout and stderr one pipe, as a shell's 2>&1
+// does; runLmcCommand returns what it carried as stdout.
+func WithCombinedOutput() LmcCommandOption {
+	return func(c *lmcCommandConfig) {
+		c.combined = true
+	}
 }
 
 func WithLogDir(dir string) LmcCommandOption {
@@ -114,6 +123,9 @@ func runLmcCommand(t *testing.T, lmcBin string, args []string, input string, opt
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
+	if config.combined {
+		cmd.Stderr = &stdoutBuf
+	}
 
 	err = cmd.Run()
 	return stdoutBuf.String(), stderrBuf.String(), err

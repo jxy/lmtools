@@ -159,55 +159,6 @@ func replDiagnostics(stdinTerminal bool) (io.Writer, func()) {
 	return tty, func() { _ = tty.Close() }
 }
 
-// separatedAnswers writes the answers of a loop's turns to a stdout that is
-// not a terminal. An answer that wrote anything ends with a newline, and an
-// empty line separates it from the next answer. This is formatting for a
-// reader: an answer can hold empty lines itself, so it is no record format.
-type separatedAnswers struct {
-	out io.Writer
-	// newlines counts the newlines the output ends with, up to two.
-	newlines int
-	// wrote reports that the current turn wrote, and earlier that an
-	// earlier turn did.
-	wrote, earlier bool
-}
-
-func (a *separatedAnswers) Write(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if !a.wrote && a.earlier && a.newlines < 2 {
-		if _, err := io.WriteString(a.out, strings.Repeat("\n", 2-a.newlines)); err != nil {
-			return 0, err
-		}
-		a.newlines = 2
-	}
-	a.wrote = true
-	n, err := a.out.Write(p)
-	for _, b := range p[:n] {
-		if b != '\n' {
-			a.newlines = 0
-		} else if a.newlines < 2 {
-			a.newlines++
-		}
-	}
-	return n, err
-}
-
-// endTurn ends the current turn's answer with a newline, when it wrote one
-// without.
-func (a *separatedAnswers) endTurn() {
-	if !a.wrote {
-		return
-	}
-	if a.newlines == 0 {
-		_, _ = io.WriteString(a.out, "\n")
-		a.newlines = 1
-	}
-	a.wrote = false
-	a.earlier = true
-}
-
 // replScreen follows what was shown last on a terminal that the answers on
 // stdout and the diagnostic stream share, so a prompt can start below an
 // answer, with an empty line between them, as the presenter keeps a note

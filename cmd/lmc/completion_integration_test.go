@@ -353,8 +353,10 @@ func TestCLIToolFollowupCompletionPersistsWithoutRerunning(t *testing.T) {
 						}
 						assertCompletionError(t, err, stderr, want)
 					}
-					if stdout != "Running marker tool"+text || len(requests()) != 2 {
-						t.Fatalf("stdout=%q, inferences=%d, want intermediate text followed by final bytes", stdout, len(requests()))
+					// stdout is a pipe of its own, so an empty line separates
+					// the two responses' answers.
+					if stdout != "Running marker tool\n\n"+text || len(requests()) != 2 {
+						t.Fatalf("stdout=%q, inferences=%d, want intermediate text, an empty line, and the final bytes", stdout, len(requests()))
 					}
 					sess, messages := completionSession(t, dir)
 					results := 0

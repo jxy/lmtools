@@ -227,6 +227,29 @@ func TestResponsePresenterSeparatesDiagnosticsWithoutChangingAnswer(t *testing.T
 	}
 }
 
+// On a stdout of its own, an empty line keeps the answer of each response off
+// the next, as the tool transcript between them does on a shared screen. A
+// response without text adds nothing.
+func TestResponsePresenterSeparatesTheAnswersOfATurn(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newResponsePresenter(&separatedAnswers{out: &stdout}, &stderr, false)
+	presenter.separate = false
+	calls := []core.ToolCall{{ID: "call_1"}}
+	presenter.HandleStreamEvent(core.ResponseStreamEvent{Type: core.ResponseStreamTextDelta, Text: "Running the tool."})
+	presenter.HandleResponseComplete(core.Response{Streamed: true, ToolCalls: calls})
+	presenter.HandleResponseComplete(core.Response{ToolCalls: calls})
+	presenter.HandleResponseComplete(core.Response{Text: "Line one\n", ToolCalls: calls})
+	presenter.HandleResponseComplete(core.Response{Text: "Done."})
+	presenter.Close()
+
+	if got, want := stdout.String(), "Running the tool.\n\nLine one\n\nDone."; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want nothing, since the answers are not there", got)
+	}
+}
+
 func TestResponsePresenterAndToolUIProduceCompactCombinedTranscript(t *testing.T) {
 	var transcript bytes.Buffer
 	notifier := cliui.NewNotifierWithWriter(&transcript)

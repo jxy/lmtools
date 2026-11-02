@@ -261,10 +261,11 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
   turn failed. Interactive sessions can recover from a failed turn and exit
   normally.
 - With stdout a terminal, it carries the answers alone, and the prompt starts
-  below an answer after an empty line. With stdout redirected, each answer
-  ends with a newline and an empty line separates it from the next. This is
-  formatting for a reader, not a record format, since an answer can hold
-  empty lines itself; the session holds both sides, and `-show` prints them.
+  below an answer after an empty line. With stdout redirected, each turn's
+  answer ends with a newline and an empty line separates each answer from
+  the next, the answers of a turn's tool rounds included. This is formatting
+  for a reader, not a record format, since an answer can hold empty lines
+  itself; the session holds both sides, and `-show` prints them.
 - The first turn that saves anything settles where the conversation goes:
   a new session, or the one `-resume` or `-branch` names. A turn that fails
   before saving anything leaves that choice for the next turn. `-branch` on
@@ -634,10 +635,12 @@ usually safer.
 
 Assistant text stays on stdout. Tool review, approval prompts, execution
 results, warnings, and errors go to stderr, so redirecting stdout captures only
-the assistant response. Tool commands are displayed as their exact JSON argv
-arrays, and each result quotes its output a line at a time. Results appear in
-request order as calls finish. In the REPL on a terminal a round looks like
-this:
+the assistant response. When stdout and stderr go to different places, an
+empty line on stdout separates the text of one response from the next, which
+the tool transcript does on a shared terminal. Tool commands are displayed as
+their exact JSON argv arrays, and each result quotes its output a line at a
+time. Results appear in request order as calls finish. In the REPL on a
+terminal a round looks like this:
 
 ```text
 Tokens (response 1): input 4472 | output 403 (reasoning 152) | 4.4s
