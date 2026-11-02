@@ -120,7 +120,7 @@ func TestTerminalEditorKeepsQueuedInputOutOfApproval(t *testing.T) {
 	if _, err := owner.enableEditing(pty.Slave, &replHistory{}); err != nil {
 		t.Fatal(err)
 	}
-	typeKeys(t, pty, "yes\n")
+	typeQueued(t, pty, "yes\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	shown := make(chan bool, 1)

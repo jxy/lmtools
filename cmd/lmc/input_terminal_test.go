@@ -56,6 +56,30 @@ func typeKeys(t *testing.T, pty *ptytest.PTY, keys string) {
 	}
 }
 
+// typeQueued types keys and waits until the terminal holds them, for a test
+// whose code counts the input waiting, as a question does to report what it
+// discards. Linux hands what the master writes to the slave on a work queue,
+// so the keys can arrive after Type returns, and with echo off no screen
+// output says when they have.
+func typeQueued(t *testing.T, pty *ptytest.PTY, keys string) {
+	t.Helper()
+	typeKeys(t, pty, keys)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		held, err := pendingInput(int(pty.Slave.Fd()))
+		if err != nil {
+			t.Fatalf("count the input %s holds: %v", pty.Name, err)
+		}
+		if held >= len(keys) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s holds %d of the %d bytes typed", pty.Name, held, len(keys))
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // questionNotifier records what an approver shows, and tells the test each
 // time a question appears.
 type questionNotifier struct {
