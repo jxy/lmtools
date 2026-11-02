@@ -116,6 +116,12 @@ func (b *AnthropicContentBlock) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON provides custom JSON encoding to match Anthropic's event schema.
 func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
+	if len(b.Raw) > 0 && (b.Type == "thinking" || b.Type == "redacted_thinking") {
+		// A thinking block goes on as the provider sent it, empty fields
+		// included: a content_block_start carries "thinking":"", and a
+		// client appends each thinking_delta to that field.
+		return b.Raw, nil
+	}
 	m := map[string]interface{}{
 		"type": b.Type,
 	}

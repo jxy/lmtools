@@ -43,9 +43,11 @@ func TestParseAnthropicStreamPreservesThinkingDeltas(t *testing.T) {
 
 	out := recorder.Body.String()
 	for _, want := range []string{
+		// The empty fields stay: the Anthropic SDK appends each delta to
+		// content_block.thinking and would otherwise start from undefined.
+		`"content_block":{"type":"thinking","thinking":"","signature":""}`,
 		`"type":"thinking_delta","thinking":"I should compute this carefully."`,
 		`"type":"signature_delta","signature":"sig_fixture"`,
-		`"type":"thinking"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stream output missing %q\noutput:\n%s", want, out)
