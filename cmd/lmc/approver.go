@@ -264,8 +264,8 @@ func (a *cliApprover) ask(ctx context.Context, q question) (core.Approval, error
 		}
 		// A question that composes its answer runs commands as they come;
 		// a plain one runs a command here and asks again. A command is
-		// never an answer.
-		if err != nil || got.eof || q.compose || !isREPLCommand(strings.TrimSpace(got.text)) {
+		// never an answer, and pasted text is never a command.
+		if err != nil || got.eof || q.compose || got.keptStart || !isREPLCommand(strings.TrimSpace(got.text)) {
 			break
 		}
 		a.questionCommand(ctx, strings.TrimSpace(got.text), q)

@@ -48,9 +48,12 @@ const replInputHelp = `Input:
 Enter sends a turn. An empty line sends nothing unless a draft or images are pending.
 A long line wraps across rows as you type, and the whole turn stays in the scrollback.
 End a line with \ to continue; use \\ for a literal trailing \.
-Bracketed paste stays one editable draft; Enter sends it. Unbracketed pasted lines
-and piped input remain one turn per line. Text queued during a response appears
-at the next prompt; approval questions discard queued input.
+Bracketed paste stays one editable draft; Enter sends it. Pasted and recalled
+text is sent as it is, its own backslashes included, and a paste is never a
+command or a // escape. Keys typed around it work as usual: a \ typed at the end
+continues. Unbracketed pasted lines and piped input remain one turn per line.
+Text queued during a response appears at the next prompt; approval questions
+discard queued input.
 Left/Right move; Home/End or Ctrl-A/Ctrl-E move to line ends. Backspace/Delete erase.
 Ctrl-W erases a word; Ctrl-U clears input. Up/Down recall prompts and commands,
 including those of earlier REPLs; Ctrl-R searches them.

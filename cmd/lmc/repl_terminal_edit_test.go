@@ -53,7 +53,7 @@ func TestTerminalEditorPasteIsOneDraftAndRestoresMode(t *testing.T) {
 	if err := <-errs; err != nil {
 		t.Fatal(err)
 	}
-	if line.text != "one\n\ntwo\\" || !line.literal {
+	if line.text != "one\n\ntwo\\" || !line.keptStart || line.typedFrom != len(line.text) {
 		t.Fatalf("paste=%#v", line)
 	}
 	if strings.Contains(screen.String(), "\x1b[31m") {
@@ -111,6 +111,40 @@ func TestTerminalEditorEchoesAPasteThePreviewShortened(t *testing.T) {
 	}
 	if strings.Contains(screen.String(), "[the pasted draft above, 3 lines]") {
 		t.Fatal("a shortened preview was referred to as the draft sent")
+	}
+}
+
+// Text typed after a paste the preview showed whole follows the reference to
+// it, so continuing a paste does not print the paste a second time, and the
+// hint under the preview says how to continue.
+func TestTerminalEditorEchoesTextTypedAfterAPaste(t *testing.T) {
+	t.Setenv("TERM", "xterm")
+	owner, pty, screen := terminalOwner(t)
+	if enabled, err := owner.enableEditing(pty.Slave, &replHistory{}); err != nil || !enabled {
+		t.Fatalf("enable=%v,%v", enabled, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := make(chan inputLine, 1)
+	errs := make(chan error, 1)
+	go func() { line, err := owner.readLineUnder(ctx, 1<<20); result <- line; errs <- err }()
+	typeKeys(t, pty, "\x1b[200~one\ntwo\x1b[201~")
+	if err := screen.Expect("Enter sends; arrows edit; Ctrl-C discards. Type \\ and Enter to continue.", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	typeKeys(t, pty, " three\\\n")
+	line := <-result
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if line.text != "one\ntwo three\\" || line.text[line.typedFrom:] != " three\\" {
+		t.Fatalf("line=%+v", line)
+	}
+	if err := screen.Expect(freshPrompt+"[the pasted draft above, 2 lines] three\\", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if rest := screen.Since(); strings.Contains(rest, "one") {
+		t.Fatalf("the echo printed the paste again: %q", rest)
 	}
 }
 

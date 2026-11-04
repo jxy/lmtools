@@ -28,8 +28,14 @@ type inputLine struct {
 	// a marker there, such as a backslash that continues a turn, is still
 	// known.
 	tail string
-	// literal preserves pasted and recalled text without continuation escapes.
-	literal bool
+	// typedFrom is where the typed text that ends the line begins, in text,
+	// or in tail when the line is too long. Before it the editor holds
+	// pasted or recalled text, which is sent as it came, so a backslash
+	// continues the turn only from here. Zero for a line typed throughout.
+	typedFrom int
+	// keptStart reports that the line starts with pasted or recalled text,
+	// which is never a command, /ed, or a // escape.
+	keptStart bool
 	// escapedSlash identifies the leading slash added by history recall.
 	// Pasted text has no such escape to remove on a continued line.
 	escapedSlash bool

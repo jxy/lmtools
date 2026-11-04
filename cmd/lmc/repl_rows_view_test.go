@@ -84,7 +84,7 @@ func TestRowsViewWindowsAndClipsLongLines(t *testing.T) {
 
 func TestRowsViewNamesTheLineOfAMultilineDraft(t *testing.T) {
 	e := newEditBuffer(1000, nil)
-	e.paste("first\nsecond\nthird", false)
+	e.paste(inputLine{text: "first\nsecond\nthird"})
 	rows, _, _ := e.rowsView(freshPrompt, 80, 10)
 	if len(rows) != 1 || rows[0] != "[3/3] "+freshPrompt+"third" {
 		t.Fatalf("rows = %q", rows)
@@ -97,11 +97,11 @@ func TestRowsViewNamesTheLineOfAMultilineDraft(t *testing.T) {
 
 func TestSubmittedTextShowsTheWholeDraft(t *testing.T) {
 	e := newEditBuffer(1000, nil)
-	e.paste("first\nsecond\x1b[31m", false)
-	if got := e.submittedText(freshPrompt, continuationPrompt, 1000); got != freshPrompt+"first\n"+continuationPrompt+`second\u001b[31m`+"\n" {
+	e.paste(inputLine{text: "first\nsecond\x1b[31m"})
+	if got := e.submittedText(freshPrompt, continuationPrompt, 0, 1000); got != freshPrompt+"first\n"+continuationPrompt+`second\u001b[31m`+"\n" {
 		t.Fatalf("echo = %q", got)
 	}
-	if got := e.submittedText(freshPrompt, continuationPrompt, 3); got != freshPrompt+"fir [14 more characters not shown]\n" {
+	if got := e.submittedText(freshPrompt, continuationPrompt, 0, 3); got != freshPrompt+"fir [14 more characters not shown]\n" {
 		t.Fatalf("bounded echo = %q", got)
 	}
 }

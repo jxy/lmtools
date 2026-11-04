@@ -254,7 +254,9 @@ const (
 // A turn is capped at maxTurnBytes, the size a
 // single run accepts: a longer one is discarded once it ends, and the loop
 // prompts again; a line longer than that keeps its tail, so the end of the
-// turn is still found. Pasted text is read line by line like typed text.
+// turn is still found. The rules read only typed text: the editor keeps a
+// bracketed paste or a recall as it came, and without the editor pasted
+// lines are read like typed ones.
 // show displays a prompt, note reports a discarded turn, and consumed hears
 // of every line read, sent or not.
 func readTurn(ctx context.Context, input *inputOwner, show func(prompt string), note func(format string, args ...interface{}), consumed func(), allowEmpty bool) (string, turnRead, error) {
@@ -275,6 +277,9 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 	// between them.
 	size := 0
 	discarding := false
+	// escaped reports that the first line starts with a slash the reader
+	// added, which the command layer removes and the turn does not hold.
+	escaped := false
 	for {
 		prompt := freshPrompt
 		if lines != nil || discarding {
@@ -300,27 +305,20 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 			return "", readEnd, nil
 		}
 		consumed()
-		if terminal && lines != nil && !discarding && !line.tooLong && !line.literal && strings.TrimSuffix(line.text, "\r") == "/ed" {
-			return strings.Join(lines, "\n"), readEdit, nil
+		if terminal && lines != nil && !discarding && !line.tooLong && !line.keptStart && strings.TrimSuffix(line.text, "\r") == "/ed" {
+			turn := strings.Join(lines, "\n")
+			if escaped {
+				turn = turn[1:]
+			}
+			return turn, readEdit, nil
 		}
 
-		// A line too long keeps its tail, where the marker is.
-		raw := line.text
-		if line.tooLong {
-			raw = line.tail
-		}
-		if lines != nil && (!line.literal || line.escapedSlash) && strings.HasPrefix(raw, "//") {
-			raw = raw[1:]
-		}
-		text, continues := continuationMarker(strings.TrimSuffix(raw, "\r"))
-		if line.literal {
-			text, continues = raw, false
-		}
+		text, continues, lineEscaped := turnLine(line, lines == nil)
 		grown := len(text)
 		if lines != nil {
 			grown += size + 1
-		} else if line.escapedSlash && strings.HasPrefix(text, "//") {
-			// Keep history's escape for command interpretation, but do
+		} else if lineEscaped {
+			// Keep the reader's escape for command interpretation, but do
 			// not count that synthetic byte toward the prompt's limit.
 			grown--
 		}
@@ -337,6 +335,9 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 		if !allowEmpty && lines == nil && !continues && strings.TrimSpace(text) == "" {
 			continue
 		}
+		if lines == nil {
+			escaped = lineEscaped
+		}
 		lines = append(lines, text)
 		size = grown
 		if continues {
@@ -352,6 +353,35 @@ func readTextTurn(ctx context.Context, read func(context.Context, int) (inputLin
 		}
 		return turn, readTurnText, nil
 	}
+}
+
+// turnLine applies the input contract to one line of a turn, its first or a
+// continuation. Only typed text follows the rules: text pasted or recalled is
+// sent as it came, so its backslashes never continue the turn and its slashes
+// are never a command or an escape. The command layer reads the first line,
+// so one that starts with a kept slash gets an escape of the reader's own;
+// escaped reports that slash, or recall's, which the turn does not hold.
+func turnLine(line inputLine, first bool) (text string, continues, escaped bool) {
+	// A line too long keeps its tail, where the marker is.
+	raw := line.text
+	if line.tooLong {
+		raw = line.tail
+	}
+	typedFrom := min(line.typedFrom, len(raw))
+	end, continues := continuationMarker(strings.TrimSuffix(raw[typedFrom:], "\r"))
+	text = raw[:typedFrom] + end
+	switch {
+	case line.tooLong:
+		// Only the marker matters in a line that is discarded.
+	case first && line.escapedSlash && strings.HasPrefix(text, "//"):
+		escaped = true
+	case first && line.keptStart && strings.HasPrefix(text, "/"):
+		text, escaped = "/"+text, true
+	case !first && !line.keptStart && strings.HasPrefix(text, "//"):
+		// History's escape reads as typed, so it goes the same way.
+		text = text[1:]
+	}
+	return text, continues, escaped
 }
 
 // continuationMarker reads the end of a line: a single backslash there

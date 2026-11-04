@@ -31,12 +31,101 @@ type editBuffer struct {
 // value so restoring text cannot omit a cursor, size, or interpretation flag.
 type editState struct {
 	cursor, bytes, line, lines int
-	literal, tooLong           bool
+	tooLong                    bool
 	escapedSlash               bool
-	// Once rejected, keep bounded tails on both sides of the insertion point.
+	// kept is the text that came from a paste or a recall. It is sent as it
+	// came: the continuation, escape, and command rules read only typed text.
+	kept keptSpans
+	// Once rejected, keep bounded tails on both sides of the insertion point,
+	// and how many bytes at the end of each were typed.
 	// lastBytes replaces tail without mutating it, so snapshots can share it.
-	tail       []byte
-	tailSuffix string
+	tail                   []byte
+	tailSuffix             string
+	tailTyped, suffixTyped int
+}
+
+// runeSpan is a run of a draft, as rune offsets.
+type runeSpan struct{ start, end int }
+
+// keptSpans are the runs of a draft that came from a paste or a recall, in
+// order, apart, and never empty; the rest was typed. A change returns new
+// spans and leaves the old ones as they were, so snapshots can share them.
+type keptSpans []runeSpan
+
+// appendSpan adds s to the spans built so far, which end at or before its
+// start, joining the last one when they touch.
+func appendSpan(spans keptSpans, s runeSpan) keptSpans {
+	if s.start >= s.end {
+		return spans
+	}
+	if last := len(spans) - 1; last >= 0 && spans[last].end >= s.start {
+		spans[last].end = max(spans[last].end, s.end)
+		return spans
+	}
+	return append(spans, s)
+}
+
+// inserted returns the spans once n runes are inserted at offset at; kept
+// tells whether they came from a paste or a recall. Typed runes inside a
+// span split it.
+func (k keptSpans) inserted(at, n int, kept bool) keptSpans {
+	if n == 0 || (!kept && (len(k) == 0 || k[len(k)-1].end <= at)) {
+		return k
+	}
+	out := make(keptSpans, 0, len(k)+1)
+	for _, s := range k {
+		if s.start < at {
+			out = appendSpan(out, runeSpan{s.start, min(s.end, at)})
+		}
+	}
+	if kept {
+		out = appendSpan(out, runeSpan{at, at + n})
+	}
+	for _, s := range k {
+		if s.end > at {
+			out = appendSpan(out, runeSpan{max(s.start, at) + n, s.end + n})
+		}
+	}
+	return out
+}
+
+// removed returns the spans once the runes from start to end are removed.
+func (k keptSpans) removed(start, end int) keptSpans {
+	if start >= end || len(k) == 0 || k[len(k)-1].end <= start {
+		return k
+	}
+	moved := func(at int) int {
+		if at <= start {
+			return at
+		}
+		return max(start, at-(end-start))
+	}
+	out := make(keptSpans, 0, len(k))
+	for _, s := range k {
+		out = appendSpan(out, runeSpan{moved(s.start), moved(s.end)})
+	}
+	return out
+}
+
+// covers reports whether the rune at offset i is kept.
+func (k keptSpans) covers(i int) bool {
+	for _, s := range k {
+		if i < s.start {
+			return false
+		}
+		if i < s.end {
+			return true
+		}
+	}
+	return false
+}
+
+// typedEnd is the offset where the typed runes that end the draft begin.
+func (k keptSpans) typedEnd() int {
+	if len(k) == 0 {
+		return 0
+	}
+	return k[len(k)-1].end
 }
 
 type editSnapshot struct {
@@ -62,15 +151,22 @@ func newEditBuffer(limit int, history *replHistory) *editBuffer {
 	return e
 }
 
-func (e *editBuffer) replace(text string) {
+// replace makes text the whole draft. Its first typed runes count as typed
+// and the rest as kept, the way a recall comes back.
+func (e *editBuffer) replace(text string, typed int) {
 	text = validEditText(text)
 	e.text = []rune(text)
+	e.kept = nil
+	if typed < len(e.text) {
+		e.kept = keptSpans{{typed, len(e.text)}}
+	}
 	e.cursor, e.bytes = len(e.text), len(text)
 	e.tooLong = e.bytes > e.limit
-	e.tail = nil
-	e.tailSuffix, e.escapedSlash = "", false
+	e.tail, e.tailTyped = nil, 0
+	e.tailSuffix, e.suffixTyped, e.escapedSlash = "", 0, false
 	if e.tooLong {
 		e.tail = lastBytes(nil, []byte(text[max(0, len(text)-lineTailBytes):]))
+		e.tailTyped = e.typedBytes(max(0, len(e.text)-lineTailBytes), len(e.text))
 	}
 	e.lines = 1 + strings.Count(text, "\n")
 	e.line = e.lines
@@ -83,25 +179,27 @@ func validEditText(text string) string {
 	return text
 }
 
+// insert adds typed text at the cursor.
 func (e *editBuffer) insert(text string) {
+	e.put(text, false)
+}
+
+// put adds text at the cursor; kept text came from a paste or a recall.
+func (e *editBuffer) put(text string, kept bool) {
 	text = validEditText(text)
 	if e.tooLong {
-		e.tail = lastBytes(e.tail, []byte(text))
+		e.addTail(text, kept)
 		return
 	}
 	if e.bytes+len(text) > e.limit {
-		e.tooLong = true
-		// Only a bounded suffix is needed, even for a very large draft.
-		e.tail = lastBytes(nil, []byte(string(e.text[max(0, e.cursor-lineTailBytes):e.cursor])))
-		e.tail = lastBytes(e.tail, []byte(text))
-		suffix := string(e.text[max(e.cursor, len(e.text)-lineTailBytes):])
-		e.tailSuffix = string(lastBytes(nil, []byte(suffix)))
+		e.reject(text, kept)
 		return
 	}
 	if e.cursor == 0 && text != "" {
 		e.escapedSlash = false
 	}
 	added := []rune(text)
+	e.kept = e.kept.inserted(e.cursor, len(added), kept)
 	e.text = append(e.text, make([]rune, len(added))...)
 	copy(e.text[e.cursor+len(added):], e.text[e.cursor:len(e.text)-len(added)])
 	copy(e.text[e.cursor:], added)
@@ -110,6 +208,55 @@ func (e *editBuffer) insert(text string) {
 	lines := strings.Count(text, "\n")
 	e.line += lines
 	e.lines += lines
+}
+
+// reject marks the draft too long once text does not fit at the cursor.
+// Only a bounded suffix is needed, even for a very large draft: the bytes on
+// each side of the insertion point, with how many of each end were typed, so
+// the end of the submission is still known.
+func (e *editBuffer) reject(text string, kept bool) {
+	e.tooLong = true
+	from := max(0, e.cursor-lineTailBytes)
+	e.tail = lastBytes(nil, []byte(string(e.text[from:e.cursor])))
+	e.tailTyped = e.typedBytes(from, e.cursor)
+	e.addTail(text, kept)
+	from = max(e.cursor, len(e.text)-lineTailBytes)
+	e.tailSuffix = string(lastBytes(nil, []byte(string(e.text[from:]))))
+	e.suffixTyped = e.typedBytes(from, len(e.text))
+}
+
+// addTail adds text at the insertion point of a rejected draft.
+func (e *editBuffer) addTail(text string, kept bool) {
+	if text == "" {
+		return
+	}
+	e.tail = lastBytes(e.tail, []byte(text))
+	if kept {
+		e.tailTyped = 0
+	} else {
+		e.tailTyped = min(len(e.tail), e.tailTyped+len(text))
+	}
+}
+
+// typedBytes counts the bytes of the typed runes that end text[from:to], up
+// to lineTailBytes, as many as a rejected draft keeps.
+func (e *editBuffer) typedBytes(from, to int) int {
+	n := 0
+	for i := to - 1; i >= from && n < lineTailBytes && !e.kept.covers(i); i-- {
+		n += utf8.RuneLen(e.text[i])
+	}
+	return min(n, lineTailBytes)
+}
+
+// rejectedEnd returns the last bytes of a rejected submission and how many
+// of them were typed.
+func (e *editBuffer) rejectedEnd() (string, int) {
+	tail := string(lastBytes(e.tail, []byte(e.tailSuffix)))
+	typed := e.suffixTyped
+	if typed == len(e.tailSuffix) {
+		typed = min(len(tail), typed+e.tailTyped)
+	}
+	return tail, typed
 }
 
 func (e *editBuffer) remove(start, end int) {
@@ -123,22 +270,30 @@ func (e *editBuffer) remove(start, end int) {
 			e.lines--
 		}
 	}
+	e.kept = e.kept.removed(start, end)
 	e.text = append(e.text[:start], e.text[end:]...)
 	e.cursor = start
-	if len(e.text) == 0 && !e.tooLong {
-		e.literal = false
-	}
 }
 
 // inputLine applies the same rejection contract as the canonical reader: no
 // partial text, but enough tail to discard the complete continued submission.
+// It says where the typed text that ends the line begins and whether the
+// line starts with kept text, for the rules that read only typed text.
 func (e *editBuffer) inputLine(eof bool) inputLine {
-	line := inputLine{eof: eof, literal: e.literal, tooLong: e.tooLong, escapedSlash: e.escapedSlash}
+	line := inputLine{eof: eof, tooLong: e.tooLong, escapedSlash: e.escapedSlash}
 	if e.tooLong {
-		line.tail = string(lastBytes(e.tail, []byte(e.tailSuffix)))
-	} else {
-		line.text = string(e.text)
+		var typed int
+		line.tail, typed = e.rejectedEnd()
+		line.typedFrom = len(line.tail) - typed
+		return line
 	}
+	line.text = string(e.text)
+	line.keptStart = len(e.kept) > 0 && e.kept[0].start == 0
+	typed := 0
+	for _, r := range e.text[e.kept.typedEnd():] {
+		typed += utf8.RuneLen(r)
+	}
+	line.typedFrom = e.bytes - typed
 	return line
 }
 
@@ -171,21 +326,24 @@ func (e *editBuffer) recall(direction int) {
 	}
 }
 
+// replaceHistory recalls an entry, kept as it was saved.
 func (e *editBuffer) replaceHistory(entry replPrompt) {
 	text := entry.text
 	if entry.command {
-		// A command comes back as typed, to run again.
-		e.replace(text)
+		// A command comes back to run again: its slash works as typed.
+		e.replace(text, 1)
 		return
 	}
 	// History holds submitted prompt text after // was unescaped. Restore
 	// the escape when recalling it, so a literal /exit cannot become a command.
+	// The escape and the slash it protects read as typed, so deleting the
+	// escape makes a command, as it would in typed text.
 	escaped := strings.HasPrefix(text, "/")
+	typed := 0
 	if escaped {
-		text = "/" + text
+		text, typed = "/"+text, 2
 	}
-	e.replace(text)
-	e.literal = true
+	e.replace(text, typed)
 	e.escapedSlash = escaped
 }
 
@@ -232,18 +390,20 @@ func (e *editBuffer) pasteLimit() int {
 	return max(0, e.limit-e.bytes)
 }
 
-// Paste follows the active input mode. A search query never edits its candidate.
-func (e *editBuffer) paste(text string, tooLong bool) {
-	if e.searching {
-		e.addQuery(text, tooLong)
-		return
+// paste follows the active input mode. A search query never edits its
+// candidate. Pasted text is kept; a paste too long for the draft rejects it,
+// keeping the paste's tail as the end of the submission.
+func (e *editBuffer) paste(p inputLine) {
+	switch {
+	case e.searching:
+		e.addQuery(p.text, p.tooLong)
+	case !p.tooLong:
+		e.put(p.text, true)
+	case e.tooLong:
+		e.addTail(p.tail, true)
+	default:
+		e.reject(p.tail, true)
 	}
-	if tooLong {
-		e.tooLong = true
-	} else {
-		e.insert(text)
-	}
-	e.literal = true
 }
 
 func (e *editBuffer) key(key string) {
@@ -309,8 +469,7 @@ func (e *editBuffer) key(key string) {
 		}
 		e.remove(start, e.cursor)
 	case "\x15":
-		e.replace("")
-		e.literal = false
+		e.replace("", 0)
 	case "\x0b":
 		e.remove(e.cursor, len(e.text))
 	case "\x12":
@@ -401,17 +560,17 @@ func (e *editBuffer) rowsView(prompt string, columns, maxRows int) (rows []strin
 	return rows, cursorRow, cursorCol
 }
 
-// submittedText renders a whole submitted draft for the scrollback: the
-// prompt and the first line, then each further line after the continuation
-// prompt, control characters escaped. Past limit bytes it says how much is
-// not shown, since a turn may be ten megabytes.
-func (e *editBuffer) submittedText(prompt, continuation string, limit int) string {
+// submittedText renders a submitted draft from rune offset from for the
+// scrollback: the prompt and the first line, then each further line after
+// the continuation prompt, control characters escaped. Past limit bytes it
+// says how much is not shown, since a turn may be ten megabytes.
+func (e *editBuffer) submittedText(prompt, continuation string, from, limit int) string {
 	var b strings.Builder
 	b.WriteString(prompt)
 	written := 0
-	for i, r := range e.text {
+	for i, r := range e.text[from:] {
 		if written >= limit {
-			fmt.Fprintf(&b, " [%d more characters not shown]", len(e.text)-i)
+			fmt.Fprintf(&b, " [%d more characters not shown]", len(e.text)-from-i)
 			break
 		}
 		if r == '\n' {

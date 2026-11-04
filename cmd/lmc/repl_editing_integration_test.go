@@ -108,6 +108,50 @@ func TestTerminalREPLEscapeThenEnterSubmitsRestoredDraft(t *testing.T) {
 	}
 }
 
+// Keys typed after a paste work as usual, and a paste goes out as it came: a
+// typed backslash continues a pasted draft without printing it again, code
+// that opens with a // comment keeps both slashes, and a pasted line that
+// starts with a slash is text.
+func TestTerminalREPLTypedKeysWorkAfterPaste(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	r := startREPLUnderTerminal(t, server.URL(), nil)
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "\x1b[200~func f() {\n\treturn\n}\x1b[201~")
+	r.expect(t, "Type \\ and Enter to continue.")
+	r.typeKeys(t, "\\\n")
+	r.expect(t, freshPrompt+"[the pasted draft above, 3 lines]\\")
+	r.expect(t, continuationPrompt)
+	if len(server.GetRequests()) != 0 {
+		t.Fatal("a backslash typed after a paste sent the draft")
+	}
+	r.typeKeys(t, "What does it do?\n")
+	r.expect(t, "answer 1")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "\x1b[200~// Package x\npackage x\x1b[201~")
+	r.expect(t, "Enter sends;")
+	r.typeKeys(t, "\n")
+	r.expect(t, "answer 2")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "\x1b[200~/home/me/x.c:12: error: oops\x1b[201~\n")
+	r.expect(t, "answer 3")
+	r.expect(t, freshPrompt)
+	r.typeKeys(t, "/exit\n")
+	if code := r.wait(t); code != 0 {
+		t.Fatalf("exit=%d screen=%q", code, r.screen.String())
+	}
+	requests := server.GetRequests()
+	if len(requests) != 3 ||
+		!strings.Contains(requests[0].Body, `"func f() {\n\treturn\n}\nWhat does it do?"`) ||
+		!strings.Contains(requests[1].Body, `"// Package x\npackage x"`) ||
+		!strings.Contains(requests[2].Body, `"/home/me/x.c:12: error: oops"`) {
+		t.Fatalf("pasted turns were changed: %v", requests)
+	}
+	if strings.Contains(r.screen.String(), "Unknown REPL command") {
+		t.Fatal("a pasted line ran as a command")
+	}
+}
+
 func TestTerminalREPLBracketedPasteAndRecall(t *testing.T) {
 	server := mockserver.NewMockServer(numberedAnswers())
 	defer server.Close()

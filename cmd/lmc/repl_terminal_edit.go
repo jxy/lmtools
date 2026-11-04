@@ -266,9 +266,11 @@ func (t *terminalReader) readEditedLine(ctx context.Context, bound int) (line in
 	e := newEditBuffer(bound, t.editor.history)
 	paintedColumns := t.columns()
 	dirty, batch := false, 0
-	// previewed is the draft as a paste preview showed it whole, so an
-	// unchanged draft is not printed twice when it is sent.
+	// previewed is the draft as a paste preview showed it whole, with its
+	// runes and lines, so the part of a draft it showed is not printed twice
+	// when the draft is sent.
 	previewed := ""
+	previewedRunes, previewedLines := 0, 0
 	redraw := func() {
 		columns := t.columns()
 		if !dirty && columns == paintedColumns {
@@ -312,17 +314,17 @@ func (t *terminalReader) readEditedLine(ctx context.Context, bound int) (line in
 				area.toEnd(t.editor.out)
 				return inputLine{eof: true, text: "unfinished paste"}, nil
 			}
-			e.paste(paste.text, paste.tooLong)
+			e.paste(paste)
 			if !e.searching && e.lines > 1 {
 				// The editor shows the line under the cursor; the preview
 				// shows the whole draft once.
 				area.clear(t.editor.out, t.columns())
 				draft := string(e.text)
 				showTextPreview(ui.NewNotifierWithWriter(t.editor.out), "Pasted draft", draft, maxEditorPreviewBytes)
-				_, _ = io.WriteString(t.editor.out, "Enter sends; arrows edit; Ctrl-C discards.\n")
+				_, _ = io.WriteString(t.editor.out, "Enter sends; arrows edit; Ctrl-C discards. Type \\ and Enter to continue.\n")
 				previewed = ""
 				if len(draft) <= maxEditorPreviewBytes {
-					previewed = draft
+					previewed, previewedRunes, previewedLines = draft, len(e.text), e.lines
 				}
 			}
 		case key == "\x04":
@@ -346,12 +348,15 @@ func (t *terminalReader) readEditedLine(ctx context.Context, bound int) (line in
 				redraw()
 				area.toEnd(t.editor.out)
 				_, _ = io.WriteString(t.editor.out, "\n")
-			case previewed != "" && previewed == string(e.text):
+			case previewed != "" && len(e.text) >= previewedRunes && string(e.text[:previewedRunes]) == previewed:
+				// A draft that still starts with what the preview showed
+				// refers to it, followed by what was typed after it.
 				area.clear(t.editor.out, columns)
-				_, _ = fmt.Fprintf(t.editor.out, "%s[the pasted draft above, %s]\n", t.editor.prompt, core.Plural(e.lines, "line"))
+				head := fmt.Sprintf("%s[the pasted draft above, %s]", t.editor.prompt, core.Plural(previewedLines, "line"))
+				_, _ = io.WriteString(t.editor.out, e.submittedText(head, continuationFor(t.editor.prompt), previewedRunes, submittedEchoBytes))
 			default:
 				area.clear(t.editor.out, columns)
-				_, _ = io.WriteString(t.editor.out, e.submittedText(t.editor.prompt, continuationFor(t.editor.prompt), submittedEchoBytes))
+				_, _ = io.WriteString(t.editor.out, e.submittedText(t.editor.prompt, continuationFor(t.editor.prompt), 0, submittedEchoBytes))
 			}
 			return e.inputLine(false), nil
 		default:

@@ -31,6 +31,8 @@ func TestTerminalEditorDiscardsOversizedTurn(t *testing.T) {
 		{"doubled backslash", long + "\\\\\n"},
 		{"UTF-8", strings.Repeat("界", 6) + "\\\nyes\n"},
 		{"literal paste", "\x1b[200~" + long + "\nyes\\\x1b[201~\n"},
+		{"typed backslash after an oversized paste", "\x1b[200~" + long + "\x1b[201~\\\nyes\\\ntail\n"},
+		{"typed backslash before an oversized paste", "part\\\x01\x1b[200~" + long + "\x1b[201~\nyes\n"},
 		{"middle insertion preserves continued suffix", "123456789\\\x01abcdefgh\ntail\n"},
 		{"middle insertion is not a trailing marker", "1234567890\x01ab\\\n"},
 		{"insertion joins doubled backslash", "123456789\\\x1b[Dab\\\n"},
@@ -70,6 +72,7 @@ func TestTerminalEditorOversizedApprovalDeniesWholeSubmission(t *testing.T) {
 		{"cumulative", "123456\\\n123456\\\nyes\n"},
 		{"CRLF", long + "\\\r\nyes\r\n"},
 		{"literal paste", "\x1b[200~" + long + "\\\x1b[201~\n"},
+		{"typed backslash after an oversized paste", "\x1b[200~" + long + "\x1b[201~\\\nno\n"},
 		{"middle insertion preserves continued suffix", "123456789\\\x01abcdefgh\ntail\n"},
 		{"middle insertion is not a trailing marker", "1234567890\x01ab\\\n"},
 		{"insertion joins doubled backslash", "123456789\\\x1b[Dab\\\n"},
@@ -116,7 +119,7 @@ func TestTerminalContinuedInputPreservesLiteralText(t *testing.T) {
 		{"typed escape", "//ed\n", "/ed"},
 		{"recalled escape", "\x1b[A\n", "/exit"},
 		{"paste after recall", "\x1b[A\x1b[200~ suffix\x1b[201~\n", "/exit suffix"},
-		{"paste after typed slashes", "//comment \x1b[200~body\x1b[201~\n", "//comment body"},
+		{"paste after typed slashes", "//comment \x1b[200~body\x1b[201~\n", "/comment body"},
 		{"history restores paste", "\x1b[200~// comment\x1b[201~\x1b[A\x1b[B\n", "// comment"},
 	} {
 		for _, approval := range []bool{false, true} {

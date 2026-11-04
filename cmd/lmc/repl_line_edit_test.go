@@ -2,9 +2,17 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 )
+
+// keptWhole reports whether a draft starts and ends with text that came from
+// a paste or a recall, which the input rules leave as it came.
+func keptWhole(e *editBuffer) bool {
+	line := e.inputLine(false)
+	return line.keptStart && line.typedFrom == len(line.text)
+}
 
 func TestEditBufferCursorAndHistory(t *testing.T) {
 	h := &replHistory{}
@@ -20,7 +28,7 @@ func TestEditBufferCursorAndHistory(t *testing.T) {
 		t.Fatalf("edited Unicode recall: %q", string(e.text))
 	}
 	e.key("\x1b[A")
-	if string(e.text) != "first\nsecond\\" || !e.literal {
+	if string(e.text) != "first\nsecond\\" || !keptWhole(e) {
 		t.Fatalf("multiline recall lost content: %#v", e)
 	}
 	e.key("\x1b[B")
@@ -102,10 +110,10 @@ func TestEditBufferPastedSearch(t *testing.T) {
 	h.add("newer needle\n界\\")
 	h.add("unrelated")
 	e := newEditBuffer(100, h)
-	e.paste("unsent\ndraft\\", false)
+	e.paste(inputLine{text: "unsent\ndraft\\"})
 	e.key("\x1b[D")
 	e.key("\x12")
-	e.paste("needle\n界\\", false)
+	e.paste(inputLine{text: "needle\n界\\"})
 	if string(e.query) != "needle\n界\\" || string(e.text) != "newer needle\n界\\" || !e.searching {
 		t.Fatalf("paste changed the candidate instead of searching: %#v", e)
 	}
@@ -113,12 +121,12 @@ func TestEditBufferPastedSearch(t *testing.T) {
 	if string(e.text) != "older needle\n界\\" {
 		t.Fatalf("repeat pasted search: %q", string(e.text))
 	}
-	e.paste("missing", false)
-	if e.searchAt != -1 || string(e.text) != "unsent\ndraft\\" || e.cursor != 12 || !e.literal {
+	e.paste(inputLine{text: "missing"})
+	if e.searchAt != -1 || string(e.text) != "unsent\ndraft\\" || e.cursor != 12 || !keptWhole(e) {
 		t.Fatalf("no match lost the original draft: %#v", e)
 	}
 	e.key("\x1b")
-	if e.searching || string(e.text) != "unsent\ndraft\\" || e.cursor != 12 || !e.literal {
+	if e.searching || string(e.text) != "unsent\ndraft\\" || e.cursor != 12 || !keptWhole(e) {
 		t.Fatalf("Escape lost the original draft: %#v", e)
 	}
 }
@@ -133,7 +141,7 @@ func TestEditBufferSearchQueryHasItsOwnByteLimit(t *testing.T) {
 		t.Fatal("candidate size limited the query")
 	}
 	e.key("é")
-	e.paste("界", false)
+	e.paste(inputLine{text: "界"})
 	if e.queryBytes != 5 || e.pasteLimit() != 1 || string(e.query) != "é界" {
 		t.Fatalf("query limit does not count UTF-8 bytes: %#v", e)
 	}
@@ -141,7 +149,7 @@ func TestEditBufferSearchQueryHasItsOwnByteLimit(t *testing.T) {
 		text string
 		long bool
 	}{{"é", false}, {"x", true}} {
-		e.paste(paste.text, paste.long)
+		e.paste(inputLine{text: paste.text, tooLong: paste.long})
 		if string(e.query) != "é界" || e.queryBytes != 5 || string(e.text) != "long candidate é界" || !e.queryRejected {
 			t.Fatalf("oversize query was partially applied: %#v", e)
 		}
@@ -153,12 +161,12 @@ func TestEditBufferSearchQueryHasItsOwnByteLimit(t *testing.T) {
 	if string(e.query) != "é" || e.queryBytes != 2 || e.queryRejected {
 		t.Fatal("backspace failed to recover the search")
 	}
-	e.paste("none", false)
+	e.paste(inputLine{text: "none"})
 	if e.searchAt != -1 || string(e.text) != "draft" || e.tooLong {
 		t.Fatal("no match inherited the candidate's overflow state")
 	}
 	e.key("\x1b")
-	if string(e.text) != "draft" || e.cursor != 5 || e.literal || e.tooLong {
+	if string(e.text) != "draft" || e.cursor != 5 || len(e.kept) != 0 || e.tooLong {
 		t.Fatal("search changed the original draft")
 	}
 }
@@ -177,7 +185,7 @@ func TestEditBufferRecallAndSearchPreserveRejectedDraft(t *testing.T) {
 		if string(e.text) != "draft" || e.cursor != 4 || !e.tooLong {
 			t.Fatalf("%q made a rejected prefix submittable: %#v", keys, e)
 		}
-		if line := e.inputLine(false); line.text != "" || line.tail != "ow\\" || !line.tooLong || line.literal {
+		if line := e.inputLine(false); line.text != "" || line.tail != "ow\\" || !line.tooLong || line.typedFrom != 0 {
 			t.Fatalf("%q lost rejected continuation state: %+v", keys, line)
 		}
 	}
@@ -198,7 +206,7 @@ func TestEditBufferRejectedTailAndExplicitRecovery(t *testing.T) {
 	}
 	e.key("\x15")
 	e.insert("yes")
-	if line := e.inputLine(false); line.text != "yes" || line.tooLong || line.tail != "" || line.literal {
+	if line := e.inputLine(false); line.text != "yes" || line.tooLong || line.tail != "" || line.typedFrom != 0 || line.keptStart {
 		t.Fatalf("clear did not recover clean input: %+v", line)
 	}
 }
@@ -247,7 +255,7 @@ func TestEditBufferTracksOnlyHistorySlashEscape(t *testing.T) {
 		t.Fatal("search restoration lost history's escape")
 	}
 	e.moveCursor(0)
-	e.paste("// comment ", false)
+	e.paste(inputLine{text: "// comment "})
 	if e.inputLine(false).escapedSlash {
 		t.Fatal("inserting a new prefix retained a stale history escape")
 	}
@@ -259,7 +267,7 @@ func TestEditBufferTracksOnlyHistorySlashEscape(t *testing.T) {
 	}
 	e.replaceHistory(replPrompt{text: "/exit"})
 	e.key("\x15")
-	e.paste("// comment", false)
+	e.paste(inputLine{text: "// comment"})
 	if e.inputLine(false).escapedSlash {
 		t.Fatal("clear applied a history escape to pasted content")
 	}
@@ -269,7 +277,7 @@ func TestEditBufferMultilineCursorMetadata(t *testing.T) {
 	history := &replHistory{}
 	history.add("/older\nprompt")
 	e := newEditBuffer(1000, history)
-	e.paste("a\n界b\nlast", false)
+	e.paste(inputLine{text: "a\n界b\nlast"})
 	for _, key := range []string{
 		"\x01", "\x1b[D", "\x1b[A", "\x1b[B", "\x1b[D", "\x7f", "X\nY",
 		"\x12", "older", "\x1b", "\x05", "\x1b[3~", "\x17", "\x0b", "\x15", "fresh",
@@ -324,17 +332,18 @@ func TestHistoryRecallEscapesCommandsAndRestoresDraftSemantics(t *testing.T) {
 		t.Fatalf("literal history became a command: %q", string(e.text))
 	}
 	e.key("\x1b[B")
-	if string(e.text) != "unfinished\\" || e.literal {
+	if string(e.text) != "unfinished\\" || len(e.kept) != 0 {
 		t.Fatal("history navigation changed the draft's continuation semantics")
 	}
 	e.key("\x12")
 	e.key("\x1b")
-	if e.literal || string(e.text) != "unfinished\\" {
+	if len(e.kept) != 0 || string(e.text) != "unfinished\\" {
 		t.Fatal("search cancellation changed the draft")
 	}
 	e.key("\x1b[A")
 	e.key("\x15")
-	if e.literal {
+	e.insert("typed\\")
+	if line := e.inputLine(false); len(e.kept) != 0 || line.typedFrom != 0 || line.keptStart {
 		t.Fatal("clearing recalled input must restore typed continuation rules")
 	}
 }
@@ -390,5 +399,207 @@ func TestEditRuneWidthMatchesItsEscape(t *testing.T) {
 func TestPlainPreviewSpellsOutHiddenCharacters(t *testing.T) {
 	if got, want := plainPreview("a\u202eb\nc\x1b\td"), "a\\u202eb\nc\\u001b\td"; got != want {
 		t.Fatalf("plainPreview = %q, want %q", got, want)
+	}
+}
+
+// The kept spans follow every edit exactly. A model that marks each rune
+// typed or kept agrees with them after random typing, pastes, removals, and
+// recalls, and after restoring a snapshot taken many edits earlier, which
+// later edits must not have changed. The line handed over says where the
+// typed text that ends it begins, in bytes, and whether it starts kept.
+func TestEditBufferKeptSpansFollowEdits(t *testing.T) {
+	type model struct {
+		text []rune
+		kept []bool
+	}
+	spliced := func(m model, at int, text string, kept bool) model {
+		added := []rune(text)
+		out := model{text: append(append(append([]rune(nil), m.text[:at]...), added...), m.text[at:]...)}
+		out.kept = append(out.kept, m.kept[:at]...)
+		for range added {
+			out.kept = append(out.kept, kept)
+		}
+		out.kept = append(out.kept, m.kept[at:]...)
+		return out
+	}
+	alphabet := []rune("ab/\\\n界é")
+	rng := rand.New(rand.NewSource(211))
+	word := func() string {
+		r := make([]rune, 1+rng.Intn(4))
+		for i := range r {
+			r[i] = alphabet[rng.Intn(len(alphabet))]
+		}
+		return string(r)
+	}
+	for round := 0; round < 300; round++ {
+		e := newEditBuffer(1<<20, nil)
+		var m, savedModel model
+		var saved editSnapshot
+		for step := 0; step < 50; step++ {
+			at := rng.Intn(len(m.text) + 1)
+			e.moveCursor(at)
+			switch op := rng.Intn(10); {
+			case op < 4:
+				text := word()
+				e.insert(text)
+				m = spliced(m, at, text, false)
+			case op < 7:
+				text := word()
+				e.paste(inputLine{text: text})
+				m = spliced(m, at, text, true)
+			case op < 9:
+				end := at + rng.Intn(len(m.text)-at+1)
+				e.remove(at, end)
+				m = model{
+					text: append(append([]rune(nil), m.text[:at]...), m.text[end:]...),
+					kept: append(append([]bool(nil), m.kept[:at]...), m.kept[end:]...),
+				}
+			default:
+				text := word() + word()
+				typed := rng.Intn(len([]rune(text)) + 1)
+				e.replace(text, typed)
+				m = model{text: []rune(text)}
+				for i := range m.text {
+					m.kept = append(m.kept, i >= typed)
+				}
+			}
+			switch step % 20 {
+			case 5:
+				saved, savedModel = e.snapshot(), m
+			case 15:
+				e.restore(saved)
+				m = savedModel
+			}
+
+			var want keptSpans
+			for i, kept := range m.kept {
+				if kept {
+					want = appendSpan(want, runeSpan{i, i + 1})
+				}
+			}
+			if string(e.text) != string(m.text) || len(e.kept) != len(want) {
+				t.Fatalf("round %d step %d: text=%q kept=%v, want %q %v", round, step, string(e.text), e.kept, string(m.text), want)
+			}
+			for i := range want {
+				if e.kept[i] != want[i] {
+					t.Fatalf("round %d step %d: kept=%v, want %v", round, step, e.kept, want)
+				}
+			}
+			typedEnd := len(m.text)
+			for typedEnd > 0 && !m.kept[typedEnd-1] {
+				typedEnd--
+			}
+			line := e.inputLine(false)
+			if line.typedFrom != len(string(m.text[:typedEnd])) || line.keptStart != (len(m.kept) > 0 && m.kept[0]) {
+				t.Fatalf("round %d step %d: %q handed over typedFrom=%d keptStart=%v", round, step, line.text, line.typedFrom, line.keptStart)
+			}
+		}
+	}
+}
+
+// The line handed over says which of its ends were typed. A backslash typed
+// after a paste or a recall ends typed text; a pasted or recalled one does
+// not. A recalled prompt's escape and the slash it protects read as typed,
+// and so does a recalled command's slash.
+func TestEditBufferLineSaysWhichEndsWereTyped(t *testing.T) {
+	history := &replHistory{}
+	history.add("/exit")
+	history.addCommand("/developer C:\\")
+	for _, tt := range []struct {
+		name           string
+		edit           func(*editBuffer)
+		text, typedEnd string
+		keptStart      bool
+	}{
+		{"typed", func(e *editBuffer) { e.insert("foo\\") }, "foo\\", "foo\\", false},
+		{"typed backslash after a paste", func(e *editBuffer) {
+			e.paste(inputLine{text: "one\ntwo"})
+			e.insert("\\")
+		}, "one\ntwo\\", "\\", true},
+		{"pasted backslash", func(e *editBuffer) { e.paste(inputLine{text: "foo\\"}) }, "foo\\", "", true},
+		{"typed before a paste", func(e *editBuffer) {
+			e.insert("Explain: ")
+			e.paste(inputLine{text: "x\\"})
+		}, "Explain: x\\", "", false},
+		{"paste inside typed text", func(e *editBuffer) {
+			e.insert("foo\\")
+			e.moveCursor(0)
+			e.paste(inputLine{text: "x"})
+		}, "xfoo\\", "foo\\", true},
+		{"typed backslash after a recall", func(e *editBuffer) {
+			e.key("\x1b[A")
+			e.key("\x1b[A")
+			e.insert("\\")
+		}, "//exit\\", "\\", false},
+		{"recalled prompt", func(e *editBuffer) {
+			e.key("\x1b[A")
+			e.key("\x1b[A")
+		}, "//exit", "", false},
+		{"recalled command", func(e *editBuffer) { e.key("\x1b[A") }, "/developer C:\\", "", false},
+		{"removed paste", func(e *editBuffer) {
+			e.insert("a")
+			e.paste(inputLine{text: "XY"})
+			e.insert("b\\")
+			e.remove(1, 3)
+		}, "ab\\", "ab\\", false},
+		{"cleared paste", func(e *editBuffer) {
+			e.paste(inputLine{text: "foo"})
+			e.key("\x15")
+			e.insert("bar\\")
+		}, "bar\\", "bar\\", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEditBuffer(100, history)
+			tt.edit(e)
+			line := e.inputLine(false)
+			if line.text != tt.text || line.text[line.typedFrom:] != tt.typedEnd || line.keptStart != tt.keptStart {
+				t.Fatalf("line %q typed end %q keptStart=%v; want %q, %q, %v", line.text, line.text[line.typedFrom:], line.keptStart, tt.text, tt.typedEnd, tt.keptStart)
+			}
+		})
+	}
+}
+
+// A rejected draft still knows whether its end was typed: an oversized paste
+// keeps its own tail, and a backslash typed after it is the turn's marker,
+// while the text on either side of the insertion keeps where it came from.
+func TestEditBufferRejectedDraftKnowsWhetherItsEndWasTyped(t *testing.T) {
+	for _, tt := range []struct {
+		name           string
+		edit           func(*editBuffer)
+		tail, typedEnd string
+	}{
+		{"oversized paste", func(e *editBuffer) {
+			e.paste(inputLine{tooLong: true, tail: "ab\\"})
+		}, "ab\\", ""},
+		{"typed backslash after an oversized paste", func(e *editBuffer) {
+			e.paste(inputLine{tooLong: true, tail: "ab\\"})
+			e.insert("\\")
+		}, "b\\\\", "\\"},
+		{"oversized paste before typed text", func(e *editBuffer) {
+			e.insert("fo\\")
+			e.moveCursor(0)
+			e.paste(inputLine{tooLong: true, tail: "xyz"})
+		}, "fo\\", "fo\\"},
+		{"typed overflow before pasted text", func(e *editBuffer) {
+			e.paste(inputLine{text: "ab\\"})
+			e.moveCursor(0)
+			e.insert("xyz")
+		}, "ab\\", ""},
+		{"typed overflow after pasted text", func(e *editBuffer) {
+			e.paste(inputLine{text: "abc\\"})
+			e.insert("x\\")
+		}, "\\x\\", "x\\"},
+		{"recalled draft too long", func(e *editBuffer) {
+			e.replaceHistory(replPrompt{text: "abcdef\\"})
+		}, "ef\\", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEditBuffer(5, nil)
+			tt.edit(e)
+			line := e.inputLine(false)
+			if !line.tooLong || line.text != "" || line.tail != tt.tail || line.tail[line.typedFrom:] != tt.typedEnd {
+				t.Fatalf("rejected line %+v, typed end %q; want tail %q typed %q", line, line.tail[min(line.typedFrom, len(line.tail)):], tt.tail, tt.typedEnd)
+			}
+		})
 	}
 }

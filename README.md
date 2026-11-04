@@ -211,12 +211,17 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
   prompt sends nothing unless a draft or images are pending. A turn larger
   than 10 MiB (10,485,760 UTF-8 bytes, including newlines) is discarded with a note.
   In terminals supporting bracketed paste,
-  pasted text is one editable multiline draft; Enter sends it, including literal
-  trailing backslashes. Pasted CRLF and CR line endings become LF before the
+  pasted text is one editable multiline draft, and Enter sends it. Text you
+  paste or recall is sent exactly as it is, and the keys you type work as
+  usual. A `\` you type at the end of a line continues the turn, after a
+  paste or a recall as well, while a backslash that came with the text stays
+  in it: to continue after a paste that ends in `\`, type one more. A paste
+  is never a command, `/ed`, or a `//` escape, even when it starts with `/`;
+  a `/` typed in front of it still makes a command. A recalled command runs
+  again as it ran. Pasted CRLF and CR line endings become LF before the
   size check, so each newline counts as one byte.
   Unbracketed pasted lines and piped input remain one
-  turn per line. Pasting into a continuation preserves leading `//` and treats
-  `/ed` as text.
+  turn per line.
 - On a terminal the prompt is `you> `, and `...> ` on a continuation line,
   with an empty line above each fresh prompt. It goes to stderr, or to the
   terminal when stderr is redirected, with the notes, thinking summaries, tool
