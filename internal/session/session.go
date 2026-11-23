@@ -28,6 +28,9 @@ type Session struct {
 	// write check that the lineage still ends there, and advance it to the
 	// message it wrote. An empty ref pins a lineage with no messages.
 	Head *MessageRef
+	// WindowUsed is the projection used for the current provider request.
+	// The assistant commit records it atomically with the reply.
+	WindowUsed *WindowReceipt
 	// ConflictForks lists the forks writes through this value made because
 	// another writer had moved the head, oldest first.
 	ConflictForks []ConflictFork
@@ -100,7 +103,11 @@ type Message struct {
 	// Revision is the revision the message was committed with, read from
 	// its metadata; empty for a message committed before revisions existed.
 	// Writers ignore it: each commit gives its message a new one.
-	Revision string
+	Revision   string
+	Origin     string
+	Window     *WindowReceipt
+	Pin        *PinChange
+	Incomplete bool
 }
 
 // SaveResult represents the result of a session save operation

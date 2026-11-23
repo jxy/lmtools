@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"lmtools/internal/contextcfg"
 	"lmtools/internal/prompts"
 	"net/http"
 	"os"
@@ -23,38 +24,40 @@ const (
 // RequestOptions is the concrete request configuration consumed by core and
 // session code after CLI flag parsing has applied defaults and validation.
 type RequestOptions struct {
-	User                string
-	Model               string
-	System              string
-	EffectiveSystem     string
-	SystemExplicitlySet bool
-	Developer           string // pending instruction for the first new user turn
-	Env                 string
-	ArgoLegacy          bool
-	Embed               bool
-	StreamChat          bool
-	Provider            string
-	ProviderURL         string
-	APIKeyFile          string
-	Effort              string
-	ReasoningMode       string
-	ReasoningContext    string
-	MaxTokens           int
-	JSONMode            bool
-	JSONSchema          json.RawMessage
-	OpenAIResponses     bool
-	AnthropicBearer     bool
-	ToolEnabled         bool
-	ToolTimeout         time.Duration
-	ToolWhitelist       string
-	ToolBlacklist       string
-	ToolAutoApprove     bool
-	ToolNonInteractive  bool
-	MaxToolRounds       int
-	MaxToolParallel     int
-	ToolMaxOutputBytes  int
-	Resume              string
-	Branch              string
+	Context               contextcfg.Binding
+	User                  string
+	Model                 string
+	System                string
+	EffectiveSystem       string
+	SystemExplicitlySet   bool
+	Developer             string // pending instruction for the first new user turn
+	Env                   string
+	ArgoLegacy            bool
+	Embed                 bool
+	StreamChat            bool
+	Provider              string
+	ProviderURL           string
+	APIKeyFile            string
+	Effort                string
+	ReasoningMode         string
+	ReasoningContext      string
+	MaxTokens             int
+	JSONMode              bool
+	JSONSchema            json.RawMessage
+	OpenAIResponses       bool
+	AnthropicBearer       bool
+	ToolEnabled           bool
+	ImplicitNotebookTools bool // The notebook alone supplied the run's tool selection.
+	ToolTimeout           time.Duration
+	ToolWhitelist         string
+	ToolBlacklist         string
+	ToolAutoApprove       bool
+	ToolNonInteractive    bool
+	MaxToolRounds         int
+	MaxToolParallel       int
+	ToolMaxOutputBytes    int
+	Resume                string
+	Branch                string
 	// Images are the -image attachments for this run's user turn, already
 	// loaded as data URLs. They join the stdin prompt through
 	// UserMessageBlocks.

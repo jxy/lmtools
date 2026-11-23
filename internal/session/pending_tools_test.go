@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
+	"lmtools/internal/mcp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,6 +235,50 @@ func TestResolvePendingToolCallsRequiresToolFlag(t *testing.T) {
 	}
 	if len(pending) != 1 {
 		t.Fatalf("pending tool calls should remain unexecuted, got %d", len(pending))
+	}
+}
+
+func TestImplicitNotebookResumePreservesPendingBatch(t *testing.T) {
+	UseTestSessionDir(t)
+	ctx := context.Background()
+	call := echoCall("cmd", core.NewInvocationID(), "original command")
+	note := core.ToolCall{ID: "list", InvocationID: core.NewInvocationID(), MCPServer: "notebook", MCPTool: "list", Name: "mcp__notebook__list"}
+	calls := []core.ToolCall{note, call}
+	claim, err := NewToolJournal().Claim(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = claim.Finished(note, core.ToolResult{ID: note.ID, Output: "saved notes"})
+	claim.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := pendingCallSession(t, calls)
+	cfg := pendingToolTestConfig()
+	cfg.ImplicitNotebookTools = true
+	cfg.MCP = fakeMCPTools{tools: []mcp.QualifiedTool{{Name: note.Name, Server: "notebook", Tool: mcp.Tool{Name: "list"}}}}
+	cfg.ExcludedTools = []string{"universal_command", "view_image"}
+	resolve := func() (PendingResolution, error) {
+		return ResolvePendingToolCalls(ctx, s, cfg, &MockLogger{}, core.NewTestNotifier(), core.TestToolUI{}, &MockApprover{shouldApprove: true})
+	}
+	out, err := resolve()
+	if err == nil || !strings.Contains(err.Error(), "-tool") || !out.Found || out.Committed {
+		t.Fatalf("implicit resume: %+v, %v", out, err)
+	}
+	pending, err := CheckForPendingToolCalls(ctx, s.Path)
+	if err != nil || len(pending) != 2 || pending[0].InvocationID != note.InvocationID || pending[1].InvocationID != call.InvocationID {
+		t.Fatalf("lost pending invocation: %+v, %v", pending, err)
+	}
+	cfg = pendingToolTestConfig()
+	if out, err = resolve(); err != nil || !out.Committed {
+		t.Fatal(out, err)
+	}
+	results := lastToolResults(t, s)
+	if len(results) != 2 || results[0].Output != "saved notes" || strings.TrimSpace(results[1].Output) != "original command" || results[1].NotRun {
+		t.Fatal(results)
+	}
+	if out, err = resolve(); err != nil || out.Found || out.Committed {
+		t.Fatalf("resolved twice: %+v, %v", out, err)
 	}
 }
 

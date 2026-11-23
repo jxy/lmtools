@@ -64,7 +64,7 @@ func removeMessageFiles(dirPath, msgID string) error {
 			return errors.WrapError("delete "+filepath.Base(path), err)
 		}
 	}
-	return nil
+	return os.RemoveAll(filepath.Join(dirPath, checkpointDirectory, msgID))
 }
 
 // deleteMessageAndDescendants deletes a message and all subsequent messages/branches.

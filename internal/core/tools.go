@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
+	lmerrors "lmtools/internal/errors"
 	"net/http"
 	"strings"
 )
@@ -387,6 +388,53 @@ func claimRoundCalls(journal ToolJournal, calls []ToolCall) (ToolClaim, error) {
 		return nil, fmt.Errorf("claim tool calls: %w", err)
 	}
 	return claim, nil
+}
+
+// PersistUnstartedResponse records a delivered answer and closes its tool batch
+// when setup fails after the user turn committed. Recovery sees known outcomes.
+func PersistUnstartedResponse(ctx context.Context, response Response, cfg ToolExecutionConfig, log Logger, cause error) ToolExecutionResult {
+	result := ToolExecutionResult{FinalText: response.Text, FinalStreamed: response.Streamed, Error: cause}
+	if !ResponseHasContent(response) {
+		return result
+	}
+	var claim ToolClaim
+	if len(response.ToolCalls) > 0 {
+		var err error
+		claim, err = claimRoundCalls(cfg.Journal, response.ToolCalls)
+		if err != nil {
+			result.Error, result.UnsavedAnswer = stdErrors.Join(cause, err), err
+			return result
+		}
+		if claim != nil {
+			defer claim.Release()
+		}
+	}
+	code := lmerrors.ErrCodeExecError
+	if stdErrors.Is(cause, context.Canceled) {
+		code = lmerrors.ErrCodeCancelled
+	} else if stdErrors.Is(cause, context.DeadlineExceeded) {
+		code = lmerrors.ErrCodeTimeout
+	}
+	// Publish the known outcomes before an interruption can expose pending calls.
+	results := make([]ToolResult, len(response.ToolCalls))
+	for i, call := range response.ToolCalls {
+		results[i] = ToolResult{ID: call.ID, NotRun: true, Error: cause.Error(), Code: code}
+		if claim != nil {
+			if err := claim.Finished(call, results[i]); err != nil {
+				result.Error = stdErrors.Join(result.Error, err)
+			}
+		}
+	}
+	if err := persistAssistantRound(ctx, cfg.Store, response, cfg.ActualModel, log); err != nil {
+		result.Error, result.UnsavedAnswer = stdErrors.Join(result.Error, err), err
+		return result
+	}
+	if len(results) > 0 {
+		if err := persistToolResultsRound(ctx, cfg.Store, results, ""); err != nil {
+			result.Error = stdErrors.Join(result.Error, err)
+		}
+	}
+	return result
 }
 
 // requestToolRoundLimitReset asks whether the round counter may start another

@@ -27,6 +27,7 @@ func SaveAssistantResponseWithMetadata(ctx context.Context, sess *Session, text 
 		Role:             core.RoleAssistant,
 		Content:          text,
 		ThoughtSignature: thoughtSignature,
+		Window:           sess.WindowUsed,
 		Timestamp:        time.Now(),
 		Model:            model,
 	}
@@ -43,7 +44,9 @@ func SaveAssistantResponse(ctx context.Context, sess *Session, response core.Res
 	msg := Message{
 		Role:             core.RoleAssistant,
 		Content:          response.Text,
+		Incomplete:       response.IncompleteReason != "" || response.CompletionError != nil,
 		ThoughtSignature: response.ThoughtSignature,
+		Window:           sess.WindowUsed,
 		Timestamp:        time.Now(),
 		Model:            model,
 	}

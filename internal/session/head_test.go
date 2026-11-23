@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	"os"
 	"strconv"
@@ -294,6 +295,16 @@ func TestForkThroughHeadFailsOnAnUnreadableSidecar(t *testing.T) {
 	ctx := setupCoordinatorTestEnv(t)
 	sess := createPlanSession(t, "")
 	appendPlanMessage(t, ctx, sess, core.RoleUser, "run it")
+	binding := contextcfg.Binding{Settings: contextcfg.Settings{Policy: contextcfg.Archive, Window: 8192}}
+	if err := BindContext(ctx, sess, binding); err != nil {
+		t.Fatal(err)
+	}
+	_, refs := snapshotForTest(t, sess)
+	last := len(refs) - 1
+	cp := Checkpoint{Count: len(refs), Prefix: PrefixKeys(refs)[last], Handoff: "source checkpoint"}
+	if _, err := PublishCheckpoint(ctx, refs[last], "abc", cp); err != nil {
+		t.Fatal(err)
+	}
 	callID := appendPlanAssistantToolCall(t, ctx, sess, "call_1", "universal_command")
 	if err := os.WriteFile(buildMessageFilePaths(sess.Path, callID).ToolsPath, []byte("{not json"), 0o600); err != nil {
 		t.Fatalf("corrupt tool interaction: %v", err)
@@ -309,6 +320,9 @@ func TestForkThroughHeadFailsOnAnUnreadableSidecar(t *testing.T) {
 	}
 	if after := sessionDirNames(t); strings.Join(after, ",") != strings.Join(before, ",") {
 		t.Fatalf("sessions after the failed fork = %v, want %v with no partial session left", after, before)
+	}
+	if saved, found, err := CandidateCheckpoint(ctx, refs[last], "abc", cp.Prefix); err != nil || !found || saved.Handoff != cp.Handoff {
+		t.Fatal("failed fork affected the source checkpoint", err)
 	}
 }
 

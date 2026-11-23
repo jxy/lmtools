@@ -346,6 +346,7 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 		"-provider-url", "http://example.test/v1",
 		"-chat-completions",
 		"-resume", session.GetSessionID(sess.Path),
+		"-sessions-dir", session.GetSessionsDir(),
 		"-print-curl",
 	})
 	if err != nil {

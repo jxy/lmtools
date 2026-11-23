@@ -107,7 +107,7 @@ func (h *Host) connectOne(ctx context.Context, cfg ServerConfig) error {
 	}
 
 	h.clients = append(h.clients, client)
-	for _, tool := range filterTools(cfg, tools, h.warnf) {
+	for _, tool := range SelectedTools(cfg, tools, h.warnf) {
 		h.addTool(cfg, tool)
 	}
 	return nil
@@ -145,11 +145,11 @@ func (h *Host) addTool(cfg ServerConfig, tool Tool) {
 	h.tools = append(h.tools, QualifiedTool{Name: name, Server: cfg.Name, Tool: tool, headers: headers})
 }
 
-// filterTools applies the file's includeTools and excludeTools, then the
+// SelectedTools applies the file's includeTools and excludeTools, then the
 // run's -tool-include and -tool-exclude names for the server. A name in any
 // list that the server does not offer is reported, since it is most likely
 // a typo that leaves a tool exposed or hidden by accident.
-func filterTools(cfg ServerConfig, tools []Tool, warnf Logf) []Tool {
+func SelectedTools(cfg ServerConfig, tools []Tool, warnf Logf) []Tool {
 	offered := make(map[string]bool, len(tools))
 	for _, tool := range tools {
 		offered[tool.Name] = true

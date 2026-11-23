@@ -198,9 +198,9 @@ type Response struct {
 	IncompleteReason string
 	// CompletionError explains an invalid stream whose partial content is retained.
 	CompletionError error
-	// Usage carries the token counts the provider reported, nil when it
-	// reported none. Display-only: session stores decompose Response
-	// field-by-field and never persist it.
+	// Usage carries the provider's token counts, when reported. The CLI
+	// displays them and its optional context-sizing probe uses the input
+	// count. Session stores keep the exchange separately from these counts.
 	Usage *Usage
 	// Model is the model the provider says answered, which an alias such as
 	// claudeopus55 resolves to; empty when it said nothing. Display-only.

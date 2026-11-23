@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"lmtools/internal/constants"
+	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
 	"lmtools/internal/prompts"
@@ -16,6 +17,7 @@ import (
 )
 
 type Config struct {
+	Context contextcfg.Binding
 	// Tool execution settings
 	MaxToolRounds    int    `json:"max_tool_rounds,omitempty"`
 	MaxToolParallel  int    `json:"max_tool_parallel,omitempty"`
@@ -59,13 +61,14 @@ type Config struct {
 	Version    bool // print version information and exit
 
 	// Tool support
-	EnableTool         bool          // enable the built-in universal_command and view_image tools
-	ToolTimeout        time.Duration // timeout for tool execution
-	ToolWhitelist      string        // JSON command rules that run without prompting
-	ToolBlacklist      string        // JSON command rules that are always denied
-	ToolAutoApprove    bool          // run unless denied by blacklist or restrictive whitelist
-	ToolNonInteractive bool          // never prompt; deny commands not approved by policy
-	ToolMaxOutputBytes int           // maximum output size per tool execution (default: 1MB)
+	EnableTool            bool // enable the built-in universal_command and view_image tools
+	implicitNotebookTools bool
+	ToolTimeout           time.Duration // timeout for tool execution
+	ToolWhitelist         string        // JSON command rules that run without prompting
+	ToolBlacklist         string        // JSON command rules that are always denied
+	ToolAutoApprove       bool          // run unless denied by blacklist or restrictive whitelist
+	ToolNonInteractive    bool          // never prompt; deny commands not approved by policy
+	ToolMaxOutputBytes    int           // maximum output size per tool execution (default: 1MB)
 
 	// MCP servers
 	MCPConfigPaths []string           // -mcp-config files in command-line order
@@ -145,6 +148,9 @@ func ParseFlags(args []string) (Config, error) {
 	if err := validateMCPFlags(&cfg); err != nil {
 		return cfg, err
 	}
+	if err := configureContext(&cfg, fs); err != nil {
+		return cfg, err
+	}
 
 	if err := validateToolSelection(&cfg); err != nil {
 		return cfg, err
@@ -158,6 +164,7 @@ func ParseFlags(args []string) (Config, error) {
 }
 
 func registerFlags(fs *flag.FlagSet, cfg *Config) {
+	registerContextFlags(fs, cfg)
 	// Model Options
 	fs.StringVar(&cfg.Model, "model", "", fmt.Sprintf("model to use (default varies by provider, %q for embed)",
 		core.DefaultEmbedModel))
@@ -282,40 +289,42 @@ func (c Config) RequestOptions() core.RequestOptions {
 	}
 
 	return core.RequestOptions{
-		User:                c.ArgoUser,
-		Model:               c.Model,
-		System:              c.System,
-		EffectiveSystem:     effectiveSystem,
-		SystemExplicitlySet: c.SystemExplicitlySet,
-		Developer:           c.Developer,
-		Env:                 argoEnv,
-		ArgoLegacy:          c.ArgoLegacy,
-		Embed:               c.Embed,
-		StreamChat:          c.StreamChat,
-		Provider:            c.Provider,
-		ProviderURL:         c.ProviderURL,
-		APIKeyFile:          c.APIKeyFile,
-		Effort:              c.Effort,
-		ReasoningMode:       c.ReasoningMode,
-		ReasoningContext:    c.ReasoningContext,
-		MaxTokens:           c.MaxTokens,
-		JSONMode:            c.JSONMode,
-		JSONSchema:          append(json.RawMessage(nil), c.JSONSchema...),
-		OpenAIResponses:     c.OpenAIResponses,
-		AnthropicBearer:     c.AnthropicBearer,
-		ToolEnabled:         c.EnableTool,
-		ToolTimeout:         c.ToolTimeout,
-		ToolWhitelist:       c.ToolWhitelist,
-		ToolBlacklist:       c.ToolBlacklist,
-		ToolAutoApprove:     c.ToolAutoApprove,
-		ToolNonInteractive:  c.ToolNonInteractive,
-		MaxToolRounds:       c.MaxToolRounds,
-		MaxToolParallel:     c.MaxToolParallel,
-		ToolMaxOutputBytes:  c.ToolMaxOutputBytes,
-		Resume:              c.Resume,
-		Branch:              c.Branch,
-		Images:              append([]core.ImageBlock(nil), c.Images...),
-		ExcludedTools:       append([]string(nil), c.ExcludedTools...),
+		Context:               c.Context,
+		User:                  c.ArgoUser,
+		Model:                 c.Model,
+		System:                c.System,
+		EffectiveSystem:       effectiveSystem,
+		SystemExplicitlySet:   c.SystemExplicitlySet,
+		Developer:             c.Developer,
+		Env:                   argoEnv,
+		ArgoLegacy:            c.ArgoLegacy,
+		Embed:                 c.Embed,
+		StreamChat:            c.StreamChat,
+		Provider:              c.Provider,
+		ProviderURL:           c.ProviderURL,
+		APIKeyFile:            c.APIKeyFile,
+		Effort:                c.Effort,
+		ReasoningMode:         c.ReasoningMode,
+		ReasoningContext:      c.ReasoningContext,
+		MaxTokens:             c.MaxTokens,
+		JSONMode:              c.JSONMode,
+		JSONSchema:            append(json.RawMessage(nil), c.JSONSchema...),
+		OpenAIResponses:       c.OpenAIResponses,
+		AnthropicBearer:       c.AnthropicBearer,
+		ToolEnabled:           c.EnableTool,
+		ImplicitNotebookTools: c.implicitNotebookTools,
+		ToolTimeout:           c.ToolTimeout,
+		ToolWhitelist:         c.ToolWhitelist,
+		ToolBlacklist:         c.ToolBlacklist,
+		ToolAutoApprove:       c.ToolAutoApprove,
+		ToolNonInteractive:    c.ToolNonInteractive,
+		MaxToolRounds:         c.MaxToolRounds,
+		MaxToolParallel:       c.MaxToolParallel,
+		ToolMaxOutputBytes:    c.ToolMaxOutputBytes,
+		Resume:                c.Resume,
+		Branch:                c.Branch,
+		Images:                append([]core.ImageBlock(nil), c.Images...),
+		ExcludedTools:         append([]string(nil), c.ExcludedTools...),
 	}
 }
 

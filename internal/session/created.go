@@ -29,6 +29,7 @@ import (
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -103,8 +104,8 @@ func buildNewSession(sess *Session, system *string, build func(*Session, Message
 
 // takeApartLocked removes a session whose build failed, while its lock is
 // still held. Only the build can have committed messages there, so it removes
-// each of them, metadata first, and then the directory. Another run that
-// found the directory may have staged files in it while it waits for the
+// their files, binding and checkpoints before removing the directory. Another
+// run that found the directory may have staged files in it while it waits for the
 // lock; the directory then stays, holding only those, and the error says so.
 func (m *Manager) takeApartLocked(sessionPath string) error {
 	fail := func(err error) error {
@@ -115,11 +116,13 @@ func (m *Manager) takeApartLocked(sessionPath string) error {
 		return fail(err)
 	}
 	for _, id := range ids {
-		paths := buildMessageFilePaths(sessionPath, id)
-		for _, path := range []string{paths.JSONPath, paths.TxtPath, paths.ToolsPath, paths.BlocksPath} {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return fail(err)
-			}
+		if err := removeMessageFiles(sessionPath, id); err != nil {
+			return fail(err)
+		}
+	}
+	for _, name := range []string{bindingFile, checkpointDirectory} {
+		if err := os.Remove(filepath.Join(sessionPath, name)); err != nil && !os.IsNotExist(err) {
+			return fail(err)
 		}
 	}
 	if err := os.Remove(sessionPath); err != nil {
@@ -129,13 +132,15 @@ func (m *Manager) takeApartLocked(sessionPath string) error {
 }
 
 // forkSource is what a fork copies: the lineage, the system message the
-// fork begins with in place of any in the lineage, nil for none, and
-// whether the fork pins its head. A stored empty prompt is a system message
-// like any other, distinct from none.
+// fork begins with in place of any in the lineage, nil for none, whether
+// the fork pins its head, and the directory whose notebook binding the fork
+// takes, when it is not the source's. A stored empty prompt is a system
+// message like any other, distinct from none.
 type forkSource struct {
-	refs   []lineageMessageRef
-	system *string
-	pin    bool
+	refs    []lineageMessageRef
+	system  *string
+	pin     bool
+	binding string
 }
 
 // buildFork creates a session holding the lineage read returns. It holds
@@ -151,8 +156,21 @@ func buildFork(ctx context.Context, manager *Manager, sourcePath string, read fu
 		if err != nil {
 			return err
 		}
+		bindingPath := sourcePath
+		if source.binding != "" {
+			bindingPath = source.binding
+		}
 		fork, err = manager.createSessionUnderLock(ctx, source.system, func(fork *Session, head MessageRef) error {
-			head, err := copyLineageMessageRefs(ctx, source.refs, fork, head)
+			binding, found, err := readBinding(bindingPath)
+			if err != nil {
+				return err
+			}
+			if found {
+				if err := writeBinding(fork.Path, binding); err != nil {
+					return err
+				}
+			}
+			head, err = copyLineageMessageRefs(ctx, source.refs, fork, head)
 			if err != nil {
 				return err
 			}

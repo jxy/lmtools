@@ -13,7 +13,7 @@ GOARCH ?=
 BIN_DIR ?= ./bin
 BUILD_SUBDIR ?=
 
-.PHONY: all build test test-unit test-integration test-e2e test-all coverage lint lint-fix clean dev check verify-fixtures verify-fixtures-refresh help
+.PHONY: all build test test-unit test-integration test-e2e test-all test-context coverage lint lint-fix clean dev check verify-fixtures verify-fixtures-refresh help
 
 # Default target
 all: lint test build
@@ -27,7 +27,7 @@ build:
 	subdir="$(BUILD_SUBDIR)"; [ -n "$$subdir" ] || subdir="$$goos-$$goarch"; \
 	out="$(BIN_DIR)"; [ "$$subdir" = . ] || out="$$out/$$subdir"; \
 	mkdir -p "$$out"; \
-	for cmd in lmc apiproxy alcfauth; do \
+	for cmd in lmc apiproxy alcfauth notebook; do \
 	    echo "GOOS=$$goos GOARCH=$$goarch go build -o $$out/$$cmd$$exe ./cmd/$$cmd"; \
 	    GOOS=$$goos GOARCH=$$goarch go build -o "$$out/$$cmd$$exe" "./cmd/$$cmd"; \
 	done
@@ -37,7 +37,7 @@ test: test-unit
 
 # Run unit tests
 test-unit:
-	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures ./cmd/alcfauth
+	go test -race ./internal/... ./cmd/lmc ./cmd/apiproxy ./cmd/apifixtures ./cmd/alcfauth ./cmd/notebook
 
 # Run integration tests (requires built binaries)
 test-integration: build
@@ -49,6 +49,11 @@ test-e2e: build
 
 # Run all tests (unit, integration, e2e)
 test-all: test-unit test-integration test-e2e
+
+# Offline notebook and session context regressions.
+test-context:
+	go test -race ./internal/workingcontext ./internal/notebook ./internal/session ./internal/config ./cmd/notebook ./cmd/lmc
+	go test -race -tags=integration ./cmd/lmc -run '^TestContextNotebook'
 
 # Run tests with coverage for all packages
 coverage:
@@ -106,4 +111,5 @@ help:
 	@echo "  make check           - Quick check before commit (lint-fix, test)"
 	@echo "  make verify-fixtures - Verify the API fixture corpus and targeted fixture tests"
 	@echo "  make verify-fixtures-refresh - Refresh fixture captures and fail if diffs need review"
+	@echo "  make test-context    - Run the notebook and session context regression tests"
 	@echo "  make help            - Show this help message"

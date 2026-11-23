@@ -56,6 +56,22 @@ func (l *replLoop) showInfo() {
 	if l.base.MaxTokens > 0 {
 		n.Promptf("Output token limit: %d\n", l.base.MaxTokens)
 	}
+	if settings := l.base.Context; settings.Enabled() {
+		policy := settings.Policy
+		if policy == "" {
+			policy = "full"
+		}
+		n.Promptf("Context policy: %s\n", policy)
+		if settings.Window > 0 {
+			n.Promptf("Context window: %d tokens (estimated input ceiling %d)\n", settings.Window, settings.Ceiling())
+		}
+		if settings.Compacts() {
+			n.Promptf("Compaction trigger: %d tokens; phase hints: %s\n", settings.CutThreshold(), onOff(settings.PhaseHints()))
+		}
+		if settings.Notebook != "" {
+			n.Promptf("Notebook: %s (%s)\n", settings.Notebook, settings.NotebookView())
+		}
+	}
 	sess, err := l.currentSession(ctx)
 	switch {
 	case err != nil:

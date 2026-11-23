@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
+	"slices"
 	"strings"
 )
 
@@ -60,6 +61,12 @@ type PendingResolution struct {
 // The results are committed through the session's pinned head, even when
 // the context was cancelled while calls ran, so no pending state is left.
 func ResolvePendingToolCalls(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, notifier core.Notifier, ui core.ToolUI, approver core.Approver) (PendingResolution, error) {
+	return ResolvePendingWithSetup(ctx, sess, cfg, log, notifier, ui, approver, nil)
+}
+
+// ResolvePendingWithSetup calls setup after the pending calls are known and
+// outside the tree lock. Normal resumes need no extra context snapshot.
+func ResolvePendingWithSetup(ctx context.Context, sess *Session, cfg core.RequestOptions, log core.Logger, notifier core.Notifier, ui core.ToolUI, approver core.Approver, setup func([]core.ToolCall) error) (PendingResolution, error) {
 	var resolution PendingResolution
 	if sess == nil {
 		return resolution, nil
@@ -96,6 +103,21 @@ func ResolvePendingToolCalls(ctx context.Context, sess *Session, cfg core.Reques
 	resolution.Found = true
 	if !cfg.ToolEnabled {
 		return resolution, lmerrors.WrapError("execute pending tools", fmt.Errorf("pending tool calls require -tool to continue"))
+	}
+	if cfg.ImplicitNotebookTools {
+		tools := core.AdvertisedTools(cfg)
+		for _, call := range calls {
+			if !slices.ContainsFunc(tools, func(t core.ToolDefinition) bool {
+				return t.Name == call.Name && (call.MCPServer == "" || call.MCPServer == t.MCPServer) && (call.MCPTool == "" || call.MCPTool == t.MCPTool)
+			}) {
+				return resolution, fmt.Errorf("pending tool call %q requires -tool or its explicit tool selection to continue", call.Name)
+			}
+		}
+	}
+	if setup != nil {
+		if err := setup(calls); err != nil {
+			return resolution, err
+		}
 	}
 
 	// Work on copies. A call saved before invocations had identities is

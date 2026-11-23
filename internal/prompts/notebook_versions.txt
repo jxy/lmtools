@@ -1,0 +1,7 @@
+Prepare a notebook that lets a colleague reconstruct the project's supported versions using only the notes. Inspect the existing notes and the authoritative project artifacts or original records. Identify subjects whose decisions, configuration, or behavior change over time.
+
+For each such subject, record an exact baseline and every accepted change needed to reproduce the supported history. Compact snapshots are also suitable. Give each version an unambiguous identifier or effective interval. Carry forward values that a change leaves applicable, including scoped exceptions, units and identifiers. Label rejected proposals separately. A reader should be able to derive both the current state and an arbitrary earlier supported state.
+
+Store the actual values in the notes alongside their sources. Divide a long history by subject or version range and make the ranges discoverable from the note titles and summaries. Preserve useful existing notes. Check the coverage of the version sequence and reconstruct intermediate states against the original evidence. Record any gap precisely.
+
+Use the notebook tools to publish the verified entries at their current revisions. Report which subjects and versions the notes now cover.

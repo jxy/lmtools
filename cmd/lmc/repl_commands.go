@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	"lmtools/internal/prompts"
 	"strconv"
 	"strings"
 	"unicode"
@@ -124,8 +125,43 @@ func (l *replLoop) interpretInput(text string) replAction {
 	switch command {
 	case "/help":
 		l.showHelp(argument)
+	case "/pin", "/pins", "/unpin":
+		ctx, end := l.commandContext()
+		if command == "/pin" {
+			_, argument = pinField(text)
+		}
+		err := l.pinCommand(ctx, command, argument)
+		end()
+		if err != nil {
+			l.env.notifier.Errorf("%v", err)
+			l.failedTurns++
+		}
 	case "/info":
 		l.showInfo()
+	case "/handoff":
+		writeEnabled := false
+		for _, d := range core.AdvertisedTools(l.base) {
+			if d.MCPServer == "notebook" && d.MCPTool == "put" {
+				writeEnabled = true
+				break
+			}
+		}
+		// A handoff that never starts counts as a failed turn, so a piped
+		// REPL exits nonzero.
+		if !writeEnabled {
+			l.env.notifier.Errorf("/handoff requires the notebook put tool")
+			l.failedTurns++
+			return replAction{}
+		}
+		switch argument {
+		case "":
+			return replAction{text: strings.TrimSpace(prompts.NotebookHandoff), send: true}
+		case "versions":
+			return replAction{text: strings.TrimSpace(prompts.NotebookVersions), send: true}
+		default:
+			l.env.notifier.Errorf("Use /handoff or /handoff versions.")
+			l.failedTurns++
+		}
 	case "/show":
 		l.showConversation(argument)
 	case "/model":
@@ -235,7 +271,18 @@ func (l *replLoop) setModel(model string) {
 		l.env.notifier.Errorf("Use /model NAME; a model name has no spaces.")
 		return
 	}
-	l.base.Model = model
+	next := l.base
+	next.Model = model
+	if next.Context.Notebook != "" {
+		ctx, end := l.commandContext()
+		err := resolveNotebookWindow(ctx, l.env.cfg, &next, l.env.notifier, l.env.logDir)
+		end()
+		if err != nil {
+			l.env.notifier.Errorf("%v", err)
+			return
+		}
+	}
+	l.base = next
 	l.env.notifier.Infof("Model set to %s for the next turns (%s API).", model, replAPIName(l.base))
 	l.warnHiddenThinking()
 }

@@ -6,8 +6,11 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
+	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 // MessageRef identifies a committed message by the directory that owns its
@@ -52,21 +55,30 @@ func BuildMessagesWithToolInteractionsThroughMessageWithManager(ctx context.Cont
 }
 
 // branchRequest is what preparing a request at a message reads: the
-// messages the request carries, the anchor's role, the head of that lineage,
-// which the branch's writes follow, the system prompt the lineage carries,
-// and the path of the directory the anchor is in.
+// messages the request carries and where each is stored, the anchor's role,
+// the head of that lineage, which the branch's writes follow, the system
+// prompt the lineage carries, and the anchor's directory and ID. recorded
+// is the anchor role a sibling recorded when the reference bubbled up
+// through it, which the request reads in place of the anchor's current role.
+// source is the directory of the message the reference names, whose
+// notebook binding the request was configured with.
 type branchRequest struct {
+	refs       []ContextRef
 	messages   []core.TypedMessage
+	carried    []MessageRef
 	anchorRole core.Role
+	recorded   core.Role
 	head       *MessageRef
 	system     *string
 	path       string
+	anchorID   string
+	source     string
 }
 
 // buildBranchRequestMessages reads what a request that branches at branchRef
 // carries. The scan, the sidecars, and the head's identity are read under one
 // hold of the tree's lock.
-func buildBranchRequestMessages(ctx context.Context, branchRef string) (branchRequest, error) {
+func buildBranchRequestMessages(ctx context.Context, branchRef string, needRefs bool) (branchRequest, error) {
 	manager := DefaultManager()
 	sessionPath, messageID := manager.ParseMessageID(branchRef)
 	if messageID == "" {
@@ -88,10 +100,44 @@ func buildBranchRequestMessages(ctx context.Context, branchRef string) (branchRe
 		}
 		anchorPath, anchorID := GetAnchorForBranching(sessionPath, messageID)
 		anchorPath = manager.ResolveSessionPath(anchorPath)
-		request, err = branchRequestLocked(ctx, manager, anchorPath, anchorID)
+		recorded, err := bubbledAnchorRole(sessionPath, anchorPath)
+		if err != nil {
+			return err
+		}
+		request, err = branchRequestLocked(ctx, manager, anchorPath, anchorID, recorded, needRefs)
+		request.source = sessionPath
 		return err
 	})
 	return request, err
+}
+
+// bubbledAnchorRole returns the anchor role recorded by the sibling through
+// which a reference in sessionPath bubbled up to its anchor in anchorPath.
+// It returns none when the reference did not bubble or the sibling has no
+// record.
+func bubbledAnchorRole(sessionPath, anchorPath string) (core.Role, error) {
+	rel, err := filepath.Rel(anchorPath, sessionPath)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return "", nil
+	}
+	first, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return recordedAnchorRole(filepath.Join(anchorPath, first))
+}
+
+// replacedPosition returns where the message a sibling replaces stands
+// among refs, the messages of one directory in ID order: its index, or,
+// when it was deleted, the index of the first message after its ID.
+func replacedPosition(refs []lineageMessageRef, id string) int {
+	want, err := strconv.ParseUint(id, 16, 64)
+	for i, ref := range refs {
+		if ref.message.ID == id {
+			return i
+		}
+		if got, gotErr := strconv.ParseUint(ref.message.ID, 16, 64); err == nil && gotErr == nil && got > want {
+			return i
+		}
+	}
+	return len(refs)
 }
 
 func validateBranchMessageRole(role core.Role) error {
@@ -101,31 +147,56 @@ func validateBranchMessageRole(role core.Role) error {
 	return nil
 }
 
-func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anchorID string) (branchRequest, error) {
-	refs, err := lineageMessageRefsWithManager(manager, anchorPath)
+func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anchorID string, recorded core.Role, needRefs bool) (branchRequest, error) {
+	refs, role, system, err := branchLineageLocked(manager, anchorPath, anchorID, recorded)
 	if err != nil {
 		return branchRequest{}, err
 	}
-	request := branchRequest{system: lineageSystemPrompt(refs), path: anchorPath}
-
-	anchorIdx := -1
-	for i, ref := range refs {
-		if ref.path == anchorPath && ref.message.ID == anchorID {
-			anchorIdx = i
-			break
-		}
-	}
-	if anchorIdx == -1 {
-		return branchRequest{}, errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
-	}
-
-	request.anchorRole = refs[anchorIdx].message.Role
-	if err := validateBranchMessageRole(request.anchorRole); err != nil {
+	request := branchRequest{carried: storedRefs(refs), system: system, path: anchorPath, anchorID: anchorID, anchorRole: role, recorded: recorded}
+	if request.messages, err = buildTypedMessagesFromLineageRefs(ctx, refs); err != nil {
 		return branchRequest{}, err
 	}
-	switch request.anchorRole {
+	if request.head, err = pinHeadLocked(refs); err != nil {
+		return branchRequest{}, err
+	}
+	if needRefs {
+		request.refs = contextRefs(refs, request.messages)
+	}
+	return request, nil
+}
+
+// branchLineageLocked returns the lineage a request that branches at the
+// anchor carries, the anchor's role, and the system prompt of the anchor's
+// lineage. An assistant anchor is regenerated; a user anchor replaces its
+// turn. A recorded role stands in for the anchor's current role.
+func branchLineageLocked(manager *Manager, anchorPath, anchorID string, recorded core.Role) ([]lineageMessageRef, core.Role, *string, error) {
+	refs, err := lineageMessageRefsWithManager(manager, anchorPath)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	system := lineageSystemPrompt(refs)
+	// The anchor directory's messages end the lineage. A deleted anchor
+	// stands before the first of them with a later ID, and only a recorded
+	// role says how a branch continues there.
+	own := len(refs)
+	for own > 0 && refs[own-1].path == anchorPath {
+		own--
+	}
+	anchorIdx := own + replacedPosition(refs[own:], anchorID)
+	role := recorded
+	if anchorIdx < len(refs) && refs[anchorIdx].message.ID == anchorID {
+		if role == "" {
+			role = refs[anchorIdx].message.Role
+		}
+	} else if role == "" {
+		return nil, "", nil, errors.WrapError("find branch anchor", fmt.Errorf("message %s was not found in lineage for %s", anchorID, anchorPath))
+	}
+	if err := validateBranchMessageRole(role); err != nil {
+		return nil, "", nil, err
+	}
+	switch role {
 	case core.RoleAssistant:
-		refs = refs[:anchorIdx]
+		return refs[:anchorIdx], role, system, nil
 	case core.RoleUser:
 		prevAssistantIdx := -1
 		for i := anchorIdx - 1; i >= 0; i-- {
@@ -134,18 +205,34 @@ func branchRequestLocked(ctx context.Context, manager *Manager, anchorPath, anch
 				break
 			}
 		}
-		refs = userBranchRefs(refs[:anchorIdx], prevAssistantIdx)
+		kept, err := userBranchRefs(refs[:anchorIdx], prevAssistantIdx)
+		return kept, role, system, err
 	default:
-		return branchRequest{}, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", request.anchorRole, anchorID))
+		return nil, "", nil, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", role, anchorID))
 	}
+}
 
-	if request.messages, err = buildTypedMessagesFromLineageRefs(ctx, refs); err != nil {
-		return branchRequest{}, err
+// plannedBranchLocked reads again the lineage a request that branches at its
+// anchor carries. It fails when that lineage holds other messages than the
+// request carried, as when the anchor or a message before it was replaced.
+func plannedBranchLocked(manager *Manager, request branchRequest) ([]lineageMessageRef, error) {
+	refs, _, _, err := branchLineageLocked(manager, request.path, request.anchorID, request.recorded)
+	if err != nil {
+		return nil, err
 	}
-	if request.head, err = pinHeadLocked(refs); err != nil {
-		return branchRequest{}, err
+	if !slices.Equal(storedRefs(refs), request.carried) {
+		return nil, &HeadReplacedError{Expected: MessageRef{Path: request.path, ID: request.anchorID}}
 	}
-	return request, nil
+	return refs, nil
+}
+
+// storedRefs names each message of refs by its directory, ID and revision.
+func storedRefs(refs []lineageMessageRef) []MessageRef {
+	stored := make([]MessageRef, len(refs))
+	for i, ref := range refs {
+		stored[i] = MessageRef{Path: ref.path, ID: ref.message.ID, Revision: ref.message.Revision}
+	}
+	return stored
 }
 
 // systemPrefix returns the system message refs begin with, alone, or nothing
@@ -257,22 +344,28 @@ func scanLineage(manager *Manager, sessionPath string) (lineageScan, error) {
 
 		comp := components[i]
 		_, branchMsgID, _ := IsSiblingDir(comp)
-		branchIdx := -1
-		for j := range refs {
-			if refs[j].message.ID == branchMsgID {
-				branchIdx = j
-				break
-			}
+		// A deleted branch point leaves its siblings in place. A sibling
+		// that recorded its anchor role continues the messages before the
+		// deleted one's ID.
+		branchIdx := replacedPosition(refs, branchMsgID)
+		var branchMsg *lineageMessageRef
+		var current core.Role
+		if branchIdx < len(refs) && refs[branchIdx].message.ID == branchMsgID {
+			found := refs[branchIdx]
+			branchMsg, current = &found, found.message.Role
 		}
-		if branchIdx == -1 {
+		role, err := siblingAnchorRole(filepath.Join(dir, comp), current)
+		if err != nil {
+			return lineageScan{}, err
+		}
+		if role == "" {
 			return lineageScan{}, errors.WrapError("find branch point", fmt.Errorf("branch point %s not found in %s", branchMsgID, dir))
 		}
 
-		branchMsg := refs[branchIdx]
-		switch branchMsg.message.Role {
+		switch role {
 		case core.RoleAssistant:
 			lineage = append(lineage, refs[:branchIdx]...)
-			lastAssistant = &branchMsg
+			lastAssistant = branchMsg
 			assistantAlreadyInLineage = false
 
 		case core.RoleUser:
@@ -285,7 +378,11 @@ func scanLineage(manager *Manager, sessionPath string) (lineageScan, error) {
 			}
 
 			if prevAssistIdx != -1 {
-				lineage = append(lineage, userBranchRefs(refs[:branchIdx], prevAssistIdx)...)
+				kept, err := userBranchRefs(refs[:branchIdx], prevAssistIdx)
+				if err != nil {
+					return lineageScan{}, err
+				}
+				lineage = append(lineage, kept...)
 				prevAssistant := refs[prevAssistIdx]
 				lastAssistant = &prevAssistant
 				assistantAlreadyInLineage = true
@@ -294,11 +391,15 @@ func scanLineage(manager *Manager, sessionPath string) (lineageScan, error) {
 					lineage = append(lineage, *lastAssistant)
 					assistantAlreadyInLineage = true
 				}
-				lineage = append(lineage, userBranchRefs(refs[:branchIdx], -1)...)
+				kept, err := userBranchRefs(refs[:branchIdx], -1)
+				if err != nil {
+					return lineageScan{}, err
+				}
+				lineage = append(lineage, kept...)
 			}
 
 		default:
-			return lineageScan{}, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", branchMsg.message.Role, branchMsg.message.ID))
+			return lineageScan{}, errors.WrapError("validate message role", fmt.Errorf("unknown role %q in message %s", role, branchMsgID))
 		}
 
 		dir = filepath.Join(dir, comp)
@@ -424,6 +525,8 @@ func toolInteractionResults(toolInteraction *core.ToolInteraction) []core.ToolRe
 // a revision of its own; its tool interaction and blocks, invocation
 // identities included, are copied as they are.
 func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, fork *Session, head MessageRef) (MessageRef, error) {
+	hasContext := map[string]bool{}
+	toolNames := map[string]string{}
 	id := uint64(0)
 	if head.ID != "" {
 		last, err := strconv.ParseUint(head.ID, 16, 64)
@@ -455,12 +558,22 @@ func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, fork 
 			blocks = loadedBlocks
 		}
 
+		original := core.TypedMessage{Role: string(msg.Role), Blocks: blocks}
+		if !ok {
+			original = buildTypedMessage(msg, toolInteraction, toolNames)
+		} else {
+			original.Blocks = applyToolNameIndex(slices.Clone(blocks), toolNames)
+		}
 		newMsg := Message{
 			Role:             msg.Role,
 			Content:          msg.Content,
 			ThoughtSignature: msg.ThoughtSignature,
 			Timestamp:        msg.Timestamp,
 			Model:            msg.Model,
+			Origin:           sourceRef(ref, original).Source,
+			Window:           msg.Window,
+			Pin:              msg.Pin,
+			Incomplete:       msg.Incomplete,
 		}
 		staged, err := stageMessageFilesWithBlocks(fork.Path, newMsg, toolInteraction, blocks)
 		if err != nil {
@@ -473,6 +586,20 @@ func copyLineageMessageRefs(ctx context.Context, refs []lineageMessageRef, fork 
 			return MessageRef{}, errors.WrapError("place message", err)
 		}
 		head = MessageRef{Path: fork.Path, ID: newMsgID, Revision: staged.Revision}
+		exists, checked := hasContext[ref.path]
+		if !checked {
+			_, err := os.Stat(filepath.Join(ref.path, checkpointDirectory))
+			if err != nil && !os.IsNotExist(err) {
+				return MessageRef{}, err
+			}
+			exists = err == nil
+			hasContext[ref.path] = exists
+		}
+		if exists {
+			if err = copyCheckpointFiles(ContextRef{MessageRef: MessageRef{Path: ref.path, ID: msg.ID}}, fork.Path, newMsgID); err != nil {
+				return MessageRef{}, err
+			}
+		}
 		id++
 		logger.From(ctx).Debugf("Copied message %s -> %s (role=%s, hasTools=%v)", msg.ID, newMsgID, msg.Role, toolInteraction != nil)
 	}

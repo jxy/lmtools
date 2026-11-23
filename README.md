@@ -1,6 +1,6 @@
 # lmtools
 
-`lmtools` builds three binaries:
+`lmtools` builds four binaries.
 
 - `lmc`: a command-line client for chat, embeddings, tool calls, and local session history.
 - `apiproxy`: an HTTP proxy that serves Anthropic-compatible, OpenAI Chat
@@ -8,6 +8,7 @@
   Anthropic, OpenAI, Google, or Argo backends.
 - `alcfauth`: a Globus login for the ALCF Inference Endpoints that keeps an
   access token in a key file for `lmc -api-key-file`.
+- `notebook` serves a directory of project notes over MCP stdio.
 
 **Disclaimer**: LLMs (GPT, Claude, Gemini, and others) "vibe-coded" almost all
 code in this repository. Use it at your own risk and review it before you deploy
@@ -21,7 +22,7 @@ Requires Go 1.21.13 or later.
 make build
 ```
 
-`make build` writes `lmc`, `apiproxy`, and `alcfauth` for the host into
+`make build` writes `lmc`, `apiproxy`, `alcfauth`, and `notebook` for the host into
 `./bin/<goos>-<goarch>/`, such as `./bin/linux-amd64/`. Set `GOOS` and `GOARCH`
 to cross-compile; each platform gets its own directory. The Makefile works with
 both BSD make and GNU make.
@@ -29,12 +30,12 @@ both BSD make and GNU make.
 Prebuilt binaries for linux/amd64, freebsd/amd64, and macOS/arm64 are attached
 to each [GitHub release](https://github.com/jxy/lmtools/releases) as
 `lmtools-<tag>-<goos>-<goarch>.tar.gz`, with a `SHA256SUMS` file beside them.
-Each archive holds `lmc`, `apiproxy`, `alcfauth`, `LICENSE`, and this README.
+Each archive holds those four programs, `LICENSE`, and this README.
 
 The examples below run the binaries by name. Add the directory that
 holds them to your `PATH`, or copy them into a directory already on it.
 
-`lmc -version`, `apiproxy -version`, and `alcfauth -version` print the version the go command
+`lmc -version`, `apiproxy -version`, `alcfauth -version`, and `notebook -version` print the version the go command
 stamped at build time: the release tag for a release archive, or a
 pseudo-version naming the commit for a build from an untagged checkout.
 
@@ -155,6 +156,196 @@ A call the model made to an MCP server is recorded with the server and tool
 name, which `-show` prints under the call. Resuming a session with such a
 call pending needs the `-mcp-config` that defines the server.
 
+#### Project notebooks and long conversations
+
+Use `-notebook DIR` to bind a project notebook to a session. The model can list
+notes, search them by words, read them by ID, and create or revise them. Each
+Markdown file has a title, a short catalog description, a body, and source
+references. A write names the revision it read so two cooperating writers can
+detect a conflict. Install `notebook` beside `lmc` or on `PATH`. Other MCP
+clients can start `notebook -root DIR` directly.
+
+If a hand edit breaks the layout or takes a file above 32 KiB, the catalog
+lists its ID under `invalid_notes`. Read that ID to inspect the original
+file in pages and get its revision. Supply that revision to `put` with a
+corrected note. A repair page with binary data returns its bytes in `base64`.
+
+A hand-edited file such as `build-output.md` uses this layout.
+
+```markdown
+# Build output
+
+Where to find the binaries for the selected platform.
+
+## Note
+The default `make build` writes the binaries under `bin/<goos>-<goarch>/`.
+
+## Sources
+- Makefile build target
+```
+
+`notebook` creates a missing notebook directory that only you can open. New
+notes get the mode your umask gives any new file, and a revised note keeps
+its mode and group. When you revise a note whose group you do not belong to,
+the new copy cannot keep that group, so it gives its new group and other
+accounts only the access that the old group and other accounts both had.
+The catalog lists a note it cannot open, such as another account's private
+note, under `unreadable_notes`.
+
+At a milestone, `/handoff` asks the model to prepare the notebook for a fresh
+operator. For projects that must reproduce earlier versions,
+`/handoff versions` asks for an exact baseline and the changes needed to
+reconstruct each supported state. Each command submits a normal REPL turn
+with the usual tool approvals. Batch clients can send the same text as a user
+turn. [Handoff prompt](internal/prompts/notebook_handoff.txt) · [Version history prompt](internal/prompts/notebook_versions.txt)
+
+For example, this starts a conversation on ALCF Minerva with a model that
+advertises a 1,048,576-token window.
+
+```bash
+lmc -repl -provider openai -api-key-file ~/.lmc/alcf/inference.key \
+  -provider-url https://inference-api.alcf.anl.gov/resource_server/minerva/api/v1 \
+  -models-url https://inference-api.alcf.anl.gov/resource_server/minerva/models \
+  -model inkling-2-small -effort max -notebook ./project-notes
+```
+
+`-resume` and `-branch` inherit the notebook binding and the initial context
+settings. The notebook tools stay in the prompt across ordinary turns. The
+default notebook view supplies a bounded snapshot of note IDs, summaries, and
+revisions at the start of a window. A window keeps its snapshot until the next
+checkpoint. If a request cannot fit the snapshot, nothing before it can be
+compacted, and no earlier request in the window carried the snapshot, `lmc`
+leaves the snapshot out of that window and says so. Once a request carries
+the snapshot, the window keeps it. Full replay never compacts, so under
+`-context-policy full` a later request that cannot fit beside the snapshot
+reports its size.
+`-notebook-view tools` exposes the notebook through tools alone, including in
+a resumed window that began with a snapshot.
+Edits become visible through tool results or the next window's snapshot.
+An explicitly selected notebook supplies its requested snapshot even when the
+tool selector limits which subsequent reads and writes the model can request.
+
+A new notebook session uses a prose handoff with the session's model and
+effort. `lmc` looks up the selected model's capacity. An explicit
+`-context-window N` supplies a limit or a smaller local cap. If capacity is
+unknown, the CLI reports that it is using full replay and explains how to set
+the window. Use `/info` to see the effective policy, trigger and ceiling.
+
+To carry a standing user instruction through every cut, enter
+`/pin Start each ordinary response with the project release number.` in the
+REPL. `/pins` lists active IDs and sources. `/pin --from REF [START END]`
+marks an earlier user text block, optionally selecting a range of UTF-8 bytes
+from START through the byte before END. Use `/pin --replace ID TEXT` to
+revise it and `/unpin ID` to withdraw it. The commands save user events
+locally and work in a piped REPL. Each new window places the exact active
+text after its historical evidence, in the user role. A later user request can
+override a rule for one reply. Forks inherit the pins at their branch point.
+Sharing a notebook directory shares the project notes.
+
+At a cut, the session model writes a prose handoff from completed exchanges.
+It carries forward decisions, sources, completed work and open questions.
+Use `-context-policy full` to replay the complete branch, or
+`-context-policy handoff -context-window N` to enable prose handoffs in a
+text-only session. Ordinary sessions without a notebook default to full replay.
+
+For a session saved with an experimental writer or cut policy, specify
+`-resume ID -context-policy handoff` to continue with prose, or use
+`-context-policy full` for full replay. The option applies to that invocation.
+A prose continuation reuses the committed checkpoint while it fits. An
+executable built by the companion `lmc-context-bench` repository can continue
+the original experiment. Earlier command
+lines that specify `-context-format prose` select the same writer.
+
+A compacting policy needs a known window. Supply `-context-window N` for text-only compaction or when the notebook cannot discover one. The portable estimator
+uses framed content size, including tools and retained reasoning. It allows
+2,048 tokens for each attached image, including images returned by tools.
+For a saved audio block it allows 32 tokens per second of recorded duration,
+or 2,048 tokens when duration is unavailable. Actual media token counts
+depend on the provider. The estimator reserves an eighth of the window
+for output and estimation error. When a long text
+conversation would otherwise be refused, `lmc` can measure bounded groups
+of complete exchanges using the provider's input usage. These probes
+preserve tool schemas, call/result pairs, and native reasoning blocks.
+A large exchange that fits the input ceiling can be measured on its own.
+If the provider refuses a native sizing request with HTTP 401 or 403,
+`lmc` reports the credential error so the same conversation can resume
+after access is restored. If the provider omits usage or a sizing request
+fails temporarily, the host uses its estimate and tries to compact when a
+smaller projection can fit.
+An exchange exceeding that ceiling can have its large public text fields
+measured in fragments. Media retain their estimated charge. Sizing responses
+never invoke tools. The provider enforces its physical window.
+The host normally cuts at 70% of the configured window.
+`-context-trigger N` changes that threshold.
+New notebook handoff sessions also allow the model to request an earlier
+cut after a completed phase. `-context-early-cuts=false` selects the fixed
+trigger alone. The host checks the next projected request and leaves one
+eighth of the window for output, reasoning and margin.
+The original transcript remains available to `-show`. A checkpoint preserves
+system and developer instructions in their roles and takes effect at a
+completed exchange. When a cut is needed during a tool turn, the new context
+carries the active request and the completed batch's observed results.
+If a tool observation itself exceeds the input budget and history reads are
+enabled, the new window carries the original block reference, byte length and
+excerpts from each large result. The model can search and page the saved text.
+If a later run turns history reads off, the model keeps only the excerpts, and
+`lmc` says so.
+A protected request too large for the configured input ceiling reports its
+estimate. A model-written checkpoint must already exist for an exact
+`-print-curl` preview that needs it. A preview also reports when admission
+would need a live input measurement. A `-print-curl` preview stays offline
+and cannot look up the model's window. For a new notebook session, or after
+changing the model or provider, pass `-context-window` with the model's
+limit, or preview full replay with `-context-policy full`.
+
+Pending checkpoint candidates are keyed by the context window and effective
+trigger, the selected writer, covered source and marked instructions. A
+complete handoff above its requested byte target can be accepted when the
+full request fits. If the writer fails,
+`lmc` uses the previous projection while it fits. When replay exceeds the
+ceiling and branch history is accessible, it tries an archive and records
+the fallback. At the next cut the writer resumes from the last successful
+handoff and reads the original records covered by the fallback. When that
+handoff leaves the writer's window no room for the records, as one written
+for a larger model can, the writer reads the original records from the
+start. A fallback relies on history reads, so a run without them writes
+that handoff at once, or uses one another run has written for the same point.
+When a full handoff and the exchanges after the fallback would reach the
+cut threshold, the new handoff covers those exchanges too. If the writer
+fails again, `lmc` says what the model cannot reach. Changing
+the window or trigger makes a later cut rebuild from the original records;
+other changes, such as the notebook view, keep the previous handoff. The
+original request and last recorded tool result from an
+interrupted exchange stay identifiable at the next boundary. An active handoff
+already used by a saved reply remains usable while its projection fits.
+
+The local `history/search` and `history/read` tools retrieve bounded excerpts
+from the active branch across prior windows. A note can cite an exact block
+reference, including a captured tool result. To add only these tools to a
+saved conversation, use `-resume ID -context-policy full -tool-include history`.
+You can attach its first notebook later with `-resume ID -notebook DIR`.
+Search reports its scope and
+whether more matches exist. A retrieved result can recover only the bytes
+captured at execution. Set `-tool-max-output-bytes` before the tool runs
+when the project needs more than the default 1 MiB per result.
+An unrelated session can use the shared notes. To
+resolve a citation into the original conversation, resume or branch from the
+session that contains it. History returns visible text and attachment metadata.
+Compaction also works in ordinary text chat, without a
+notebook or tool flag. With `-no-session`, history and checkpoints live in
+memory for that invocation. An explicitly named project notebook is shared
+storage across invocations.
+
+Notebook mode alone enables scoped notebook and history tools. Add `-tool` for
+the normal local commands, or use tool selectors to choose the desired set.
+A notebook-only resume leaves a pending batch in place if it requires another
+tool. Resume with that tool enabled to continue the batch.
+The usual MCP approval rules apply. For scripted use a rule such as
+`{"mcp":"notebook","tool":"read"}` admits that read operation. Grant `put`
+separately when the model should maintain notes. The `lmc-context-bench`
+repository contains the research, recorded model comparisons and drivers
+for testing another model or writer prompt.
+
 #### Interrupted tool rounds
 
 When a turn is cancelled while tools run, `lmc` still saves the results of
@@ -263,7 +454,8 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
   it must.
 - With piped input, failed, cancelled, or incomplete turns are reported and
   later turns still run. At EOF or `/exit`, the process exits nonzero if any
-  turn failed. Interactive sessions can recover from a failed turn and exit
+  turn failed; a `/pin` or `/handoff` command that fails counts as a failed
+  turn. Interactive sessions can recover from a failed turn and exit
   normally.
 - With stdout a terminal, it carries the answers alone, and the prompt starts
   below an answer after an empty line. With stdout redirected, each turn's
@@ -316,6 +508,7 @@ REPL commands work with terminal and piped input:
 | --- | --- |
 | `/help [input\|history\|tools]` | Show commands or help for a topic. |
 | `/info` | Show the connection, display settings, tools, session, logs, and pending input. |
+| `/handoff [versions]` | Update the project notebook for a fresh operator, or record how to reconstruct earlier versions. |
 | `/model [NAME]` | Show the model, or change it for the turns that follow. |
 | `/effort [LEVEL\|default]` | Show the reasoning effort, or change it for the turns that follow. |
 | `/history [N\|clear]` | List retained prompts, show prompt N in full, or empty the history, saved history included. |

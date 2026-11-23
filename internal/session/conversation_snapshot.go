@@ -23,6 +23,7 @@ type conversationSnapshot struct {
 	// and never longer than it, and toolNames is the tool-name index those
 	// builds accumulated. Both are dropped by rebuild.
 	built     []core.TypedMessage
+	sources   []ContextRef
 	toolNames map[string]string
 }
 
@@ -52,6 +53,7 @@ func (s *conversationSnapshot) rebuild(path string) error {
 	// decoded at that index, so the decoded messages and the tool-name index
 	// built from them go with it. Dropping them is what makes reuse safe.
 	s.built = nil
+	s.sources = nil
 	s.toolNames = nil
 	return nil
 }
@@ -107,7 +109,7 @@ func (s *conversationSnapshot) buildTypedMessages(ctx context.Context, path stri
 // sidecars it decodes. The refresh still reads everything appended to the
 // active directory, and whatever another writer appended past the head is
 // left out of the result, so it never reaches a request.
-func (s *conversationSnapshot) buildTypedMessagesThrough(ctx context.Context, path string, head MessageRef) ([]core.TypedMessage, error) {
+func (s *conversationSnapshot) buildTypedMessagesThrough(ctx context.Context, path string, head MessageRef, provenance *[]ContextRef) ([]core.TypedMessage, error) {
 	var messages []core.TypedMessage
 	err := withTreeLock(ctx, path, func() error {
 		if err := s.refresh(path); err != nil {
@@ -141,6 +143,12 @@ func (s *conversationSnapshot) buildTypedMessagesThrough(ctx context.Context, pa
 			return err
 		}
 		messages = slices.Clone(s.built[:end])
+		if provenance != nil {
+			for i := len(s.sources); i < end; i++ {
+				s.sources = append(s.sources, sourceRef(s.refs[i], s.built[i]))
+			}
+			*provenance = slices.Clone(s.sources[:end])
+		}
 		return nil
 	})
 	return messages, err

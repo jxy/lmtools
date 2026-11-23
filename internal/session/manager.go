@@ -36,7 +36,18 @@ func DefaultManager() *Manager {
 
 // NewManager creates a manager with an optional explicit sessions directory.
 func NewManager(sessionsDir string) *Manager {
-	return &Manager{sessionsDir: sessionsDir}
+	return &Manager{sessionsDir: absoluteSessionsDir(sessionsDir)}
+}
+
+// Pin a relative root once so stored paths can be passed back to the manager.
+func absoluteSessionsDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	if absolute, err := filepath.Abs(dir); err == nil {
+		return absolute
+	}
+	return filepath.Clean(dir)
 }
 
 // ConfigureDefaultManager applies session-related configuration through one seam.
@@ -49,7 +60,7 @@ func ConfigureDefaultManager(cfg ManagerConfig) {
 func (m *Manager) SetSessionsDir(dir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sessionsDir = dir
+	m.sessionsDir = absoluteSessionsDir(dir)
 	m.flockChecked = false
 }
 

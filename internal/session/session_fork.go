@@ -35,6 +35,38 @@ func MaybeForkForSystem(ctx context.Context, sess *Session, effectiveSystem stri
 	return newSession, true, nil
 }
 
+// forkBranchForSystem copies, under system, the lineage a request that
+// branches at the request's anchor carries. An edited question's fork leaves
+// out what its request left out. The copy fails when that lineage, read
+// again, holds other messages than the request carried or no longer ends at
+// the head the request was planned with.
+func forkBranchForSystem(ctx context.Context, request branchRequest, system string) (*Session, error) {
+	logger.From(ctx).Infof("Forking session %s due to system prompt change", GetSessionID(request.path))
+	var stored *string
+	if system != "" {
+		stored = &system
+	}
+	manager := DefaultManager()
+	fork, err := buildFork(ctx, manager, request.path, func() (forkSource, error) {
+		refs, err := plannedBranchLocked(manager, request)
+		if err != nil {
+			return forkSource{}, err
+		}
+		head, err := pinHeadLocked(refs)
+		if err != nil {
+			return forkSource{}, err
+		}
+		if *head != *request.head {
+			return forkSource{}, &HeadReplacedError{Expected: *request.head}
+		}
+		return forkSource{refs: refs, system: stored, pin: true, binding: request.source}, nil
+	})
+	if err != nil {
+		return nil, errors.WrapError("create forked session", err)
+	}
+	return fork, nil
+}
+
 // forkForSystem forks sess under system: a new session holding its lineage,
 // through the head it pins when it pins one, with system in place of the
 // lineage's own prompt. An empty system is no system message, as a new

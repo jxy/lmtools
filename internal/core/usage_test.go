@@ -11,6 +11,19 @@ import (
 
 func intPtr(v int) *int { return &v }
 
+func TestMeasuredInputHonorsProviderCacheScopes(t *testing.T) {
+	u := &Usage{InputTokens: intPtr(40), CacheReadInputTokens: intPtr(20), CacheCreationInputTokens: intPtr(5)}
+	for provider, want := range map[string]int{"anthropic": 65, "openai": 40, "google": 40} {
+		got, ok := u.MeasuredInput(RequestOptions{Provider: provider})
+		if !ok || got != want {
+			t.Fatalf("%s: got %d/%t, want %d", provider, got, ok, want)
+		}
+	}
+	if _, ok := (&Usage{}).MeasuredInput(RequestOptions{}); ok {
+		t.Fatal("missing count treated as zero")
+	}
+}
+
 func assertUsageEquals(t *testing.T, got, want *Usage) {
 	t.Helper()
 	if (got == nil) != (want == nil) {

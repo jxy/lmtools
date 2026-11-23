@@ -77,6 +77,7 @@ func newTurnTestEnvAt(t *testing.T, baseURL string, extraFlags ...string) turnTe
 		"-provider", "openai",
 		"-provider-url", baseURL + "/v1",
 		"-model", "gpt-test",
+		"-sessions-dir", sessionsDir,
 		"-retries", "0",
 	}, earlierModeFlags...)
 	args = append(args, extraFlags...)
@@ -521,6 +522,86 @@ func TestRunTurnReportsAToolBearingAnswerItCouldNotSave(t *testing.T) {
 	}
 	if !strings.Contains(te.stdout.String(), "running it") {
 		t.Fatalf("stdout = %q, want the answer presented before the failed save", te.stdout.String())
+	}
+}
+
+func TestPostCommitContextFailuresPreserveAnswerAndUnstartedCalls(t *testing.T) {
+	for _, failure := range []string{"cancel", "binding", "binding-text"} {
+		t.Run(failure, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "ran")
+			server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
+				if failure == "binding-text" {
+					return openAITextResponse("record this answer"), http.StatusOK, nil
+				}
+				return toolCallResponse("touch", marker), http.StatusOK, nil
+			}))
+			defer server.Close()
+			te := newTurnTestEnv(t, server, "-notebook", t.TempDir(), "-context-window", "8192", "-tool", "-tool-auto-approve")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			other := te.opts.Context
+			other.Notebook = t.TempDir()
+			afterTurnCommitForTest = func(s *session.Session) {
+				if failure == "cancel" {
+					cancel()
+					return
+				}
+				if err := session.BindContext(ctx, s, other); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() { afterTurnCommitForTest = nil })
+			out, err := runTurn(ctx, te.env, te.opts, turnInput{text: "test setup"})
+			if err == nil || out.UnsavedAnswer != nil || !out.PlanCommitted || out.Session == nil {
+				t.Fatalf("outcome %+v, error %v", out, err)
+			}
+			if failure == "cancel" && !stdErrors.Is(err, context.Canceled) || failure != "cancel" && !strings.Contains(err.Error(), "binding changed") {
+				t.Fatal(err)
+			}
+			lineage, err := session.GetLineage(out.Session.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failure == "binding-text" {
+				last := lineage[len(lineage)-1]
+				if last.Role != core.RoleAssistant || last.Content != "record this answer" {
+					t.Fatal(last)
+				}
+				return
+			}
+			assistant, result := lineage[len(lineage)-2], lineage[len(lineage)-1]
+			if assistant.Content != "running it" || assistant.Role != core.RoleAssistant || !strings.Contains(te.stdout.String(), assistant.Content) {
+				t.Fatal(assistant)
+			}
+			calls, err := session.LoadToolInteraction(out.Session.Path, assistant.ID)
+			if err != nil || calls == nil || len(calls.Calls) != 1 || calls.Calls[0].InvocationID == "" {
+				t.Fatal(calls, err)
+			}
+			results, err := session.LoadToolInteraction(out.Session.Path, result.ID)
+			if err != nil || results == nil || len(results.Results) != 1 || !results.Results[0].NotRun || results.Results[0].ID != calls.Calls[0].ID {
+				t.Fatal(results, err)
+			}
+			pending, err := session.CheckForPendingToolCalls(context.Background(), out.Session.Path)
+			if err != nil || len(pending) != 0 {
+				t.Fatal(pending, err)
+			}
+			// A fork at the call sees the durable journal outcome even without the result message.
+			fork, err := session.ForkThroughHead(context.Background(), session.DefaultManager(), out.Session.Path, session.MessageRef{Path: out.Session.Path, ID: assistant.ID, Revision: assistant.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := session.ResolvePendingToolCalls(context.Background(), fork, te.opts, core.NewTestLogger(false), te.notifier, core.TestToolUI{}, nil)
+			if err != nil || !recovered.Committed {
+				t.Fatal(recovered, err)
+			}
+			saved, err := session.LoadToolInteraction(fork.Path, fork.Head.ID)
+			if err != nil || saved == nil || len(saved.Results) != 1 || saved.Results[0].Error != results.Results[0].Error || !saved.Results[0].NotRun {
+				t.Fatal(saved, err)
+			}
+			if _, err := os.Stat(marker); !stdErrors.Is(err, os.ErrNotExist) {
+				t.Fatal("command ran", err)
+			}
+		})
 	}
 }
 

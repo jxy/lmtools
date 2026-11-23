@@ -22,6 +22,7 @@ import (
 	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"lmtools/internal/version"
+	"lmtools/internal/workingcontext"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -52,7 +53,7 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		defer env.progress.stop()
 	}
 
-	rb, err := buildHTTPRequest(ctx, env.cfg, opts, plan, inputStr)
+	rb, err := buildTurnRequest(ctx, env, opts, plan, inputStr)
 	if err != nil {
 		return out, err
 	}
@@ -88,6 +89,17 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		env.served = response.Model
 	}
 
+	failSetup := func(cause error) (turnOutcome, error) {
+		if out.Session == nil {
+			return out, cause
+		}
+		log := logger.From(ctx)
+		result := core.PersistUnstartedResponse(ctx, response, core.ToolExecutionConfig{
+			Store: session.NewStore(out.Session, log), Journal: session.NewToolJournal(), ActualModel: rb.Model,
+		}, log, cause)
+		out.UnsavedAnswer = result.UnsavedAnswer
+		return out, result.Error
+	}
 	if plan != nil {
 		// The response has arrived, so its turn is recorded even if the run
 		// is being cancelled.
@@ -112,6 +124,17 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		if afterTurnCommitForTest != nil {
 			afterTurnCommitForTest(committed)
 		}
+		if opts.Context.Enabled() {
+			if env.window != nil {
+				committed.WindowUsed = env.window.Receipt()
+			}
+			bindCtx, done := core.PersistenceContext(ctx)
+			err = session.BindContext(bindCtx, committed, opts.Context)
+			done()
+			if err != nil {
+				return failSetup(fmt.Errorf("save session context settings: %w", err))
+			}
+		}
 	}
 
 	if err := core.ValidateResponse(opts, response); err != nil {
@@ -120,7 +143,10 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	}
 	if len(response.ToolCalls) > 0 {
 		logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
-		tc := newToolContext(ctx, env, opts, out.Session, &response, rb, inputStr, presenter)
+		tc, err := newToolContext(ctx, env, opts, out.Session, &response, rb, inputStr, presenter)
+		if err != nil {
+			return failSetup(err)
+		}
 		result := core.HandleToolExecution(tc)
 		out.UnsavedAnswer = result.UnsavedAnswer
 		return out, finishToolExecution(result)
@@ -130,8 +156,11 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	return out, nil
 }
 
-func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) core.ToolContext {
-	store, messageBuilder := createToolStoreAndMessageBuilder(ctx, opts, sess, inputStr)
+func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) (core.ToolContext, error) {
+	store, messageBuilder, err := contextToolStore(ctx, env, opts, sess, inputStr)
+	if err != nil {
+		return core.ToolContext{}, err
+	}
 
 	retryClient := newRetryClient(ctx, env.cfg)
 
@@ -160,7 +189,7 @@ func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		UI:              env.toolUI,
 		Output:          output,
 		InitialResponse: *response,
-	}
+	}, nil
 }
 
 func createToolStoreAndMessageBuilder(ctx context.Context, opts core.RequestOptions, sess *session.Session, inputStr string) (core.SessionStore, func(string) ([]core.TypedMessage, error)) {
@@ -269,6 +298,10 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
+	if err := resolveNotebookWindow(ctx, &cfg, &opts, notifier, logDir); err != nil {
+		return err
+	}
+
 	isRegeneration, err := branchRegenerates(cfg.Branch)
 	if err != nil {
 		return err
@@ -303,7 +336,7 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
-	host, err := connectMCPServers(ctx, &cfg, &opts, notifier)
+	host, err := connectMCPServers(ctx, &cfg, &opts, notifier, false)
 	if err != nil {
 		return err
 	}
@@ -358,14 +391,34 @@ func argoChatHidesThinking(opts core.RequestOptions) string {
 // executor, and described in the system prompt. It runs after the prompt
 // is read and before the session plan, which needs the effective system
 // prompt the tools extend. The host is nil when no server is configured.
-func connectMCPServers(ctx context.Context, cfg *config.Config, opts *core.RequestOptions, notifier core.Notifier) (*mcp.Host, error) {
+func connectMCPServers(ctx context.Context, cfg *config.Config, opts *core.RequestOptions, notifier core.Notifier, announce bool) (*mcp.Host, error) {
 	if len(cfg.MCPServers) == 0 {
 		return nil, nil
 	}
 	for _, warning := range cfg.MCPWarnings {
 		notifier.Warnf("-mcp-config: %s", warning)
 	}
-	host, err := mcp.Connect(ctx, cfg.MCPServers, mcp.HostOptions{
+	var remotes []mcp.ServerConfig
+	var local *mcp.ServerConfig
+	for _, s := range cfg.MCPServers {
+		if s.Type == "local" {
+			v := s
+			local = &v
+			continue
+		}
+		if cfg.Context.Notebook != "" && s.Name == "notebook" {
+			path, err := config.ResolveNotebookExecutable()
+			if err != nil {
+				return nil, fmt.Errorf("locate notebook executable: %w", err)
+			}
+			s.Command = path
+		}
+		remotes = append(remotes, s)
+	}
+	if announce && len(remotes) > 0 {
+		notifier.Infof("Connecting %d MCP server(s)...", len(remotes))
+	}
+	host, err := mcp.Connect(ctx, remotes, mcp.HostOptions{
 		ClientInfo:     mcp.DefaultClientInfo,
 		Log:            logger.From(ctx).Debugf,
 		Warn:           notifier.Warnf,
@@ -379,7 +432,11 @@ func connectMCPServers(ctx context.Context, cfg *config.Config, opts *core.Reque
 		logger.From(ctx).Infof("MCP server %s | Transport: %s | Protocol: %s (%s era) | Tools: %d",
 			server.Name, server.Transport, server.Protocol, server.Era, server.ToolCount)
 	}
-	core.ApplyMCP(opts, host)
+	var services core.MCPTools = host
+	if cfg.Context.Enabled() {
+		services = workingcontext.NewTools(host, local, cfg.Context.Settings, opts.GetToolTimeout(), notifier.Warnf)
+	}
+	core.ApplyMCP(opts, services)
 	return host, nil
 }
 
@@ -792,18 +849,27 @@ func persistAssistantOnly(ctx context.Context, response core.Response, sess *ses
 
 // listModels queries and displays available models for the configured provider
 func listModels(ctx context.Context, cfg config.Config, logDir string) error {
+	items, err := fetchModelCatalog(ctx, cfg, logDir)
+	if err != nil {
+		return err
+	}
+	displayModels(os.Stdout, providers.ResolveProvider(cfg.Provider), items)
+	return nil
+}
+
+func fetchModelCatalog(ctx context.Context, cfg config.Config, logDir string) ([]modelcatalog.Item, error) {
 	provider := providers.ResolveProvider(cfg.Provider)
 	req, err := buildListModelsRequest(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Make request
 	client := &http.Client{Timeout: cfg.Timeout}
 	logWireHTTPRequest(ctx, req, nil)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req.WithContext(ctx))
 	if err != nil {
-		return errors.WrapError("fetch models", err)
+		return nil, errors.WrapError("fetch models", err)
 	}
 	defer resp.Body.Close()
 	logWireHTTPResponseHeaders(ctx, resp)
@@ -812,15 +878,15 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 	if resp.StatusCode != http.StatusOK {
 		body, err := limitio.ReadLimited(resp.Body, constants.MaxErrorResponseSize)
 		if err != nil {
-			return errors.WrapError("fetch models", fmt.Errorf("HTTP %d (failed to read body: %v)", resp.StatusCode, err))
+			return nil, errors.WrapError("fetch models", fmt.Errorf("HTTP %d (failed to read body: %v)", resp.StatusCode, err))
 		}
-		return errors.WrapError("fetch models", errors.NewHTTPError(resp.StatusCode, string(body)))
+		return nil, errors.WrapError("fetch models", errors.NewHTTPError(resp.StatusCode, string(body)))
 	}
 
 	// Read response with size limit
 	data, err := limitio.ReadLimited(resp.Body, constants.MaxCLIResponseSize)
 	if err != nil {
-		return errors.WrapError("read response", err)
+		return nil, errors.WrapError("read response", err)
 	}
 
 	// Log the raw response for debugging
@@ -830,11 +896,10 @@ func listModels(ctx context.Context, cfg config.Config, logDir string) error {
 
 	items, err := modelcatalog.Parse(provider, data)
 	if err != nil {
-		return errors.WrapError("parse models response", err)
+		return nil, errors.WrapError("parse models response", err)
 	}
 
-	displayModels(os.Stdout, provider, items)
-	return nil
+	return items, nil
 }
 
 func buildListModelsRequest(cfg config.Config) (*http.Request, error) {

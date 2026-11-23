@@ -9,6 +9,12 @@ import (
 var replCommands = []struct{ usage, effect string }{
 	{"/help [input|history|tools]", "Show these commands, or help on a topic."},
 	{"/info", "Show the model, endpoint, session, tools, and settings."},
+	{"/handoff [versions]", "Update project notes for the next operator or preserve the project's supported versions."},
+	{"/pin TEXT", "Keep this user instruction across context windows on this branch."},
+	{"/pin --from REF [START END]", "Mark original user text, optionally selecting a UTF-8 byte range."},
+	{"/pin --replace ID TEXT", "Replace an active standing instruction."},
+	{"/pins", "List active standing instructions and their original references."},
+	{"/unpin ID", "Withdraw a standing instruction on this branch."},
 	{"/model [NAME]", "Show the model, or change it for the next turns."},
 	{"/effort [LEVEL|default]", "Show the reasoning effort, or change it for the next turns."},
 	{"/history [N|clear]", "List recent prompts, show prompt N in full, or clear the history."},

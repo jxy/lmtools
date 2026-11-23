@@ -11,6 +11,7 @@ import (
 	"lmtools/internal/logger"
 	"lmtools/internal/session"
 	"lmtools/internal/ui/tools"
+	"lmtools/internal/workingcontext"
 	"os"
 )
 
@@ -18,6 +19,7 @@ import (
 // and the operator surfaces, decided once at startup. A single run builds one
 // and runs one turn with it.
 type turnEnv struct {
+	window          *workingcontext.Engine
 	cfg             *config.Config
 	notifier        core.Notifier
 	toolUI          core.ToolUI
@@ -144,6 +146,7 @@ var afterTurnCommitForTest func(*session.Session)
 // handle the response. opts is the turn's own copy of the options; nothing
 // here mutates the caller's.
 func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in turnInput) (out turnOutcome, err error) {
+	env.window = newContextWindow(env, opts)
 	if err := core.ValidateDeveloperTurn(opts, in.text, in.isRegeneration); err != nil {
 		return out, err
 	}
@@ -167,7 +170,25 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 			}
 		}
 		var resolution session.PendingResolution
-		resolution, err = session.ResolvePendingToolCalls(ctx, resumed, opts, logger.From(ctx), env.notifier, env.toolUI, env.approver)
+		resolution, err = session.ResolvePendingWithSetup(ctx, resumed, opts, logger.From(ctx), env.notifier, env.toolUI, env.approver, func(calls []core.ToolCall) error {
+			if env.window == nil {
+				return nil
+			}
+			for _, call := range calls {
+				if (call.MCPServer == "" || call.MCPServer == "history") && workingcontext.IsHistoryTool(call.Name) {
+					read, err := session.CreateContextBuilder(ctx, resumed)
+					if err != nil {
+						return err
+					}
+					msgs, refs, err := read()
+					if err != nil {
+						return err
+					}
+					return env.window.BindExisting(ctx, msgs, refs, resumed)
+				}
+			}
+			return nil
+		})
 		if resolution.Committed {
 			out.Session = resumed
 		}
@@ -191,7 +212,7 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 	}
 
 	if env.cfg.PrintCurl {
-		rb, err := buildHTTPRequest(ctx, env.cfg, opts, plan, in.text)
+		rb, err := buildTurnRequest(ctx, env, opts, plan, in.text)
 		if err != nil {
 			return out, err
 		}

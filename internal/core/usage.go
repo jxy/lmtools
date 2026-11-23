@@ -22,6 +22,27 @@ type Usage struct {
 	reasoningIncluded        bool
 }
 
+// MeasuredInput returns the prompt footprint for a sizing probe. On Anthropic
+// wire, ordinary, cache-read and cache-creation input are disjoint. Chat,
+// Responses and Gemini's reported prompt counts already include cached input.
+func (u *Usage) MeasuredInput(cfg RequestOptions) (int, bool) {
+	if u == nil || u.InputTokens == nil || *u.InputTokens < 0 {
+		return 0, false
+	}
+	n := *u.InputTokens
+	if effectiveResponseProvider(cfg) == "anthropic" {
+		for _, v := range []*int{u.CacheReadInputTokens, u.CacheCreationInputTokens} {
+			if v != nil && *v > 0 {
+				if *v > int(^uint(0)>>1)-n {
+					return 0, false
+				}
+				n += *v
+			}
+		}
+	}
+	return n, n > 0
+}
+
 // usageEnvelope matches every location the supported providers put token
 // counts: top-level `usage` (Anthropic Messages, OpenAI Chat Completions and
 // embeddings, OpenAI Responses), top-level `usageMetadata` (Google),
@@ -68,8 +89,8 @@ type wireUsage struct {
 
 // UsageFromPayload extracts token counts from a provider response body or
 // stream event payload, and returns nil when the payload carries none.
-// Display-only: nothing downstream branches on it, so an unrecognized shape
-// degrades to "no note" rather than to an error.
+// The notifier displays these counts. Context sizing uses MeasuredInput to
+// select the provider's reported input total when a measurement is required.
 func UsageFromPayload(data []byte) *Usage {
 	envelope, ok := decodeUsageEnvelope(data)
 	if !ok {

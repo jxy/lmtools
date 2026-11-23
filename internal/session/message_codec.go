@@ -17,14 +17,22 @@ type MessageMetadata struct {
 	// Revision names one commit of the message: every commit writes a new
 	// one, a fork's copy included. Messages committed before revisions
 	// existed have none.
-	Revision string `json:"revision,omitempty"`
+	Revision   string         `json:"revision,omitempty"`
+	Origin     string         `json:"origin,omitempty"`
+	Window     *WindowReceipt `json:"context_window,omitempty"`
+	Pin        *PinChange     `json:"user_pin,omitempty"`
+	Incomplete bool           `json:"incomplete,omitempty"`
 }
 
 func buildMessageMetadata(msg Message) MessageMetadata {
 	metadata := MessageMetadata{
-		Role:      msg.Role,
-		Timestamp: msg.Timestamp,
-		Revision:  msg.Revision,
+		Role:       msg.Role,
+		Timestamp:  msg.Timestamp,
+		Revision:   msg.Revision,
+		Origin:     msg.Origin,
+		Window:     msg.Window,
+		Pin:        msg.Pin,
+		Incomplete: msg.Incomplete,
 	}
 	if msg.Model != "" {
 		metadata.Model = &msg.Model
@@ -161,11 +169,15 @@ func readMessage(sessionPath, msgID string) (*Message, error) {
 	}
 
 	msg := &Message{
-		ID:        msgID,
-		Role:      metadata.Role,
-		Content:   content,
-		Timestamp: metadata.Timestamp,
-		Revision:  metadata.Revision,
+		ID:         msgID,
+		Role:       metadata.Role,
+		Content:    content,
+		Timestamp:  metadata.Timestamp,
+		Revision:   metadata.Revision,
+		Origin:     metadata.Origin,
+		Window:     metadata.Window,
+		Pin:        metadata.Pin,
+		Incomplete: metadata.Incomplete,
 	}
 
 	if metadata.Model != nil {

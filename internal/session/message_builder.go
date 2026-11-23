@@ -124,6 +124,6 @@ func CreateCachedMessageBuilderForSession(ctx context.Context, sess *Session) (f
 		if sess.Head == nil {
 			return snapshot.buildTypedMessages(ctx, path)
 		}
-		return snapshot.buildTypedMessagesThrough(ctx, sess.Path, *sess.Head)
+		return snapshot.buildTypedMessagesThrough(ctx, sess.Path, *sess.Head, nil)
 	}, nil
 }

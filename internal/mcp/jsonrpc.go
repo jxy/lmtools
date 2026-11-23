@@ -126,6 +126,13 @@ func newErrorResponse(id json.RawMessage, code int, text string) *message {
 // server that reformats them still matches; a string id and a number id
 // with the same digits stay distinct, as JSON-RPC says they are.
 func idKey(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && raw[0] == '"' {
+		var id string
+		if json.Unmarshal(raw, &id) == nil {
+			return strconv.Quote(id)
+		}
+	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, raw); err != nil {
 		return string(raw)

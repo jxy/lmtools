@@ -38,6 +38,13 @@ func (n *StdNotifier) BeginTurn() { n.response = 0 }
 
 func (n *StdNotifier) SetUsageEnabled(enabled bool) { n.hideUsage = !enabled }
 
+// ReportCheckpointUsage keeps maintenance inference out of user-response numbering.
+func (n *StdNotifier) ReportCheckpointUsage(u *core.Usage) {
+	if !n.hideUsage && u != nil {
+		n.Promptf("Checkpoint tokens: %s\n", u.DisplaySummary())
+	}
+}
+
 // SetElapsedSource makes the usage line report the time from the request to
 // the response's end, as source measures it.
 func (n *StdNotifier) SetElapsedSource(source func() time.Duration) { n.elapsed = source }

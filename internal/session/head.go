@@ -302,10 +302,17 @@ func BuildMessagesForSession(ctx context.Context, sess *Session) ([]core.TypedMe
 	if sess.Head == nil {
 		return BuildMessagesWithToolInteractions(ctx, sess.Path)
 	}
+	return buildPinnedMessages(ctx, sess, nil)
+}
+
+func buildPinnedMessages(ctx context.Context, sess *Session, provenance *[]ContextRef) ([]core.TypedMessage, error) {
 	var messages []core.TypedMessage
 	err := readThroughHead(ctx, DefaultManager(), sess.Path, sess.Head, func(refs []lineageMessageRef, _ *MessageRef) error {
 		var err error
 		messages, err = buildTypedMessagesFromLineageRefs(ctx, refs)
+		if err == nil && provenance != nil {
+			*provenance = contextRefs(refs, messages)
+		}
 		return err
 	})
 	return messages, err

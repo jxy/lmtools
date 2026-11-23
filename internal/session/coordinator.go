@@ -38,6 +38,7 @@ func PrepareRequest(ctx context.Context, cfg core.RequestOptions, notifier core.
 // RequestPlan contains the messages for a provider request plus the deferred
 // session writes that should run only after the provider response succeeds.
 type RequestPlan struct {
+	Refs            []ContextRef
 	Messages        []core.TypedMessage
 	HasPendingTools bool
 	commit          func(context.Context) (*Session, error)
@@ -157,9 +158,10 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 		return nil, err
 	}
 	var (
-		pending  pendingToolResolution
-		decision ResumeForkDecision
-		messages []core.TypedMessage
+		pending    pendingToolResolution
+		decision   ResumeForkDecision
+		messages   []core.TypedMessage
+		sourceRefs []ContextRef
 	)
 	err := withTreeLock(ctx, sess.Path, func() error {
 		refs, pinned, err := lineageThroughHeadLocked(DefaultManager(), sess.Path, head)
@@ -180,11 +182,15 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 		if messages, err = buildTypedMessagesFromLineageRefs(ctx, refs); err != nil {
 			return errors.WrapError("build session messages", err)
 		}
+		if c.cfg.Context.Enabled() {
+			sourceRefs = contextRefs(refs, messages)
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	sourceRefs = plannedContextRefs(sourceRefs, messages, decision)
 	messages = applyPlannedSystemDecision(messages, decision)
 	messages = appendPendingToolPreviewResults(messages, pending)
 	messages = c.appendPlannedDeveloperMessage(messages)
@@ -193,6 +199,7 @@ func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, h
 	return &RequestPlan{
 		Messages:        messages,
 		HasPendingTools: pending.HasPending,
+		Refs:            sourceRefs,
 		commit: func(ctx context.Context) (*Session, error) {
 			return c.commitResume(ctx, sess, decision, inputStr, isRegeneration)
 		},
@@ -206,6 +213,12 @@ func (c *requestPreparer) commitResume(ctx context.Context, sess *Session, decis
 	if err != nil {
 		return nil, err
 	}
+	return c.saveResumedInput(ctx, committed, forked, inputStr, isRegeneration)
+}
+
+// saveResumedInput saves the user turn in the session a resume continues in,
+// which is a new fork when forked is true.
+func (c *requestPreparer) saveResumedInput(ctx context.Context, committed *Session, forked bool, inputStr string, isRegeneration bool) (*Session, error) {
 	var created []Session
 	if forked {
 		created = append(created, *committed)
@@ -222,7 +235,7 @@ func (c *requestPreparer) commitResume(ctx context.Context, sess *Session, decis
 }
 
 func (c *requestPreparer) prepareMessageResumeRequest(ctx context.Context, resumeRef, inputStr string, isRegeneration bool) (*RequestPlan, error) {
-	request, err := buildBranchRequestMessages(ctx, resumeRef)
+	request, err := buildBranchRequestMessages(ctx, resumeRef, c.cfg.Context.Enabled())
 	if err != nil {
 		return nil, err
 	}
@@ -234,13 +247,18 @@ func (c *requestPreparer) prepareMessageResumeRequest(ctx context.Context, resum
 
 	return &RequestPlan{
 		Messages: messages,
+		Refs:     plannedContextRefs(request.refs, request.messages, decision),
 		commit: func(ctx context.Context) (*Session, error) {
 			if decision.ShouldFork {
-				// The fork copies the lineage through the anchor under the
+				// The fork copies the lineage this request carries under the
 				// new prompt, so no branch is made: it would stay empty.
-				return c.commitResume(ctx, &Session{Path: request.path, Head: request.head}, decision, inputStr, isRegeneration)
+				fork, err := forkBranchForSystem(ctx, request, decision.NewSystem)
+				if err != nil {
+					return nil, err
+				}
+				return c.saveResumedInput(ctx, fork, true, inputStr, isRegeneration)
 			}
-			branch, err := c.commitBranch(ctx, resumeRef, "create branch", request.head)
+			branch, err := c.commitBranch(ctx, "create branch", request)
 			if err != nil {
 				return nil, err
 			}
@@ -255,18 +273,18 @@ func (c *requestPreparer) prepareMessageResumeRequest(ctx context.Context, resum
 }
 
 func (c *requestPreparer) prepareBranchRequest(ctx context.Context, branchRef, inputStr string, isRegeneration bool) (*RequestPlan, error) {
-	request, err := buildBranchRequestMessages(ctx, branchRef)
+	request, err := buildBranchRequestMessages(ctx, branchRef, c.cfg.Context.Enabled())
 	if err != nil {
 		return nil, err
 	}
-	head := request.head
 	messages := c.appendPlannedDeveloperMessage(request.messages)
 	messages = appendPlannedUserMessage(messages, inputStr, c.cfg.Images, isRegeneration)
 
 	return &RequestPlan{
 		Messages: messages,
+		Refs:     request.refs,
 		commit: func(ctx context.Context) (*Session, error) {
-			sess, err := c.commitBranch(ctx, branchRef, "create branch", head)
+			sess, err := c.commitBranch(ctx, "create branch", request)
 			if err != nil {
 				return nil, err
 			}
@@ -279,19 +297,30 @@ func (c *requestPreparer) prepareBranchRequest(ctx context.Context, branchRef, i
 	}, nil
 }
 
-// commitBranch creates the branch a plan was prepared for and pins head, the
-// last message of the lineage the plan's request carries, on the branch.
-func (c *requestPreparer) commitBranch(ctx context.Context, branchRef, wrap string, head *MessageRef) (*Session, error) {
-	sessionPath, messageID := ParseMessageID(branchRef)
-	siblingPath, err := CreateSibling(ctx, sessionPath, messageID)
-	if err != nil {
+// commitBranch creates the branch a plan was prepared for and pins the head
+// of the lineage the plan's request carries on the branch. It fails when that
+// lineage, read again, holds other messages than the request carried. The
+// check and the branch's creation share one hold of the tree's lock, and the
+// branch records the role its anchor had in the request, so the branch keeps
+// that lineage however the anchor changes afterwards. The branch keeps the
+// notebook binding of the message the request named.
+func (c *requestPreparer) commitBranch(ctx context.Context, wrap string, request branchRequest) (*Session, error) {
+	var siblingPath string
+	if err := withTreeLock(ctx, request.path, func() error {
+		if _, err := plannedBranchLocked(DefaultManager(), request); err != nil {
+			return err
+		}
+		var err error
+		siblingPath, err = createBranchLocked(request.path, request.anchorID, request.anchorRole, request.source)
+		return err
+	}); err != nil {
 		return nil, errors.WrapError(wrap, err)
 	}
 	sess, err := LoadSession(siblingPath)
 	if err != nil {
-		return failCommit(err, nil, 0, Session{Path: siblingPath, Head: head})
+		return failCommit(err, nil, 0, Session{Path: siblingPath, Head: request.head})
 	}
-	sess.Head = head
+	sess.Head = request.head
 	return sess, nil
 }
 

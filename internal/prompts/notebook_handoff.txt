@@ -1,0 +1,5 @@
+Prepare this project's notebook for a colleague starting a fresh session with only those notes. Use the notebook tools to inspect existing entries, then publish the updates that the evidence supports. Make a separate note for each subject that can change independently. A useful title and one short catalog description should let a reader find the right note.
+
+For each active decision or procedure, preserve the exact applicable values, identifiers, units, exceptions and rationale. Record historical versions when a later task could depend on them. Distinguish user corrections, rejected proposals, confirmed tool results and outstanding work. Recover missing specifics from the current artifact or original history. Cite the relevant committed history references or exact source record IDs. Use the existing note revision when updating. Keep complete applicable facts, remove duplicated prose, and do not guess at missing evidence.
+
+Verify that the writes succeeded, then briefly name the notes changed and any unresolved gaps.

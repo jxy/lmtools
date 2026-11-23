@@ -411,13 +411,9 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 	// Run after terminal/host cleanup, but before closing the selected stream.
 	// The caller may have a redirected stderr and must not report this again.
 	defer func() { retErr = reportError(notifier, retErr) }()
-	if input.terminal && len(cfg.MCPServers) > 0 {
-		notifier.Infof("Connecting %d MCP server(s)...", len(cfg.MCPServers))
-	}
-
 	// The servers' tools are applied to the options once; each turn takes
 	// a copy of the result.
-	host, err := connectMCPServers(ctx, cfg, &opts, notifier)
+	host, err := connectMCPServers(ctx, cfg, &opts, notifier, input.terminal)
 	if err != nil {
 		return err
 	}
