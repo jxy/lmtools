@@ -12,7 +12,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
 	"lmtools/internal/notebook"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"math"
 	"strings"
 	"unicode/utf8"

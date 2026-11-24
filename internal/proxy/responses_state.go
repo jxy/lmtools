@@ -7,7 +7,7 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"os"
 	"path/filepath"
 	"strings"

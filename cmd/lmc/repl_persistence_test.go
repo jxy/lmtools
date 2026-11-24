@@ -6,7 +6,7 @@ import (
 	"io"
 	"lmtools/internal/core"
 	"lmtools/internal/mockserver"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/ui"
 	"net/http"
 	"os"

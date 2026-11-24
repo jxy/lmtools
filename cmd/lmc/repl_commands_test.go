@@ -10,7 +10,7 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/mockserver"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
 	"net/http"

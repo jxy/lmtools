@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"regexp"
 	"slices"
 	"strconv"

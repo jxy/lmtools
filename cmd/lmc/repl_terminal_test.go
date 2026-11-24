@@ -5,8 +5,8 @@ package main
 import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/ptytest"
-	"lmtools/internal/session"
 	"os"
 	"strings"
 	"syscall"

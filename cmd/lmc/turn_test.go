@@ -10,7 +10,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/mockserver"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"net/http"
 	"net/http/httptest"
 	"os"

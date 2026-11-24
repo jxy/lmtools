@@ -9,7 +9,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/ui/tools"
 	"lmtools/internal/workingcontext"
 	"os"

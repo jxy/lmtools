@@ -5,7 +5,7 @@ package main
 import (
 	"encoding/json"
 	"lmtools/internal/mockserver"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"os"
 	"path/filepath"
 	"strings"

@@ -9,7 +9,7 @@ import (
 	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"math"
 	"os"
 	"path/filepath"

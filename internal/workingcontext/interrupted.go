@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 )
 
 // Preserve the identity of the latest exchange whose answer was interrupted.

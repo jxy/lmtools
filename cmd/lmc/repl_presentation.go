@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/providers"
-	"lmtools/internal/session"
 	"os"
 	"strings"
 )

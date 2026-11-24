@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/workingcontext"
 	"strconv"
 	"strings"

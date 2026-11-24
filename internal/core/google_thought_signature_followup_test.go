@@ -7,7 +7,7 @@ import (
 	"io"
 	"lmtools/internal/apifixtures"
 	"lmtools/internal/core"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"net/http"
 	"os"
 	"path/filepath"

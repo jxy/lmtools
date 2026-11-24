@@ -5,7 +5,7 @@ import (
 	"io"
 	"lmtools/internal/config"
 	"lmtools/internal/core"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"net/http"
 	"net/http/httptest"
 	"strings"

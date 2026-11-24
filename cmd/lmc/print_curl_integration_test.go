@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"lmtools/internal/core"
 	"lmtools/internal/mockserver"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"os"
 	"path/filepath"
 	"reflect"

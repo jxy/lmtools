@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"lmtools/internal/session"
+	"lmtools/internal/filelock"
 	"os"
 	"strings"
 	"time"
@@ -44,7 +44,7 @@ func (s Store) withLock(fn func() error) error {
 	if timeout == 0 {
 		timeout = defaultLockTimeout
 	}
-	return session.WithSessionLock(s.CachePath, timeout, fn)
+	return filelock.With(context.Background(), s.CachePath, timeout, fn)
 }
 
 func (s Store) cachedClient(c *cacheFile) Client {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"net/http"
 	"strings"
 	"time"

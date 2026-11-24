@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"lmtools/internal/core"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"strconv"
 	"strings"
 	"unicode"

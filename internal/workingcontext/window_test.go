@@ -8,7 +8,7 @@ import (
 	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"net/http"
 	"slices"
 	"strings"

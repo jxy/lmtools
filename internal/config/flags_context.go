@@ -7,7 +7,7 @@ import (
 	"lmtools/internal/contextcfg"
 	"lmtools/internal/mcp"
 	"lmtools/internal/notebook"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"os"
 	"os/exec"
 	"path/filepath"

@@ -8,7 +8,7 @@ import (
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
 	"os"

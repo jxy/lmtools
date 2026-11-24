@@ -1,0 +1,327 @@
+package oldsession
+
+import (
+	"encoding/json"
+	"lmtools/internal/core"
+	"lmtools/internal/errors"
+	"os"
+)
+
+const messageBlocksVersion = 1
+
+type storedMessageBlocks struct {
+	Version int           `json:"version"`
+	Role    core.Role     `json:"role"`
+	Blocks  []storedBlock `json:"blocks"`
+}
+
+type storedBlock struct {
+	Type             string          `json:"type"`
+	Text             string          `json:"text,omitempty"`
+	Provider         string          `json:"provider,omitempty"`
+	ReasoningType    string          `json:"reasoning_type,omitempty"`
+	ID               string          `json:"id,omitempty"`
+	Status           string          `json:"status,omitempty"`
+	Summary          json.RawMessage `json:"summary,omitempty"`
+	Content          json.RawMessage `json:"content,omitempty"`
+	Signature        string          `json:"signature,omitempty"`
+	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	Raw              json.RawMessage `json:"raw,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	ToolType         string          `json:"tool_type,omitempty"`
+	Namespace        string          `json:"namespace,omitempty"`
+	OriginalName     string          `json:"original_name,omitempty"`
+	Input            json.RawMessage `json:"input,omitempty"`
+	InputString      string          `json:"input_string,omitempty"`
+	ToolUseID        string          `json:"tool_use_id,omitempty"`
+	IsError          bool            `json:"is_error,omitempty"`
+	URL              string          `json:"url,omitempty"`
+	Detail           string          `json:"detail,omitempty"`
+	FileID           string          `json:"file_id,omitempty"`
+	AudioID          string          `json:"audio_id,omitempty"`
+	Data             string          `json:"data,omitempty"`
+	Format           string          `json:"format,omitempty"`
+	Duration         int             `json:"duration,omitempty"`
+	// Images are the images a tool_result block carries. They are stored
+	// here and nowhere else: .tools.json keeps the result's text, so the
+	// bytes a view_image call read are held once per message.
+	Images []storedImage `json:"images,omitempty"`
+}
+
+// storedImage is an image nested in a stored tool_result block, the same
+// three fields a top-level stored image block carries.
+type storedImage struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+	Name   string `json:"name,omitempty"`
+}
+
+func storedImagesFromCore(images []core.ImageBlock) []storedImage {
+	if len(images) == 0 {
+		return nil
+	}
+	stored := make([]storedImage, 0, len(images))
+	for _, image := range images {
+		stored = append(stored, storedImage{URL: image.URL, Detail: image.Detail, Name: image.Name})
+	}
+	return stored
+}
+
+func coreImagesFromStored(images []storedImage) []core.ImageBlock {
+	if len(images) == 0 {
+		return nil
+	}
+	blocks := make([]core.ImageBlock, 0, len(images))
+	for _, image := range images {
+		blocks = append(blocks, core.ImageBlock{URL: image.URL, Detail: image.Detail, Name: image.Name})
+	}
+	return blocks
+}
+
+func marshalMessageBlocks(msg Message, toolInteraction *core.ToolInteraction) ([]byte, error) {
+	blocks := blocksFromMessageProjection(msg, toolInteraction)
+	return marshalExplicitMessageBlocks(msg.Role, blocks)
+}
+
+func marshalExplicitMessageBlocks(role core.Role, blocks []core.Block) ([]byte, error) {
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	stored, err := storedBlocksFromCore(blocks)
+	if err != nil {
+		return nil, err
+	}
+	payload := storedMessageBlocks{
+		Version: messageBlocksVersion,
+		Role:    role,
+		Blocks:  stored,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return nil, errors.WrapError("marshal message blocks", err)
+	}
+	return data, nil
+}
+
+func blocksFromMessageProjection(msg Message, toolInteraction *core.ToolInteraction) []core.Block {
+	blocks := make([]core.Block, 0)
+	if msg.ThoughtSignature != "" {
+		blocks = append(blocks, core.ReasoningBlock{
+			Provider:  "google",
+			Type:      "thought_signature",
+			Signature: msg.ThoughtSignature,
+		})
+	}
+	if toolInteraction == nil {
+		if msg.Content != "" {
+			blocks = append(blocks, core.TextBlock{Text: msg.Content})
+		}
+		return blocks
+	}
+
+	// Results without calls is the tool-results user message; its content is
+	// the trailing truncation note. New writes persist explicit blocks, so this
+	// inference only reconstructs legacy messages stored without .blocks.json.
+	if len(toolInteraction.Results) > 0 && len(toolInteraction.Calls) == 0 {
+		return append(blocks, core.ToolResultsMessageBlocks(toolInteraction.Results, msg.Content, nil)...)
+	}
+	if msg.Content != "" {
+		blocks = append(blocks, core.TextBlock{Text: msg.Content})
+	}
+	for _, call := range toolInteraction.Calls {
+		if call.ThoughtSignature != "" {
+			blocks = append(blocks, core.ReasoningBlock{
+				Provider:  "google",
+				Type:      "thought_signature",
+				Signature: call.ThoughtSignature,
+			})
+		}
+		blocks = append(blocks, core.ToolUseBlock{
+			ID:           call.ID,
+			Type:         call.Type,
+			Namespace:    call.Namespace,
+			OriginalName: call.OriginalName,
+			Name:         call.Name,
+			Input:        append(json.RawMessage(nil), call.Args...),
+			InputString:  call.Input,
+		})
+	}
+	for _, result := range toolInteraction.Results {
+		blocks = append(blocks, core.ToolResultBlockFromResult(result, ""))
+	}
+	return blocks
+}
+
+func storedBlocksFromCore(blocks []core.Block) ([]storedBlock, error) {
+	stored := make([]storedBlock, 0, len(blocks))
+	for _, block := range blocks {
+		switch value := block.(type) {
+		case core.TextBlock:
+			stored = append(stored, storedBlock{Type: "text", Text: value.Text})
+		case core.ReasoningBlock:
+			stored = append(stored, storedBlock{
+				Type:             "reasoning",
+				Provider:         value.Provider,
+				ReasoningType:    value.Type,
+				ID:               value.ID,
+				Status:           value.Status,
+				Text:             value.Text,
+				Summary:          append(json.RawMessage(nil), value.Summary...),
+				Content:          append(json.RawMessage(nil), value.Content...),
+				Signature:        value.Signature,
+				EncryptedContent: value.EncryptedContent,
+				Raw:              append(json.RawMessage(nil), value.Raw...),
+			})
+		case core.ToolUseBlock:
+			stored = append(stored, storedBlock{
+				Type:         "tool_use",
+				ID:           value.ID,
+				Name:         value.Name,
+				ToolType:     value.Type,
+				Namespace:    value.Namespace,
+				OriginalName: value.OriginalName,
+				Input:        append(json.RawMessage(nil), value.Input...),
+				InputString:  value.InputString,
+			})
+		case core.ToolResultBlock:
+			stored = append(stored, storedBlock{
+				Type:      "tool_result",
+				ToolUseID: value.ToolUseID,
+				ToolType:  value.Type,
+				Namespace: value.Namespace,
+				Name:      value.Name,
+				Text:      value.Content,
+				IsError:   value.IsError,
+				Images:    storedImagesFromCore(value.Images),
+			})
+		case core.ImageBlock:
+			stored = append(stored, storedBlock{Type: "image", URL: value.URL, Detail: value.Detail, Name: value.Name})
+		case core.AudioBlock:
+			stored = append(stored, storedBlock{
+				Type:     "audio",
+				AudioID:  value.ID,
+				Data:     value.Data,
+				Format:   value.Format,
+				URL:      value.URL,
+				Duration: value.Duration,
+			})
+		case core.FileBlock:
+			stored = append(stored, storedBlock{Type: "file", FileID: value.FileID})
+		}
+	}
+	return stored, nil
+}
+
+func loadMessageBlocks(sessionPath, msgID string) ([]core.Block, bool, error) {
+	path := buildMessageFilePaths(sessionPath, msgID).BlocksPath
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, errors.WrapError("read message blocks", err)
+	}
+	var payload storedMessageBlocks
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, true, errors.WrapError("unmarshal message blocks", err)
+	}
+	blocks := make([]core.Block, 0, len(payload.Blocks))
+	for _, block := range payload.Blocks {
+		switch block.Type {
+		case "text":
+			blocks = append(blocks, core.TextBlock{Text: block.Text})
+		case "reasoning":
+			blocks = append(blocks, core.ReasoningBlock{
+				Provider:         block.Provider,
+				Type:             block.ReasoningType,
+				ID:               block.ID,
+				Status:           block.Status,
+				Text:             block.Text,
+				Summary:          append(json.RawMessage(nil), block.Summary...),
+				Content:          append(json.RawMessage(nil), block.Content...),
+				Signature:        block.Signature,
+				EncryptedContent: block.EncryptedContent,
+				Raw:              append(json.RawMessage(nil), block.Raw...),
+			})
+		case "tool_use":
+			blocks = append(blocks, core.ToolUseBlock{
+				ID:           block.ID,
+				Type:         block.ToolType,
+				Namespace:    block.Namespace,
+				OriginalName: block.OriginalName,
+				Name:         block.Name,
+				Input:        append(json.RawMessage(nil), block.Input...),
+				InputString:  block.InputString,
+			})
+		case "tool_result":
+			blocks = append(blocks, core.ToolResultBlock{
+				ToolUseID: block.ToolUseID,
+				Type:      block.ToolType,
+				Namespace: block.Namespace,
+				Name:      block.Name,
+				Content:   block.Text,
+				IsError:   block.IsError,
+				Images:    coreImagesFromStored(block.Images),
+			})
+		case "image":
+			blocks = append(blocks, core.ImageBlock{URL: block.URL, Detail: block.Detail, Name: block.Name})
+		case "audio":
+			blocks = append(blocks, core.AudioBlock{
+				ID:       block.AudioID,
+				Data:     block.Data,
+				Format:   block.Format,
+				URL:      block.URL,
+				Duration: block.Duration,
+			})
+		case "file":
+			blocks = append(blocks, core.FileBlock{FileID: block.FileID})
+		}
+	}
+	return normalizeToolResultsBlockOrder(blocks), true, nil
+}
+
+// normalizeToolResultsBlockOrder puts a stored tool-results message back into
+// the canonical layout core.ToolResultsMessageBlocks defines: the tool_result
+// blocks in order, then the trailing truncation note. Binaries before that
+// constructor existed wrote the note first, and replaying `[text, tool_result]`
+// verbatim renders an ordinary user message between the assistant tool_calls
+// turn and the tool messages answering it — which validateOpenAIChatToolSequence
+// rejects outright and Anthropic will not accept either, so those sessions can
+// never be resumed. AGENTS.md names one constructor for this message; the read
+// path agrees with it here rather than growing a second ordering rule.
+//
+// Only a message that already looks like that one is touched: it must carry at
+// least one tool_result block, no tool_use block (that is the assistant turn),
+// and at least one text block ahead of its last result. Everything that is not
+// a text block keeps its position, so a leading reasoning sidecar stays leading.
+func normalizeToolResultsBlockOrder(blocks []core.Block) []core.Block {
+	firstText, lastResult := -1, -1
+	for i, block := range blocks {
+		switch block.(type) {
+		case core.ToolUseBlock:
+			return blocks
+		case core.ToolResultBlock:
+			lastResult = i
+		case core.TextBlock:
+			if firstText == -1 {
+				firstText = i
+			}
+		}
+	}
+	if firstText == -1 || lastResult == -1 || firstText > lastResult {
+		return blocks
+	}
+
+	ordered := make([]core.Block, 0, len(blocks))
+	for _, block := range blocks {
+		if _, isText := block.(core.TextBlock); !isText {
+			ordered = append(ordered, block)
+		}
+	}
+	for _, block := range blocks {
+		if _, isText := block.(core.TextBlock); isText {
+			ordered = append(ordered, block)
+		}
+	}
+	return ordered
+}

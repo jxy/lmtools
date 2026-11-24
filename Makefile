@@ -52,7 +52,7 @@ test-all: test-unit test-integration test-e2e
 
 # Offline notebook and session context regressions.
 test-context:
-	go test -race ./internal/workingcontext ./internal/notebook ./internal/session ./internal/config ./cmd/notebook ./cmd/lmc
+	go test -race ./internal/workingcontext ./internal/notebook ./internal/oldsession ./internal/config ./cmd/notebook ./cmd/lmc
 	go test -race -tags=integration ./cmd/lmc -run '^TestContextNotebook'
 
 # Run tests with coverage for all packages

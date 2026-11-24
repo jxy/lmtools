@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"lmtools/internal/core"
-	"lmtools/internal/session"
+	session "lmtools/internal/oldsession"
 	"net/http"
 	"net/http/httptest"
 	"os"
