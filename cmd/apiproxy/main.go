@@ -164,33 +164,11 @@ func registerFlags(fs *flag.FlagSet, c *commandLine) {
 	fs.BoolVar(&c.showVersion, "version", false, "Print version information and exit")
 }
 
-// removedFlags answers the flags apiproxy replaced with what to use instead.
-var removedFlags = providerconfig.RemovedFlags{
-	"openai-responses": "apiproxy forwards /v1/responses to the provider's Responses API by default, and -chat-completions converts it",
-}
-
-// parseCommandLine parses args on fs. A removed flag is an error that names
-// its replacement.
-func parseCommandLine(fs *flag.FlagSet, args []string) (commandLine, error) {
-	var cl commandLine
-	registerFlags(fs, &cl)
-	removedFlags.Register(fs)
-	if err := fs.Parse(args); err != nil {
-		return cl, err
-	}
-	return cl, removedFlags.Err(fs)
-}
-
 func main() {
-	// Set custom usage function
 	flag.Usage = func() { printUsage(os.Stderr) }
-	// Parse command-line flags; flag.CommandLine exits on its own errors, so
-	// what returns is a removed flag.
-	cl, err := parseCommandLine(flag.CommandLine, os.Args[1:])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
+	var cl commandLine
+	registerFlags(flag.CommandLine, &cl)
+	flag.Parse()
 	if cl.showVersion {
 		fmt.Println(version.String("apiproxy"))
 		return

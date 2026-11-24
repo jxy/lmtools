@@ -1,7 +1,6 @@
 package providerconfig
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"lmtools/internal/auth"
@@ -51,38 +50,6 @@ func RegisterFlags(fs *flag.FlagSet, opts *Options, defaults Defaults) {
 	fs.StringVar(&opts.ModelsURL, "models-url", "", "URL of the provider's model list, in place of the one -provider-url implies; for an ALCF cluster, https://inference-api.alcf.anl.gov/resource_server/<cluster>/models")
 	fs.BoolVar(&opts.ChatCompletions, "chat-completions", false, "use the provider's chat/completions route instead of its Responses API (/v1/responses), which -provider openai and argo gpt* models use by default")
 	fs.BoolVar(&opts.AnthropicBearer, "anthropic-bearer", false, "with -provider anthropic, also send the API key as Authorization: Bearer, which the ALCF inference gateway requires")
-}
-
-// RemovedFlags maps the name of a bool flag a binary no longer has to what
-// replaced it, so a script that still passes one is told what to use instead
-// of "flag provided but not defined". Register them on the set being parsed,
-// never on one printed as usage, and check Err after parsing.
-type RemovedFlags map[string]string
-
-// removedFlag stands in for a removed bool flag. It takes no value, like the
-// flag it replaces, so -name and -name=false both parse and Err answers them.
-type removedFlag struct{}
-
-func (removedFlag) String() string   { return "" }
-func (removedFlag) Set(string) error { return nil }
-func (removedFlag) IsBoolFlag() bool { return true }
-
-func (r RemovedFlags) Register(fs *flag.FlagSet) {
-	for name := range r {
-		fs.Var(removedFlag{}, name, "")
-	}
-}
-
-// Err names every removed flag the parsed command line gave, with its
-// replacement.
-func (r RemovedFlags) Err(fs *flag.FlagSet) error {
-	var errs []error
-	fs.Visit(func(f *flag.Flag) {
-		if replacement, ok := r[f.Name]; ok {
-			errs = append(errs, fmt.Errorf("-%s was removed: %s", f.Name, replacement))
-		}
-	})
-	return errors.Join(errs...)
 }
 
 // ResponsesAPIAvailable reports whether the provider exposes a Responses

@@ -144,26 +144,6 @@ func TestUsageListsEveryFlag(t *testing.T) {
 			t.Errorf("usage lists -%s, which is not a flag", name)
 		}
 	}
-	for name := range removedFlags {
-		if registered[name] {
-			t.Errorf("registerFlags defines the removed flag -%s", name)
-		}
-	}
-}
-
-// -openai-responses forwarded /v1/responses to Argo's Responses API, which is
-// the default now; a script that still passes it is told so.
-func TestRemovedFlagsNameTheirReplacement(t *testing.T) {
-	for _, args := range [][]string{{"-openai-responses"}, {"-openai-responses=false"}} {
-		_, err := parseCommandLine(flag.NewFlagSet("apiproxy", flag.ContinueOnError), args)
-		if err == nil || !strings.Contains(err.Error(), "-openai-responses was removed") || !strings.Contains(err.Error(), "-chat-completions") {
-			t.Fatalf("parseCommandLine(%q) error = %v, want it to name -chat-completions", args, err)
-		}
-	}
-	cl, err := parseCommandLine(flag.NewFlagSet("apiproxy", flag.ContinueOnError), []string{"-chat-completions"})
-	if err != nil || !cl.providerOpts.ChatCompletions {
-		t.Fatalf("parseCommandLine(-chat-completions) = %+v, %v; want ChatCompletions set", cl.providerOpts, err)
-	}
 }
 
 func TestUsageAdvertisesEncryptedReasoningRecovery(t *testing.T) {

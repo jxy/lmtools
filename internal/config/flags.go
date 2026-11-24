@@ -95,18 +95,10 @@ func ParseFlags(args []string) (Config, error) {
 	var cfg Config
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 
-	// Set custom usage function
-	fs.Usage = func() {
-		printUsage()
-	}
-
+	fs.Usage = func() { printUsage(fs) }
 	registerFlags(fs, &cfg)
-	removedFlags.Register(fs)
 
 	if err := fs.Parse(args); err != nil {
-		return cfg, err
-	}
-	if err := removedFlags.Err(fs); err != nil {
 		return cfg, err
 	}
 	if fs.NArg() > 0 {
@@ -245,13 +237,9 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.LogLevel, "log-level", "INFO", "log level (DEBUG, INFO, WARN, ERROR)")
 }
 
-// printUsage prints a custom usage message
-func printUsage() {
-	var cfg Config
-	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+// printUsage prints the usage message, with the flags fs defines.
+func printUsage(fs *flag.FlagSet) {
 	fs.SetOutput(os.Stderr)
-	registerFlags(fs, &cfg)
-
 	fmt.Fprintf(os.Stderr, `Usage: %s [options] < input
 
 lmc is a command-line interface for AI model interactions.
@@ -355,14 +343,6 @@ func UseSystemPrompt(opts core.RequestOptions, settings session.Settings) core.R
 	prompt := session.SystemPrompt(settings, opts)
 	opts.System, opts.EffectiveSystem, opts.SystemExplicitlySet = prompt, prompt, true
 	return opts
-}
-
-// removedFlags answers the mode flags lmc replaced when their modes became
-// the defaults.
-var removedFlags = providerconfig.RemovedFlags{
-	"stream":           "lmc streams by default, and -no-stream waits for the whole answer",
-	"show-thinking":    "lmc shows thinking by default, and -hide-thinking hides it",
-	"openai-responses": "lmc uses the Responses API by default where the provider has one, and -chat-completions uses chat/completions",
 }
 
 // unexpectedArgumentError refuses a word the flag parser could not place. The

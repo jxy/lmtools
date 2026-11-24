@@ -562,36 +562,3 @@ func TestParseFlagsRejectsLeftoverArguments(t *testing.T) {
 		})
 	}
 }
-
-// -stream, -show-thinking, and -openai-responses gave way to -no-stream,
-// -hide-thinking, and -chat-completions when their modes became the
-// defaults. A script that still passes one, either way round, is told what
-// replaced it, and the help lists only the new flags.
-func TestParseFlagsNamesTheReplacementOfARemovedFlag(t *testing.T) {
-	for _, tt := range []struct {
-		args []string
-		want []string
-	}{
-		{[]string{"-stream"}, []string{"-stream was removed", "-no-stream"}},
-		{[]string{"-stream=false"}, []string{"-stream was removed", "-no-stream"}},
-		{[]string{"-show-thinking=false"}, []string{"-show-thinking was removed", "-hide-thinking"}},
-		{[]string{"-openai-responses"}, []string{"-openai-responses was removed", "-chat-completions"}},
-		{[]string{"-stream", "-show-thinking", "-openai-responses=false"}, []string{"-stream was removed", "-show-thinking was removed", "-openai-responses was removed"}},
-		{[]string{"-stream", "false", "-repl"}, []string{"-stream was removed"}},
-	} {
-		_, err := ParseFlags(append([]string{"-argo-user", "u"}, tt.args...))
-		for _, want := range tt.want {
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Fatalf("ParseFlags(%q) error = %v, want one containing %q", tt.args, err, want)
-			}
-		}
-	}
-
-	fs := flag.NewFlagSet("lmc", flag.ContinueOnError)
-	registerFlags(fs, &Config{})
-	for name := range removedFlags {
-		if fs.Lookup(name) != nil {
-			t.Errorf("the help lists the removed flag -%s", name)
-		}
-	}
-}
