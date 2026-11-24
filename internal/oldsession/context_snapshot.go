@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"os"
@@ -15,15 +16,20 @@ import (
 	"time"
 )
 
-// ContextRef identifies a stored message and the original source of a fork's copy.
+// ContextRef identifies a stored message and describes it for the context
+// engine, which reads the embedded contextstate.Ref.
 type ContextRef struct {
 	MessageRef
-	Source     string
-	At         time.Time
-	Role       core.Role
-	Window     *WindowReceipt
-	Pin        *PinChange
-	Incomplete bool
+	contextstate.Ref
+}
+
+// EngineRefs returns the part of each ref the context engine reads.
+func EngineRefs(refs []ContextRef) []contextstate.Ref {
+	out := make([]contextstate.Ref, len(refs))
+	for i, ref := range refs {
+		out[i] = ref.Ref
+	}
+	return out
 }
 
 func sourceRef(ref lineageMessageRef, msg core.TypedMessage) ContextRef {
@@ -38,7 +44,10 @@ func sourceRef(ref lineageMessageRef, msg core.TypedMessage) ContextRef {
 	} else if source == "" {
 		source = legacySourceID(ref, msg)
 	}
-	return ContextRef{MessageRef: MessageRef{Path: ref.path, ID: m.ID, Revision: m.Revision}, Source: source, At: m.Timestamp, Role: m.Role, Window: m.Window, Pin: m.Pin, Incomplete: m.Incomplete}
+	return ContextRef{
+		MessageRef: MessageRef{Path: ref.path, ID: m.ID, Revision: m.Revision},
+		Ref:        contextstate.Ref{Source: source, At: m.Timestamp, Role: m.Role, Receipt: m.Window, Pin: m.Pin, Incomplete: m.Incomplete},
+	}
 }
 
 // Legacy records have no revision. Name them by their path within their
@@ -93,54 +102,16 @@ func CheckContextHead(ctx context.Context, s *Session) error {
 
 // A receipt belongs to the assistant message produced under a checkpoint.
 // Computing a checkpoint for a shared ancestor does not activate it on a sibling.
-type WindowReceipt struct {
-	Count     int    `json:"count"`
-	Prefix    string `json:"prefix,omitempty"`
-	Tag       string `json:"tag,omitempty"`
-	PinDigest string `json:"pin_digest,omitempty"`
-	Deferred  string `json:"deferred_checkpoint,omitempty"`
-	// CatalogSent and CatalogOmitted record whether a window starting at
-	// the beginning of the branch carried the notebook catalog or left it
-	// out. Later requests in that window make the same choice, which keeps
-	// their prefix stable.
-	CatalogSent    bool `json:"catalog_sent,omitempty"`
-	CatalogOmitted bool `json:"catalog_omitted,omitempty"`
-}
+// WindowReceipt and Checkpoint are the context engine's records, which this
+// package stores.
+type (
+	WindowReceipt = contextstate.Receipt
+	Checkpoint    = contextstate.Checkpoint
+)
 
-type Checkpoint struct {
-	Tag string `json:"-"`
-	// Window and Threshold are the budget the handoff was written for. Only
-	// a different budget makes a cut rebuild from the original records.
-	Window      int           `json:"window,omitempty"`
-	Threshold   int           `json:"threshold,omitempty"`
-	Prefix      string        `json:"prefix"`
-	Count       int           `json:"count"`
-	Handoff     string        `json:"handoff"`
-	Tail        string        `json:"tail,omitempty"`
-	Catalog     string        `json:"catalog,omitempty"`
-	Continue    bool          `json:"continue,omitempty"`
-	Pins        []StandingPin `json:"pins"`
-	PinDigest   string        `json:"pin_digest,omitempty"`
-	Fallback    bool          `json:"archive_fallback,omitempty"`
-	Interrupted string        `json:"interrupted_work,omitempty"`
-	// PagedResult names the original result message when its text cannot
-	// fit in one window. Block indices locate each result within it.
-	PagedResult string `json:"paged_result,omitempty"`
-}
-
-// PrefixKeys incorporates the source identity and ordering. A sibling that
-// replaces an earlier turn cannot reuse a handoff from the other side.
+// PrefixKeys identifies each prefix of the history refs describe.
 func PrefixKeys(refs []ContextRef) []string {
-	keys := make([]string, len(refs))
-	h := sha256.New()
-	for i, r := range refs {
-		fmt.Fprintln(h, r.Source)
-		if r.Pin != nil {
-			_ = json.NewEncoder(h).Encode(r.Pin)
-		}
-		keys[i] = hex.EncodeToString(h.Sum(nil))
-	}
-	return keys
+	return contextstate.PrefixKeys(EngineRefs(refs))
 }
 
 const checkpointDirectory = ".context"
@@ -180,7 +151,7 @@ func ActiveCheckpoint(ctx context.Context, refs []ContextRef, keys []string) (Ch
 		if refs[i].Role != core.RoleAssistant {
 			continue
 		}
-		w := refs[i].Window
+		w := refs[i].Receipt
 		if w == nil || w.Count == 0 {
 			return Checkpoint{}, nil
 		}

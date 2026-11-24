@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"lmtools/internal/contextcfg"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
 	session "lmtools/internal/oldsession"
@@ -29,6 +30,7 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 			var s *session.Session
 			var raw []core.TypedMessage
 			var refs []session.ContextRef
+			var memory []contextstate.Ref
 			if mode != "memory" {
 				old := session.GetSessionsDir()
 				session.SetSessionsDir(t.TempDir())
@@ -43,7 +45,7 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 				t.Helper()
 				if s == nil {
 					raw = append(raw, core.NewTextMessage("user", question), core.NewTextMessage("assistant", answer))
-					refs = MemoryRefs(raw)
+					memory = MemoryRefs(raw)
 					return
 				}
 				if _, err := session.AppendMessageWithToolInteraction(ctx, s, session.Message{Role: core.RoleUser, Content: question}, nil, nil); err != nil {
@@ -69,7 +71,11 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 			}
 			projectNext := func(engine *Engine) {
 				t.Helper()
-				_, err := engine.Project(ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), refs, s, false)
+				engineRefs, transcript := memory, MemoryTranscript(memory)
+				if s != nil {
+					engineRefs, transcript = saved(refs, s)
+				}
+				_, err := engine.Project(ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), engineRefs, transcript, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -144,7 +150,7 @@ func TestAdjustedCheckpointKeepsItsWritingBudget(t *testing.T) {
 		e := testEngine(contextcfg.Handoff)
 		raw := []core.TypedMessage{core.NewTextMessage("user", "VERY-FIRST"), core.NewTextMessage("assistant", "done"), core.NewTextMessage("user", "next"), core.NewTextMessage("assistant", "UNSUMMARIZED "+strings.Repeat("a", 16000)), core.NewTextMessage("user", "continue")}
 		refs := MemoryRefs(raw[:4])
-		cp := session.Checkpoint{Window: e.Binding.Window, Threshold: e.Binding.Threshold(), Count: 2, Prefix: session.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF"}
+		cp := session.Checkpoint{Window: e.Binding.Window, Threshold: e.Binding.Threshold(), Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF"}
 		cp.Tag = derivedCheckpointTag(e.tag(), cp)
 		if view != "" {
 			e.Binding.Notebook, e.Binding.View = "notes", view
@@ -152,7 +158,7 @@ func TestAdjustedCheckpointKeepsItsWritingBudget(t *testing.T) {
 		e.current, e.loaded = cp, true
 		var sources strings.Builder
 		e.Write = func(_ context.Context, _, src string) (string, error) { sources.WriteString(src); return "short", nil }
-		_, err := e.Project(context.Background(), raw, refs, nil, false)
+		_, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 		if err != nil || strings.Contains(sources.String(), "VERY-FIRST") || !strings.Contains(sources.String(), "PRIOR-HANDOFF") || !strings.Contains(sources.String(), "UNSUMMARIZED") {
 			t.Fatalf("view %q restarted or lost a record: %v", view, err)
 		}
@@ -170,7 +176,7 @@ func TestFirstWindowLeavesOutACatalogThatCannotFit(t *testing.T) {
 		var notices []string
 		e.Notice = func(format string, args ...any) { notices = append(notices, fmt.Sprintf(format, args...)) }
 		for i := 0; i < 2; i++ {
-			view, err := e.Project(context.Background(), raw, MemoryRefs(raw), nil, false)
+			view, err := e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 			b, _ := json.Marshal(view)
 			if err != nil || strings.Contains(string(b), "window start") == (catalog == large) || (len(notices) == 1) != (catalog == large) {
 				t.Fatalf("catalog of %d bytes: %v %q", len(catalog), err, notices)
@@ -183,7 +189,7 @@ func TestFirstWindowLeavesOutACatalogThatCannotFit(t *testing.T) {
 	var notices []string
 	e.Notice = func(format string, args ...any) { notices = append(notices, fmt.Sprintf(format, args...)) }
 	huge := []core.TypedMessage{core.NewTextMessage("system", "sys"), core.NewTextMessage("user", strings.Repeat("q", 10000))}
-	if _, err := e.Project(context.Background(), huge, MemoryRefs(huge), nil, false); !exceedsBudget(err) || len(notices) != 0 {
+	if _, err := e.Project(context.Background(), huge, MemoryRefs(huge), MemoryTranscript(MemoryRefs(huge)), false); !exceedsBudget(err) || len(notices) != 0 {
 		t.Fatal(err, notices)
 	}
 }
@@ -196,9 +202,9 @@ func TestToolsViewLeavesOutASavedCatalog(t *testing.T) {
 	for _, view := range []string{"catalog", "tools"} {
 		e := testEngine(contextcfg.Handoff)
 		e.Binding.Notebook, e.Binding.View = "notes", view
-		e.current = session.Checkpoint{Count: 2, Prefix: session.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "OLD-CATALOG"}
+		e.current = session.Checkpoint{Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "OLD-CATALOG"}
 		e.loaded = true
-		visible, err := e.Project(context.Background(), raw, refs, nil, false)
+		visible, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 		b, _ := json.Marshal(visible)
 		if err != nil || !strings.Contains(string(b), "PRIOR-HANDOFF") || strings.Contains(string(b), "OLD-CATALOG") != (view == "catalog") {
 			t.Fatal(view, err)
@@ -223,7 +229,7 @@ func TestLocalHistoryRoutingTimeoutAndRawPages(t *testing.T) {
 	content := strings.Repeat("\x80", 600) + "NEEDLE"
 	raw := []core.TypedMessage{{Role: "assistant", Blocks: []core.Block{core.ToolUseBlock{Name: remote, ID: "1"}}}, {Role: "user", Blocks: []core.Block{core.ToolResultBlock{Name: remote, ToolUseID: "1", Content: content}}}}
 	refs := MemoryRefs(raw)
-	h.History.Bind(raw, refs, 2, nil)
+	h.History.Bind(raw, refs, 2, MemoryTranscript(refs))
 	res, err := h.History.search(ctx, query{Query: "NEEDLE"})
 	if err != nil || len(res.Hits) != 1 || res.Hits[0].Tool != remote || res.Hits[0].Offset != 536 {
 		t.Fatal(res, err)
@@ -238,7 +244,7 @@ func TestLocalHistoryRoutingTimeoutAndRawPages(t *testing.T) {
 	}
 	dir := t.TempDir()
 	head := &session.Session{Path: dir, Head: &session.MessageRef{Path: dir, ID: "0001"}}
-	h.History.Bind(raw, refs, 2, head)
+	h.History.Bind(raw, refs, 2, session.NewTranscript(nil, head))
 	if err := session.WithSessionLock(dir, time.Second, func() error {
 		parent, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
@@ -256,7 +262,7 @@ func TestHistoryMatchAcrossSearchChunkBoundary(t *testing.T) {
 	h := &History{}
 	for _, n := range []int{65532, 65535, 65536, 131071} {
 		raw := []core.TypedMessage{core.NewTextMessage("user", strings.Repeat("a", n)+"K界")}
-		h.Bind(raw, MemoryRefs(raw), 1, nil)
+		h.Bind(raw, MemoryRefs(raw), 1, MemoryTranscript(MemoryRefs(raw)))
 		got, err := h.search(context.Background(), query{Query: "k界", Scope: "all"})
 		if err != nil || len(got.Hits) != 1 || !strings.Contains(got.Hits[0].Snippet, "K界") {
 			t.Fatal(n, got, err)
@@ -295,7 +301,8 @@ func TestSavedAudioUsesDurationOrMediaEstimate(t *testing.T) {
 	}
 	e := testEngine(contextcfg.Full)
 	e.Binding.Window = 4096
-	view, err := e.Project(ctx, raw, refs, s, false)
+	engineRefs, transcript := saved(refs, s)
+	view, err := e.Project(ctx, raw, engineRefs, transcript, false)
 	if err != nil || !reflect.DeepEqual(raw, view) {
 		t.Fatal("audio without a duration failed admission or changed on resume", err)
 	}
@@ -306,7 +313,7 @@ func TestSavedAudioUsesDurationOrMediaEstimate(t *testing.T) {
 		if size(raw[0]) != size(ref) || size(ref) != 14+duration*estimatedAudioTokensPerSecond {
 			t.Errorf("duration %d gave different budgets for the same recording", duration)
 		}
-		_, err := e.Project(ctx, raw, refs, s, false)
+		_, err := e.Project(ctx, raw, engineRefs, transcript, false)
 		if (err != nil) != (duration == 120) {
 			t.Errorf("duration=%d, admission error=%v", duration, err)
 		}
@@ -327,7 +334,7 @@ func TestHistoryDoesNotEchoPendingQuestionOrRevealPrivateBlocks(t *testing.T) {
 		{Role: "user", Blocks: []core.Block{core.ToolResultBlock{ToolUseID: "q", Name: "mcp__history__search", Content: "missing-marker"}}},
 	}
 	refs := MemoryRefs(msgs)
-	h.Bind(msgs, refs, 4, nil)
+	h.Bind(msgs, refs, 4, MemoryTranscript(refs))
 	for _, word := range []string{"missing-marker", "private-system", "private-developer"} {
 		p, err := h.search(context.Background(), query{Query: word})
 		if err != nil || len(p.Hits) != 0 {
@@ -360,13 +367,13 @@ func TestFrozenCatalogAndCheckpointRenderAcrossWires(t *testing.T) {
 	e.Write = func(context.Context, string, string) (string, error) { return "Earlier work.", nil }
 	e.Binding.Initial = "Catalog version 1."
 	raw := []core.TypedMessage{core.NewTextMessage("system", "Stable instructions"), core.NewTextMessage("user", strings.Repeat("z", 4000)), core.NewTextMessage("assistant", "Done."), core.NewTextMessage("user", "Question.")}
-	first, err := e.Project(context.Background(), raw, MemoryRefs(raw[:3]), nil, false)
+	first, err := e.Project(context.Background(), raw, MemoryRefs(raw[:3]), MemoryTranscript(MemoryRefs(raw[:3])), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw = append(raw, core.NewTextMessage("assistant", "answer"), core.NewTextMessage("user", "follow-up"))
 	e.Binding.Trigger = 7000
-	next, err := e.Project(context.Background(), raw, MemoryRefs(raw[:len(raw)-1]), nil, false)
+	next, err := e.Project(context.Background(), raw, MemoryRefs(raw[:len(raw)-1]), MemoryTranscript(MemoryRefs(raw[:len(raw)-1])), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +421,7 @@ func TestFrozenHistoryRejectsDeletedHead(t *testing.T) {
 	}
 	h := &History{}
 	msg := []core.TypedMessage{core.NewTextMessage("user", "source")}
-	h.Bind(msg, MemoryRefs(msg), 0, s)
+	h.Bind(msg, MemoryRefs(msg), 0, session.NewTranscript(nil, s))
 	if err = session.DeleteNode(s.Path); err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +464,8 @@ func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
 	large.Binding.Window, large.Binding.Trigger = 65536, 22000
 	oldMemo := strings.Repeat("large draft ", 500)
 	large.Write = func(context.Context, string, string) (string, error) { return oldMemo, nil }
-	if _, err := large.Project(ctx, raw, refs, nil, false); err != nil || large.Receipt().Count == 0 {
+	engineRefs, transcript := saved(refs, nil)
+	if _, err := large.Project(ctx, raw, engineRefs, transcript, false); err != nil || large.Receipt().Count == 0 {
 		t.Fatal("initial checkpoint", err)
 	}
 	for _, tc := range []struct {
@@ -473,7 +481,7 @@ func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
 		e.Binding.Window, e.Binding.Trigger = tc.window, tc.trigger
 		wrote := false
 		e.Write = func(context.Context, string, string) (string, error) { wrote = true; return "short memo", nil }
-		if _, err := e.Project(ctx, raw, refs, nil, false); err != nil || wrote != tc.rewrite {
+		if _, err := e.Project(ctx, raw, engineRefs, transcript, false); err != nil || wrote != tc.rewrite {
 			t.Fatalf("window %d trigger %d wrote %t: %v", tc.window, tc.trigger, wrote, err)
 		}
 	}
@@ -499,7 +507,8 @@ func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
 	resumed := testEngine(contextcfg.Handoff)
 	resumed.Binding.Window, resumed.Binding.Trigger = 65536, 60000
 	continued := append(slices.Clone(raw), core.NewTextMessage("user", "a new task"))
-	view, err := resumed.Project(ctx, continued, refs, s, true)
+	engineRefs, transcript = saved(refs, s)
+	view, err := resumed.Project(ctx, continued, engineRefs, transcript, true)
 	if err != nil || resumed.Receipt().Tag != "a9c3" || len(view) == 0 || !strings.Contains(view[0].Blocks[0].(core.TextBlock).Text, strings.TrimSpace(oldMemo)) {
 		t.Fatal("a fitting committed checkpoint must be usable in an offline preview", err)
 	}
@@ -513,7 +522,8 @@ func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
 		sawOriginal = sawOriginal || strings.Contains(source, "original evidence")
 		return "short memo", nil
 	}
-	if _, err := small.Project(ctx, append(raw, pending), refs, nil, false); err != nil || !sawOriginal {
+	engineRefs, transcript = saved(refs, nil)
+	if _, err := small.Project(ctx, append(raw, pending), engineRefs, transcript, false); err != nil || !sawOriginal {
 		t.Fatal("failed to rebuild active handoff from original records", err)
 	}
 }

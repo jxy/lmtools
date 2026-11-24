@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"lmtools/internal/contextcfg"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
 	session "lmtools/internal/oldsession"
@@ -96,7 +97,8 @@ func (c *storedConversation) next(e *Engine) ([]core.TypedMessage, error) {
 
 // request projects the saved conversation followed by pending input.
 func (c *storedConversation) request(e *Engine, pending ...core.TypedMessage) ([]core.TypedMessage, error) {
-	return e.Project(c.ctx, append(slices.Clone(c.raw), pending...), c.refs, c.s, false)
+	refs, transcript := saved(c.refs, c.s)
+	return e.Project(c.ctx, append(slices.Clone(c.raw), pending...), refs, transcript, false)
 }
 
 func recordNotices(e *Engine) *[]string {
@@ -115,13 +117,13 @@ func TestFirstWindowKeepsItsCatalogUntilACheckpoint(t *testing.T) {
 	writes := 0
 	e.Write = func(context.Context, string, string) (string, error) { writes++; return "HANDOFF", nil }
 	raw := []core.TypedMessage{core.NewTextMessage("system", "sys"), core.NewTextMessage("user", "first question")}
-	view, err := e.Project(ctx, raw, MemoryRefs(raw), nil, false)
+	view, err := e.Project(ctx, raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 	b, _ := json.Marshal(view)
 	if err != nil || !strings.Contains(string(b), "window start") || e.Receipt().CatalogOmitted {
 		t.Fatal("first request", err)
 	}
 	raw = append(raw, core.NewTextMessage("assistant", strings.Repeat("answer ", 300)), core.NewTextMessage("user", "second question"))
-	if _, err := e.Project(ctx, raw, MemoryRefs(raw), nil, false); err != nil || writes == 0 || e.current.Count == 0 {
+	if _, err := e.Project(ctx, raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false); err != nil || writes == 0 || e.current.Count == 0 {
 		t.Fatalf("expected a checkpoint: writes %d, count %d: %v", writes, e.current.Count, err)
 	}
 }
@@ -134,9 +136,8 @@ func TestReceiptKeepsTheFirstWindowsCatalogChoice(t *testing.T) {
 		e.Binding.Initial = "Project notebook at window start: one note."
 		raw := []core.TypedMessage{core.NewTextMessage("system", "sys"), core.NewTextMessage("user", "q1"), core.NewTextMessage("assistant", "a1"), core.NewTextMessage("user", "q2")}
 		refs := MemoryRefs(raw)
-		refs[2].Role, refs[2].Window = core.RoleAssistant, &session.WindowReceipt{CatalogOmitted: omitted}
-		refs[3].Path = "saved"
-		view, err := e.Project(context.Background(), raw, refs, nil, false)
+		refs[2].Role, refs[2].Receipt = core.RoleAssistant, &contextstate.Receipt{CatalogOmitted: omitted}
+		view, err := e.Project(context.Background(), raw, refs, savedInMemory{MemoryTranscript(refs)}, false)
 		b, _ := json.Marshal(view)
 		if err != nil || strings.Contains(string(b), "one note") == omitted || e.Receipt().CatalogOmitted != omitted || e.Receipt().CatalogSent == omitted {
 			t.Fatal(omitted, err)
@@ -178,7 +179,7 @@ func TestFirstWindowStopsAtACredentialRefusal(t *testing.T) {
 		return 0, &lmerrors.HTTPError{StatusCode: http.StatusForbidden}
 	}
 	raw := []core.TypedMessage{core.NewTextMessage("system", "sys"), core.NewTextMessage("user", "short question")}
-	if _, err := e.Project(context.Background(), raw, MemoryRefs(raw), nil, false); !credentialRefusal(err) || probes != 1 {
+	if _, err := e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false); !credentialRefusal(err) || probes != 1 {
 		t.Fatal(probes, err)
 	}
 }
@@ -543,9 +544,10 @@ func TestReuseKeepsAWholeResultOverExcerpts(t *testing.T) {
 		{Role: "user", Blocks: []core.Block{core.ToolResultBlock{ToolUseID: "call", Name: "events", Content: strings.Repeat("r", 10000)}}},
 		core.NewTextMessage("user", "continue"),
 	}
-	saved := session.Checkpoint{Count: 3, Continue: true, Handoff: strings.Repeat("h", 6000), PagedResult: "source"}
+	e.t = MemoryTranscript(MemoryRefs(raw[:3]))
+	saved := contextstate.Checkpoint{Count: 3, Continue: true, Handoff: strings.Repeat("h", 6000), PagedResult: "source"}
 	for _, paged := range []bool{false, true} {
-		if _, fits, err := e.reuse(context.Background(), raw, session.ContextRef{}, e.tag(), saved, paged, false); err != nil || fits != paged {
+		if _, fits, err := e.reuse(context.Background(), raw, 3, e.tag(), saved, paged, false); err != nil || fits != paged {
 			t.Fatalf("paged checkpoint allowed %t: fits %t: %v", paged, fits, err)
 		}
 	}
@@ -561,7 +563,8 @@ func TestPreviewNeedsTheMeasurementTheRunWouldMake(t *testing.T) {
 		e := testEngine(contextcfg.Handoff)
 		e.Write = func(context.Context, string, string) (string, error) { return "HANDOFF", nil }
 		e.CountText = func(_ context.Context, text string) (int, error) { return countQuestions(text), nil }
-		view, err := e.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", question)), c.refs, c.s, preview)
+		refs, transcript := saved(c.refs, c.s)
+		view, err := e.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", question)), refs, transcript, preview)
 		b, _ := json.Marshal(view)
 		return e, string(b), err
 	}
@@ -640,14 +643,16 @@ func TestDeferredRecoveryUsesAHandoffAnotherRunPublished(t *testing.T) {
 	c.exchange("continue", "answer under the archive note", failing.Receipt())
 	preview := testEngine(contextcfg.Handoff)
 	preview.Write = refuse
-	view, err := preview.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", "continue")), c.refs, c.s, true)
+	previewRefs, previewTranscript := saved(c.refs, c.s)
+	view, err := preview.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", "continue")), previewRefs, previewTranscript, true)
 	b, _ := json.Marshal(view)
 	if err != nil || !strings.Contains(string(b), "history tools are unavailable now") {
 		t.Fatal("preview of the deferred recovery:", err)
 	}
 	other := testEngine(contextcfg.Handoff)
 	other.Write = func(context.Context, string, string) (string, error) { return "REBUILT-HANDOFF", nil }
-	if _, err := other.Project(c.ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), refs, nil, false); err != nil || other.current.Fallback {
+	otherRefs, otherTranscript := saved(refs, nil)
+	if _, err := other.Project(c.ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), otherRefs, otherTranscript, false); err != nil || other.current.Fallback {
 		t.Fatal(other.current, err)
 	}
 	later := testEngine(contextcfg.Handoff)
@@ -658,3 +663,15 @@ func TestDeferredRecoveryUsesAHandoffAnotherRunPublished(t *testing.T) {
 		t.Fatalf("fallback %t: %v", later.current.Fallback, err)
 	}
 }
+
+// saved returns the engine's refs and the transcript of a history read from
+// a saved session.
+func saved(refs []session.ContextRef, s *session.Session) ([]contextstate.Ref, Transcript) {
+	return session.EngineRefs(refs), session.NewTranscript(refs, s)
+}
+
+// savedInMemory is a memory transcript that reports its history saved, for
+// tests of what the engine reads from receipts.
+type savedInMemory struct{ Transcript }
+
+func (savedInMemory) Stored(int) bool { return true }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	session "lmtools/internal/oldsession"
@@ -151,8 +152,12 @@ func buildTurnRequest(ctx context.Context, env *turnEnv, opts core.RequestOption
 	if env.window == nil {
 		return buildHTTPRequest(ctx, env.cfg, opts, plan, input)
 	}
+	// The transcript comes from where the history came: a plan read from a
+	// saved session keeps its checkpoints there, although nothing of this
+	// run is written yet.
 	var raw []core.TypedMessage
-	var refs []session.ContextRef
+	var refs []contextstate.Ref
+	transcript := workingcontext.MemoryTranscript(nil)
 	if plan == nil {
 		var err error
 		raw, err = core.NewMemorySessionStoreForRequest(opts, input).Messages("")
@@ -160,9 +165,10 @@ func buildTurnRequest(ctx context.Context, env *turnEnv, opts core.RequestOption
 			return core.RequestBuild{}, err
 		}
 	} else {
-		raw, refs = plan.Messages, plan.Refs
+		raw, refs = plan.Messages, session.EngineRefs(plan.Refs)
+		transcript = session.NewTranscript(plan.Refs, nil)
 	}
-	view, err := env.window.Project(ctx, raw, refs, nil, env.cfg.PrintCurl)
+	view, err := env.window.Project(ctx, raw, refs, transcript, env.cfg.PrintCurl)
 	if err != nil {
 		return core.RequestBuild{}, err
 	}
@@ -180,13 +186,15 @@ func contextToolStore(ctx context.Context, env *turnEnv, opts core.RequestOption
 		if err != nil {
 			return nil, nil, err
 		}
-		env.window.History.Bind(initial, workingcontext.MemoryRefs(initial), 0, nil)
+		refs := workingcontext.MemoryRefs(initial)
+		env.window.History.Bind(initial, refs, 0, workingcontext.MemoryTranscript(refs))
 		return store, func(path string) ([]core.TypedMessage, error) {
 			msgs, err := store.Messages(path)
 			if err != nil {
 				return nil, err
 			}
-			return env.window.Project(ctx, msgs, workingcontext.MemoryRefs(msgs), nil, false)
+			refs := workingcontext.MemoryRefs(msgs)
+			return env.window.Project(ctx, msgs, refs, workingcontext.MemoryTranscript(refs), false)
 		}, nil
 	}
 	reader, err := session.CreateContextBuilder(ctx, sess)
@@ -197,7 +205,7 @@ func contextToolStore(ctx context.Context, env *turnEnv, opts core.RequestOption
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = env.window.BindExisting(ctx, msgs, refs, sess); err != nil {
+	if err = env.window.BindExisting(ctx, msgs, session.EngineRefs(refs), session.NewTranscript(refs, sess)); err != nil {
 		return nil, nil, err
 	}
 	return session.NewStore(sess, logger.From(ctx)), func(string) ([]core.TypedMessage, error) {
@@ -205,6 +213,6 @@ func contextToolStore(ctx context.Context, env *turnEnv, opts core.RequestOption
 		if err != nil {
 			return nil, err
 		}
-		return env.window.Project(ctx, msgs, refs, sess, false)
+		return env.window.Project(ctx, msgs, session.EngineRefs(refs), session.NewTranscript(refs, sess), false)
 	}, nil
 }

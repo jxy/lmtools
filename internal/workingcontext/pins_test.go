@@ -25,7 +25,7 @@ func TestPinsSurviveLossyHandoffAndKeepTheirUserRole(t *testing.T) {
 	refs := MemoryRefs(raw[:4])
 	refs[0].Pin = entry.Message.Pin
 	e.Write = func(context.Context, string, string) (string, error) { return "work status", nil }
-	got, err := e.Project(context.Background(), raw, refs, nil, false)
+	got, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,13 +121,13 @@ func TestDeferredWriterAndPhaseRequestAtCompletedExchange(t *testing.T) {
 		calls++
 		return "", errors.New("writer unavailable")
 	}
-	if _, err := e.Project(ctx, raw, MemoryRefs(raw), nil, false); err != nil || calls != 0 {
+	if _, err := e.Project(ctx, raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false); err != nil || calls != 0 {
 		t.Fatal(err, calls)
 	}
 	raw = append(raw, core.NewTextMessage("assistant", "phase complete"), core.NewTextMessage("user", "next task"))
 	refs := MemoryRefs(raw[:4])
 	for i := 0; i < 2; i++ {
-		if _, err := e.Project(ctx, raw, refs, nil, false); err != nil {
+		if _, err := e.Project(ctx, raw, refs, MemoryTranscript(refs), false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -148,7 +148,7 @@ func TestInterruptedCorrectionCarriesTheOriginalRequestAndLastObservation(t *tes
 	refs := MemoryRefs(raw[:4])
 	refs[3].Incomplete = true
 	e.Write = func(context.Context, string, string) (string, error) { return "The release was discussed.", nil }
-	view, err := e.Project(context.Background(), raw, refs, nil, false)
+	view, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestNotebookTriggerAndCeilingInclusivity(t *testing.T) {
 		e.ExtraTokens = e.Binding.Threshold() + offset - estimate(raw, 0)
 		writes := 0
 		e.Write = func(context.Context, string, string) (string, error) { writes++; return "saved", nil }
-		if _, err := e.Project(ctx, raw, refs, nil, false); err != nil || (writes > 0) != (offset >= 0) {
+		if _, err := e.Project(ctx, raw, refs, MemoryTranscript(refs), false); err != nil || (writes > 0) != (offset >= 0) {
 			t.Fatal(offset, writes, err)
 		}
 	}
@@ -228,7 +228,7 @@ func TestWriterBudgetRecovery(t *testing.T) {
 		} else {
 			raw[0] = core.NewTextMessage("user", strings.Repeat("e", 18000))
 		}
-		_, err := e.Project(ctx, raw, MemoryRefs(raw[:2]), nil, false)
+		_, err := e.Project(ctx, raw, MemoryRefs(raw[:2]), MemoryTranscript(MemoryRefs(raw[:2])), false)
 		switch mode {
 		case "oversize":
 			if err != nil || calls != 1 || len(e.current.Handoff) != 1000 {

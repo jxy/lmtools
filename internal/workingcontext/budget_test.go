@@ -22,10 +22,10 @@ func TestUsageMeasurementRescuesProtectedText(t *testing.T) {
 		}
 		return len(s)/4 + 10, nil
 	}
-	if _, err := e.Project(context.Background(), raw, nil, nil, true); err == nil || calls != 0 {
+	if _, err := e.Project(context.Background(), raw, nil, MemoryTranscript(nil), true); err == nil || calls != 0 {
 		t.Fatal("preview performed or skipped measurement")
 	}
-	v, err := e.Project(context.Background(), raw, nil, nil, false)
+	v, err := e.Project(context.Background(), raw, nil, MemoryTranscript(nil), false)
 	if err != nil || len(v) != 1 || calls == 0 {
 		t.Fatal(err, calls)
 	}
@@ -47,7 +47,7 @@ func TestUnavailableMeasurementAllowsCutDuringToolTurn(t *testing.T) {
 		probes := 0
 		e.CountText = func(context.Context, string) (int, error) { probes++; return 0, probeErr }
 		e.Write = func(context.Context, string, string) (string, error) { return "finish the current task", nil }
-		view, err := e.Project(context.Background(), raw, MemoryRefs(raw), nil, false)
+		view, err := e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 		if err != nil || probes == 0 || !e.current.Continue || e.current.PagedResult == "" || e.current.Fallback || len(view) == 0 {
 			t.Fatalf("%v: %d probes, checkpoint %+v, error %v", probeErr, probes, e.current, err)
 		}
@@ -55,7 +55,7 @@ func TestUnavailableMeasurementAllowsCutDuringToolTurn(t *testing.T) {
 	for _, cause := range []error{context.Canceled, lmerrors.NewHTTPError(401, "renew")} {
 		e := testEngine(contextcfg.Handoff)
 		e.CountText = func(context.Context, string) (int, error) { return 0, cause }
-		_, err := e.Project(context.Background(), raw, MemoryRefs(raw), nil, false)
+		_, err := e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 		if !errors.Is(err, cause) || exceedsBudget(err) {
 			t.Fatal(cause, err)
 		}
@@ -65,7 +65,7 @@ func TestUnavailableMeasurementAllowsCutDuringToolTurn(t *testing.T) {
 func TestMeasurementFailureAndOpaqueBudget(t *testing.T) {
 	e := testEngine(contextcfg.Full)
 	e.CountText = func(context.Context, string) (int, error) { return 0, errors.New("missing count") }
-	if _, err := e.Project(context.Background(), []core.TypedMessage{core.NewTextMessage("user", strings.Repeat("z", 20000))}, nil, nil, false); err == nil || !strings.Contains(err.Error(), "missing count") {
+	if _, err := e.Project(context.Background(), []core.TypedMessage{core.NewTextMessage("user", strings.Repeat("z", 20000))}, nil, MemoryTranscript(nil), false); err == nil || !strings.Contains(err.Error(), "missing count") {
 		t.Fatal(err)
 	}
 	e.CountText = func(context.Context, string) (int, error) {

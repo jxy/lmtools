@@ -9,10 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"lmtools/internal/contextcfg"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
 	"lmtools/internal/notebook"
-	session "lmtools/internal/oldsession"
 	"math"
 	"strings"
 	"unicode/utf8"
@@ -42,8 +42,8 @@ type Engine struct {
 	// and the tool and answer schemas a request carries.
 	Sizing        string
 	WriterProfile string
-	current       session.Checkpoint
-	lastWritten   session.Checkpoint // writer base for a memory-only fallback
+	current       contextstate.Checkpoint
+	lastWritten   contextstate.Checkpoint // writer base for a memory-only fallback
 	loaded        bool
 	deferred      string
 	// sentInitial and omitInitial hold the notebook catalog choice of the
@@ -53,6 +53,8 @@ type Engine struct {
 	sentInitial bool
 	omitInitial bool
 	noticed     map[string]bool
+	// t is the transcript of the request being built.
+	t Transcript
 	// meterFailed is set when an admission refused a request because the
 	// provider could not measure it. Such a decision is not recorded for
 	// later attempts.
@@ -68,37 +70,43 @@ func (e *Engine) tag() string {
 	return hex.EncodeToString(hash[:12])
 }
 
-func (e *Engine) BindExisting(ctx context.Context, messages []core.TypedMessage, refs []session.ContextRef, s *session.Session) error {
+// BindExisting binds the history tools to a saved history before the first
+// request of a turn is built, through the transcript t it is kept in.
+func (e *Engine) BindExisting(ctx context.Context, messages []core.TypedMessage, refs []contextstate.Ref, t Transcript) error {
+	if t == nil {
+		return errors.New("context engine bound without a transcript")
+	}
+	e.t = t
 	if !e.Binding.Compacts() {
-		e.History.Bind(messages, refs, 0, s)
+		e.History.Bind(messages, refs, 0, t)
 		return nil
 	}
-	cp, err := e.checkpoint(ctx, messages, refs, session.PrefixKeys(refs))
+	cp, err := e.checkpoint(ctx, messages, refs, transcriptKeys(t, len(refs)))
 	if err != nil {
 		return err
 	}
-	e.History.Bind(messages, refs, cp.Count, s)
+	e.History.Bind(messages, refs, cp.Count, t)
 	return nil
 }
 
-func (e *Engine) checkpoint(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, keys []string) (session.Checkpoint, error) {
+func (e *Engine) checkpoint(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string) (contextstate.Checkpoint, error) {
 	cp := e.current
 	if e.loaded && cp.Count <= len(refs) && (cp.Count == 0 || cp.Prefix == keys[cp.Count-1]) {
 		return cp, nil
 	}
-	cp = session.Checkpoint{}
-	if len(refs) > 0 && refs[len(refs)-1].Path != "" {
+	cp = contextstate.Checkpoint{}
+	if len(refs) > 0 && e.t.Stored(len(refs)) {
 		var err error
-		cp, err = session.ActiveCheckpoint(ctx, refs, keys)
+		cp, err = activeCheckpoint(ctx, refs, e.t, len(refs))
 		if err != nil {
 			return cp, err
 		}
 		if cp.Count > 0 {
-			pins, err := session.ActivePins(raw[:cp.Count], refs[:cp.Count])
+			pins, err := contextstate.ActivePins(raw[:cp.Count], refs[:cp.Count])
 			if err != nil {
 				return cp, err
 			}
-			if session.PinDigest(pins) != cp.PinDigest {
+			if contextstate.PinDigest(pins) != cp.PinDigest {
 				return cp, errors.New("saved checkpoint does not match its user pin events")
 			}
 		}
@@ -112,10 +120,10 @@ func (e *Engine) checkpoint(ctx context.Context, raw []core.TypedMessage, refs [
 // readReceipt restores what the latest reply's window recorded: a deferred
 // checkpoint, and whether a window starting at the beginning of the branch
 // carried the notebook catalog or left it out.
-func (e *Engine) readReceipt(refs []session.ContextRef) {
+func (e *Engine) readReceipt(refs []contextstate.Ref) {
 	for i := len(refs) - 1; i >= 0; i-- {
 		if refs[i].Role == core.RoleAssistant {
-			if w := refs[i].Window; w != nil {
+			if w := refs[i].Receipt; w != nil {
 				e.deferred = w.Deferred
 				e.sentInitial = w.Count == 0 && w.CatalogSent
 				e.omitInitial = w.Count == 0 && w.CatalogOmitted
@@ -245,7 +253,7 @@ func cutPoint(raw []core.TypedMessage, from, end int) (int, bool) {
 
 // projection is this run's view of a checkpoint. The tools view leaves out a
 // catalog that an earlier run saved with the checkpoint.
-func (e *Engine) projection(raw []core.TypedMessage, cp session.Checkpoint) []core.TypedMessage {
+func (e *Engine) projection(raw []core.TypedMessage, cp contextstate.Checkpoint) []core.TypedMessage {
 	if e.Binding.NotebookView() == "tools" {
 		cp.Catalog = ""
 	}
@@ -270,7 +278,7 @@ func (e *Engine) noticeOnce(kind, format string, args ...any) {
 
 // reportOmissions tells the operator what an admitted window cannot give the
 // model while history reads are off.
-func (e *Engine) reportOmissions(cp session.Checkpoint) {
+func (e *Engine) reportOmissions(cp contextstate.Checkpoint) {
 	if e.CanReadHistory {
 		return
 	}
@@ -282,7 +290,7 @@ func (e *Engine) reportOmissions(cp session.Checkpoint) {
 	}
 }
 
-func project(raw []core.TypedMessage, cp session.Checkpoint, initial string, canRead bool) []core.TypedMessage {
+func project(raw []core.TypedMessage, cp contextstate.Checkpoint, initial string, canRead bool) []core.TypedMessage {
 	if cp.Count == 0 && initial == "" {
 		return raw
 	}
@@ -324,7 +332,7 @@ func project(raw []core.TypedMessage, cp session.Checkpoint, initial string, can
 	if background != "" {
 		msgs = append(msgs, core.NewTextMessage("user", background))
 	}
-	if pins := session.RenderPins(cp.Pins); pins != "" {
+	if pins := contextstate.RenderPins(cp.Pins); pins != "" {
 		msgs = append(msgs, core.NewTextMessage("user", pins))
 	}
 	if cp.Continue && user >= 0 {
@@ -367,8 +375,8 @@ func project(raw []core.TypedMessage, cp session.Checkpoint, initial string, can
 }
 
 // MemoryRefs identify the immutable copies in a no-session tool loop.
-func MemoryRefs(raw []core.TypedMessage) []session.ContextRef {
-	r := make([]session.ContextRef, len(raw))
+func MemoryRefs(raw []core.TypedMessage) []contextstate.Ref {
+	r := make([]contextstate.Ref, len(raw))
 	for i, m := range raw {
 		h := sha256.New()
 		fmt.Fprintf(h, "%d\x00%s\x00", i, m.Role)
@@ -394,7 +402,7 @@ func writerSource(previous, records string) string {
 }
 
 // priorHandoff is the text a handoff written after base starts from.
-func priorHandoff(base session.Checkpoint) string {
+func priorHandoff(base contextstate.Checkpoint) string {
 	if base.Interrupted != "" {
 		return base.Handoff + "\n\n" + base.Interrupted
 	}
@@ -404,7 +412,7 @@ func priorHandoff(base session.Checkpoint) string {
 // writerTakes reports whether the input ceiling holds a writer request that
 // starts from base: the writer's instructions, base's handoff, and a full
 // chunk of original records.
-func (e *Engine) writerTakes(base session.Checkpoint) bool {
+func (e *Engine) writerTakes(base contextstate.Checkpoint) bool {
 	if e.Binding.Window == 0 {
 		return true
 	}
@@ -415,7 +423,7 @@ func (e *Engine) writerTakes(base session.Checkpoint) bool {
 	return estimate(request, (e.chunkSize()+1)/2) <= e.Binding.Ceiling()
 }
 
-func (e *Engine) summarize(ctx context.Context, previous string, raw []core.TypedMessage, refs []session.ContextRef, begin, end int) (string, error) {
+func (e *Engine) summarize(ctx context.Context, previous string, raw []core.TypedMessage, refs []contextstate.Ref, begin, end int) (string, error) {
 	limit := e.handoffLimit()
 	chunkSize := e.chunkSize()
 	var chunk strings.Builder
@@ -483,7 +491,7 @@ func (e *Engine) summarize(ctx context.Context, previous string, raw []core.Type
 }
 
 // shortTail retains literal, attributable evidence from the latest completed exchange.
-func shortTail(raw []core.TypedMessage, refs []session.ContextRef, end, limit int) string {
+func shortTail(raw []core.TypedMessage, refs []contextstate.Ref, end, limit int) string {
 	var parts []string
 	used := 0
 	for i := end - 1; i >= 0 && used < limit; i-- {
@@ -523,9 +531,9 @@ func shortTail(raw []core.TypedMessage, refs []session.ContextRef, end, limit in
 }
 
 // Receipt is committed with the assistant reply under this projection.
-func (e *Engine) Receipt() *session.WindowReceipt {
+func (e *Engine) Receipt() *contextstate.Receipt {
 	first := e.current.Count == 0
-	return &session.WindowReceipt{Count: e.current.Count, Prefix: e.current.Prefix, Tag: e.current.Tag, PinDigest: e.current.PinDigest, Deferred: e.deferred, CatalogSent: first && e.sentInitial, CatalogOmitted: first && e.omitInitial}
+	return &contextstate.Receipt{Count: e.current.Count, Prefix: e.current.Prefix, Tag: e.current.Tag, PinDigest: e.current.PinDigest, Deferred: e.deferred, CatalogSent: first && e.sentInitial, CatalogOmitted: first && e.omitInitial}
 }
 
 func (e *Engine) shorten(ctx context.Context, draft string, limit int) (string, error) {
@@ -534,7 +542,7 @@ func (e *Engine) shorten(ctx context.Context, draft string, limit int) (string, 
 
 func (e *Engine) handoffLimit() int { return min(32768, max(768, e.Binding.Threshold()/3)) }
 
-func (e *Engine) newHandoff(ctx context.Context, previous session.Checkpoint, raw []core.TypedMessage, refs []session.ContextRef, end int, preview bool) (string, error) {
+func (e *Engine) newHandoff(ctx context.Context, previous contextstate.Checkpoint, raw []core.TypedMessage, refs []contextstate.Ref, end int, preview bool) (string, error) {
 	if e.Binding.ArchiveOnly() {
 		return strings.TrimSpace(archivePrompt), nil
 	}
@@ -544,26 +552,26 @@ func (e *Engine) newHandoff(ctx context.Context, previous session.Checkpoint, ra
 	return e.summarize(ctx, priorHandoff(previous), raw, refs, previous.Count, end)
 }
 
-func (e *Engine) writerBase(ctx context.Context, previous session.Checkpoint, refs []session.ContextRef, keys []string) (session.Checkpoint, error) {
+func (e *Engine) writerBase(ctx context.Context, previous contextstate.Checkpoint, refs []contextstate.Ref, keys []string) (contextstate.Checkpoint, error) {
 	for previous.Fallback {
-		if refs[previous.Count-1].Path == "" {
+		if !e.t.Stored(previous.Count) {
 			if base := e.lastWritten; base.Count > 0 && base.Count <= previous.Count && base.Prefix == keys[base.Count-1] {
 				return base, nil
 			}
-			return session.Checkpoint{}, nil
+			return contextstate.Checkpoint{}, nil
 		}
 		// Walk actual ancestor receipts, including through successive fallbacks.
 		// Each receipt covers strictly fewer messages than the current fallback.
-		base, err := session.ActiveCheckpoint(ctx, refs[:previous.Count], keys[:previous.Count])
+		base, err := activeCheckpoint(ctx, refs, e.t, previous.Count)
 		if err != nil {
-			return session.Checkpoint{}, err
+			return contextstate.Checkpoint{}, err
 		}
 		previous = base
 	}
 	return previous, nil
 }
 
-func derivedCheckpointTag(settings string, cp session.Checkpoint) string {
+func derivedCheckpointTag(settings string, cp contextstate.Checkpoint) string {
 	data, _ := json.Marshal(cp)
 	digest := sha256.Sum256(append([]byte(settings), data...))
 	return hex.EncodeToString(digest[:12])
@@ -574,7 +582,7 @@ func exceedsBudget(err error) bool {
 	return errors.As(err, &over)
 }
 
-func pinBudgetError(err error, pins []session.StandingPin) error {
+func pinBudgetError(err error, pins []contextstate.StandingPin) error {
 	if !exceedsBudget(err) || len(pins) == 0 {
 		return err
 	}
@@ -585,7 +593,7 @@ func pinBudgetError(err error, pins []session.StandingPin) error {
 	return fmt.Errorf("protected request with standing pins %s: %w", strings.Join(ids, ", "), err)
 }
 
-func (e *Engine) fitCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, cp *session.Checkpoint, preview bool) error {
+func (e *Engine) fitCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, cp *contextstate.Checkpoint, preview bool) error {
 	admit := func() error { return e.admit(ctx, e.projection(raw, *cp), preview) }
 	err := admit()
 	if exceedsBudget(err) && cp.Catalog != "" {
@@ -612,9 +620,8 @@ func (e *Engine) fitCheckpoint(ctx context.Context, raw []core.TypedMessage, ref
 // can record two checkpoints, one with its tool result whole and one with
 // the result paged, and a retry prefers the whole one. A checkpoint chosen
 // while the provider could not measure the request is not recorded.
-func (e *Engine) nextCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, keys []string, previous session.Checkpoint, cut checkpointCut, preview bool) (session.Checkpoint, error) {
-	ref := refs[cut.end-1]
-	if cut.overflow == "" || ref.Path == "" {
+func (e *Engine) nextCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string, previous contextstate.Checkpoint, cut checkpointCut, preview bool) (contextstate.Checkpoint, error) {
+	if cut.overflow == "" || !e.t.Stored(cut.end) {
 		return e.writeCheckpoint(ctx, raw, refs, keys, previous, cut, preview)
 	}
 	for _, paged := range []bool{false, true} {
@@ -636,7 +643,7 @@ func (e *Engine) nextCheckpoint(ctx context.Context, raw []core.TypedMessage, re
 	if err != nil || preview || cp.Fallback || cp.Count != cut.end || e.meterFailed {
 		return cp, err
 	}
-	if _, err = session.PublishCheckpoint(ctx, ref, e.overflowTag(cut.overflow, cp.PagedResult != ""), cp); err != nil {
+	if _, err = e.t.Publish(ctx, cut.end, e.overflowTag(cut.overflow, cp.PagedResult != ""), cp); err != nil {
 		return previous, err
 	}
 	return cp, nil
@@ -644,16 +651,16 @@ func (e *Engine) nextCheckpoint(ctx context.Context, raw []core.TypedMessage, re
 
 // savedCheckpoint loads the checkpoint saved under tag at the boundary end
 // and checks that it covers the instructions in force there.
-func (e *Engine) savedCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, keys []string, end int, tag string) (session.Checkpoint, bool, error) {
-	saved, ok, err := session.CandidateCheckpoint(ctx, refs[end-1], tag, keys[end-1])
+func (e *Engine) savedCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string, end int, tag string) (contextstate.Checkpoint, bool, error) {
+	saved, ok, err := e.t.Checkpoint(ctx, end, tag)
 	if err != nil || !ok {
 		return saved, false, err
 	}
-	pins, err := session.ActivePins(raw[:end], refs[:end])
+	pins, err := contextstate.ActivePins(raw[:end], refs[:end])
 	if err != nil {
 		return saved, false, err
 	}
-	if digest := session.PinDigest(pins); saved.Count != end || saved.Prefix != keys[end-1] || saved.PinDigest != digest || session.PinDigest(saved.Pins) != digest {
+	if digest := contextstate.PinDigest(pins); saved.Count != end || saved.Prefix != keys[end-1] || saved.PinDigest != digest || contextstate.PinDigest(saved.Pins) != digest {
 		return saved, false, errors.New("checkpoint candidate does not match the covered instructions")
 	}
 	return saved, true, nil
@@ -662,7 +669,7 @@ func (e *Engine) savedCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 // reuse offers this request a checkpoint published for its boundary. A
 // result that another request needed paged is offered whole first, and the
 // paged checkpoint only when paged allows it.
-func (e *Engine) reuse(ctx context.Context, raw []core.TypedMessage, ref session.ContextRef, tag string, saved session.Checkpoint, paged, preview bool) (session.Checkpoint, bool, error) {
+func (e *Engine) reuse(ctx context.Context, raw []core.TypedMessage, end int, tag string, saved contextstate.Checkpoint, paged, preview bool) (contextstate.Checkpoint, bool, error) {
 	if saved.PagedResult != "" {
 		whole := saved
 		whole.PagedResult = ""
@@ -670,7 +677,7 @@ func (e *Engine) reuse(ctx context.Context, raw []core.TypedMessage, ref session
 		case err == nil && preview:
 			return whole, true, nil
 		case err == nil:
-			whole, err = session.PublishCheckpoint(ctx, ref, derivedCheckpointTag(tag, whole), whole)
+			whole, err = e.t.Publish(ctx, end, derivedCheckpointTag(tag, whole), whole)
 			return whole, err == nil, err
 		case !exceedsBudget(err):
 			return saved, false, err
@@ -685,16 +692,16 @@ func (e *Engine) reuse(ctx context.Context, raw []core.TypedMessage, ref session
 	return saved, err == nil, err
 }
 
-func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, keys []string, previous session.Checkpoint, cut checkpointCut, preview bool) (session.Checkpoint, error) {
+func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string, previous contextstate.Checkpoint, cut checkpointCut, preview bool) (contextstate.Checkpoint, error) {
 	end := cut.end
-	stored := refs[end-1].Path != ""
+	stored := e.t.Stored(end)
 	tag, prefix := e.tag(), keys[end-1]
 	key := tag + ":" + prefix
-	pins, err := session.ActivePins(raw[:end], refs[:end])
+	pins, err := contextstate.ActivePins(raw[:end], refs[:end])
 	if err != nil {
 		return previous, err
 	}
-	next := session.Checkpoint{Tag: tag, Window: e.Binding.Window, Threshold: e.Binding.Threshold(), Prefix: prefix, Count: end, Continue: cut.mid, Pins: pins, PinDigest: session.PinDigest(pins)}
+	next := contextstate.Checkpoint{Tag: tag, Window: e.Binding.Window, Threshold: e.Binding.Threshold(), Prefix: prefix, Count: end, Continue: cut.mid, Pins: pins, PinDigest: contextstate.PinDigest(pins)}
 	cached := false
 	if stored {
 		saved, ok, err := e.savedCheckpoint(ctx, raw, refs, keys, end, tag)
@@ -702,7 +709,7 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 			return previous, err
 		}
 		if ok {
-			cp, fits, err := e.reuse(ctx, raw, refs[end-1], tag, saved, true, preview)
+			cp, fits, err := e.reuse(ctx, raw, end, tag, saved, true, preview)
 			if err != nil {
 				return previous, err
 			}
@@ -737,7 +744,7 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 		}
 		if base.Count > 0 && !preview && !e.Binding.ArchiveOnly() && !e.writerTakes(base) {
 			e.noticeOnce("records", "Writing the handoff from the original records: the handoff through message %d leaves the writer no room for them", base.Count)
-			base = session.Checkpoint{}
+			base = contextstate.Checkpoint{}
 		}
 		next.Interrupted = interruptedWork(raw, refs, base.Count, end)
 		next.Handoff, err = e.newHandoff(ctx, base, raw, refs, end, preview)
@@ -788,14 +795,14 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 	e.deferred = ""
 	if stored && !preview {
 		if !cached && !next.Fallback {
-			winner, err := session.PublishCheckpoint(ctx, refs[end-1], tag, next)
+			winner, err := e.t.Publish(ctx, end, tag, next)
 			if err != nil {
 				return previous, err
 			}
 			// Another run may have published first. Its checkpoint serves
 			// this request when it fits, its result whole if this request's
 			// own handoff kept the result whole.
-			cp, fits, err := e.reuse(ctx, raw, refs[end-1], tag, winner, next.PagedResult != "", false)
+			cp, fits, err := e.reuse(ctx, raw, end, tag, winner, next.PagedResult != "", false)
 			if err != nil {
 				return previous, err
 			}
@@ -806,7 +813,7 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 		// A concurrent writer can have a smaller incoming request. Keep
 		// its published candidate addressable by earlier receipts.
 		tag = derivedCheckpointTag(tag, next)
-		return session.PublishCheckpoint(ctx, refs[end-1], tag, next)
+		return e.t.Publish(ctx, end, tag, next)
 	}
 	return next, nil
 }
@@ -822,7 +829,7 @@ type checkpointCut struct {
 
 // dueCut selects a completed exchange. A tool result stays in its current
 // window until the estimated ceiling is reached and the request cannot fit.
-func (e *Engine) dueCut(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, keys []string, visible []core.TypedMessage, cp session.Checkpoint, est int, preview bool) (checkpointCut, error) {
+func (e *Engine) dueCut(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string, visible []core.TypedMessage, cp contextstate.Checkpoint, est int, preview bool) (checkpointCut, error) {
 	committed := len(refs)
 	requested := e.Binding.PhaseHints() && phaseRequest(raw[cp.Count:committed])
 	atTrigger := est >= e.Binding.CutThreshold()
@@ -888,12 +895,12 @@ func (e *Engine) overflowTag(request string, paged bool) string {
 
 // recordedOverflow reports whether request measured too large at the
 // boundary end in an earlier attempt, which recorded the checkpoint it used.
-func (e *Engine) recordedOverflow(ctx context.Context, refs []session.ContextRef, keys []string, end int, request string) bool {
-	if refs[end-1].Path == "" {
+func (e *Engine) recordedOverflow(ctx context.Context, refs []contextstate.Ref, keys []string, end int, request string) bool {
+	if !e.t.Stored(end) {
 		return false
 	}
 	for _, paged := range []bool{false, true} {
-		if _, ok, err := session.CandidateCheckpoint(ctx, refs[end-1], e.overflowTag(request, paged), keys[end-1]); err == nil && ok {
+		if _, ok, err := e.t.Checkpoint(ctx, end, e.overflowTag(request, paged)); err == nil && ok {
 			return true
 		}
 	}
@@ -909,7 +916,7 @@ func (e *Engine) recordedOverflow(ctx context.Context, refs []session.ContextRef
 // handoff another run published for that boundary serves at once. Without
 // one, the fallback stays while it fits when an earlier attempt at the
 // boundary failed.
-func (e *Engine) recoverHandoff(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, keys []string, cp session.Checkpoint, preview bool) (session.Checkpoint, error) {
+func (e *Engine) recoverHandoff(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string, cp contextstate.Checkpoint, preview bool) (contextstate.Checkpoint, error) {
 	written := cp
 	written.Fallback, written.PagedResult, written.Handoff = false, "", ""
 	est := addEstimatedTokens(estimate(e.projection(raw, written), e.ExtraTokens), (e.handoffLimit()+1)/2)
@@ -925,16 +932,16 @@ func (e *Engine) recoverHandoff(ctx context.Context, raw []core.TypedMessage, re
 	return e.nextCheckpoint(ctx, raw, refs, keys, cp, cut, preview)
 }
 
-func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, preview bool) ([]core.TypedMessage, session.Checkpoint, error) {
+func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, preview bool) ([]core.TypedMessage, contextstate.Checkpoint, error) {
 	if !e.Binding.Compacts() {
-		if !e.loaded && len(refs) > 0 && refs[len(refs)-1].Path != "" {
+		if !e.loaded && len(refs) > 0 && e.t.Stored(len(refs)) {
 			e.readReceipt(refs)
 		}
 		e.loaded = true
-		cp := session.Checkpoint{}
+		cp := contextstate.Checkpoint{}
 		return e.projection(raw, cp), cp, nil
 	}
-	keys := session.PrefixKeys(refs)
+	keys := transcriptKeys(e.t, len(refs))
 	cp, err := e.checkpoint(ctx, raw, refs, keys)
 	if err != nil {
 		return nil, cp, err
@@ -942,7 +949,7 @@ func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs
 	if cp.Continue && (cp.Count < 2 || !completedBatch(raw, cp.Count-1)) {
 		return nil, cp, errors.New("saved checkpoint has an invalid tool boundary")
 	}
-	if cp.Fallback && !e.CanReadHistory && !e.Binding.ArchiveOnly() && refs[cp.Count-1].Path != "" {
+	if cp.Fallback && !e.CanReadHistory && !e.Binding.ArchiveOnly() && e.t.Stored(cp.Count) {
 		if cp, err = e.recoverHandoff(ctx, raw, refs, keys, cp, preview); err != nil {
 			return nil, cp, err
 		}
@@ -956,7 +963,7 @@ func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs
 	// as the writer's starting point.
 	if cp.Count > 0 && e.Binding.Window > 0 && est > e.Binding.Ceiling() && (cp.Window != e.Binding.Window || cp.Threshold != e.Binding.Threshold()) {
 		if err := e.admit(ctx, visible, preview); exceedsBudget(err) {
-			cp = session.Checkpoint{}
+			cp = contextstate.Checkpoint{}
 			visible = e.projection(raw, cp)
 			est = estimate(visible, e.ExtraTokens)
 		} else if err != nil {
@@ -983,12 +990,17 @@ func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs
 	return visible, cp, nil
 }
 
-// Project uses the exact ancestor snapshot for this request. Each new window
-// starts with its own evidence and leaves the old window's signed state behind.
-func (e *Engine) Project(ctx context.Context, raw []core.TypedMessage, refs []session.ContextRef, head *session.Session, preview bool) ([]core.TypedMessage, error) {
+// Project uses the exact ancestor snapshot for this request, whose history
+// is kept in transcript t. Each new window starts with its own evidence and
+// leaves the old window's signed state behind.
+func (e *Engine) Project(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, t Transcript, preview bool) ([]core.TypedMessage, error) {
+	if t == nil {
+		return nil, errors.New("context engine called without a transcript")
+	}
 	if len(refs) > len(raw) {
 		return nil, errors.New("session provenance longer than transcript")
 	}
+	e.t = t
 	visible, cp, err := e.selectWindow(ctx, raw, refs, preview)
 	if err != nil {
 		return nil, err
@@ -1011,7 +1023,7 @@ func (e *Engine) Project(ctx context.Context, raw []core.TypedMessage, refs []se
 	}
 	if err != nil {
 		if exceedsBudget(err) {
-			pins, pinErr := session.ActivePins(raw, refs)
+			pins, pinErr := contextstate.ActivePins(raw, refs)
 			if pinErr != nil {
 				return nil, pinErr
 			}
@@ -1027,9 +1039,9 @@ func (e *Engine) Project(ctx context.Context, raw []core.TypedMessage, refs []se
 	if !cp.Fallback && !e.Binding.ArchiveOnly() {
 		e.lastWritten = cp
 	}
-	e.History.Bind(raw, refs, cp.Count, head)
-	if head != nil && !preview {
-		head.WindowUsed = e.Receipt()
+	e.History.Bind(raw, refs, cp.Count, t)
+	if !preview {
+		t.Used(*e.Receipt())
 	}
 	return visible, nil
 }

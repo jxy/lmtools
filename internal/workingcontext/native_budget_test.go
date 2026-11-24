@@ -60,10 +60,10 @@ func TestNativeBudgetPreservesWholeExchanges(t *testing.T) {
 		t.Fatal("native blocks entered the text-only path")
 		return 0, nil
 	}
-	if _, err := e.Project(context.Background(), raw, nil, nil, true); err == nil || segments != 0 {
+	if _, err := e.Project(context.Background(), raw, nil, MemoryTranscript(nil), true); err == nil || segments != 0 {
 		t.Fatal("preview measured or skipped the oversized projection")
 	}
-	view, err := e.Project(context.Background(), raw, nil, nil, false)
+	view, err := e.Project(context.Background(), raw, nil, MemoryTranscript(nil), false)
 	if err != nil || !reflect.DeepEqual(view, raw) || segments < 2 || len(seen) != 8 {
 		t.Fatalf("view %d segments %d calls %v: %v", len(view), segments, seen, err)
 	}
@@ -105,7 +105,7 @@ func TestNativeBudgetKeepsDeveloperMessagesWithTheirTurn(t *testing.T) {
 		t.Fatal("native blocks entered the text-only path")
 		return 0, nil
 	}
-	view, err := e.Project(context.Background(), raw, nil, nil, false)
+	view, err := e.Project(context.Background(), raw, nil, MemoryTranscript(nil), false)
 	if err != nil || !reflect.DeepEqual(view, raw) || segments < 2 {
 		t.Fatalf("view %d segments %d: %v", len(view), segments, err)
 	}

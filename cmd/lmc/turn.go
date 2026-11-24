@@ -184,7 +184,7 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 					if err != nil {
 						return err
 					}
-					return env.window.BindExisting(ctx, msgs, refs, resumed)
+					return env.window.BindExisting(ctx, msgs, session.EngineRefs(refs), session.NewTranscript(refs, resumed))
 				}
 			}
 			return nil

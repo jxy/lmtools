@@ -99,7 +99,7 @@ func TestLargePNGUsesSameVisualBudgetInAttachmentsAndToolResults(t *testing.T) {
 	e.Binding.Window = 200000
 	for _, block := range []core.Block{im, core.ToolResultBlock{ToolUseID: "image", Images: []core.ImageBlock{im}}} {
 		raw := []core.TypedMessage{{Role: "user", Blocks: []core.Block{block}}, core.NewTextMessage("user", "follow up")}
-		view, err := e.Project(context.Background(), raw, nil, nil, false)
+		view, err := e.Project(context.Background(), raw, nil, MemoryTranscript(nil), false)
 		if err != nil || !reflect.DeepEqual(view, raw) {
 			t.Fatalf("image projection changed or failed: %v", err)
 		}
@@ -151,10 +151,10 @@ func TestCheckpointPreservesInstructionsAndReplaysStableSuffix(t *testing.T) {
 		core.NewTextMessage("developer", "D2"), core.NewTextMessage("user", "new instruction"),
 	}
 	refs := MemoryRefs(raw[:4])
-	if _, err := e.Project(context.Background(), raw, refs, nil, true); err == nil || calls != 0 {
+	if _, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), true); err == nil || calls != 0 {
 		t.Fatalf("preview %v calls %d", err, calls)
 	}
-	v, err := e.Project(context.Background(), raw, refs, nil, false)
+	v, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestCheckpointPreservesInstructionsAndReplaysStableSuffix(t *testing.T) {
 	}
 	raw = append(raw, core.NewTextMessage("assistant", "done"), core.NewTextMessage("user", "next"))
 	e.Binding.Trigger = 7000
-	w, err := e.Project(context.Background(), raw, MemoryRefs(raw[:len(raw)-1]), nil, false)
+	w, err := e.Project(context.Background(), raw, MemoryRefs(raw[:len(raw)-1]), MemoryTranscript(MemoryRefs(raw[:len(raw)-1])), false)
 	if err != nil || !reflect.DeepEqual(w[:len(v)], v) || calls != 1 {
 		t.Fatalf("prefix changed: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestCompactionAfterCompletedBatch(t *testing.T) {
 		{Role: "assistant", Blocks: []core.Block{core.ToolUseBlock{ID: "id", Name: "read", Input: json.RawMessage("{}")}}},
 		{Role: "user", Blocks: []core.Block{core.ToolResultBlock{ToolUseID: "id", Name: "read", Content: strings.Repeat("x", 3200)}}},
 	}
-	v, err := e.Project(context.Background(), raw, MemoryRefs(raw), nil, false)
+	v, err := e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,13 +187,13 @@ func TestCompactionAfterCompletedBatch(t *testing.T) {
 	e.Binding.Early = true
 	raw[1].Blocks = append(raw[1].Blocks, core.ToolUseBlock{ID: "phase", Name: "mcp__history__request_compaction"})
 	raw[2].Blocks = append(raw[2].Blocks, core.ToolResultBlock{ToolUseID: "phase", Content: "Checkpoint requested"})
-	v, err = e.Project(context.Background(), raw, MemoryRefs(raw), nil, false)
+	v, err = e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 	if err != nil || !reflect.DeepEqual(v, raw) {
 		t.Fatal("phase hint hid a fresh observation", err)
 	}
 	goal := raw[0]
 	raw = append([]core.TypedMessage{core.NewTextMessage("user", strings.Repeat("earlier work ", 1700)), core.NewTextMessage("assistant", "done")}, raw...)
-	v, err = e.Project(context.Background(), raw, MemoryRefs(raw), nil, false)
+	v, err = e.Project(context.Background(), raw, MemoryRefs(raw), MemoryTranscript(MemoryRefs(raw)), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,12 +220,12 @@ func TestCheckpointFailureAndHardCeiling(t *testing.T) {
 	e := testEngine(contextcfg.Handoff)
 	e.Write = func(context.Context, string, string) (string, error) { return "", errors.New("unavailable") }
 	raw := []core.TypedMessage{core.NewTextMessage("user", strings.Repeat("a", 3000)), core.NewTextMessage("assistant", "ok"), core.NewTextMessage("user", "next")}
-	v, err := e.Project(context.Background(), raw, MemoryRefs(raw[:2]), nil, false)
+	v, err := e.Project(context.Background(), raw, MemoryRefs(raw[:2]), MemoryTranscript(MemoryRefs(raw[:2])), false)
 	if err != nil || e.current.Count != 0 || !reflect.DeepEqual(v, raw) {
 		t.Fatal(err)
 	}
 	raw[0] = core.NewTextMessage("user", strings.Repeat("a", 16000))
-	if _, err = e.Project(context.Background(), raw, MemoryRefs(raw[:2]), nil, false); err == nil {
+	if _, err = e.Project(context.Background(), raw, MemoryRefs(raw[:2]), MemoryTranscript(MemoryRefs(raw[:2])), false); err == nil {
 		t.Fatal("over-limit fallback")
 	}
 }
@@ -235,7 +235,7 @@ func TestHistoryOffsetsAndScope(t *testing.T) {
 	msg := []core.TypedMessage{core.NewTextMessage("user", body), {Role: "assistant", Blocks: []core.Block{core.ReasoningBlock{Signature: "private"}}}, core.NewTextMessage("user", "recent")}
 	refs := MemoryRefs(msg)
 	h := &History{}
-	h.Bind(msg, refs, 2, nil)
+	h.Bind(msg, refs, 2, MemoryTranscript(refs))
 	p, err := h.search(context.Background(), query{Query: "precise"})
 	if err != nil || len(p.Hits) != 1 || p.Hits[0].Offset == 0 || !strings.Contains(p.Hits[0].Snippet, "PRECISE") {
 		t.Fatal(p, err)
@@ -267,11 +267,11 @@ func TestOversizedObservationCanBePagedOnlyWithOriginalHistory(t *testing.T) {
 	refs := MemoryRefs(raw)
 	e := testEngine(contextcfg.Handoff)
 	e.Write = func(context.Context, string, string) (string, error) { return "Read the saved observation.", nil }
-	if _, err := e.Project(ctx, raw, refs, nil, false); err == nil {
+	if _, err := e.Project(ctx, raw, refs, MemoryTranscript(refs), false); err == nil {
 		t.Fatal("paged without a history reader")
 	}
 	e.CanReadHistory = true
-	view, err := e.Project(ctx, raw, refs, nil, false)
+	view, err := e.Project(ctx, raw, refs, MemoryTranscript(refs), false)
 	if err != nil || e.current.PagedResult != refs[2].Source {
 		t.Fatalf("missing source for oversized observation: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestOversizedObservationCanBePagedOnlyWithOriginalHistory(t *testing.T) {
 	var notices []string
 	off.Notice = func(format string, _ ...any) { notices = append(notices, format) }
 	for i := 0; i < 2; i++ {
-		view, err = off.Project(ctx, raw, refs, nil, false)
+		view, err = off.Project(ctx, raw, refs, MemoryTranscript(refs), false)
 		b, _ = json.Marshal(view)
 		if err != nil || strings.Contains(string(b), "Read by byte offset") || !strings.Contains(string(b), "only these excerpts") || len(notices) != 1 {
 			t.Fatalf("history reads off: %v %q", err, notices)

@@ -2,14 +2,14 @@ package workingcontext
 
 import (
 	"fmt"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	session "lmtools/internal/oldsession"
 )
 
 // Preserve the identity of the latest exchange whose answer was interrupted.
 // The note records what reached the branch. The next user can revise the task.
-func interruptedWork(raw []core.TypedMessage, refs []session.ContextRef, begin, end int) string {
+func interruptedWork(raw []core.TypedMessage, refs []contextstate.Ref, begin, end int) string {
 	start := begin
 	for start > 0 {
 		start--

@@ -10,6 +10,7 @@ import (
 	lmerrors "lmtools/internal/errors"
 	"lmtools/internal/mcp"
 	"lmtools/internal/ui"
+	"lmtools/internal/workingcontext"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +39,7 @@ func TestNativeSizingExposesCredentialRefusal(t *testing.T) {
 				messages = append(messages, core.NewTextMessage("user", strings.Repeat("x", 1024)), core.NewTextMessage("assistant", "done"))
 			}
 			messages = append(messages, core.NewTextMessage("user", "continue"))
-			_, err := engine.Project(context.Background(), messages, nil, nil, false)
+			_, err := engine.Project(context.Background(), messages, nil, workingcontext.MemoryTranscript(nil), false)
 			var refused *lmerrors.HTTPError
 			if !errors.As(err, &refused) || refused.StatusCode != status || calls.Load() != 1 {
 				t.Fatalf("native requests=%d, expected HTTP %d, got %v", calls.Load(), status, err)

@@ -6,9 +6,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	session "lmtools/internal/oldsession"
 	"regexp"
 	"slices"
 	"strconv"
@@ -99,9 +99,11 @@ type History struct {
 // Each call keeps the branch snapshot it started with while Bind installs the next.
 type historyView struct {
 	messages []core.TypedMessage
-	refs     []session.ContextRef
+	refs     []contextstate.Ref
 	archived int
-	head     *session.Session
+	// transcript is where the bound history is kept; the tools answer only
+	// while the message it continues exists.
+	transcript Transcript
 }
 
 // Keep the advertised interface stable if a REPL switches to a model
@@ -112,17 +114,14 @@ func (h *History) SetCompactionAvailable(available bool) {
 	h.unavailable = !available
 }
 
-func (h *History) Bind(messages []core.TypedMessage, refs []session.ContextRef, archived int, head *session.Session) {
+// Bind installs the history the tools read, kept in transcript t.
+func (h *History) Bind(messages []core.TypedMessage, refs []contextstate.Ref, archived int, t Transcript) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.messages = messages
 	h.refs = refs
 	h.archived = archived
-	h.head = nil
-	if head != nil && head.Head != nil {
-		ref := *head.Head
-		h.head = &session.Session{Path: head.Path, Head: &ref}
-	}
+	h.transcript = t
 }
 
 // A tool receipt crosses process boundaries. Only a successful result for
@@ -344,8 +343,10 @@ func (h *History) CallTool(ctx context.Context, name string, args json.RawMessag
 		}
 		return "Checkpoint requested at the next eligible boundary. Continue the task.", nil
 	}
-	if err := session.CheckContextHead(ctx, view.head); err != nil {
-		return nil, err
+	if view.transcript != nil {
+		if err := view.transcript.Current(ctx); err != nil {
+			return nil, err
+		}
 	}
 	switch name {
 	case "search":
