@@ -39,9 +39,12 @@ type Receipt struct {
 	// CatalogSent and CatalogOmitted record whether a window starting at
 	// the beginning of the branch carried the notebook catalog or left it
 	// out. Later requests in that window make the same choice, which keeps
-	// their prefix stable.
-	CatalogSent    bool `json:"catalog_sent,omitempty"`
-	CatalogOmitted bool `json:"catalog_omitted,omitempty"`
+	// their prefix stable, while the notebook and view are the ones the
+	// choice was made for.
+	CatalogSent    bool   `json:"catalog_sent,omitempty"`
+	CatalogOmitted bool   `json:"catalog_omitted,omitempty"`
+	Notebook       string `json:"catalog_notebook,omitempty"`
+	View           string `json:"catalog_view,omitempty"`
 }
 
 // Checkpoint replaces the first Count messages of a history with a handoff.
@@ -49,13 +52,17 @@ type Checkpoint struct {
 	Tag string `json:"-"`
 	// Window and Threshold are the budget the handoff was written for. Only
 	// a different budget makes a cut rebuild from the original records.
-	Window      int           `json:"window,omitempty"`
-	Threshold   int           `json:"threshold,omitempty"`
-	Prefix      string        `json:"prefix"`
-	Count       int           `json:"count"`
-	Handoff     string        `json:"handoff"`
-	Tail        string        `json:"tail,omitempty"`
-	Catalog     string        `json:"catalog,omitempty"`
+	Window    int    `json:"window,omitempty"`
+	Threshold int    `json:"threshold,omitempty"`
+	Prefix    string `json:"prefix"`
+	Count     int    `json:"count"`
+	Handoff   string `json:"handoff"`
+	Tail      string `json:"tail,omitempty"`
+	Catalog   string `json:"catalog,omitempty"`
+	// Notebook and View name the notebook and view the catalog came from.
+	// A request under another one sends that one's catalog instead.
+	Notebook    string        `json:"notebook,omitempty"`
+	View        string        `json:"notebook_view,omitempty"`
 	Continue    bool          `json:"continue,omitempty"`
 	Pins        []StandingPin `json:"pins"`
 	PinDigest   string        `json:"pin_digest,omitempty"`

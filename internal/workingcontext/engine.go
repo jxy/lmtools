@@ -125,8 +125,9 @@ func (e *Engine) readReceipt(refs []contextstate.Ref) {
 		if refs[i].Role == core.RoleAssistant {
 			if w := refs[i].Receipt; w != nil {
 				e.deferred = w.Deferred
-				e.sentInitial = w.Count == 0 && w.CatalogSent
-				e.omitInitial = w.Count == 0 && w.CatalogOmitted
+				sameCatalog := w.Notebook == e.Binding.Notebook && w.View == e.Binding.NotebookView()
+				e.sentInitial = w.Count == 0 && w.CatalogSent && sameCatalog
+				e.omitInitial = w.Count == 0 && w.CatalogOmitted && sameCatalog
 			}
 			return
 		}
@@ -253,7 +254,14 @@ func cutPoint(raw []core.TypedMessage, from, end int) (int, bool) {
 
 // projection is this run's view of a checkpoint. The tools view leaves out a
 // catalog that an earlier run saved with the checkpoint.
+// projection is what a request sends under checkpoint cp. A checkpoint's
+// catalog goes with it while the notebook and view it came from are in
+// force; under another notebook or view the request carries that one's
+// catalog, and none without a notebook.
 func (e *Engine) projection(raw []core.TypedMessage, cp contextstate.Checkpoint) []core.TypedMessage {
+	if cp.Count > 0 && (cp.Notebook != e.Binding.Notebook || cp.View != e.Binding.NotebookView()) {
+		cp.Catalog = e.Binding.Initial
+	}
 	if e.Binding.NotebookView() == "tools" {
 		cp.Catalog = ""
 	}
@@ -533,7 +541,11 @@ func shortTail(raw []core.TypedMessage, refs []contextstate.Ref, end, limit int)
 // Receipt is committed with the assistant reply under this projection.
 func (e *Engine) Receipt() *contextstate.Receipt {
 	first := e.current.Count == 0
-	return &contextstate.Receipt{Count: e.current.Count, Prefix: e.current.Prefix, Tag: e.current.Tag, PinDigest: e.current.PinDigest, Deferred: e.deferred, CatalogSent: first && e.sentInitial, CatalogOmitted: first && e.omitInitial}
+	return &contextstate.Receipt{
+		Count: e.current.Count, Prefix: e.current.Prefix, Tag: e.current.Tag, PinDigest: e.current.PinDigest, Deferred: e.deferred,
+		CatalogSent: first && e.sentInitial, CatalogOmitted: first && e.omitInitial,
+		Notebook: e.Binding.Notebook, View: e.Binding.NotebookView(),
+	}
 }
 
 func (e *Engine) shorten(ctx context.Context, draft string, limit int) (string, error) {
@@ -732,6 +744,7 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 		if err != nil {
 			return previous, err
 		}
+		next.Notebook, next.View = e.Binding.Notebook, e.Binding.NotebookView()
 		if !cut.mid {
 			next.Tail = shortTail(raw, refs, end, min(8192, e.Binding.Threshold()/8))
 		}

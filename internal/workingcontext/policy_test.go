@@ -202,7 +202,7 @@ func TestToolsViewLeavesOutASavedCatalog(t *testing.T) {
 	for _, view := range []string{"catalog", "tools"} {
 		e := testEngine(contextcfg.Handoff)
 		e.Binding.Notebook, e.Binding.View = "notes", view
-		e.current = session.Checkpoint{Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "OLD-CATALOG"}
+		e.current = session.Checkpoint{Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "OLD-CATALOG", Notebook: "notes", View: "catalog"}
 		e.loaded = true
 		visible, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 		b, _ := json.Marshal(visible)

@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
 	"slices"
@@ -19,6 +20,13 @@ type Message struct {
 	Time       time.Time `json:"time"`
 	Model      string    `json:"model,omitempty"`
 	Incomplete bool      `json:"incomplete,omitempty"`
+	// Settings, on a system record, are the conversation's settings from
+	// this message on.
+	Settings *Settings `json:"settings,omitempty"`
+	// Pin, on a pin event, is the standing pin it adds, replaces or removes.
+	Pin *contextstate.PinChange `json:"pin,omitempty"`
+	// Receipt, on a reply, records the window it was produced with.
+	Receipt *contextstate.Receipt `json:"receipt,omitempty"`
 }
 
 // Content is what a message says: its typed blocks, and for a message that
@@ -37,6 +45,9 @@ type Entry struct {
 	Time       time.Time
 	Model      string
 	Incomplete bool
+	Settings   *Settings
+	Pin        *contextstate.PinChange
+	Receipt    *contextstate.Receipt
 	Content    Content
 }
 

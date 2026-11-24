@@ -71,9 +71,7 @@ func storeBlock(block core.Block) (storedBlock, error) {
 			Type: "tool_result", ToolUseID: b.ToolUseID, ToolType: b.Type, Namespace: b.Namespace,
 			Name: b.Name, Text: b.Content, IsError: b.IsError,
 		}
-		for _, image := range b.Images {
-			stored.Images = append(stored.Images, storedImage{URL: image.URL, Detail: image.Detail, Name: image.Name})
-		}
+		stored.Images = storedImagesFromCore(b.Images)
 		return stored, nil
 	case core.ImageBlock:
 		return storedBlock{Type: "image", URL: b.URL, Detail: b.Detail, Name: b.Name}, nil
@@ -105,9 +103,7 @@ func loadBlock(b storedBlock) (core.Block, error) {
 			ToolUseID: b.ToolUseID, Type: b.ToolType, Namespace: b.Namespace, Name: b.Name,
 			Content: b.Text, IsError: b.IsError,
 		}
-		for _, image := range b.Images {
-			result.Images = append(result.Images, core.ImageBlock{URL: image.URL, Detail: image.Detail, Name: image.Name})
-		}
+		result.Images = coreImagesFromStored(b.Images)
 		return result, nil
 	case "image":
 		return core.ImageBlock{URL: b.URL, Detail: b.Detail, Name: b.Name}, nil
@@ -117,4 +113,20 @@ func loadBlock(b storedBlock) (core.Block, error) {
 		return core.FileBlock{FileID: b.FileID}, nil
 	}
 	return nil, fmt.Errorf("unknown stored block type %q", b.Type)
+}
+
+func storedImagesFromCore(images []core.ImageBlock) []storedImage {
+	var stored []storedImage
+	for _, image := range images {
+		stored = append(stored, storedImage{URL: image.URL, Detail: image.Detail, Name: image.Name})
+	}
+	return stored
+}
+
+func coreImagesFromStored(images []storedImage) []core.ImageBlock {
+	var blocks []core.ImageBlock
+	for _, image := range images {
+		blocks = append(blocks, core.ImageBlock{URL: image.URL, Detail: image.Detail, Name: image.Name})
+	}
+	return blocks
 }

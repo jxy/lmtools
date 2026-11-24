@@ -18,10 +18,14 @@ import (
 
 const appenderEnv = "LMC_TEST_SESSION_APPENDER"
 
-// TestMain lets the test binary append to a session from another process.
+// TestMain lets the test binary append to a session from another process,
+// or play a run that owns a tool call.
 func TestMain(m *testing.M) {
 	if job := os.Getenv(appenderEnv); job != "" {
 		os.Exit(runAppender(job))
+	}
+	if invocation := os.Getenv(journalOwnerEnv); invocation != "" {
+		os.Exit(runJournalOwner(invocation))
 	}
 	os.Exit(m.Run())
 }

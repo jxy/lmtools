@@ -96,6 +96,7 @@ func (s *Store) Append(ctx context.Context, at Ref, entries ...Entry) ([]Message
 			m := Message{
 				ID: formatID(first + uint64(i)), Parent: parent, Role: entry.Role, Time: entry.Time,
 				Model: entry.Model, Incomplete: entry.Incomplete,
+				Settings: entry.Settings, Pin: entry.Pin, Receipt: entry.Receipt,
 			}
 			if m.Time.IsZero() {
 				m.Time = time.Now().UTC()

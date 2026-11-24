@@ -136,7 +136,7 @@ func TestReceiptKeepsTheFirstWindowsCatalogChoice(t *testing.T) {
 		e.Binding.Initial = "Project notebook at window start: one note."
 		raw := []core.TypedMessage{core.NewTextMessage("system", "sys"), core.NewTextMessage("user", "q1"), core.NewTextMessage("assistant", "a1"), core.NewTextMessage("user", "q2")}
 		refs := MemoryRefs(raw)
-		refs[2].Role, refs[2].Receipt = core.RoleAssistant, &contextstate.Receipt{CatalogOmitted: omitted}
+		refs[2].Role, refs[2].Receipt = core.RoleAssistant, &contextstate.Receipt{CatalogOmitted: omitted, View: "catalog"}
 		view, err := e.Project(context.Background(), raw, refs, savedInMemory{MemoryTranscript(refs)}, false)
 		b, _ := json.Marshal(view)
 		if err != nil || strings.Contains(string(b), "one note") == omitted || e.Receipt().CatalogOmitted != omitted || e.Receipt().CatalogSent == omitted {
@@ -675,3 +675,45 @@ func saved(refs []session.ContextRef, s *session.Session) ([]contextstate.Ref, T
 type savedInMemory struct{ Transcript }
 
 func (savedInMemory) Stored(int) bool { return true }
+
+// A checkpoint's catalog goes with it while the notebook and view it came
+// from are in force. After a switch to another notebook a request carries
+// that notebook's catalog, and after a detach none. A receipt's choice to
+// leave the first window's catalog out is made again for another notebook.
+func TestCheckpointCatalogFollowsTheNotebookInForce(t *testing.T) {
+	raw := []core.TypedMessage{core.NewTextMessage("user", "first"), core.NewTextMessage("assistant", "done"), core.NewTextMessage("user", "next")}
+	refs := MemoryRefs(raw)
+	for _, tc := range []struct {
+		notebook, initial, want string
+	}{
+		{"notes-a", "CATALOG-B", "CATALOG-A"},
+		{"notes-b", "CATALOG-B", "CATALOG-B"},
+		{"", "", ""},
+	} {
+		e := testEngine(contextcfg.Handoff)
+		e.Binding.Notebook, e.Binding.Initial = tc.notebook, tc.initial
+		e.current = contextstate.Checkpoint{Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "CATALOG-A", Notebook: "notes-a", View: "catalog"}
+		e.loaded = true
+		visible, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
+		b, _ := json.Marshal(visible)
+		sent := string(b)
+		if err != nil || !strings.Contains(sent, "PRIOR-HANDOFF") {
+			t.Fatalf("notebook %q: %v", tc.notebook, err)
+		}
+		for _, catalog := range []string{"CATALOG-A", "CATALOG-B"} {
+			if strings.Contains(sent, catalog) != (catalog == tc.want) {
+				t.Errorf("notebook %q sent %s: %t", tc.notebook, catalog, strings.Contains(sent, catalog))
+			}
+		}
+	}
+	first := []core.TypedMessage{core.NewTextMessage("system", "sys"), core.NewTextMessage("user", "q1"), core.NewTextMessage("assistant", "a1"), core.NewTextMessage("user", "q2")}
+	firstRefs := MemoryRefs(first)
+	firstRefs[2].Role, firstRefs[2].Receipt = core.RoleAssistant, &contextstate.Receipt{CatalogOmitted: true, Notebook: "notes-a", View: "catalog"}
+	e := testEngine(contextcfg.Handoff)
+	e.Binding.Notebook, e.Binding.Initial = "notes-b", "CATALOG-B"
+	visible, err := e.Project(context.Background(), first, firstRefs, savedInMemory{MemoryTranscript(firstRefs)}, false)
+	b, _ := json.Marshal(visible)
+	if err != nil || !strings.Contains(string(b), "CATALOG-B") || e.Receipt().CatalogOmitted {
+		t.Fatalf("the choice made for notes-a held for notes-b: %v", err)
+	}
+}
