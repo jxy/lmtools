@@ -424,7 +424,7 @@ func TestE2E_EmbeddingMode(t *testing.T) {
 	server := newE2ETestServer(t)
 
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "charlie", "-model", "v3large", "-e", "-provider-url", server.URL},
+		[]string{"-argo-user", "charlie", "-model", "v3large", "-embed", "-provider-url", server.URL},
 		"Generate an embedding for this text")
 	if err != nil {
 		t.Fatalf("Failed to generate embedding: %v\nStderr: %s", err, stderr)

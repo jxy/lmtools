@@ -138,7 +138,7 @@ func TestBuildRequestRejectsUnsupportedDeveloperHistory(t *testing.T) {
 		cfg := newProviderSpecTestConfig(test.provider, test.model, "http://example.test/v1")
 		cfg.ArgoLegacy = test.legacy
 		messages := []TypedMessage{NewTextMessage("developer", "Persisted instruction"), NewTextMessage("user", "hello")}
-		if _, _, err := BuildChatRequest(cfg, messages, ChatBuildOptions{}); err == nil || !strings.Contains(err.Error(), "cannot preserve the developer role") {
+		if _, _, err := BuildChatRequest(cfg, messages, ChatBuildOptions{}); err == nil || !strings.Contains(err.Error(), "cannot preserve the developer role") || !strings.HasSuffix(err.Error(), "with -system") {
 			t.Fatalf("provider=%s model=%s legacy=%v error=%v", test.provider, test.model, test.legacy, err)
 		}
 	}

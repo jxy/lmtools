@@ -147,11 +147,11 @@ func TestSettingsFlagsSetAndClear(t *testing.T) {
 	}
 }
 
-// -builtin-system restores the built-in prompt, and is refused beside -s,
-// -s ” included.
+// -builtin-system restores the built-in prompt, and is refused beside
+// -system, an empty one included.
 func TestBuiltinSystemFlag(t *testing.T) {
 	base := []string{"-argo-user", "test", "-sessions-dir", t.TempDir()}
-	for _, flags := range [][]string{{"-s", "custom"}, {"-s", ""}} {
+	for _, flags := range [][]string{{"-system", "custom"}, {"-system", ""}} {
 		if _, err := ParseFlags(append(slices.Clone(base), append(flags, "-builtin-system")...)); err == nil || !strings.Contains(err.Error(), "-builtin-system") {
 			t.Fatalf("%v: %v", flags, err)
 		}

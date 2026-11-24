@@ -111,7 +111,7 @@ func TestParseFlagsImageRejections(t *testing.T) {
 		},
 		{
 			name: "embed mode",
-			args: []string{"-e", "-image", png},
+			args: []string{"-embed", "-image", png},
 			want: "-image is only supported in chat mode",
 		},
 		{

@@ -150,8 +150,8 @@ func TestOpenAIResponsesDefault(t *testing.T) {
 		{"anthropic chat", []string{"-provider", "anthropic", "-chat-completions", "-api-key-file", "test.key"}, false},
 		{"google", []string{"-provider", "google", "-api-key-file", "test.key"}, false},
 		{"google chat", []string{"-provider", "google", "-chat-completions", "-api-key-file", "test.key"}, false},
-		{"embed", []string{"-provider", "openai", "-e", "-api-key-file", "test.key"}, false},
-		{"embed chat", []string{"-provider", "openai", "-e", "-chat-completions", "-api-key-file", "test.key"}, false},
+		{"embed", []string{"-provider", "openai", "-embed", "-api-key-file", "test.key"}, false},
+		{"embed chat", []string{"-provider", "openai", "-embed", "-chat-completions", "-api-key-file", "test.key"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, err := ParseFlags(tt.args)

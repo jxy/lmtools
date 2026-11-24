@@ -302,12 +302,12 @@ func TestMatrixEditAQuestionAfterItsInstruction(t *testing.T) {
 	}
 }
 
-// 5. A new -s mid conversation applies from its turn on, a resume without
-// -s keeps it, a resume from before the change does not have it, and
+// 5. A new -system mid conversation applies from its turn on, a resume
+// without -system keeps it, a resume from before the change does not have it, and
 // -builtin-system restores the built-in prompt.
 func TestMatrixSystemPromptFollowsTheLineage(t *testing.T) {
 	m := newMatrix(t)
-	_, stderr, err := m.run("q0", "-s", "a new session's prompt")
+	_, stderr, err := m.run("q0", "-system", "a new session's prompt")
 	if err != nil || strings.Contains(stderr, "Changed the") {
 		t.Fatalf("a new session announced its settings: %v\n%s", err, stderr)
 	}
@@ -315,12 +315,12 @@ func TestMatrixSystemPromptFollowsTheLineage(t *testing.T) {
 	if got := systemOf(m.last()); got != prompts.DefaultSystemPrompt {
 		t.Fatalf("first system prompt %q", got)
 	}
-	_, stderr, err = m.run("q2", "-resume", first.Session, "-s", "be terse")
+	_, stderr, err = m.run("q2", "-resume", first.Session, "-system", "be terse")
 	if err != nil || !strings.Contains(stderr, "Changed the system prompt from message "+first.Session+"/") {
 		t.Fatalf("the change was not announced: %v\n%s", err, stderr)
 	}
 	if got := systemOf(m.last()); got != "be terse" {
-		t.Fatalf("system prompt after -s: %q", got)
+		t.Fatalf("system prompt after -system: %q", got)
 	}
 	third := m.ok("q3", "-resume", first.Session)
 	if got := systemOf(m.last()); got != "be terse" {
@@ -542,7 +542,7 @@ func TestMatrixCheckpointCatalogFollowsTheNotebook(t *testing.T) {
 func TestMatrixEmptyInputNeedsSomethingToAnswer(t *testing.T) {
 	m := newMatrix(t)
 	first := m.ok("q1")
-	for _, flags := range [][]string{{"-resume", first.Session}, {"-resume", first.Session, "-s", "new prompt"}} {
+	for _, flags := range [][]string{{"-resume", first.Session}, {"-resume", first.Session, "-system", "new prompt"}} {
 		_, stderr, err := m.run("", flags...)
 		if err == nil || !strings.Contains(stderr, "needs a prompt") {
 			t.Fatalf("%v: %v\n%s", flags, err, stderr)

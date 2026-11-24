@@ -64,8 +64,8 @@ func reply(t *testing.T, sess *Session, answer string) Message {
 
 func custom(prompt string) *string { return &prompt }
 
-// conversation starts a session with prompt "q1" under -s "sys" and answers
-// it, and returns the session at the answer.
+// conversation starts a session with prompt "q1" under -system "sys" and
+// answers it, and returns the session at the answer.
 func conversation(t *testing.T, s *Store) *Session {
 	t.Helper()
 	sess := commit(t, prepare(t, s, Ref{}, Change{System: custom("sys")}, Turn{Prompt: "q1"}))
@@ -270,8 +270,10 @@ func TestSettingsFollowTheLineage(t *testing.T) {
 
 func intp(n int) *int { return &n }
 
-// The built-in prompt is built from the tools a run advertises; a custom
-// prompt stays, and an empty one sends no system message.
+// The built-in prompt is built from the tools a run advertises. A custom
+// prompt replaces its opening, and the texts the run's tools add follow any
+// prompt, an empty one included; an empty prompt without tools sends no
+// system message.
 func TestSystemPromptFollowsTheRunsTools(t *testing.T) {
 	tools := plainOpts()
 	tools.ToolEnabled = true
@@ -281,15 +283,21 @@ func TestSystemPromptFollowsTheRunsTools(t *testing.T) {
 	if got := SystemPrompt(Settings{}, tools); got != core.ToolSystemPromptFor(nil) {
 		t.Fatalf("with tools %q", got)
 	}
-	if got := SystemPrompt(Settings{System: custom("mine")}, tools); got != "mine" {
+	if got := SystemPrompt(Settings{System: custom("mine")}, tools); got != "mine\n\n"+prompts.ToolPromptRules {
 		t.Fatalf("custom %q", got)
+	}
+	withheld := tools
+	withheld.ExcludedTools = []string{core.UniversalCommandToolName}
+	if got := SystemPrompt(Settings{System: custom("mine")}, withheld); got != "mine\n\n"+prompts.ToolPromptGuidance {
+		t.Fatalf("custom without universal_command %q", got)
 	}
 	withServer := tools
 	withServer.MCP = oneMCPTool{}
-	if got := SystemPrompt(Settings{System: custom("mine")}, withServer); !strings.HasPrefix(got, "mine") || !strings.Contains(got, "MCP servers") {
-		t.Fatalf("a custom prompt without what the servers add: %q", got)
+	addendum := core.MCPSystemPromptAddendum(withServer.MCP)
+	if got := SystemPrompt(Settings{System: custom("mine")}, withServer); got != "mine\n\n"+prompts.ToolPromptRules+addendum {
+		t.Fatalf("a custom prompt with a server %q", got)
 	}
-	if got := SystemPrompt(Settings{System: custom("")}, withServer); got != core.MCPSystemPromptAddendum(withServer.MCP) {
+	if got := SystemPrompt(Settings{System: custom("")}, withServer); got != prompts.ToolPromptRules+addendum {
 		t.Fatalf("an empty prompt with a server sends %q", got)
 	}
 	s := newStore(t)

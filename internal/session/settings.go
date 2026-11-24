@@ -6,11 +6,11 @@ import (
 	"lmtools/internal/prompts"
 )
 
-// Settings are a conversation's settings: what the operator set with -s,
-// -builtin-system, -notebook, -notebook-view and the -context-* flags. A
-// system record holds them, and they stay in force for every later message
-// of its lineage until another record replaces them. An empty value is a
-// default, which each run resolves for itself.
+// Settings are a conversation's settings: what the operator set with
+// -system, -builtin-system, -notebook, -notebook-view and the -context-*
+// flags. A system record holds them, and they stay in force for every later
+// message of its lineage until another record replaces them. An empty value
+// is a default, which each run resolves for itself.
 type Settings struct {
 	// System is the custom system prompt; nil stands for the built-in
 	// prompt, which each run builds from the tools it advertises. An empty
@@ -139,23 +139,27 @@ func (s *Store) SettingsAt(at Ref) (Settings, error) {
 	return SettingsAt(lineage), nil
 }
 
-// SystemPrompt returns the system prompt a request under s sends: the custom
-// prompt, or the built-in prompt for the tools opts advertises, the default
-// prompt without tools and the tool prompt with them, each followed by what
-// the run's MCP servers add, which a custom prompt gets too. An empty prompt
-// sends no system message.
+// SystemPrompt returns the system message a request under s sends: the
+// conversation's prompt, then what the tools opts advertises add. The prompt
+// is the custom one, or the built-in opening for the run's tools: the
+// default prompt without tools. The tools add the rules for
+// universal_command, or a shorter guidance when the run withholds it, then
+// what the run's MCP servers add. A custom prompt sets only the first part,
+// so an empty one with tools sends the tool texts alone, and without tools
+// no system message.
 func SystemPrompt(s Settings, opts core.RequestOptions) string {
-	var base string
-	switch {
-	case s.System != nil:
-		base = *s.System
-	case opts.ToolEnabled:
-		base = core.ToolSystemPromptFor(opts.ExcludedTools)
-	default:
-		base = prompts.DefaultSystemPrompt
+	if !opts.ToolEnabled {
+		if s.System != nil {
+			return *s.System
+		}
+		return prompts.DefaultSystemPrompt
 	}
-	if opts.ToolEnabled {
-		base += core.MCPSystemPromptAddendum(opts.MCP)
+	opening, tools := core.ToolPrompt(opts.ExcludedTools)
+	if s.System != nil {
+		opening = *s.System
 	}
-	return base
+	if opening != "" {
+		tools = opening + "\n\n" + tools
+	}
+	return tools + core.MCPSystemPromptAddendum(opts.MCP)
 }

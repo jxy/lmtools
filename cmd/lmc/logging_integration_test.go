@@ -59,7 +59,7 @@ func TestLoggingIntegration(t *testing.T) {
 	// Test 1: Embedding request with logging
 	logDir := t.TempDir()
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-e", "-model", "v3large", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
+		[]string{"-argo-user", "testuser", "-embed", "-model", "v3large", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
 		"Test message for embedding", WithLogDir(logDir))
 	if err != nil {
 		t.Fatalf("Failed to run embedding: %v\nStderr: %s", err, stderr)
@@ -252,7 +252,7 @@ func TestConcurrentLogging(t *testing.T) {
 		go func(id int) {
 			// Use specific log dir for concurrent test
 			_, stderr, err := runLmcCommand(t, lmcBin,
-				[]string{"-argo-user", "testuser", "-e", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
+				[]string{"-argo-user", "testuser", "-embed", "-provider-url", ms.URL(), "-sessions-dir", sessionsDir},
 				"Concurrent test message", WithLogDir(logDir))
 			if err != nil {
 				t.Logf("Process %d failed: %v, stderr: %s", id, err, stderr)

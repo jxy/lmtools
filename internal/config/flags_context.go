@@ -55,7 +55,7 @@ func resolveStart(store *session.Store, resume string) (session.Ref, error) {
 	return located, err
 }
 
-// settingsChange is what the run's settings flags set: -s, -builtin-system,
+// settingsChange is what the run's settings flags set: -system, -builtin-system,
 // -notebook, -notebook-view and the -context-* flags. A policy other than
 // the one in force at the start point also clears the format, returns early
 // cuts to their default, and clears the trigger when it stops compaction,
@@ -64,7 +64,7 @@ func resolveStart(store *session.Store, resume string) (session.Ref, error) {
 // force leaves an experimental writer.
 func settingsChange(c *Config, explicit map[string]bool, at session.Settings) (session.Change, error) {
 	var ch session.Change
-	if explicit["s"] {
+	if explicit["system"] {
 		system := c.System
 		ch.System = &system
 	}

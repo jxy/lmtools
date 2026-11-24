@@ -63,12 +63,12 @@ func TestToolSelectionSettlesBuiltinToolsAndThePrompt(t *testing.T) {
 	}
 
 	// An explicit system prompt is the operator's, whatever the selection.
-	cfg, err := ParseFlags([]string{"-argo-user", "testuser", "-tool", "-tool-exclude", "universal_command", "-s", "mine"})
+	cfg, err := ParseFlags([]string{"-argo-user", "testuser", "-tool", "-tool-exclude", "universal_command", "-system", "mine"})
 	if err != nil {
 		t.Fatalf("ParseFlags() error = %v", err)
 	}
-	if opts := cfg.RequestOptions(); opts.EffectiveSystem != "mine" {
-		t.Fatalf("EffectiveSystem = %q, want the explicit prompt", opts.EffectiveSystem)
+	if opts := cfg.RequestOptions(); opts.EffectiveSystem != "mine\n\n"+prompts.ToolPromptGuidance {
+		t.Fatalf("EffectiveSystem = %q, want the explicit prompt with the tool guidance", opts.EffectiveSystem)
 	}
 }
 

@@ -63,7 +63,7 @@ func TestShowLastTurnsAndSystemPrompt(t *testing.T) {
 		t.Fatalf("built-in prompt:\n%s", out)
 	}
 	none := commit(t, prepare(t, s, asked.Ref(), Change{System: custom("")}, Turn{Prompt: "q3"}))
-	if out := show(t, s, none.Ref(), ShowOptions{SystemOnly: true}); !strings.Contains(out, "sends no system prompt") {
+	if out := show(t, s, none.Ref(), ShowOptions{SystemOnly: true}); !strings.Contains(out, "has an empty system prompt") {
 		t.Fatalf("no prompt:\n%s", out)
 	}
 	empty := create(t, s)

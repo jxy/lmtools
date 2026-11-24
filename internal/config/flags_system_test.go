@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// The system prompt is the custom one -s sets, -s ” included, or else the
-// built-in prompt for the run's tools.
+// The system prompt is the custom one -system sets, an empty one included,
+// or else the built-in prompt for the run's tools. The command rules follow
+// any prompt of a run with tools.
 func TestSystemPromptWithToolFlag(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -23,8 +24,8 @@ func TestSystemPromptWithToolFlag(t *testing.T) {
 		},
 		{
 			name:               "tool flag with custom system prompt",
-			args:               []string{"-tool", "-s", "Custom system prompt", "-argo-user", "testuser"},
-			expectedSystem:     "Custom system prompt",
+			args:               []string{"-tool", "-system", "Custom system prompt", "-argo-user", "testuser"},
+			expectedSystem:     "Custom system prompt\n\n" + prompts.ToolPromptRules,
 			expectedEnableTool: true,
 			expectedCustom:     true,
 		},
@@ -35,22 +36,29 @@ func TestSystemPromptWithToolFlag(t *testing.T) {
 		},
 		{
 			name:           "explicit system prompt without tool",
-			args:           []string{"-s", "My custom prompt", "-argo-user", "testuser"},
+			args:           []string{"-system", "My custom prompt", "-argo-user", "testuser"},
 			expectedSystem: "My custom prompt",
 			expectedCustom: true,
 		},
 		{
 			name:               "tool with explicit default system prompt",
-			args:               []string{"-tool", "-s", prompts.DefaultSystemPrompt, "-argo-user", "testuser"},
-			expectedSystem:     prompts.DefaultSystemPrompt,
+			args:               []string{"-tool", "-system", prompts.DefaultSystemPrompt, "-argo-user", "testuser"},
+			expectedSystem:     prompts.DefaultSystemPrompt + "\n\n" + prompts.ToolPromptRules,
 			expectedEnableTool: true,
 			expectedCustom:     true, // custom even when it matches the default
 		},
 		{
 			name:           "empty system prompt",
-			args:           []string{"-s", "", "-argo-user", "testuser"},
+			args:           []string{"-system", "", "-argo-user", "testuser"},
 			expectedSystem: "",
 			expectedCustom: true,
+		},
+		{
+			name:               "empty system prompt with tools",
+			args:               []string{"-tool", "-system", "", "-argo-user", "testuser"},
+			expectedSystem:     prompts.ToolPromptRules,
+			expectedEnableTool: true,
+			expectedCustom:     true,
 		},
 	}
 

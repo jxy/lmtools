@@ -138,7 +138,7 @@ func TestParseFlagsInvalidCombos(t *testing.T) {
 		args    []string
 		wantErr string
 	}{
-		{"embed+resume", []string{"-argo-user", "testuser", "-e", "-resume", "123"}, "embed mode cannot be used with -resume"},
+		{"embed+resume", []string{"-argo-user", "testuser", "-embed", "-resume", "123"}, "embed mode cannot be used with -resume"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,7 +153,7 @@ func TestParseFlagsInvalidCombos(t *testing.T) {
 }
 
 func TestParseFlagsCustom(t *testing.T) {
-	args := []string{"-model", "modelA", "-argo-user", "alice", "-s", "sys"}
+	args := []string{"-model", "modelA", "-argo-user", "alice", "-system", "sys"}
 	cfg, err := ParseFlags(args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -408,12 +408,12 @@ func TestParseFlagsOutputOptionValidation(t *testing.T) {
 		},
 		{
 			name:    "embed reasoning mode",
-			args:    []string{"-argo-user", "alice", "-e", "-reasoning-mode", "pro"},
+			args:    []string{"-argo-user", "alice", "-embed", "-reasoning-mode", "pro"},
 			wantErr: "only supported in chat mode",
 		},
 		{
 			name:    "embed output option",
-			args:    []string{"-argo-user", "alice", "-e", "-json"},
+			args:    []string{"-argo-user", "alice", "-embed", "-json"},
 			wantErr: "only supported in chat mode",
 		},
 		{
@@ -442,7 +442,7 @@ func TestParseFlagsOutputOptionValidation(t *testing.T) {
 }
 
 func TestEmbedModeAutoDisablesSessions(t *testing.T) {
-	args := []string{"-argo-user", "testuser", "-e"}
+	args := []string{"-argo-user", "testuser", "-embed"}
 	cfg, err := ParseFlags(args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -456,10 +456,10 @@ func TestEmbedModeAutoDisablesSessions(t *testing.T) {
 }
 
 func TestEmbedModeWithExplicitNoSessionFalse(t *testing.T) {
-	args := []string{"-argo-user", "testuser", "-e", "-no-session=false"}
+	args := []string{"-argo-user", "testuser", "-embed", "-no-session=false"}
 	_, err := ParseFlags(args)
 	if err == nil {
-		t.Error("Expected error when using -e with -no-session=false")
+		t.Error("Expected error when using -embed with -no-session=false")
 	}
 	expectedErr := "invalid flag combination: embed mode requires sessions to be disabled"
 	if err != nil && !strings.Contains(err.Error(), expectedErr) {
@@ -468,7 +468,7 @@ func TestEmbedModeWithExplicitNoSessionFalse(t *testing.T) {
 }
 
 func TestEmbedModeWithExplicitNoSessionTrue(t *testing.T) {
-	args := []string{"-argo-user", "testuser", "-e", "-no-session=true"}
+	args := []string{"-argo-user", "testuser", "-embed", "-no-session=true"}
 	cfg, err := ParseFlags(args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -503,7 +503,7 @@ func TestVersionFlagSkipsValidation(t *testing.T) {
 // session, naming the flag it cannot be used with.
 func TestParseFlagsREPLRefusals(t *testing.T) {
 	for _, flag := range [][]string{
-		{"-e"}, {"-print-curl"}, {"-show-sessions"}, {"-show", "0001"}, {"-delete", "0001"}, {"-list-models"}, {"-no-session"},
+		{"-embed"}, {"-print-curl"}, {"-show-sessions"}, {"-show", "0001"}, {"-delete", "0001"}, {"-list-models"}, {"-no-session"},
 	} {
 		t.Run(flag[0], func(t *testing.T) {
 			args := append([]string{"-argo-user", "testuser", "-repl"}, flag...)
@@ -527,8 +527,8 @@ func TestParseFlagsStreamsByDefault(t *testing.T) {
 		{args: []string{"-no-stream"}, stream: false},
 		{args: []string{"-repl"}, stream: true},
 		{args: []string{"-repl", "-no-stream"}, stream: false},
-		{args: []string{"-e"}, stream: false},
-		{args: []string{"-e", "-no-stream"}, stream: false},
+		{args: []string{"-embed"}, stream: false},
+		{args: []string{"-embed", "-no-stream"}, stream: false},
 		{args: []string{"-show", "0001"}, stream: false},
 		{args: []string{"-show", "0001", "-no-stream"}, stream: false},
 	} {

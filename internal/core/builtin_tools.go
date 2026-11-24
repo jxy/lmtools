@@ -42,16 +42,24 @@ func GetBuiltinTools(cfg RequestOptions) []ToolDefinition {
 // which is the order -tool-include and -tool-exclude report them in.
 var BuiltinToolNames = []string{UniversalCommandToolName, ViewImageToolName}
 
-// ToolSystemPromptFor is the built-in system prompt of a run with tools: the
-// command prompt, or the shorter one when universal_command is among the
-// excluded tools.
+// ToolSystemPromptFor is the built-in system prompt of a run with tools:
+// its opening and its tool text, as ToolPrompt gives them.
 func ToolSystemPromptFor(excluded []string) string {
+	opening, tools := ToolPrompt(excluded)
+	return opening + "\n\n" + tools
+}
+
+// ToolPrompt returns the opening of the built-in prompt of a run with tools,
+// and the tool text any system prompt of that run is followed by: the rules
+// for universal_command, or a shorter guidance when it is among the
+// excluded tools.
+func ToolPrompt(excluded []string) (opening, tools string) {
 	for _, name := range excluded {
 		if name == UniversalCommandToolName {
-			return prompts.ToolSystemPromptWithoutCommand
+			return prompts.ToolPromptOpeningWithoutCommand, prompts.ToolPromptGuidance
 		}
 	}
-	return prompts.ToolSystemPrompt
+	return prompts.ToolPromptOpening, prompts.ToolPromptRules
 }
 
 // ToolImageByteLimit is the cap view_image loads under. Anthropic rejects an

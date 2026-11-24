@@ -42,7 +42,7 @@ type Config struct {
 	Images           []core.ImageBlock // -image files loaded at parse time as data URLs
 	providerconfig.Options
 	OpenAIResponses bool          // chat through the provider's Responses API where the model has one; ParseFlags derives it from ChatCompletions
-	System          string        // -s: the custom system prompt this run sets
+	System          string        // -system: the custom system prompt this run sets
 	BuiltinSystem   bool          // -builtin-system: restore the built-in system prompt
 	Developer       string        // pending developer instruction for the first new user turn
 	Timeout         time.Duration // HTTP request timeout
@@ -188,14 +188,14 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	// Model Options
 	fs.StringVar(&cfg.Model, "model", "", fmt.Sprintf("model to use (default varies by provider, %q for embed)",
 		core.DefaultEmbedModel))
-	fs.BoolVar(&cfg.Embed, "e", false, "enable embed mode instead of chat")
+	fs.BoolVar(&cfg.Embed, "embed", false, "enable embed mode instead of chat")
 
 	// Chat Options
 	fs.BoolVar(&cfg.NoStream, "no-stream", false, "wait for the whole answer instead of streaming it")
 	fs.BoolVar(&cfg.REPL, "repl", false, "read one turn per line from stdin until it ends, continuing one session")
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.BoolVar(&cfg.HideThinking, "hide-thinking", false, "hide the provider-returned thinking summaries lmc prints to stderr; the request and its reasoning are unchanged")
-	fs.StringVar(&cfg.System, "s", "", "custom system prompt, kept for the turns that follow; -s '' sends none")
+	fs.StringVar(&cfg.System, "system", "", "custom system prompt, kept for the turns that follow; the texts the run's tools add follow it")
 	fs.BoolVar(&cfg.BuiltinSystem, "builtin-system", false, "Restore the built-in system prompt. Each run builds it from the tools it advertises.")
 	fs.StringVar(&cfg.Developer, "developer", "", "developer instruction saved before the first new user turn (OpenAI, or Argo gpt* without -chat-completions)")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")

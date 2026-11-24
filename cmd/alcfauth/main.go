@@ -218,7 +218,7 @@ func runToken(ctx context.Context, args []string, e env) error {
 	var o options
 	fs := newFlagSet("token", "token [flags]", e, &o)
 	minValid := fs.Duration("min-valid", time.Hour, "refresh the access token when less than this `duration` is left")
-	quiet := fs.Bool("q", false, "write the key file without printing the token")
+	quiet := fs.Bool("quiet", false, "write the key file without printing the token")
 	watch := fs.Bool("watch", false, "keep running, and refresh the key file whenever less than -min-valid is left, until interrupted")
 	if err := noArguments(fs, args); err != nil {
 		return err

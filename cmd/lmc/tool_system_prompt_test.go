@@ -14,20 +14,21 @@ import (
 	"time"
 )
 
-// TestToolSystemPromptUsage verifies that the correct system prompt is used
-// when the -tool flag is specified without an explicit -s flag
+// TestToolSystemPromptUsage checks the system message of runs with tools: the
+// built-in tool prompt, or a custom prompt followed by the command rules,
+// and with an empty custom prompt the rules alone.
 func TestToolSystemPromptUsage(t *testing.T) {
 	// Start a mock server for all tests
 	ms := mockserver.NewMockServer()
 	defer ms.Close()
 
-	// Test 1: With -tool flag, no explicit -s flag - should use ToolSystemPrompt
+	// Test 1: With -tool flag, no explicit -system flag - should use ToolSystemPrompt
 	t.Run("tool_without_explicit_system", func(t *testing.T) {
 		lmcBin := getLmcBinary(t)
 		logDir := t.TempDir()
 		sessDir := t.TempDir()
 
-		// Run lmc with -tool but without -s
+		// Run lmc with -tool but without -system
 		// Use mock server to avoid actual API call
 		_, stderr, err := runLmcCommand(t, lmcBin,
 			[]string{
@@ -66,41 +67,44 @@ func TestToolSystemPromptUsage(t *testing.T) {
 		}
 	})
 
-	// Test 2: With -tool and explicit -s flag - should use custom prompt
-	t.Run("tool_with_explicit_system", func(t *testing.T) {
-		lmcBin := getLmcBinary(t)
-		logDir := t.TempDir()
-		sessDir := t.TempDir()
-		customPrompt := "My custom system prompt for testing"
+	// Test 2: With -tool and an explicit -system flag - the custom prompt
+	// replaces the built-in opening, and the command rules follow it. An
+	// empty custom prompt leaves the rules alone.
+	for _, tc := range []struct{ name, custom, want string }{
+		{"tool_with_explicit_system", "My custom system prompt for testing", "My custom system prompt for testing\n\n" + prompts.ToolPromptRules},
+		{"tool_with_empty_system", "", prompts.ToolPromptRules},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lmcBin := getLmcBinary(t)
+			logDir := t.TempDir()
+			sessDir := t.TempDir()
 
-		_, stderr, err := runLmcCommand(t, lmcBin,
-			[]string{
-				"-provider", "openai",
-				"-provider-url", ms.URL() + "/v1",
-				"-tool",
-				"-s", customPrompt,
-				"-sessions-dir", sessDir,
-			},
-			"test input", WithLogDir(logDir))
-		if err != nil {
-			t.Logf("Command failed (might be expected): %v", err)
-		}
-		t.Logf("stderr: %s", stderr)
+			_, stderr, err := runLmcCommand(t, lmcBin,
+				[]string{
+					"-provider", "openai",
+					"-provider-url", ms.URL() + "/v1",
+					"-tool",
+					"-system", tc.custom,
+					"-sessions-dir", sessDir,
+				},
+				"test input", WithLogDir(logDir))
+			if err != nil {
+				t.Logf("Command failed (might be expected): %v", err)
+			}
+			t.Logf("stderr: %s", stderr)
 
-		jsonFile := findLogFile(t, logDir, "chat_input")
-		if jsonFile == "" {
-			t.Fatal("Could not find chat_input log file")
-		}
+			jsonFile := findLogFile(t, logDir, "chat_input")
+			if jsonFile == "" {
+				t.Fatal("Could not find chat_input log file")
+			}
 
-		data := readJSONFile(t, jsonFile)
-		systemPrompt := extractSystemPrompt(t, data)
-		t.Logf("System prompt found: %q", systemPrompt)
-
-		// Should use the custom prompt, not ToolSystemPrompt
-		if systemPrompt != customPrompt {
-			t.Errorf("Expected custom prompt %q, got: %q", customPrompt, systemPrompt)
-		}
-	})
+			data := readJSONFile(t, jsonFile)
+			systemPrompt := extractSystemPrompt(t, data)
+			if systemPrompt != tc.want {
+				t.Errorf("system prompt %q, want %q", systemPrompt, tc.want)
+			}
+		})
+	}
 
 	// Test 3: Session resume with -tool flag - should use ToolSystemPrompt
 	t.Run("resume_session_with_tool", func(t *testing.T) {

@@ -21,7 +21,7 @@ func TestDeveloperFlagValidation(t *testing.T) {
 		{"google", []string{"-provider", "google"}, "cannot preserve the developer role"},
 		{"argo_claude", []string{"-provider", "argo", "-model", "claude-opus-4-7"}, "cannot preserve the developer role"},
 		{"argo_legacy", []string{"-provider", "argo", "-model", "gpt5", "-argo-legacy"}, "cannot preserve the developer role"},
-		{"embed", []string{"-provider", "openai", "-e"}, "only supported in chat mode"},
+		{"embed", []string{"-provider", "openai", "-embed"}, "only supported in chat mode"},
 		{"show_sessions", []string{"-provider", "openai", "-show-sessions"}, "only supported when sending a chat request"},
 		{"list_models", []string{"-provider", "openai", "-list-models"}, "only supported when sending a chat request"},
 	} {

@@ -67,7 +67,7 @@ func TestMCPConfigFlagRejections(t *testing.T) {
 		want string
 	}{
 		{name: "missing file", args: []string{"-mcp-config", filepath.Join(t.TempDir(), "none.json")}, want: "-mcp-config: read"},
-		{name: "embed mode", args: []string{"-e", "-mcp-config", good}, want: "chat mode"},
+		{name: "embed mode", args: []string{"-embed", "-mcp-config", good}, want: "chat mode"},
 		{name: "no servers", args: []string{"-mcp-config", empty}, want: "no servers are configured"},
 		{name: "non-interactive without a policy", args: []string{"-mcp-config", good, "-tool-non-interactive"}, want: "tool-non-interactive requires"},
 		{name: "empty path", args: []string{"-mcp-config", ""}, want: "requires a file path"},

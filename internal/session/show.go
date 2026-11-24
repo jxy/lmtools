@@ -91,7 +91,7 @@ func showSystemOnly(w io.Writer, at Ref, settings Settings) {
 	case settings.System == nil:
 		fmt.Fprintf(w, "Conversation %s uses the built-in system prompt, which each run builds from the tools it advertises.\n", at)
 	case *settings.System == "":
-		fmt.Fprintf(w, "Conversation %s sends no system prompt.\n", at)
+		fmt.Fprintf(w, "Conversation %s has an empty system prompt; a run with tools sends the texts its tools add.\n", at)
 	default:
 		fmt.Fprintf(w, "System prompt of conversation %s:\n%s\n", at, *settings.System)
 	}
@@ -202,7 +202,7 @@ func showSettings(w io.Writer, s Settings, options ShowOptions) {
 	case s.System == nil:
 		fmt.Fprintln(w, "system prompt: built-in")
 	case *s.System == "":
-		fmt.Fprintln(w, "system prompt: none")
+		fmt.Fprintln(w, "system prompt: empty")
 	case options.SystemSummary && strings.Count(*s.System, "\n") >= 3:
 		fmt.Fprintf(w, "system prompt: %d lines; /show system prints it\n", 1+strings.Count(*s.System, "\n"))
 	default:

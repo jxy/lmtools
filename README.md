@@ -92,7 +92,7 @@ echo "Explain quantum computing" | lmc \
   -print-curl
 
 # Generate embeddings. Embed mode turns off session tracking.
-echo "Hello world" | lmc -argo-user "$USER" -e
+echo "Hello world" | lmc -argo-user "$USER" -embed
 ```
 
 When a response reports token counts, `lmc` prints them to stderr as soon as
@@ -177,7 +177,7 @@ the settings a run changed and the message they apply from.
 
 | Flag | Sets | Clears |
 | --- | --- | --- |
-| `-s TEXT` | a custom system prompt; `-s ''` an empty one | `-builtin-system` restores the built-in prompt |
+| `-system TEXT` | a custom system prompt; `-system ''` an empty one | `-builtin-system` restores the built-in prompt |
 | `-notebook DIR` | the notebook | `-notebook ''` detaches it, with its view and catalog |
 | `-notebook-view`, `-context-policy`, `-context-format` | the named value | each has a default |
 | `-context-window N` | a cap on the context window | `-context-window 0` removes the cap |
@@ -187,10 +187,15 @@ the settings a run changed and the message they apply from.
 A new `-context-policy` also returns the format and early cuts to their
 defaults, and clears a trigger the policy cannot use. Every other flag
 applies to one run: the provider, model, effort, reasoning, tools, MCP
-servers and approvals. The built-in system prompt follows the tools a run
-advertises: the default prompt without tools, or the tool prompt with them,
-followed by what the run's MCP servers add. A custom prompt gets that too,
-`-s ''` included.
+servers and approvals.
+
+A request's system message is the conversation's prompt followed by what
+the run's tools add. The built-in prompt is the default one without tools,
+and an opening naming the tools with them; a custom prompt replaces it. A
+run with tools adds the rules for `universal_command`, or a shorter
+guidance when it withholds that tool, then what its MCP servers add. These
+texts follow every prompt: with `-system ''` a run with tools sends them
+alone, and a run without tools sends no system message.
 
 An image attached with `-image` is saved inline in the session, so a later
 run on that history sends it to the provider again. `-show` lists each one
@@ -538,7 +543,7 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
 - At exit, the loop says where it saved, as in `Saved in session 0001 at
   message 000c; continue it with -resume 0001/000c.`
 - `-repl` streams as a single run does, so `-no-stream` keeps
-  streaming off. It cannot be used with `-e`, `-print-curl`,
+  streaming off. It cannot be used with `-embed`, `-print-curl`,
   `-show-sessions`, `-show`, `-delete`, `-list-models`, or `-no-session`.
   With a terminal on stdin it needs to open that terminal again by its
   name, and stops at startup, naming the terminal and the reason, when it
@@ -1110,7 +1115,7 @@ Provider and credentials:
 Mode and model:
 
 - `-model string`: Model name. The default depends on the provider.
-- `-e`: Generate embeddings instead of chat. Embed mode turns off sessions,
+- `-embed`: Generate embeddings instead of chat. Embed mode turns off sessions,
   does not stream or use the Responses API, and rejects `-tool`, `-resume`,
   and the output controls.
 - `-list-models`: List the models the provider reports. When the provider
@@ -1134,20 +1139,21 @@ Mode and model:
 
 Output controls:
 
-- `-s string`: Custom system prompt, kept for the turns that follow; `-s ''`
-  sets an empty one. See [Settings and run options](#settings-and-run-options).
+- `-system string`: Custom system prompt, kept for the turns that follow;
+  `-system ''` sets an empty one. The texts the run's tools add follow it.
+  See [Settings and run options](#settings-and-run-options).
 - `-builtin-system`: Restore the built-in system prompt. Each run builds it
-  from the tools it advertises. Not with `-s`.
+  from the tools it advertises. Not with `-system`.
 - `-developer string`: Add a developer instruction immediately before the
   invocation's first new user turn. Supports `-provider openai`, and Argo
   `gpt*` models on the Responses API, which `-chat-completions` turns off. The
   instruction is saved and replayed with
   its developer role. On resume, supplying the flag adds another instruction;
   omitting it keeps the saved instructions. In a REPL it is consumed once the
-  first user turn is committed. It requires prompt text or an image and cannot
-  accompany regeneration of an assistant answer. Other provider wires reject
-  developer instructions, including ones in resumed history; use `-s` to set
-  a system prompt on those providers.
+  first user turn is committed. It requires prompt text or an image, so a run
+  that answers the end of the history without a prompt adds none. Other
+  provider wires reject developer instructions, including ones in resumed
+  history; use `-system` to set a system prompt on those providers.
 - `-effort string`: Reasoning effort hint: `none`, `minimal`, `low`, `medium`,
   `high`, `xhigh`, or `max`. On Anthropic-wire requests, any supported
   non-`none` effort also enables `thinking.type="adaptive"` with
@@ -1345,7 +1351,7 @@ paste the code back.
 An access token lasts 48 hours. `alcfauth token` refreshes it when less than
 an hour is left (`-min-valid` sets the margin), rewrites the key file, and
 prints the token, so `curl -H "Authorization: Bearer $(alcfauth token)"`
-works; `-q` skips the printing. `alcfauth token -watch` keeps running and
+works; `-quiet` skips the printing. `alcfauth token -watch` keeps running and
 refreshes the key file whenever less than `-min-valid` is left, until it is
 stopped. `lmc` reads the key file for every request, and `apiproxy` reads it
 again whenever it changes, so with a watch running a long `lmc -repl` or
@@ -1452,7 +1458,7 @@ included, so a DEBUG log of `lmc` or `apiproxy` holds a live access token.
 | Command | Action |
 | --- | --- |
 | `alcfauth login` | Log in and write the token cache and the key file. `-no-browser` only prints the URL; `-client-id ID` logs in as another Globus native app. |
-| `alcfauth token` | Refresh the access token when less than `-min-valid` (default `1h`) is left, rewrite the key file, and print the token unless `-q` is given. `-watch` keeps running and refreshes the key file before it runs out. |
+| `alcfauth token` | Refresh the access token when less than `-min-valid` (default `1h`) is left, rewrite the key file, and print the token unless `-quiet` is given. `-watch` keeps running and refreshes the key file before it runs out. |
 | `alcfauth status` | Show how long the access token has left and when the login ran. `-check` asks the gateway whether it accepts the token, refreshing an expired one first. |
 | `alcfauth logout` | Revoke the tokens at Globus and remove them from the cache and the key file. |
 

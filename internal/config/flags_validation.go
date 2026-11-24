@@ -29,11 +29,11 @@ func applyExplicitFlags(fs *flag.FlagSet, cfg *Config) explicitFlagState {
 	return explicit
 }
 
-// validateSystemFlags refuses -builtin-system beside -s, -s ” included,
-// since the two select different prompts.
+// validateSystemFlags refuses -builtin-system beside -system, an empty
+// -system included, since the two select different prompts.
 func validateSystemFlags(fs *flag.FlagSet, cfg Config) error {
-	if cfg.BuiltinSystem && explicitFlags(fs)["s"] {
-		return fmt.Errorf("invalid flag combination: -builtin-system restores the built-in system prompt, and -s sets a custom one; use one of them")
+	if cfg.BuiltinSystem && explicitFlags(fs)["system"] {
+		return fmt.Errorf("invalid flag combination: -builtin-system restores the built-in system prompt, and -system sets a custom one; use one of them")
 	}
 	return nil
 }
@@ -53,7 +53,7 @@ func applyEmbedModeDefaults(cfg *Config, explicit explicitFlagState) error {
 // validateREPLFlags refuses what -repl cannot do: a mode that sends no chat
 // turn, or a run without a session to hold the conversation, which a loop
 // does not support yet. It runs before embed mode turns sessions off, so
-// -repl -e names -e.
+// -repl -embed names -embed.
 func validateREPLFlags(cfg Config) error {
 	if !cfg.REPL {
 		return nil
@@ -62,7 +62,7 @@ func validateREPLFlags(cfg Config) error {
 		name string
 		set  bool
 	}{
-		{"-e", cfg.Embed},
+		{"-embed", cfg.Embed},
 		{"-print-curl", cfg.PrintCurl},
 		{"-show-sessions", cfg.ShowSessions},
 		{"-show", cfg.Show != ""},

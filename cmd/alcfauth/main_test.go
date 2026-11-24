@@ -181,9 +181,9 @@ func TestLoginTokenStatusLogout(t *testing.T) {
 	}
 
 	c.now = c.now.Add(47*time.Hour + 30*time.Minute)
-	code, stdout, _ = c.run("token", "-q")
+	code, stdout, _ = c.run("token", "-quiet")
 	if code != 0 || stdout != "" {
-		t.Errorf("token -q: exit %d, stdout %q", code, stdout)
+		t.Errorf("token -quiet: exit %d, stdout %q", code, stdout)
 	}
 	if got := c.key(); got != "access-1" {
 		t.Errorf("key after refresh = %q, want access-1", got)

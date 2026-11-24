@@ -7,12 +7,15 @@ import "lmtools/internal/constants"
 // DefaultSystemPrompt is the standard system prompt when no tools are enabled
 const DefaultSystemPrompt = "You are a brilliant assistant."
 
-// ToolSystemPrompt is the system prompt used when the universal_command tool is
-// enabled. The device list is a shared constant so the prompt, schema, and
-// executor cannot drift while this prompt remains immutable.
-const ToolSystemPrompt = `You are a helpful assistant with access to the universal_command tool.
+// ToolPromptOpening opens the built-in prompt of a run that advertises the
+// universal_command tool.
+const ToolPromptOpening = "You are a helpful assistant with access to the universal_command tool."
 
-Rules for universal_command:
+// ToolPromptRules are the rules for universal_command, which every system
+// prompt of a run that advertises it is followed by. The device list is a
+// shared constant so the prompt, schema, and executor cannot drift while
+// this text remains immutable.
+const ToolPromptRules = `Rules for universal_command:
 - command is an argv array executed directly with execvpe-style semantics; no shell is implied.
 - PATH resolves bare executable names. Shell features such as pipes, redirection, globbing, &&, and cd are not interpreted.
 - Prefer direct argv. Invoke a shell explicitly only when shell behavior is required.
@@ -27,13 +30,22 @@ Rules for universal_command:
 
 Run only safe, relevant commands and use their results to complete the request.`
 
-// ToolSystemPromptWithoutCommand is the tool prompt of a run that withholds
-// universal_command through -tool-include or -tool-exclude. The command
-// rules are left out: rules for a tool the model cannot call would only
-// invite the call.
-const ToolSystemPromptWithoutCommand = `You are a helpful assistant with access to tools.
+// ToolSystemPrompt is the built-in system prompt of a run that advertises
+// the universal_command tool.
+const ToolSystemPrompt = ToolPromptOpening + "\n\n" + ToolPromptRules
 
-Make only safe, relevant tool calls and use their results to complete the request.`
+// ToolPromptOpeningWithoutCommand and ToolPromptGuidance replace the
+// opening and the rules in a run that withholds universal_command through
+// -tool-include or -tool-exclude: rules for a tool the model cannot call
+// would only invite the call.
+const (
+	ToolPromptOpeningWithoutCommand = "You are a helpful assistant with access to tools."
+	ToolPromptGuidance              = "Make only safe, relevant tool calls and use their results to complete the request."
+)
+
+// ToolSystemPromptWithoutCommand is the built-in system prompt of a run
+// that withholds universal_command.
+const ToolSystemPromptWithoutCommand = ToolPromptOpeningWithoutCommand + "\n\n" + ToolPromptGuidance
 
 // Error messages
 const (
