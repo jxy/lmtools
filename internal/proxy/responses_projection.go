@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"net/url"
 	"strconv"
 	"strings"
@@ -222,79 +222,126 @@ func (s *Server) conversationItems(ctx context.Context, id string) ([]interface{
 	if !ok {
 		return nil, fmt.Errorf("conversation %q was not found", id)
 	}
-	return s.conversationItemsForRecord(ctx, conv, false)
+	items, _, err := s.conversationItemsForRecord(ctx, conv)
+	return items, err
 }
 
-func (s *Server) conversationItemsForRecord(ctx context.Context, conv *conversationRecord, includeDeleted bool) ([]interface{}, error) {
+// conversationItemsForRecord lists the items of conversation conv, without
+// the deleted ones, beside the stored item each one is.
+func (s *Server) conversationItemsForRecord(_ context.Context, conv *conversationRecord) ([]interface{}, []storedItem, error) {
 	if conv == nil {
-		return nil, fmt.Errorf("conversation is nil")
+		return nil, nil, fmt.Errorf("conversation is nil")
 	}
-	messages, err := session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, conv.SessionPath)
+	h, err := s.responsesState.store.History(session.Ref{Session: conv.Session, Message: conv.Head})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return conversationItemsFromMessages(messages, 0, conversationDeletedItemSet(conv), includeDeleted), nil
+	messages := h.Typed()
+	projected, keys := lineageItems(messages, h)
+	deleted := itemSet(conv.DeletedItems)
+	items := make([]interface{}, 0, len(projected))
+	var itemKeys []storedItem
+	for i, p := range projected {
+		if deleted[keys[i]] {
+			continue
+		}
+		items = append(items, publicItem(p.Item, i))
+		itemKeys = append(itemKeys, keys[i])
+	}
+	return items, itemKeys, nil
 }
 
-func conversationItemsFromMessages(messages []core.TypedMessage, startIndex int, deleted map[string]bool, includeDeleted bool) []interface{} {
+// conversationItemsFromMessages lists messages as conversation items, their
+// IDs numbered from startIndex.
+func conversationItemsFromMessages(messages []core.TypedMessage, startIndex int) []interface{} {
 	items := core.OpenAIResponsesInput(messages)
 	out := make([]interface{}, 0, len(items))
 	for i, item := range items {
-		itemMap, ok := item.(map[string]interface{})
-		if !ok {
-			out = append(out, item)
-			continue
-		}
-		cloned := cloneMapInterface(itemMap)
-		if _, exists := itemMap["id"]; !exists {
-			cloned["id"] = conversationItemID(startIndex + i)
-		}
-		if !includeDeleted && deleted[fmt.Sprint(cloned["id"])] {
-			continue
-		}
-		out = append(out, cloned)
+		out = append(out, publicItem(item, startIndex+i))
 	}
 	return out
 }
 
-func (s *Server) conversationHistory(ctx context.Context, conv *conversationRecord) ([]core.TypedMessage, error) {
-	if conv == nil {
-		return nil, fmt.Errorf("conversation is nil")
+// publicItem is item as the conversation API shows it: with its own ID, or
+// one numbered by its place in the listing.
+func publicItem(item interface{}, index int) interface{} {
+	itemMap, ok := item.(map[string]interface{})
+	if !ok {
+		return item
 	}
-	messages, err := session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, conv.SessionPath)
-	if err != nil {
-		return nil, err
+	cloned := cloneMapInterface(itemMap)
+	if _, exists := itemMap["id"]; !exists {
+		cloned["id"] = conversationItemID(index)
 	}
-	deleted := conversationDeletedItemSet(conv)
-	if len(deleted) == 0 {
-		return messages, nil
-	}
-	return filterConversationHistoryDeletedItems(messages, deleted), nil
+	return cloned
 }
 
-func filterConversationHistoryDeletedItems(messages []core.TypedMessage, deleted map[string]bool) []core.TypedMessage {
-	if len(deleted) == 0 {
+// storedItem names a conversation item by the stored message it comes from
+// and its place among that message's items, which holds on every branch
+// that contains the message.
+type storedItem struct {
+	Message string `json:"message"`
+	Item    int    `json:"item"`
+}
+
+func itemSet(items []storedItem) map[storedItem]bool {
+	set := make(map[storedItem]bool, len(items))
+	for _, item := range items {
+		set[item] = true
+	}
+	return set
+}
+
+func appendUniqueItem(items []storedItem, item storedItem) []storedItem {
+	for _, existing := range items {
+		if existing == item {
+			return items
+		}
+	}
+	return append(items, item)
+}
+
+// lineageItems projects messages, the typed form of history h, to their
+// Responses input items, each beside the stored item it is.
+func lineageItems(messages []core.TypedMessage, h session.History) ([]core.OpenAIResponsesInputProjectionItem, []storedItem) {
+	projected := core.OpenAIResponsesInputProjection(messages)
+	keys := make([]storedItem, len(projected))
+	counts := make(map[int]int)
+	for i, p := range projected {
+		keys[i] = storedItem{Message: h.Messages[p.MessageIndex].ID, Item: counts[p.MessageIndex]}
+		counts[p.MessageIndex]++
+	}
+	return projected, keys
+}
+
+// withoutItems returns the typed history h without the stored items in
+// hidden: a message loses the blocks of its hidden items, and a message
+// whose visible items are all hidden is left out.
+func withoutItems(h session.History, hidden []storedItem) []core.TypedMessage {
+	messages := h.Typed()
+	if len(hidden) == 0 {
 		return messages
 	}
-	projections := core.OpenAIResponsesInputProjection(messages)
+	deleted := itemSet(hidden)
+	projected, keys := lineageItems(messages, h)
 	visibleItemsByMessage := make(map[int]int)
 	keptVisibleItemByMessage := make(map[int]bool)
 	deletedBlocksByMessage := make(map[int]map[int]bool)
-	for i, projected := range projections {
-		if len(projected.BlockIndexes) == 0 {
+	for i, p := range projected {
+		if len(p.BlockIndexes) == 0 {
 			continue
 		}
-		visibleItemsByMessage[projected.MessageIndex]++
-		if !deleted[projectedConversationItemID(projected.Item, i)] {
-			keptVisibleItemByMessage[projected.MessageIndex] = true
+		visibleItemsByMessage[p.MessageIndex]++
+		if !deleted[keys[i]] {
+			keptVisibleItemByMessage[p.MessageIndex] = true
 			continue
 		}
-		blockSet := deletedBlocksByMessage[projected.MessageIndex]
+		blockSet := deletedBlocksByMessage[p.MessageIndex]
 		if blockSet == nil {
 			blockSet = make(map[int]bool)
-			deletedBlocksByMessage[projected.MessageIndex] = blockSet
+			deletedBlocksByMessage[p.MessageIndex] = blockSet
 		}
-		for _, blockIndex := range projected.BlockIndexes {
+		for _, blockIndex := range p.BlockIndexes {
 			blockSet[blockIndex] = true
 		}
 	}
@@ -326,28 +373,6 @@ func filterConversationHistoryDeletedItems(messages []core.TypedMessage, deleted
 	return out
 }
 
-func projectedConversationItemID(item interface{}, index int) string {
-	if itemMap, ok := item.(map[string]interface{}); ok {
-		if id, exists := itemMap["id"]; exists {
-			return fmt.Sprint(id)
-		}
-	}
-	return conversationItemID(index)
-}
-
-func conversationDeletedItemSet(conv *conversationRecord) map[string]bool {
-	out := make(map[string]bool)
-	if conv == nil {
-		return out
-	}
-	for _, id := range conv.DeletedItemIDs {
-		if id != "" {
-			out[id] = true
-		}
-	}
-	return out
-}
-
 func conversationItemID(index int) string {
 	return fmt.Sprintf("item_%04d", index)
 }
@@ -359,15 +384,6 @@ func listItemID(item interface{}) string {
 	}
 	id, _ := itemMap["id"].(string)
 	return id
-}
-
-func appendUniqueString(items []string, value string) []string {
-	for _, item := range items {
-		if item == value {
-			return items
-		}
-	}
-	return append(items, value)
 }
 
 func openAIResponsesCoreResponse(resp *OpenAIResponsesResponse) core.Response {

@@ -10,7 +10,6 @@ import (
 	"lmtools/internal/apifixtures"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/retry"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +49,7 @@ func TestOpenAIResponsesStatePreparationModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v", err)
 		}
-		if stateCtx == nil || stateCtx.Store || stateCtx.Background || stateCtx.Session != nil {
+		if stateCtx == nil || stateCtx.Store || stateCtx.Background || stateCtx.Session != "" {
 			t.Fatalf("read-only state = %#v, want non-stored non-background context without session", stateCtx)
 		}
 	})
@@ -83,7 +82,7 @@ func TestOpenAIResponsesStatePreparationModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 		}
-		if stateCtx == nil || !stateCtx.Store || stateCtx.Background || stateCtx.Session == nil {
+		if stateCtx == nil || !stateCtx.Store || stateCtx.Background || stateCtx.Session == "" {
 			t.Fatalf("foreground stored state = %#v, want stored writable session", stateCtx)
 		}
 	})
@@ -100,7 +99,7 @@ func TestOpenAIResponsesStatePreparationModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prepareOpenAIResponsesStateBackground() error = %v", err)
 		}
-		if stateCtx == nil || stateCtx.Store || !stateCtx.Background || stateCtx.Session == nil {
+		if stateCtx == nil || stateCtx.Store || !stateCtx.Background || stateCtx.Session == "" {
 			t.Fatalf("background store:false state = %#v, want non-persistent background session", stateCtx)
 		}
 	})
@@ -164,31 +163,30 @@ func TestOpenAIResponsesReasoningInputRoundTrip(t *testing.T) {
 func TestOpenAIResponsesStatePreparationPreviousResponseHistoryMatchesReadOnly(t *testing.T) {
 	ctx := context.Background()
 	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
-	sess, err := server.responsesState.createSession()
+	sess, err := server.responsesState.createSession(ctx)
 	if err != nil {
 		t.Fatalf("createSession() error = %v", err)
 	}
-	if err := appendTypedMessageToSession(ctx, sess, core.NewTextMessage(string(core.RoleUser), "hello"), "claude-test"); err != nil {
-		t.Fatalf("append user message error = %v", err)
-	}
-	result, err := session.SaveAssistantResponse(ctx, sess, core.Response{Text: "answer"}, "claude-test")
+	last, err := server.responsesState.appendMessages(ctx, sess, "", []core.TypedMessage{
+		core.NewTextMessage(string(core.RoleUser), "hello"),
+		core.NewTextMessage(string(core.RoleAssistant), "answer"),
+	}, "claude-test", false)
 	if err != nil {
-		t.Fatalf("SaveAssistantResponse() error = %v", err)
+		t.Fatalf("appendMessages() error = %v", err)
 	}
-	sess.Path = result.Path
 
 	respID := "resp_history_match"
-	if err := server.responsesState.saveResponse(&responseRecord{
-		Version:     responsesStateVersion,
-		ID:          respID,
-		Object:      "response",
-		Status:      "completed",
-		Model:       "claude-test",
-		SessionPath: sess.Path,
-		MessageID:   result.MessageID,
-		CreatedAt:   time.Now().Unix(),
-		Store:       true,
-		Raw:         mustMarshalJSON(&OpenAIResponsesResponse{ID: respID, Object: "response", Status: "completed", Model: "claude-test"}),
+	if err := server.responsesState.saveResponse(context.Background(), &responseRecord{
+		Version:   responsesStateVersion,
+		ID:        respID,
+		Object:    "response",
+		Status:    "completed",
+		Model:     "claude-test",
+		Session:   sess,
+		MessageID: last,
+		CreatedAt: time.Now().Unix(),
+		Store:     true,
+		Raw:       mustMarshalJSON(&OpenAIResponsesResponse{ID: respID, Object: "response", Status: "completed", Model: "claude-test"}),
 	}); err != nil {
 		t.Fatalf("saveResponse() error = %v", err)
 	}
@@ -199,14 +197,14 @@ func TestOpenAIResponsesStatePreparationPreviousResponseHistoryMatchesReadOnly(t
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
-	if stateCtx == nil || stateCtx.Session == nil {
+	if stateCtx == nil || stateCtx.Session == "" {
 		t.Fatalf("foreground state = %#v, want loaded state", stateCtx)
 	}
 	readOnlyStateCtx, readOnlyTyped, err := server.prepareOpenAIResponsesStateReadOnly(ctx, req, typed)
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateReadOnly() error = %v", err)
 	}
-	if readOnlyStateCtx == nil || readOnlyStateCtx.Session == nil {
+	if readOnlyStateCtx == nil || readOnlyStateCtx.Session == "" {
 		t.Fatalf("read-only state = %#v, want loaded state", readOnlyStateCtx)
 	}
 
@@ -274,7 +272,7 @@ func TestOpenAIResponsesBackgroundStoreFalseAllocatesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateBackground() error = %v", err)
 	}
-	if stateCtx == nil || stateCtx.Session == nil {
+	if stateCtx == nil || stateCtx.Session == "" {
 		t.Fatalf("stateCtx = %#v, want background session state", stateCtx)
 	}
 	if stateCtx.Store {
@@ -306,7 +304,7 @@ func TestOpenAIResponsesStateStoresClientRequestWithoutRemarshalling(t *testing.
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
-	if stateCtx == nil || stateCtx.Session == nil {
+	if stateCtx == nil || stateCtx.Session == "" {
 		t.Fatalf("stateCtx = %#v, want writable session state", stateCtx)
 	}
 	if !bytes.Equal(stateCtx.CurrentRequest, rawRequest) {
@@ -345,7 +343,7 @@ func TestOpenAIResponsesCommitMarshalErrorDoesNotAppendSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareOpenAIResponsesStateForeground() error = %v", err)
 	}
-	if stateCtx == nil || stateCtx.Session == nil {
+	if stateCtx == nil || stateCtx.Session == "" {
 		t.Fatalf("stateCtx = %#v, want writable session state", stateCtx)
 	}
 
@@ -369,19 +367,15 @@ func TestOpenAIResponsesCommitMarshalErrorDoesNotAppendSession(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "marshal JSON") {
 		t.Fatalf("commitOpenAIResponsesStateWithBlocks() error = %v, want marshal JSON error", err)
 	}
-	messages, err := session.BuildMessagesWithToolInteractionsWithManager(ctx, server.responsesState.manager, stateCtx.Session.Path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractionsWithManager() error = %v", err)
-	}
-	if len(messages) != 0 {
-		t.Fatalf("session messages = %+v, want no appended messages", messages)
+	if n := storedMessageCount(t, server, stateCtx.Session); n != 0 {
+		t.Fatalf("session holds %d messages, want no appended messages", n)
 	}
 }
 
 func TestResponsesStateCancelResponseIfPendingDoesNotOverwriteCompleted(t *testing.T) {
 	state := newResponsesState(t.TempDir())
 	respID := "resp_race_complete"
-	if err := state.saveResponse(&responseRecord{
+	if err := state.saveResponse(context.Background(), &responseRecord{
 		Version:   responsesStateVersion,
 		ID:        respID,
 		Object:    "response",
@@ -393,7 +387,7 @@ func TestResponsesStateCancelResponseIfPendingDoesNotOverwriteCompleted(t *testi
 		t.Fatalf("saveResponse(completed) error = %v", err)
 	}
 
-	rec, ok, err := state.cancelResponseIfPending(respID, map[string]interface{}{"code": "cancelled"})
+	rec, ok, err := state.cancelResponseIfPending(context.Background(), respID, map[string]interface{}{"code": "cancelled"})
 	if err != nil || !ok {
 		t.Fatalf("cancelResponseIfPending() = rec:%#v ok:%v err:%v", rec, ok, err)
 	}
@@ -416,21 +410,21 @@ func TestOpenAIResponsesBackgroundCommitRequiresActiveRecordBeforeSessionAppend(
 	}
 	client := retry.NewClientForTesting(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger)
 	server := NewTestServerDirectWithClient(t, config, client)
-	sess, err := server.responsesState.createSession()
+	sess, err := server.responsesState.createSession(context.Background())
 	if err != nil {
 		t.Fatalf("createSession() error = %v", err)
 	}
 	respID := "resp_cancelled_before_commit"
-	if err := server.responsesState.saveResponse(&responseRecord{
-		Version:     responsesStateVersion,
-		ID:          respID,
-		Object:      "response",
-		Status:      "cancelled",
-		Model:       "claude-test",
-		SessionPath: sess.Path,
-		CreatedAt:   time.Now().Unix(),
-		Background:  true,
-		Store:       true,
+	if err := server.responsesState.saveResponse(context.Background(), &responseRecord{
+		Version:    responsesStateVersion,
+		ID:         respID,
+		Object:     "response",
+		Status:     "cancelled",
+		Model:      "claude-test",
+		Session:    sess,
+		CreatedAt:  time.Now().Unix(),
+		Background: true,
+		Store:      true,
 	}); err != nil {
 		t.Fatalf("saveResponse(cancelled) error = %v", err)
 	}
@@ -467,12 +461,8 @@ func TestOpenAIResponsesBackgroundCommitRequiresActiveRecordBeforeSessionAppend(
 	if err == nil || !stdErrors.Is(err, errResponsesStateNotActive) {
 		t.Fatalf("commit error = %v, want errResponsesStateNotActive", err)
 	}
-	messages, err := session.BuildMessagesWithToolInteractionsWithManager(context.Background(), server.responsesState.manager, sess.Path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractionsWithManager() error = %v", err)
-	}
-	if len(messages) != 0 {
-		t.Fatalf("session messages = %+v, want no appended messages", messages)
+	if n := storedMessageCount(t, server, sess); n != 0 {
+		t.Fatalf("session holds %d messages, want no appended messages", n)
 	}
 	stored, ok, err := server.responsesState.loadResponse(respID)
 	if err != nil || !ok || stored.Status != "cancelled" {
@@ -480,7 +470,9 @@ func TestOpenAIResponsesBackgroundCommitRequiresActiveRecordBeforeSessionAppend(
 	}
 }
 
-func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
+// A conversation request prepared before another one committed is saved as a
+// branch at the place it was built on, and the conversation keeps the first.
+func TestOpenAIResponsesConversationCommitBranchesFromStalePreparedHead(t *testing.T) {
 	config := &Config{
 		Provider:           constants.ProviderAnthropic,
 		ProviderURL:        "http://anthropic.local",
@@ -490,7 +482,7 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 	}
 	client := retry.NewClientForTesting(10*time.Second, 0, &retryLoggerAdapter{ctx: context.Background()}, extractRequestLogger)
 	server := NewTestServerDirectWithClient(t, config, client)
-	conv, _, err := server.responsesState.createConversation(nil, "")
+	conv, err := server.responsesState.createConversation(context.Background(), nil, "", nil)
 	if err != nil {
 		t.Fatalf("createConversation() error = %v", err)
 	}
@@ -563,11 +555,11 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load second response = ok:%v err:%v", ok, err)
 	}
-	if firstRec.SessionPath != convAfter.SessionPath {
-		t.Fatalf("first response session = %q, want conversation head path %q", firstRec.SessionPath, convAfter.SessionPath)
+	if firstRec.Session != convAfter.Session || firstRec.MessageID != convAfter.Head {
+		t.Fatalf("first response ends at %s/%s, want the conversation head %s/%s", firstRec.Session, firstRec.MessageID, convAfter.Session, convAfter.Head)
 	}
-	if secondRec.SessionPath == convAfter.SessionPath {
-		t.Fatalf("stale second response overwrote conversation head path %q", convAfter.SessionPath)
+	if secondRec.Session != convAfter.Session || secondRec.MessageID == convAfter.Head {
+		t.Fatalf("stale second response ends at %s/%s, want a branch beside the head %s", secondRec.Session, secondRec.MessageID, convAfter.Head)
 	}
 	items := getJSON(t, server, "/v1/conversations/"+conv.ID+"/items")
 	itemDump := fmt.Sprint(items)
@@ -577,16 +569,16 @@ func TestOpenAIResponsesConversationCommitForksStalePreparedHead(t *testing.T) {
 	if strings.Contains(itemDump, "second question") || strings.Contains(itemDump, "second answer") {
 		t.Fatalf("stale response leaked into conversation head items: %#v", items)
 	}
-	staleMessages, err := session.BuildMessagesWithToolInteractionsWithManager(context.Background(), server.responsesState.manager, secondRec.SessionPath)
+	staleMessages, err := server.responsesState.history(secondRec.Session, secondRec.MessageID, secondRec.HiddenItems)
 	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractionsWithManager(stale) error = %v", err)
+		t.Fatalf("history(stale) error = %v", err)
 	}
 	staleDump := fmt.Sprint(staleMessages)
 	if !strings.Contains(staleDump, "second question") || !strings.Contains(staleDump, "second answer") {
-		t.Fatalf("stale fork missing second response messages: %+v", staleMessages)
+		t.Fatalf("stale branch missing second response messages: %+v", staleMessages)
 	}
 	if strings.Contains(staleDump, "first question") || strings.Contains(staleDump, "first answer") {
-		t.Fatalf("stale fork copied concurrent first response: %+v", staleMessages)
+		t.Fatalf("stale branch holds the concurrent first response: %+v", staleMessages)
 	}
 }
 
@@ -716,7 +708,7 @@ func TestPaginatedListPayloadRejectsInvalidParameters(t *testing.T) {
 
 func TestConversationHistoryDeletionPreservesHiddenReasoningWithRemainingVisibleItem(t *testing.T) {
 	server := NewMinimalTestServer(t, &Config{SessionsDir: t.TempDir()})
-	conv, sess, err := server.responsesState.createConversation(nil, "")
+	conv, err := server.responsesState.createConversation(context.Background(), nil, "", nil)
 	if err != nil {
 		t.Fatalf("createConversation() error = %v", err)
 	}
@@ -739,15 +731,16 @@ func TestConversationHistoryDeletionPreservesHiddenReasoningWithRemainingVisible
 			},
 		},
 	}
-	if err := appendTypedMessageToSession(context.Background(), sess, msg, "claude-test"); err != nil {
-		t.Fatalf("appendTypedMessageToSession() error = %v", err)
-	}
-	conv.SessionPath = sess.Path
-
-	conv.DeletedItemIDs = []string{"item_0000"}
-	history, err := server.conversationHistory(context.Background(), conv)
+	head, err := server.responsesState.appendMessages(context.Background(), conv.Session, conv.Head, []core.TypedMessage{msg}, "claude-test", false)
 	if err != nil {
-		t.Fatalf("conversationHistory() error = %v", err)
+		t.Fatalf("appendMessages() error = %v", err)
+	}
+	conv.Head = head
+
+	conv.DeletedItems = []storedItem{{Message: head, Item: 0}}
+	history, err := server.responsesState.history(conv.Session, conv.Head, conv.DeletedItems)
+	if err != nil {
+		t.Fatalf("history() error = %v", err)
 	}
 	if len(history) != 1 {
 		t.Fatalf("history length = %d, want 1: %#v", len(history), history)
@@ -763,10 +756,10 @@ func TestConversationHistoryDeletionPreservesHiddenReasoningWithRemainingVisible
 		t.Fatalf("second block = %#v, want remaining tool_use", history[0].Blocks[1])
 	}
 
-	conv.DeletedItemIDs = []string{"item_0000", "item_0001"}
-	history, err = server.conversationHistory(context.Background(), conv)
+	conv.DeletedItems = []storedItem{{Message: head, Item: 0}, {Message: head, Item: 1}}
+	history, err = server.responsesState.history(conv.Session, conv.Head, conv.DeletedItems)
 	if err != nil {
-		t.Fatalf("conversationHistory(all deleted) error = %v", err)
+		t.Fatalf("history(all deleted) error = %v", err)
 	}
 	if len(history) != 0 {
 		t.Fatalf("history length after deleting all visible items = %d, want 0: %#v", len(history), history)
@@ -1176,8 +1169,8 @@ func TestOpenAIResponsesConversationPreviousResponseUsesResponseSnapshot(t *test
 	if branchRec.ConversationID != convID {
 		t.Fatalf("branch conversation id = %q, want %q", branchRec.ConversationID, convID)
 	}
-	if branchRec.SessionPath == convAfter.SessionPath {
-		t.Fatalf("older previous_response_id branch advanced conversation head path %q", convAfter.SessionPath)
+	if branchRec.Session != convAfter.Session || branchRec.MessageID == convAfter.Head {
+		t.Fatalf("older previous_response_id branch ends at %s/%s, want a branch beside the head %s", branchRec.Session, branchRec.MessageID, convAfter.Head)
 	}
 }
 
@@ -2063,7 +2056,7 @@ func TestConversationItemsFromMessagesAssignsIDsWithStartIndex(t *testing.T) {
 				Content:   "result",
 			}},
 		},
-	}, 7, nil, false)
+	}, 7)
 
 	if len(items) != 3 {
 		t.Fatalf("items length = %d, want 3: %#v", len(items), items)
@@ -2164,7 +2157,7 @@ func TestOpenAIConversationAppendSurfacesSaveStateError(t *testing.T) {
 	}()
 
 	waitForChannel(t, body.started, "append request body read")
-	if _, ok, err := server.responsesState.deleteConversation(convID); err != nil || !ok {
+	if _, ok, err := server.responsesState.deleteConversation(context.Background(), convID); err != nil || !ok {
 		t.Fatalf("deleteConversation(%q) = ok:%v err:%v, want ok", convID, ok, err)
 	}
 	close(body.release)
@@ -2317,7 +2310,7 @@ func TestOpenAIResponsesRejectsUnfinishedPreviousResponse(t *testing.T) {
 
 	for _, status := range []string{"queued", "in_progress", "failed", "cancelled", "incomplete"} {
 		respID := "resp_" + strings.ReplaceAll(status, "_", "")
-		if err := server.responsesState.saveResponse(&responseRecord{
+		if err := server.responsesState.saveResponse(context.Background(), &responseRecord{
 			Version:   responsesStateVersion,
 			ID:        respID,
 			Object:    "response",
@@ -2340,7 +2333,7 @@ func TestOpenAIResponsesRejectsUnfinishedPreviousResponse(t *testing.T) {
 	}
 
 	respID := "resp_readonlyqueued"
-	if err := server.responsesState.saveResponse(&responseRecord{
+	if err := server.responsesState.saveResponse(context.Background(), &responseRecord{
 		Version:   responsesStateVersion,
 		ID:        respID,
 		Object:    "response",
@@ -2468,7 +2461,7 @@ func TestOpenAIResponsesBackgroundCompletionPreservesCreatedAt(t *testing.T) {
 		Model:     "claude-test",
 		Output:    []OpenAIResponsesOutputItem{},
 	})
-	if err := server.responsesState.saveResponse(rec); err != nil {
+	if err := server.responsesState.saveResponse(context.Background(), rec); err != nil {
 		t.Fatalf("saveResponse(preserved created_at) error = %v", err)
 	}
 
@@ -2550,10 +2543,10 @@ func TestResponsesStateDeleteRejectsInvalidIDs(t *testing.T) {
 	invalidIDs := []string{"../escape", `resp_bad\escape`}
 
 	for _, id := range invalidIDs {
-		if rec, ok, err := state.deleteResponse(id); err == nil || !strings.Contains(err.Error(), "invalid id") || ok || rec != nil {
+		if rec, ok, err := state.deleteResponse(context.Background(), id); err == nil || !strings.Contains(err.Error(), "invalid id") || ok || rec != nil {
 			t.Fatalf("deleteResponse(%q) = rec:%#v ok:%v err:%v, want invalid id", id, rec, ok, err)
 		}
-		if rec, ok, err := state.deleteConversation(id); err == nil || !strings.Contains(err.Error(), "invalid id") || ok || rec != nil {
+		if rec, ok, err := state.deleteConversation(context.Background(), id); err == nil || !strings.Contains(err.Error(), "invalid id") || ok || rec != nil {
 			t.Fatalf("deleteConversation(%q) = rec:%#v ok:%v err:%v, want invalid id", id, rec, ok, err)
 		}
 	}
@@ -2570,4 +2563,14 @@ func responseTypedTextLines(messages []core.TypedMessage) []string {
 		}
 	}
 	return out
+}
+
+// storedMessageCount counts the messages session number holds.
+func storedMessageCount(t *testing.T, server *Server, number string) int {
+	t.Helper()
+	tree, err := server.responsesState.store.Tree(number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(tree.Messages)
 }

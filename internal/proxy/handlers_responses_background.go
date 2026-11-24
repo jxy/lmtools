@@ -51,7 +51,7 @@ func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter,
 		Status:             "queued",
 		Model:              route.OriginalModel,
 		PreviousResponseID: responsesReq.PreviousResponseID,
-		SessionPath:        stateCtx.Session.Path,
+		Session:            stateCtx.Session,
 		CreatedAt:          now,
 		Background:         true,
 		Store:              stateCtx.Store,
@@ -63,7 +63,7 @@ func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter,
 	if stateCtx.Conversation != nil {
 		rec.ConversationID = stateCtx.Conversation.ID
 	}
-	if err := s.responsesState.saveResponse(rec); err != nil {
+	if err := s.responsesState.saveResponse(ctx, rec); err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to save response state", "state_error", http.StatusInternalServerError)
 		return
 	}
@@ -77,6 +77,10 @@ func (s *Server) handleConvertedOpenAIResponsesBackground(w http.ResponseWriter,
 	_ = s.sendJSONResponse(ctx, w, initial)
 }
 
+// backgroundStartForTest runs as the worker of background response id
+// starts, before it marks the response in progress.
+var backgroundStartForTest func(id string)
+
 func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, responsesReq *OpenAIResponsesRequest, typedCurrent, typedWithState TypedRequest, stateCtx *openAIResponsesStateContext, route *endpointRoute, respID string) {
 	defer func() {
 		s.backgroundMu.Lock()
@@ -84,7 +88,15 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 		s.backgroundMu.Unlock()
 	}()
 
-	if err := s.responsesState.updateResponseStatusIfPending(respID, "in_progress", nil); err != nil {
+	if backgroundStartForTest != nil {
+		backgroundStartForTest(respID)
+	}
+	// A response deleted or cancelled before its worker starts, also through
+	// another apiproxy, is not sent.
+	if err := s.responsesState.updateResponseStatusIfPending(ctx, respID, "in_progress", nil); err != nil {
+		if stdErrors.Is(err, errResponsesStateDeleted) || stdErrors.Is(err, errResponsesStateNotActive) {
+			return
+		}
 		logger.From(ctx).Errorf("failed to mark background response %s in_progress: %v", respID, err)
 	}
 	upstreamResp, err := s.forwardTypedAsAnthropic(ctx, typedWithState, route.Provider, route.MappedModel, route.OriginalModel)
@@ -95,13 +107,13 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 			status = "cancelled"
 			errPayload = map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}
 		}
-		if err := s.responsesState.updateResponseStatusIfPending(respID, status, errPayload); err != nil {
+		if err := s.responsesState.updateResponseStatusIfPending(ctx, respID, status, errPayload); err != nil {
 			logger.From(ctx).Errorf("failed to mark background response %s %s: %v", respID, status, err)
 		}
 		return
 	}
 	if ctx.Err() != nil {
-		if err := s.responsesState.updateResponseStatusIfPending(respID, "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}); err != nil {
+		if err := s.responsesState.updateResponseStatusIfPending(ctx, respID, "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}); err != nil {
 			logger.From(ctx).Errorf("failed to mark background response %s cancelled: %v", respID, err)
 		}
 		return
@@ -110,12 +122,19 @@ func (s *Server) runConvertedOpenAIResponsesBackground(ctx context.Context, resp
 	resp := ConvertAnthropicResponseToOpenAIResponsesWithToolNameRegistry(upstreamResp, route.OriginalModel, registry)
 	resp.ID = respID
 	stateCtx.ExistingRecordID = respID
+	// A response deleted or cancelled meanwhile keeps the record that says
+	// so. Any other failure, its conversation's deletion included, ends the
+	// response failed, or cancelled when its context ended.
 	if err := s.commitOpenAIResponsesStateWithBlocks(ctx, stateCtx, responsesReq, typedCurrent, resp, route.OriginalModel, AnthropicBlocksToCoreWithToolNameRegistry(upstreamResp.Content, registry)); err != nil {
 		if stdErrors.Is(err, errResponsesStateDeleted) || stdErrors.Is(err, errResponsesStateNotActive) {
 			return
 		}
-		if statusErr := s.responsesState.updateResponseStatusIfPending(respID, "failed", map[string]interface{}{"code": "state_error", "message": err.Error()}); statusErr != nil {
-			logger.From(ctx).Errorf("failed to mark background response %s failed: %v", respID, statusErr)
+		status, errPayload := "failed", map[string]interface{}{"code": "state_error", "message": err.Error()}
+		if ctx.Err() != nil {
+			status, errPayload = "cancelled", map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"}
+		}
+		if statusErr := s.responsesState.updateResponseStatusIfPending(ctx, respID, status, errPayload); statusErr != nil {
+			logger.From(ctx).Errorf("failed to mark background response %s %s: %v", respID, status, statusErr)
 		}
 	}
 }

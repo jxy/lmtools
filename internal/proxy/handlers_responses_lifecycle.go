@@ -266,7 +266,7 @@ func (s *Server) retrieveOpenAIResponse(ctx context.Context, w http.ResponseWrit
 }
 
 func (s *Server) deleteOpenAIResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, id string) {
-	if _, ok, err := s.responsesState.deleteResponse(id); err != nil {
+	if _, ok, err := s.responsesState.deleteResponse(ctx, id); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	} else if ok {
@@ -303,14 +303,22 @@ func (s *Server) cancelOpenAIResponse(ctx context.Context, w http.ResponseWriter
 	s.cancelBackgroundResponse(id)
 
 	if rec.Status == "queued" || rec.Status == "in_progress" {
-		updated, ok, err := s.responsesState.cancelResponseIfPending(id, map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"})
+		updated, ok, err := s.responsesState.cancelResponseIfPending(ctx, id, map[string]interface{}{"code": "cancelled", "message": "Response was cancelled"})
 		if err != nil {
 			s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 			return
 		}
-		if ok && updated != nil {
-			rec = updated
+		// The read under the record's lock decides: a response deleted
+		// meanwhile, here or in another apiproxy, is not stored here.
+		if !ok {
+			if s.responsesPassthroughEnabled() {
+				s.forwardOpenAIRawLifecycle(w, r, "responses")
+				return
+			}
+			s.sendOpenAIError(w, ErrTypeInvalidRequest, "Response not found", "not_found", http.StatusNotFound)
+			return
 		}
+		rec = updated
 	}
 	_ = s.sendJSONResponse(ctx, w, responseRecordPayload(rec))
 }

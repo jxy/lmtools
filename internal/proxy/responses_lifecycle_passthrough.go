@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"lmtools/internal/logger"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -28,7 +29,12 @@ func (s *Server) forwardOpenAIRawLifecycleWithBody(w http.ResponseWriter, r *htt
 		return
 	}
 	logName := passthrough.logName("lifecycle")
-	target := rawLifecycleURL(passthrough.URL, r, family)
+	target, err := rawLifecycleURL(passthrough.URL, r, family)
+	if err != nil {
+		logger.From(ctx).Errorf("%s URL: %v", logName, err)
+		s.sendOpenAIError(w, ErrTypeServer, "Failed to create upstream request", "upstream_error", http.StatusBadGateway)
+		return
+	}
 	upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(body))
 	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, "Failed to create upstream request", "upstream_error", http.StatusBadGateway)
@@ -120,25 +126,48 @@ func responseIDFromResponsesLifecyclePath(path string) string {
 // rawLifecycleURL maps a client lifecycle or conversations path onto the upstream
 // Responses base URL, preserving the sub-path and query string. The conversations
 // family assumes the upstream serves /conversations as a sibling of /responses,
-// which holds for both OpenAI (/v1/...) and Argo (/argoapi/v1/...).
-func rawLifecycleURL(responsesURL string, r *http.Request, family string) string {
-	base := strings.TrimRight(responsesURL, "/")
+// which holds for both OpenAI (/v1/...) and Argo (/argoapi/v1/...). The sub-path
+// joins the base URL's path both decoded and as the client escaped it, so the URL
+// escapes nothing again and an ID reaches the provider as the client named it,
+// with any escaped '/' kept inside it. The client's query follows the resolved
+// endpoint's query.
+func rawLifecycleURL(responsesURL string, r *http.Request, family string) (string, error) {
+	target, err := url.Parse(responsesURL)
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimRight(target.Path, "/")
+	prefix := "/v1/responses"
 	if family == "conversations" {
 		base = strings.TrimSuffix(base, "/responses") + "/conversations"
-		rest := strings.TrimPrefix(r.URL.Path, "/v1/conversations")
-		if rest != "" {
-			base += rest
-		}
-	} else {
-		rest := strings.TrimPrefix(r.URL.Path, "/v1/responses")
-		if rest != "" {
-			base += rest
-		}
+		prefix = "/v1/conversations"
 	}
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	target.Path = base + rest
+	target.RawPath = (&url.URL{Path: base}).EscapedPath() + escapedPathAfter(r.URL, len(r.URL.Path)-len(rest))
 	if r.URL.RawQuery != "" {
-		base += "?" + r.URL.RawQuery
+		if target.RawQuery != "" {
+			target.RawQuery += "&"
+		}
+		target.RawQuery += r.URL.RawQuery
 	}
-	return base
+	return target.String(), nil
+}
+
+// escapedPathAfter returns the part of u's escaped path that follows the first
+// n bytes of its decoded path, which decodes to the rest of the decoded path. An
+// escaped path holds '%' only before two hex digits, which decode to one byte.
+func escapedPathAfter(u *url.URL, n int) string {
+	escaped := u.EscapedPath()
+	i := 0
+	for ; n > 0 && i < len(escaped); n-- {
+		if escaped[i] == '%' {
+			i += 3
+		} else {
+			i++
+		}
+	}
+	return escaped[min(i, len(escaped)):]
 }
 
 func (s *Server) decodeOptionalJSON(r *http.Request, dst interface{}) error {

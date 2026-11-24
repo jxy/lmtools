@@ -106,6 +106,16 @@ func NewTextMessage(role, text string) TypedMessage {
 	}
 }
 
+// ReplyBlocks returns the blocks a reply is saved with: the reply's own
+// blocks, or, when it has none, blocks built from its text, tool calls and
+// thought signature.
+func ReplyBlocks(response Response) []Block {
+	if len(response.Blocks) > 0 {
+		return append([]Block(nil), response.Blocks...)
+	}
+	return responseBlocksFromParts(response.Text, response.ToolCalls, response.ThoughtSignature)
+}
+
 // UserMessageBlocks builds the canonical block layout of the user turn typed
 // at the CLI: the attached images in the order given, then one text block when
 // the prompt is non-empty. Every builder of that turn — the session request

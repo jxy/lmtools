@@ -5,29 +5,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
 	"strings"
 	"time"
 )
 
+// openAIResponsesStateContext is where a request's stored conversation
+// stands: the session its messages go to, the message it continues after,
+// and the conversation items its history leaves out.
 type openAIResponsesStateContext struct {
-	Session          *session.Session
-	Conversation     *conversationRecord
-	Previous         *responseRecord
-	History          []core.TypedMessage
-	Store            bool
-	Background       bool
-	Instructions     string
-	CurrentRequest   json.RawMessage
-	ExistingRecordID string
-	ConversationBase conversationBaseRef
-}
-
-type conversationBaseRef struct {
-	SessionPath       string
-	LastResponseID    string
-	MessagePath       string
-	TerminalMessageID string
+	// Session is the session number; empty until the request has one.
+	Session string
+	// Base is the message the request continues after; empty for the
+	// session root.
+	Base         string
+	Conversation *conversationRecord
+	// ConversationGeneration is the conversation's generation when the
+	// request was prepared.
+	ConversationGeneration int64
+	Previous               *responseRecord
+	HiddenItems            []storedItem
+	History                []core.TypedMessage
+	Store                  bool
+	Background             bool
+	Instructions           string
+	// RequestInstructions are the instructions the request itself gave,
+	// which alone change its conversation's.
+	RequestInstructions string
+	CurrentRequest      json.RawMessage
+	ExistingRecordID    string
 }
 
 type openAIResponsesStateMode int
@@ -104,29 +109,24 @@ func (s *Server) prepareOpenAIResponsesState(ctx context.Context, req *OpenAIRes
 	if err != nil {
 		return nil, typed, err
 	}
-
-	sessionPath, err := s.loadOpenAIResponsesPreviousState(req, stateCtx)
-	if err != nil {
+	if err := s.loadOpenAIResponsesPreviousState(req, stateCtx); err != nil {
 		return nil, typed, err
 	}
-
-	conversationSessionPath, err := s.prepareOpenAIResponsesConversationForRequest(stateCtx, convSpec, mode)
-	if err != nil {
+	if err := s.prepareOpenAIResponsesConversationForRequest(ctx, stateCtx, convSpec, mode); err != nil {
 		return nil, typed, err
 	}
-	if sessionPath == "" {
-		sessionPath = conversationSessionPath
+	if stateCtx.Session == "" && mode.writable() {
+		if stateCtx.Session, err = s.responsesState.createSession(ctx); err != nil {
+			return nil, typed, err
+		}
 	}
-
-	if err := s.prepareOpenAIResponsesSession(ctx, stateCtx, sessionPath, mode.writable()); err != nil {
-		return nil, typed, err
-	}
-
-	if stateCtx.Session != nil {
-		typed, err = s.prependOpenAIResponsesStateHistory(ctx, stateCtx, typed, mode.writable())
+	if stateCtx.Session != "" {
+		history, err := s.responsesState.history(stateCtx.Session, stateCtx.Base, stateCtx.HiddenItems)
 		if err != nil {
 			return nil, typed, err
 		}
+		stateCtx.History = history
+		typed.Messages = append(append([]core.TypedMessage{}, history...), typed.Messages...)
 	}
 	if typed.Developer == "" {
 		typed.Developer = stateCtx.Instructions
@@ -155,125 +155,79 @@ func newOpenAIResponsesStateContext(ctx context.Context, req *OpenAIResponsesReq
 	if stateCtx.Instructions == "" {
 		stateCtx.Instructions = typed.Developer
 	}
+	stateCtx.RequestInstructions = stateCtx.Instructions
 	return stateCtx, nil
 }
 
-func (s *Server) loadOpenAIResponsesPreviousState(req *OpenAIResponsesRequest, stateCtx *openAIResponsesStateContext) (string, error) {
+// loadOpenAIResponsesPreviousState makes a request with previous_response_id
+// continue where that response ends, with the items it was prepared without.
+func (s *Server) loadOpenAIResponsesPreviousState(req *OpenAIResponsesRequest, stateCtx *openAIResponsesStateContext) error {
 	if req.PreviousResponseID == "" {
-		return "", nil
+		return nil
 	}
 	prev, err := s.loadCompletedPreviousResponse(req.PreviousResponseID)
 	if err != nil {
-		return "", err
+		return err
+	}
+	if prev.Session == "" {
+		return fmt.Errorf("previous_response_id %q has no stored conversation", req.PreviousResponseID)
 	}
 	stateCtx.Previous = prev
+	stateCtx.Session, stateCtx.Base = prev.Session, prev.MessageID
+	stateCtx.HiddenItems = append([]storedItem(nil), prev.HiddenItems...)
 	if stateCtx.Instructions == "" {
 		stateCtx.Instructions = prev.Instructions
-	}
-	return prev.SessionPath, nil
-}
-
-func (s *Server) prepareOpenAIResponsesConversationForRequest(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, mode openAIResponsesStateMode) (string, error) {
-	if !convSpec.requested || (!mode.readOnly() && convSpec.create && !mode.writable()) {
-		return "", nil
-	}
-	conv, sess, err := s.prepareOpenAIResponsesConversationState(stateCtx, convSpec, mode.writable())
-	if err != nil {
-		return "", err
-	}
-	if stateCtx.Previous == nil {
-		stateCtx.Session = sess
-	}
-	stateCtx.Conversation = conv
-	if !mode.readOnly() {
-		if err := s.captureOpenAIResponsesConversationBase(stateCtx, conv); err != nil {
-			return "", err
-		}
-	}
-	if stateCtx.Instructions == "" {
-		stateCtx.Instructions = conv.Instructions
-	}
-	if stateCtx.Previous != nil {
-		return "", nil
-	}
-	return conv.SessionPath, nil
-}
-
-func (s *Server) prepareOpenAIResponsesSession(ctx context.Context, stateCtx *openAIResponsesStateContext, sessionPath string, writable bool) error {
-	if stateCtx.Previous != nil && writable {
-		forkedSession, err := s.forkOpenAIResponsesResponseSnapshot(ctx, stateCtx.Previous)
-		if err != nil {
-			return err
-		}
-		stateCtx.Session = forkedSession
-		sessionPath = forkedSession.Path
-	}
-
-	if sessionPath == "" && writable {
-		sess, err := s.responsesState.createSession()
-		if err != nil {
-			return err
-		}
-		stateCtx.Session = sess
-		return nil
-	}
-	if sessionPath != "" && stateCtx.Session == nil {
-		sess, err := s.responsesState.loadSession(sessionPath)
-		if err != nil {
-			return err
-		}
-		stateCtx.Session = sess
 	}
 	return nil
 }
 
-func (s *Server) prepareOpenAIResponsesConversationState(stateCtx *openAIResponsesStateContext, convSpec conversationSpec, writable bool) (*conversationRecord, *session.Session, error) {
-	var conv *conversationRecord
-	var sess *session.Session
-	var err error
-	if convSpec.create {
-		if stateCtx.Previous != nil {
-			return nil, nil, fmt.Errorf("conversation does not match previous_response_id")
-		}
-		conv, sess, err = s.responsesState.createConversation(convSpec.metadata, stateCtx.Instructions)
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		var ok bool
-		conv, ok, err = s.responsesState.loadConversation(convSpec.id)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !ok {
-			return nil, nil, fmt.Errorf("conversation %q was not found", convSpec.id)
-		}
-		if writable && len(convSpec.metadata) > 0 {
-			conv.Metadata = cloneStringInterfaceMap(convSpec.metadata)
-		}
+// prepareOpenAIResponsesConversationForRequest loads or creates the
+// request's conversation and records its generation. Without
+// previous_response_id the request continues after the conversation's last
+// message. Either way it leaves out the items the conversation deleted.
+func (s *Server) prepareOpenAIResponsesConversationForRequest(ctx context.Context, stateCtx *openAIResponsesStateContext, convSpec conversationSpec, mode openAIResponsesStateMode) error {
+	if !convSpec.requested || (!mode.readOnly() && convSpec.create && !mode.writable()) {
+		return nil
 	}
-	if stateCtx.Previous != nil && stateCtx.Previous.ConversationID != conv.ID {
-		return nil, nil, fmt.Errorf("conversation does not match previous_response_id")
+	conv, err := s.prepareOpenAIResponsesConversationState(ctx, stateCtx, convSpec, mode.writable())
+	if err != nil {
+		return err
 	}
-	return conv, sess, nil
+	stateCtx.Conversation = conv
+	stateCtx.ConversationGeneration = conv.Generation
+	if stateCtx.Instructions == "" {
+		stateCtx.Instructions = conv.Instructions
+	}
+	if stateCtx.Previous == nil {
+		stateCtx.Session, stateCtx.Base = conv.Session, conv.Head
+	}
+	for _, item := range conv.DeletedItems {
+		stateCtx.HiddenItems = appendUniqueItem(stateCtx.HiddenItems, item)
+	}
+	return nil
 }
 
-func (s *Server) prependOpenAIResponsesStateHistory(ctx context.Context, stateCtx *openAIResponsesStateContext, typed TypedRequest, writable bool) (TypedRequest, error) {
-	var history []core.TypedMessage
-	var err error
-	if stateCtx.Previous != nil && !writable {
-		history, err = s.responseRecordHistory(ctx, stateCtx.Previous)
-	} else if stateCtx.Conversation != nil && stateCtx.Previous == nil {
-		history, err = s.conversationHistory(ctx, stateCtx.Conversation)
-	} else {
-		history, err = session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, stateCtx.Session.Path)
+func (s *Server) prepareOpenAIResponsesConversationState(ctx context.Context, stateCtx *openAIResponsesStateContext, convSpec conversationSpec, writable bool) (*conversationRecord, error) {
+	if convSpec.create {
+		if stateCtx.Previous != nil {
+			return nil, fmt.Errorf("conversation does not match previous_response_id")
+		}
+		return s.responsesState.createConversation(ctx, convSpec.metadata, stateCtx.Instructions, nil)
 	}
+	conv, ok, err := s.responsesState.loadConversation(convSpec.id)
 	if err != nil {
-		return typed, err
+		return nil, err
 	}
-	stateCtx.History = history
-	typed.Messages = append(append([]core.TypedMessage{}, history...), typed.Messages...)
-	return typed, nil
+	if !ok {
+		return nil, fmt.Errorf("conversation %q was not found", convSpec.id)
+	}
+	if writable && len(convSpec.metadata) > 0 {
+		conv.Metadata = cloneStringInterfaceMap(convSpec.metadata)
+	}
+	if stateCtx.Previous != nil && stateCtx.Previous.ConversationID != conv.ID {
+		return nil, fmt.Errorf("conversation does not match previous_response_id")
+	}
+	return conv, nil
 }
 
 func convertedOpenAIResponsesCompaction(stateCtx *openAIResponsesStateContext, typedWithState TypedRequest, summary string, upstreamResp *AnthropicResponse) *OpenAIResponsesCompactionResponse {
@@ -287,13 +241,12 @@ func convertedOpenAIResponsesCompaction(stateCtx *openAIResponsesStateContext, t
 	}
 }
 
-type openAIResponsesCommitTarget struct {
-	Session             *session.Session
-	Conversation        *conversationRecord
-	AdvanceConversation bool
-	ExistingCreatedAt   int64
-}
-
+// commitOpenAIResponsesStateWithBlocks saves a response's messages after the
+// message its request continued, then publishes it: saves its record and
+// advances the conversation when the request continued the conversation's
+// last message and nothing changed the conversation meanwhile. A response
+// that does not advance its conversation stays a branch at the place it was
+// built on.
 func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, typedCurrent TypedRequest, resp *OpenAIResponsesResponse, originalModel string, assistantBlocks []core.Block) error {
 	if resp == nil {
 		return nil
@@ -301,7 +254,7 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	if stateCtx != nil && stateCtx.Conversation != nil {
 		attachOpenAIResponsesConversation(resp, stateCtx.Conversation.ID)
 	}
-	if stateCtx == nil || stateCtx.Session == nil {
+	if stateCtx == nil || stateCtx.Session == "" {
 		return nil
 	}
 	if !stateCtx.Store && !stateCtx.Background {
@@ -317,96 +270,75 @@ func (s *Server) commitOpenAIResponsesStateWithBlocks(ctx context.Context, state
 	s.responsesState.mu.Lock()
 	defer s.responsesState.mu.Unlock()
 
-	target, err := s.prepareOpenAIResponsesCommitTargetLocked(ctx, stateCtx, resp.ID)
+	existing, ok, err := s.ensureOpenAIResponsesStateWritableLocked(stateCtx, resp.ID, true)
 	if err != nil {
 		return err
 	}
-	if target.ExistingCreatedAt != 0 {
-		resp.CreatedAt = target.ExistingCreatedAt
+	if ok && existing.CreatedAt != 0 {
+		resp.CreatedAt = existing.CreatedAt
 	}
 	raw, err := marshalJSONRaw(resp)
 	if err != nil {
 		return err
 	}
 
-	result, err := appendOpenAIResponsesCommitMessages(ctx, target.Session, typedCurrent, resp, originalModel, assistantBlocks)
-	if err != nil {
-		return err
-	}
-	target.Session.Path = result.Path
-	stateCtx.Session = target.Session
-
-	return s.saveOpenAIResponsesCommitRecordsLocked(stateCtx, req, resp, originalModel, result, target, raw)
-}
-
-func (s *Server) prepareOpenAIResponsesCommitTargetLocked(ctx context.Context, stateCtx *openAIResponsesStateContext, responseID string) (openAIResponsesCommitTarget, error) {
-	if err := s.ensureOpenAIResponsesStateWritableLocked(stateCtx, responseID, true); err != nil {
-		return openAIResponsesCommitTarget{}, err
-	}
-	target := openAIResponsesCommitTarget{Session: stateCtx.Session}
-	existingCreatedAt := int64(0)
-	if stateCtx.ExistingRecordID != "" {
-		var existing responseRecord
-		ok, err := s.responsesState.readJSON(s.responsesState.responsePath(stateCtx.ExistingRecordID), &existing)
-		if err != nil {
-			return openAIResponsesCommitTarget{}, err
-		}
-		if ok {
-			existingCreatedAt = existing.CreatedAt
-		}
-	}
-	target.ExistingCreatedAt = existingCreatedAt
-	if stateCtx.Conversation != nil {
-		conv, matches, err := s.openAIResponsesConversationHeadMatchesLocked(stateCtx)
-		if err != nil {
-			return openAIResponsesCommitTarget{}, err
-		}
-		target.Conversation = conv
-		if matches {
-			target.AdvanceConversation = true
-		} else {
-			forkedSession, err := s.forkOpenAIResponsesConversationBase(ctx, stateCtx)
-			if err != nil {
-				return openAIResponsesCommitTarget{}, err
-			}
-			target.Session = forkedSession
-		}
-	}
-	return target, nil
-}
-
-func appendOpenAIResponsesCommitMessages(ctx context.Context, commitSession *session.Session, typedCurrent TypedRequest, resp *OpenAIResponsesResponse, originalModel string, assistantBlocks []core.Block) (session.SaveResult, error) {
-	// Clients that replay their whole transcript send every prior message again,
-	// so commit them as one batch: appending them one at a time rescans the
-	// session directory per message, which is quadratic in transcript length.
-	entries := make([]session.MessageEntry, 0, len(typedCurrent.Messages)+1)
-	for _, msg := range typedCurrent.Messages {
-		entries = append(entries, typedMessageToSessionEntry(msg, originalModel))
-	}
-	assistantResponse := openAIResponsesCoreResponse(resp)
+	messages := append([]core.TypedMessage(nil), typedCurrent.Messages...)
+	reply := openAIResponsesCoreResponse(resp)
 	if len(assistantBlocks) > 0 {
-		assistantResponse.Blocks = assistantBlocks
+		reply.Blocks = assistantBlocks
 	}
 	// A reply with nothing in it, as a content filter leaves, adds no
 	// assistant message. An empty one would go to the backend with the next
 	// request, and backends refuse an assistant message with no content.
-	if core.ResponseHasContent(assistantResponse) {
-		entries = append(entries, session.MessageEntry{
-			Message: session.Message{
-				Role:             core.RoleAssistant,
-				Content:          assistantResponse.Text,
-				ThoughtSignature: assistantResponse.ThoughtSignature,
-				Timestamp:        time.Now(),
-				Model:            originalModel,
-			},
-			ToolCalls: assistantResponse.ToolCalls,
-			Blocks:    assistantResponse.Blocks,
-		})
+	if core.ResponseHasContent(reply) {
+		messages = append(messages, core.TypedMessage{Role: string(core.RoleAssistant), Blocks: core.ReplyBlocks(reply)})
 	}
-	return session.AppendMessagesWithBlocks(ctx, commitSession, entries)
+	cutShort := resp.Status == "incomplete" || resp.Status == "failed"
+	last, err := s.responsesState.appendMessages(ctx, stateCtx.Session, stateCtx.Base, messages, originalModel, cutShort)
+	if err != nil {
+		return err
+	}
+	if responseMessagesSavedForTest != nil {
+		responseMessagesSavedForTest()
+	}
+	return s.publishOpenAIResponseLocked(ctx, stateCtx, req, resp, originalModel, last, raw)
 }
 
-func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel string, result session.SaveResult, target openAIResponsesCommitTarget, raw json.RawMessage) error {
+// responseMessagesSavedForTest runs after a response's messages are saved
+// and before the response is published.
+var responseMessagesSavedForTest func()
+
+// publishOpenAIResponseLocked saves the record of a response whose messages
+// end at last and advances its conversation. It holds the conversation's
+// lock and then the response's from checking that neither was deleted and
+// the response was not cancelled to its last write, so a deletion or
+// cancellation in another apiproxy comes before the publication, which then
+// saves nothing, or after it. The caller holds the state lock.
+func (s *Server) publishOpenAIResponseLocked(ctx context.Context, stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel, last string, raw json.RawMessage) error {
+	publish := func() error {
+		return s.responsesState.withResponseLock(ctx, resp.ID, func() error {
+			if _, _, err := s.ensureOpenAIResponsesStateWritableLocked(stateCtx, resp.ID, true); err != nil {
+				return err
+			}
+			if stateCtx.Conversation != nil && conversationChangeForTest != nil {
+				conversationChangeForTest()
+			}
+			if responseChangeForTest != nil {
+				responseChangeForTest()
+			}
+			if err := s.saveOpenAIResponsesRecordLocked(stateCtx, req, resp, originalModel, last, raw); err != nil {
+				return err
+			}
+			return s.advanceOpenAIResponsesConversationLocked(stateCtx, resp.ID, last)
+		})
+	}
+	if stateCtx.Conversation == nil {
+		return publish()
+	}
+	return s.responsesState.withConversationLock(ctx, stateCtx.Conversation.ID, publish)
+}
+
+func (s *Server) saveOpenAIResponsesRecordLocked(stateCtx *openAIResponsesStateContext, req *OpenAIResponsesRequest, resp *OpenAIResponsesResponse, originalModel, last string, raw json.RawMessage) error {
 	rec := &responseRecord{
 		Version:            responsesStateVersion,
 		ID:                 resp.ID,
@@ -414,8 +346,9 @@ func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponse
 		Status:             firstNonEmpty(resp.Status, "completed"),
 		Model:              originalModel,
 		PreviousResponseID: req.PreviousResponseID,
-		SessionPath:        stateCtx.Session.Path,
-		MessageID:          result.MessageID,
+		Session:            stateCtx.Session,
+		MessageID:          last,
+		HiddenItems:        stateCtx.HiddenItems,
 		CreatedAt:          resp.CreatedAt,
 		CompletedAt:        time.Now().Unix(),
 		Background:         stateCtx.Background,
@@ -431,195 +364,97 @@ func (s *Server) saveOpenAIResponsesCommitRecordsLocked(stateCtx *openAIResponse
 	if rec.CreatedAt == 0 {
 		rec.CreatedAt = rec.CompletedAt
 	}
-	if target.Conversation != nil {
-		rec.ConversationID = target.Conversation.ID
-		if target.AdvanceConversation {
-			target.Conversation.SessionPath = target.Session.Path
-			target.Conversation.LastResponseID = resp.ID
-			if stateCtx.Conversation.Metadata != nil {
-				target.Conversation.Metadata = cloneStringInterfaceMap(stateCtx.Conversation.Metadata)
-			}
-			if stateCtx.Instructions != "" {
-				target.Conversation.Instructions = stateCtx.Instructions
-			}
-			if err := s.responsesState.saveConversationLocked(target.Conversation); err != nil {
-				return err
-			}
-			stateCtx.Conversation = target.Conversation
-		}
+	if stateCtx.Conversation != nil {
+		rec.ConversationID = stateCtx.Conversation.ID
 	}
-	return s.responsesState.saveResponseLocked(rec)
+	// The publication read the record under its lock and found it neither
+	// deleted nor cancelled.
+	return s.responsesState.writeResponseLocked(rec.ID, rec)
 }
 
-func (s *Server) responseRecordHistory(ctx context.Context, rec *responseRecord) ([]core.TypedMessage, error) {
-	if rec == nil {
-		return nil, fmt.Errorf("response record is nil")
-	}
-	if rec.SessionPath == "" {
-		return nil, fmt.Errorf("response session path is empty")
-	}
-	if rec.MessageID == "" {
-		return session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, rec.SessionPath)
-	}
-	return session.BuildMessagesWithToolInteractionsThroughMessageWithManager(ctx, s.responsesState.manager, rec.SessionPath, rec.SessionPath, rec.MessageID)
-}
+// beforeConversationAdvanceForTest runs after a response's messages and
+// record are saved and before its conversation advances. An error it returns
+// stops the commit there, the way a crash would.
+var beforeConversationAdvanceForTest func() error
 
-func (s *Server) forkOpenAIResponsesResponseSnapshot(ctx context.Context, rec *responseRecord) (*session.Session, error) {
-	if rec == nil {
-		return nil, fmt.Errorf("response record is nil")
-	}
-	if rec.SessionPath == "" {
-		return nil, fmt.Errorf("response session path is empty")
-	}
-	if rec.MessageID == "" {
-		return session.ForkSessionWithManager(ctx, s.responsesState.manager, rec.SessionPath, nil)
-	}
-	return session.ForkSessionThroughMessageWithManager(ctx, s.responsesState.manager, rec.SessionPath, rec.SessionPath, rec.MessageID, nil)
-}
-
-func (s *Server) captureOpenAIResponsesConversationBase(stateCtx *openAIResponsesStateContext, conv *conversationRecord) error {
-	if stateCtx == nil || conv == nil {
+// advanceOpenAIResponsesConversationLocked moves the conversation to last
+// when the request continued the conversation's last message, and its last
+// response when it named one, and the conversation's generation is the one
+// the request was prepared with. A request that continued an older response,
+// or ran while an item was deleted or the instructions changed, leaves the
+// conversation where it is. Only instructions the request gave change the
+// conversation's. The caller holds the state lock and the conversation's
+// lock.
+func (s *Server) advanceOpenAIResponsesConversationLocked(stateCtx *openAIResponsesStateContext, responseID, last string) error {
+	if stateCtx.Conversation == nil {
 		return nil
 	}
-	if stateCtx.Previous != nil {
-		stateCtx.ConversationBase = conversationBaseRef{
-			SessionPath:       stateCtx.Previous.SessionPath,
-			LastResponseID:    stateCtx.Previous.ID,
-			MessagePath:       stateCtx.Previous.SessionPath,
-			TerminalMessageID: stateCtx.Previous.MessageID,
+	if beforeConversationAdvanceForTest != nil {
+		if err := beforeConversationAdvanceForTest(); err != nil {
+			return err
 		}
-		if stateCtx.ConversationBase.TerminalMessageID == "" {
-			ref, ok, err := session.LastMessageRefWithManager(s.responsesState.manager, stateCtx.Previous.SessionPath)
-			if err != nil {
-				return err
-			}
-			if ok {
-				stateCtx.ConversationBase.MessagePath = ref.Path
-				stateCtx.ConversationBase.TerminalMessageID = ref.ID
-			}
-		}
-		return nil
 	}
-
-	stateCtx.ConversationBase = conversationBaseRef{
-		SessionPath:    conv.SessionPath,
-		LastResponseID: conv.LastResponseID,
-	}
-	ref, ok, err := session.LastMessageRefWithManager(s.responsesState.manager, conv.SessionPath)
+	conv, ok, err := s.responsesState.readConversation(stateCtx.Conversation.ID)
 	if err != nil {
 		return err
 	}
-	if ok {
-		stateCtx.ConversationBase.MessagePath = ref.Path
-		stateCtx.ConversationBase.TerminalMessageID = ref.ID
+	if !ok || conv.Deleted {
+		return errResponsesConversationDeleted
 	}
+	if conv.Generation != stateCtx.ConversationGeneration || conv.Session != stateCtx.Session || conv.Head != stateCtx.Base {
+		return nil
+	}
+	if stateCtx.Previous != nil && stateCtx.Previous.ID != conv.LastResponseID {
+		return nil
+	}
+	conv.Head = last
+	conv.LastResponseID = responseID
+	if stateCtx.Conversation.Metadata != nil {
+		conv.Metadata = cloneStringInterfaceMap(stateCtx.Conversation.Metadata)
+	}
+	if stateCtx.RequestInstructions != "" {
+		conv.Instructions = stateCtx.RequestInstructions
+	}
+	if err := s.responsesState.saveConversationLocked(stateCtx.Conversation.ID, &conv); err != nil {
+		return err
+	}
+	stateCtx.Conversation = &conv
 	return nil
 }
 
-func (s *Server) openAIResponsesConversationHeadMatchesLocked(stateCtx *openAIResponsesStateContext) (*conversationRecord, bool, error) {
-	if stateCtx == nil || stateCtx.Conversation == nil {
-		return nil, false, fmt.Errorf("conversation state is missing")
-	}
-	var conv conversationRecord
-	ok, err := s.responsesState.readJSON(s.responsesState.conversationPath(stateCtx.Conversation.ID), &conv)
-	if err != nil {
-		return nil, false, err
-	}
-	if !ok || conv.Deleted {
-		return nil, false, errResponsesStateDeleted
-	}
-	base := stateCtx.ConversationBase
-	if conv.SessionPath != base.SessionPath || conv.LastResponseID != base.LastResponseID {
-		return &conv, false, nil
-	}
-
-	ref, ok, err := session.LastMessageRefWithManager(s.responsesState.manager, conv.SessionPath)
-	if err != nil {
-		return nil, false, err
-	}
-	if base.TerminalMessageID == "" {
-		return &conv, !ok, nil
-	}
-	return &conv, ok && ref.Path == base.MessagePath && ref.ID == base.TerminalMessageID, nil
-}
-
-func (s *Server) forkOpenAIResponsesConversationBase(ctx context.Context, stateCtx *openAIResponsesStateContext) (*session.Session, error) {
-	if stateCtx != nil && stateCtx.Previous != nil && stateCtx.Session != nil {
-		return stateCtx.Session, nil
-	}
-	if stateCtx == nil || stateCtx.ConversationBase.SessionPath == "" {
-		return nil, fmt.Errorf("conversation base session path is empty")
-	}
-	if stateCtx.ConversationBase.TerminalMessageID == "" {
-		return s.responsesState.createSession()
-	}
-	return session.ForkSessionThroughMessageWithManager(
-		ctx,
-		s.responsesState.manager,
-		stateCtx.ConversationBase.SessionPath,
-		stateCtx.ConversationBase.MessagePath,
-		stateCtx.ConversationBase.TerminalMessageID,
-		nil,
-	)
-}
-
-func (s *Server) ensureOpenAIResponsesStateWritableLocked(stateCtx *openAIResponsesStateContext, responseID string, requireActive bool) error {
+// ensureOpenAIResponsesStateWritableLocked checks that response responseID,
+// when it has a record, is not deleted and, with requireActive, is still
+// pending, that its file holds no record other than the response's own, and
+// that the request's conversation is not deleted. It returns the response's
+// record, which it read whole once.
+func (s *Server) ensureOpenAIResponsesStateWritableLocked(stateCtx *openAIResponsesStateContext, responseID string, requireActive bool) (responseRecord, bool, error) {
+	var rec responseRecord
+	ok := false
 	if responseID != "" {
-		var rec responseRecord
-		ok, err := s.responsesState.readJSON(s.responsesState.responsePath(responseID), &rec)
-		if err != nil {
-			return err
+		var err error
+		if rec, ok, err = s.responsesState.readResponseFile(responseID); err != nil {
+			return rec, false, err
+		}
+		if ok && !ownRecord(responseID, rec.ID, rec.Version) {
+			return responseRecord{}, false, errResponsesStateOccupied
 		}
 		if ok && rec.Deleted {
-			return errResponsesStateDeleted
+			return rec, ok, errResponsesStateDeleted
 		}
 		if ok && requireActive && !responseRecordPending(rec.Status) {
-			return errResponsesStateNotActive
+			return rec, ok, errResponsesStateNotActive
 		}
 	}
 	if stateCtx != nil && stateCtx.Conversation != nil {
-		var conv conversationRecord
-		ok, err := s.responsesState.readJSON(s.responsesState.conversationPath(stateCtx.Conversation.ID), &conv)
+		conv, found, err := s.responsesState.readConversation(stateCtx.Conversation.ID)
 		if err != nil {
-			return err
+			return rec, ok, err
 		}
-		if !ok || conv.Deleted {
-			return errResponsesStateDeleted
+		if !found || conv.Deleted {
+			return rec, ok, errResponsesConversationDeleted
 		}
 	}
-	return nil
-}
-
-func typedMessageToSessionEntry(msg core.TypedMessage, model string) session.MessageEntry {
-	text, calls, results := typedMessageToolProjection(msg)
-	role := core.Role(msg.Role)
-	if role == "" {
-		role = core.RoleUser
-	}
-	message := session.Message{
-		Role:      role,
-		Content:   text,
-		Timestamp: time.Now(),
-	}
-	if role == core.RoleAssistant {
-		message.Model = model
-	}
-	return session.MessageEntry{
-		Message:     message,
-		ToolCalls:   calls,
-		ToolResults: results,
-		Blocks:      msg.Blocks,
-	}
-}
-
-func appendTypedMessageToSession(ctx context.Context, sess *session.Session, msg core.TypedMessage, model string) error {
-	entry := typedMessageToSessionEntry(msg, model)
-	result, err := session.AppendMessageWithBlocks(ctx, sess, entry.Message, entry.ToolCalls, entry.ToolResults, entry.Blocks)
-	if err != nil {
-		return err
-	}
-	sess.Path = result.Path
-	return nil
+	return rec, ok, nil
 }
 
 func parseConversationSpec(raw interface{}) (conversationSpec, error) {

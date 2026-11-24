@@ -4,10 +4,8 @@ import (
 	"context"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	session "lmtools/internal/oldsession"
 	"net/http"
 	"strings"
-	"time"
 )
 
 func (s *Server) handleOpenAIConversations(w http.ResponseWriter, r *http.Request) {
@@ -86,17 +84,8 @@ func (s *Server) createOpenAIConversation(ctx context.Context, w http.ResponseWr
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	}
-	conv, sess, err := s.responsesState.createConversation(body.Metadata, instructions)
+	conv, err := s.responsesState.createConversation(ctx, body.Metadata, instructions, messages)
 	if err != nil {
-		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
-		return
-	}
-	if err := appendConversationMessages(ctx, sess, messages); err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
-	conv.SessionPath = sess.Path
-	if err := s.responsesState.saveConversation(conv); err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
 		return
 	}
@@ -117,12 +106,10 @@ func (s *Server) retrieveOpenAIConversation(ctx context.Context, w http.Response
 }
 
 func (s *Server) updateOpenAIConversation(ctx context.Context, w http.ResponseWriter, r *http.Request, id string) {
-	conv, ok, err := s.responsesState.loadConversation(id)
-	if err != nil {
+	if _, ok, err := s.responsesState.loadConversation(id); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
-	}
-	if !ok {
+	} else if !ok {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation not found", "not_found", http.StatusNotFound)
 		return
 	}
@@ -131,21 +118,29 @@ func (s *Server) updateOpenAIConversation(ctx context.Context, w http.ResponseWr
 		s.sendOpenAIRequestError(w, err)
 		return
 	}
-	if body.Metadata != nil {
-		conv.Metadata = cloneStringInterfaceMap(body.Metadata)
-	}
-	if instructions := responsesInstructionText(ctx, body.Instructions); instructions != "" {
-		conv.Instructions = instructions
-	}
-	if err := s.responsesState.saveConversation(conv); err != nil {
+	instructions := responsesInstructionText(ctx, body.Instructions)
+	conv, ok, err := s.responsesState.updateConversation(ctx, id, func(conv *conversationRecord) (bool, error) {
+		if body.Metadata != nil {
+			conv.Metadata = cloneStringInterfaceMap(body.Metadata)
+		}
+		if instructions != "" {
+			conv.Instructions = instructions
+		}
+		return true, nil
+	})
+	if err != nil {
 		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation not found", "not_found", http.StatusNotFound)
 		return
 	}
 	_ = s.sendJSONResponse(ctx, w, conversationPayload(conv))
 }
 
 func (s *Server) deleteOpenAIConversation(ctx context.Context, w http.ResponseWriter, id string) {
-	if _, ok, err := s.responsesState.deleteConversation(id); err != nil {
+	if _, ok, err := s.responsesState.deleteConversation(ctx, id); err != nil {
 		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
 		return
 	} else if !ok {
@@ -194,42 +189,34 @@ func (s *Server) appendOpenAIConversationItems(ctx context.Context, w http.Respo
 		return
 	}
 
-	s.responsesState.mu.Lock()
-	defer s.responsesState.mu.Unlock()
-
-	var conv conversationRecord
-	ok, err := s.responsesState.readJSON(s.responsesState.conversationPath(id), &conv)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
-	if !ok || conv.Deleted {
+	// The items follow the conversation's last message, read and moved
+	// under the conversation's lock.
+	var appendErr error
+	beforeItemCount := 0
+	_, ok, err := s.responsesState.updateConversation(ctx, id, func(conv *conversationRecord) (bool, error) {
+		before, err := s.responsesState.history(conv.Session, conv.Head, nil)
+		if err != nil {
+			return false, err
+		}
+		beforeItemCount = len(core.OpenAIResponsesInput(before))
+		head, err := s.responsesState.appendMessages(ctx, conv.Session, conv.Head, messages, "", false)
+		if err != nil {
+			appendErr = err
+			return false, err
+		}
+		conv.Head = head
+		return true, nil
+	})
+	switch {
+	case appendErr != nil:
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, appendErr.Error(), "", http.StatusBadRequest)
+	case err != nil:
+		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
+	case !ok:
 		s.sendOpenAIError(w, ErrTypeServer, errResponsesStateDeleted.Error(), "state_error", http.StatusInternalServerError)
-		return
+	default:
+		_ = s.sendJSONResponse(ctx, w, listPayload(conversationItemsFromMessages(messages, beforeItemCount)))
 	}
-	sess, err := s.responsesState.loadSession(conv.SessionPath)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
-		return
-	}
-	beforeMessages, err := session.BuildMessagesWithToolInteractionsWithManager(ctx, s.responsesState.manager, conv.SessionPath)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
-		return
-	}
-	beforeItemCount := len(core.OpenAIResponsesInput(beforeMessages))
-	if err := appendConversationMessages(ctx, sess, messages); err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
-	conv.SessionPath = sess.Path
-	conv.UpdatedAt = time.Now().Unix()
-	if err := s.responsesState.saveConversationLocked(&conv); err != nil {
-		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
-		return
-	}
-	appended := conversationItemsFromMessages(messages, beforeItemCount, conversationDeletedItemSet(&conv), false)
-	_ = s.sendJSONResponse(ctx, w, listPayload(appended))
 }
 
 func (s *Server) retrieveOpenAIConversationItem(ctx context.Context, w http.ResponseWriter, conversationID, itemID string) {
@@ -248,32 +235,33 @@ func (s *Server) retrieveOpenAIConversationItem(ctx context.Context, w http.Resp
 }
 
 func (s *Server) deleteOpenAIConversationItem(ctx context.Context, w http.ResponseWriter, conversationID, itemID string) {
-	conv, ok, err := s.responsesState.loadConversation(conversationID)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
-	if !ok {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation not found", "not_found", http.StatusNotFound)
-		return
-	}
-	items, err := s.conversationItemsForRecord(ctx, conv, false)
-	if err != nil {
-		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
-		return
-	}
-	for _, item := range items {
-		if itemMap, ok := item.(map[string]interface{}); ok && itemMap["id"] == itemID {
-			conv.DeletedItemIDs = appendUniqueString(conv.DeletedItemIDs, itemID)
-			if err := s.responsesState.saveConversation(conv); err != nil {
-				s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
-				return
-			}
-			_ = s.sendJSONResponse(ctx, w, conversationPayload(conv))
-			return
+	found := false
+	conv, ok, err := s.responsesState.updateConversation(ctx, conversationID, func(conv *conversationRecord) (bool, error) {
+		items, keys, err := s.conversationItemsForRecord(ctx, conv)
+		if err != nil {
+			return false, err
 		}
+		for i, item := range items {
+			if itemMap, ok := item.(map[string]interface{}); ok && itemMap["id"] == itemID {
+				conv.DeletedItems = appendUniqueItem(conv.DeletedItems, keys[i])
+				found = true
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	switch {
+	case err != nil && found:
+		s.sendOpenAIError(w, ErrTypeServer, err.Error(), "state_error", http.StatusInternalServerError)
+	case err != nil:
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, err.Error(), "", http.StatusBadRequest)
+	case !ok:
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation not found", "not_found", http.StatusNotFound)
+	case !found:
+		s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation item not found", "not_found", http.StatusNotFound)
+	default:
+		_ = s.sendJSONResponse(ctx, w, conversationPayload(conv))
 	}
-	s.sendOpenAIError(w, ErrTypeInvalidRequest, "Conversation item not found", "not_found", http.StatusNotFound)
 }
 
 type openAIConversationRequestBody struct {
@@ -297,13 +285,4 @@ func conversationMessagesFromRequest(ctx context.Context, body openAIConversatio
 		return nil, err
 	}
 	return typed.Messages, nil
-}
-
-func appendConversationMessages(ctx context.Context, sess *session.Session, messages []core.TypedMessage) error {
-	for _, msg := range messages {
-		if err := appendTypedMessageToSession(ctx, sess, msg, ""); err != nil {
-			return err
-		}
-	}
-	return nil
 }

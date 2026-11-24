@@ -760,12 +760,12 @@ func TestOpenAIResponsesStreamFailureCommitSurvivesCanceledContext(t *testing.T)
 	if rec.Status != "failed" {
 		t.Fatalf("failed response status = %q, want failed", rec.Status)
 	}
-	if rec.SessionPath == "" || rec.MessageID == "" {
+	if rec.Session == "" || rec.MessageID == "" {
 		t.Fatalf("failed response state missing session linkage: %#v", rec)
 	}
-	history, err := server.responseRecordHistory(context.Background(), rec)
+	history, err := server.responsesState.history(rec.Session, rec.MessageID, rec.HiddenItems)
 	if err != nil {
-		t.Fatalf("responseRecordHistory() error = %v", err)
+		t.Fatalf("history() error = %v", err)
 	}
 	if len(history) == 0 || len(history[0].Blocks) == 0 {
 		t.Fatalf("failed response history missing input message: %#v", history)

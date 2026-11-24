@@ -1766,7 +1766,8 @@ Response conversion:
 - Usage carries over when the backend reports it.
 - Converted responses store local state by default, so `previous_response_id`,
   response retrieval, input item listing, and conversation endpoints work without
-  OpenAI as the backend.
+  OpenAI as the backend. A request that continues an older response branches
+  the stored conversation there, and the newer responses keep their history.
 
 Streaming conversion:
 
@@ -1799,10 +1800,11 @@ applies to every path except `-provider openai`, and `-provider argo` on a
 - Local response and conversation state lives under `~/.apiproxy/sessions` or
   `-sessions-dir`, not on OpenAI's servers.
 - Give each `apiproxy` process a `-sessions-dir` of its own, apart from `lmc`
-  sessions. The local state finds a conversation's last message by session
-  path and message ID, so another process that deletes a session there and
-  writes another at the same path can make a later request continue the
-  replacement's history.
+  sessions: the response and conversation records there are updated by one
+  process at a time.
+- Response and conversation IDs stored by an older `apiproxy` return not
+  found. The first response stored in a directory that holds its sessions logs
+  how many there are; move them out of the directory or delete them.
 - `store:false` turns off local persistence for foreground converted requests,
   so response retrieval and `previous_response_id` do not work for those
   responses.

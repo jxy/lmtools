@@ -291,7 +291,7 @@ func TestArgoConversationsResolveLocalStateFirst(t *testing.T) {
 		}), nil
 	})
 
-	local, _, err := server.responsesState.createConversation(nil, "")
+	local, err := server.responsesState.createConversation(context.Background(), nil, "", nil)
 	if err != nil {
 		t.Fatalf("createConversation() error = %v", err)
 	}
