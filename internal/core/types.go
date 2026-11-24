@@ -56,8 +56,6 @@ type RequestOptions struct {
 	MaxToolRounds         int
 	MaxToolParallel       int
 	ToolMaxOutputBytes    int
-	Resume                string
-	Branch                string
 	// Images are the -image attachments for this run's user turn, already
 	// loaded as data URLs. They join the stdin prompt through
 	// UserMessageBlocks.
