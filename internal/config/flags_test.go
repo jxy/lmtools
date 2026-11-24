@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"lmtools/internal/providerconfig"
+	"lmtools/internal/session"
 	"os"
 	"reflect"
 	"strings"
@@ -137,8 +138,7 @@ func TestParseFlagsInvalidCombos(t *testing.T) {
 		args    []string
 		wantErr string
 	}{
-		{"embed+resume", []string{"-argo-user", "testuser", "-e", "-resume", "123"}, "embed mode cannot be used with session flags"},
-		{"embed+branch", []string{"-argo-user", "testuser", "-e", "-branch", "123/456"}, "embed mode cannot be used with session flags"},
+		{"embed+resume", []string{"-argo-user", "testuser", "-e", "-resume", "123"}, "embed mode cannot be used with -resume"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -158,6 +158,7 @@ func TestParseFlagsCustom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	sys := "sys"
 	want := Config{
 		Model:        "modelA",
 		StreamChat:   true,
@@ -167,16 +168,17 @@ func TestParseFlagsCustom(t *testing.T) {
 			ArgoEnv:  "prod",
 			Provider: "argo",
 		},
-		OpenAIResponses:     true,
-		System:              "sys",
-		SystemExplicitlySet: true, // -s flag was provided
-		Timeout:             10 * time.Minute,
-		Retries:             10,               // Default value, retry.DefaultMaxRetries
-		ToolTimeout:         60 * time.Second, // Default value
-		MaxToolRounds:       64,               // Default value
-		MaxToolParallel:     8,                // Default value
-		ToolMaxOutputBytes:  1048576,          // Default value (1MB)
-		LogLevel:            "INFO",           // Default value
+		OpenAIResponses:    true,
+		System:             "sys",
+		Change:             session.Change{System: &sys},
+		Settings:           session.Settings{System: &sys},
+		Timeout:            10 * time.Minute,
+		Retries:            10,               // Default value, retry.DefaultMaxRetries
+		ToolTimeout:        60 * time.Second, // Default value
+		MaxToolRounds:      64,               // Default value
+		MaxToolParallel:    8,                // Default value
+		ToolMaxOutputBytes: 1048576,          // Default value (1MB)
+		LogLevel:           "INFO",           // Default value
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("ParseFlags = %+v; want %+v", cfg, want)

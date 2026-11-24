@@ -3,17 +3,15 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"lmtools/internal/core"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPrintCurlFreshDoesNotSendOrCreateSession(t *testing.T) {
@@ -98,7 +96,9 @@ func TestPrintCurlResumeIsReadOnly(t *testing.T) {
 	assertSnapshotEqual(t, before, snapshotDir(t, sessionsDir))
 }
 
-func TestPrintCurlBranchAssistantIsReadOnly(t *testing.T) {
+// Resumed at the question with empty input, a preview asks for the
+// question's answer again without the answer it has, and writes nothing.
+func TestPrintCurlAnswerAgainIsReadOnly(t *testing.T) {
 	lmcBin := getLmcBinary(t)
 	server := mockserver.NewMockServer(mockserver.WithDefaultResponse("assistant response"))
 	t.Cleanup(server.Close)
@@ -115,16 +115,16 @@ func TestPrintCurlBranchAssistantIsReadOnly(t *testing.T) {
 	server.Reset()
 
 	stdout, stderr, err := runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", server.URL(), "-sessions-dir", sessionsDir, "-branch", sessionID + "/0002", "-print-curl"},
-		"ignored by assistant regeneration")
+		[]string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", server.URL(), "-sessions-dir", sessionsDir, "-resume", sessionID + "/0002", "-print-curl"},
+		"")
 	if err != nil {
-		t.Fatalf("lmc -print-curl -branch failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("lmc -print-curl -resume at the question failed: %v\nstderr: %s", err, stderr)
 	}
 	if !strings.Contains(stdout, "Initial message") {
 		t.Fatalf("stdout = %q, want prior user message", stdout)
 	}
 	if strings.Contains(stdout, "assistant response") {
-		t.Fatalf("stdout = %q, assistant regeneration should exclude target assistant", stdout)
+		t.Fatalf("stdout = %q, want the question without its answer", stdout)
 	}
 	if got := len(server.GetRequests()); got != 0 {
 		t.Fatalf("mock server received %d requests, want 0", got)
@@ -195,30 +195,13 @@ func firstSessionIDForTest(t *testing.T, lmcBin, sessionsDir string) string {
 
 func createPendingToolSession(t *testing.T, sessionsDir string) string {
 	t.Helper()
-	oldDir := session.GetSessionsDir()
-	session.SetSessionsDir(sessionsDir)
-	t.Cleanup(func() { session.SetSessionsDir(oldDir) })
-
-	ctx := context.Background()
-	sess, err := session.CreateSession("system", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
-	appendTestSessionMessage(t, ctx, sess, core.RoleUser, "run a tool")
-	_, err = session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
-		Role:      core.RoleAssistant,
-		Content:   "I will run a tool",
-		Timestamp: time.Now(),
-		Model:     "gpt4o",
-	}, []core.ToolCall{{
+	sess := newTestSession(t, session.Open(sessionsDir), textEntry(core.RoleUser, "run a tool"))
+	saveToolCalls(t, sess, "I will run a tool", []core.ToolCall{{
 		ID:   "call-1",
 		Name: "universal_command",
 		Args: json.RawMessage(`{"command":["echo","hi"]}`),
-	}}, nil)
-	if err != nil {
-		t.Fatalf("AppendMessageWithToolInteraction() error = %v", err)
-	}
-	return session.GetSessionID(sess.Path)
+	}})
+	return sess.Number
 }
 
 func snapshotDir(t *testing.T, root string) map[string]string {

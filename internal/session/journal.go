@@ -8,8 +8,8 @@ package session
 // first commits (core.AssignInvocationIDs). The journal keeps, for each
 // identity, what recovery needs to know: who owns the call, whether it
 // started, and its outcome. It lives under the sessions root rather than
-// beside a transcript, so every copy of a call, in a sibling branch or in a
-// fork, resolves to the same entry.
+// beside a session, so a call resolves to the same entry on every branch
+// that holds it.
 //
 //	<sessions>/.journal/<id[:2]>/<id>/
 //	  lock          ownership lock; never replaced or unlinked

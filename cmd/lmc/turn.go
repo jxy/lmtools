@@ -9,7 +9,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/errors"
 	"lmtools/internal/logger"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"lmtools/internal/ui/tools"
 	"lmtools/internal/workingcontext"
 	"os"
@@ -19,8 +19,10 @@ import (
 // and the operator surfaces, decided once at startup. A single run builds one
 // and runs one turn with it.
 type turnEnv struct {
-	window          *workingcontext.Engine
-	cfg             *config.Config
+	window *workingcontext.Engine
+	cfg    *config.Config
+	// store is the sessions directory, nil with -no-session.
+	store           *session.Store
 	notifier        core.Notifier
 	toolUI          core.ToolUI
 	approver        core.Approver
@@ -64,6 +66,7 @@ func newTurnEnv(cfg *config.Config, notifier core.Notifier, logDir string, input
 	columns := fileColumns(os.Stderr)
 	env := &turnEnv{
 		cfg:             cfg,
+		store:           openStore(cfg),
 		notifier:        notifier,
 		toolUI:          tools.NewCLIToolUIWithOptions(toolNotifier, tools.Options{Columns: columns}),
 		approver:        approver,
@@ -96,35 +99,30 @@ func sameFile(a, b *os.File) bool {
 	return os.SameFile(aInfo, bInfo)
 }
 
-// turnInput is what one turn contributes: the prompt, and whether the turn
-// regenerates an assistant message instead of adding a user message.
+// turnInput is what one turn contributes: the prompt, empty for a turn that
+// asks the model to answer the end of the history.
 type turnInput struct {
-	text           string
-	isRegeneration bool
-	// from is the session a loop continues: the value an earlier turn
-	// committed to, whose pinned head is where that turn left the
-	// conversation. Nil before anything was committed, when the options
-	// name the starting point.
+	text string
+	// from is the session a loop continues: the session an earlier turn
+	// wrote to, whose head is where that turn left the conversation. Nil
+	// before anything was written, when the run's start point is where the
+	// turn continues.
 	from *session.Session
 }
 
 // turnOutcome reports what a turn left in the session. runTurn fills it on
 // every exit, errors included, so a caller can tell a request that failed
-// before anything was committed from one that failed after the session
+// before anything was written from one that failed after the session
 // advanced.
 type turnOutcome struct {
-	// Session is the session the turn committed to. It stays nil until the
-	// request plan's writes land, and always with -no-session. Every later
-	// save of the turn moves its Path, so afterwards it names the message
-	// the next turn continues from.
+	// Session is the session the turn wrote to, at the last message it
+	// saved. It stays nil until something is written, and always with
+	// -no-session.
 	Session *session.Session
 	// UnsavedAnswer is the error from saving an answer that was already
 	// shown. The turn still succeeds, as a single run always has, but the
 	// transcript lacks that answer.
 	UnsavedAnswer error
-	// ConflictForks lists the forks the turn's writes moved to because
-	// another writer changed the session while the turn ran.
-	ConflictForks []session.ConflictFork
 	// PlanCommitted reports that the request plan's writes landed, the
 	// turn's user message and its images among them.
 	PlanCommitted bool
@@ -136,91 +134,70 @@ func (o turnOutcome) Committed() bool {
 	return o.Session != nil
 }
 
-// afterTurnCommitForTest runs right after a turn's request plan commits. Tests
-// use it to change the session between the commit and the saves that follow.
+// afterTurnCommitForTest runs right after a turn's request plan commits.
 var afterTurnCommitForTest func(*session.Session)
 
-// runTurn runs one turn against the session: resolve tool calls a resumed
-// session left pending, plan the request, refuse a turn with nothing to send,
-// then either print the equivalent curl command or send the request and
-// handle the response. opts is the turn's own copy of the options; nothing
-// here mutates the caller's.
+// runTurn runs one turn: resolve the tool calls pending where it starts,
+// saving their results, then prepare the request and either print the
+// equivalent curl command or send it and handle the response. opts is the
+// turn's own copy of the options; nothing here mutates the caller's.
 func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in turnInput) (out turnOutcome, err error) {
 	env.window = newContextWindow(env, opts)
-	if err := core.ValidateDeveloperTurn(opts, in.text, in.isRegeneration); err != nil {
+	if err := core.ValidateDeveloperTurn(opts, in.text); err != nil {
 		return out, err
 	}
-	var resumed *session.Session
-	defer func() {
-		out.ConflictForks = collectConflictForks(resumed, out.Session)
-		for _, fork := range out.ConflictForks {
-			env.notifier.Infof("Session %s changed while this turn ran; the turn continued in session %s", fork.From, fork.To)
+	if env.store == nil {
+		if in.text == "" && len(opts.Images) == 0 {
+			return out, errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
 		}
-	}()
+		opts = config.UseSystemPrompt(opts, env.cfg.Settings)
+		return sendTurn(ctx, env, opts, in.text, nil)
+	}
 
-	var plan *session.RequestPlan
-	resolvedPending := false
-	if in.from != nil || resolvesPendingTools(env, opts, in) {
-		// Resolving pending calls is a step of its own, before the request is
-		// prepared, so a failed request is retried without running a tool.
-		resumed = in.from
+	start := env.cfg.Start
+	// resumed is the session the turn continues, which keeps the history it
+	// reads, so resolving pending calls and preparing the request read it
+	// once.
+	var resumed *session.Session
+	if in.from != nil {
+		copied := *in.from
+		resumed = &copied
+		start = resumed.Ref()
+	}
+	if start.Session == "" && in.text == "" && len(opts.Images) == 0 {
+		return out, errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
+	}
+	// Resolving pending calls is a step of its own, before the request is
+	// prepared, so a failed request is retried without running a tool.
+	if env.pendingToolMode == session.PendingToolExecute && start.Session != "" {
 		if resumed == nil {
-			if resumed, err = session.OpenSession(ctx, opts.Resume); err != nil {
+			if resumed, err = env.store.Session(start); err != nil {
 				return out, err
 			}
 		}
-		var resolution session.PendingResolution
-		resolution, err = session.ResolvePendingWithSetup(ctx, resumed, opts, logger.From(ctx), env.notifier, env.toolUI, env.approver, func(calls []core.ToolCall) error {
-			if env.window == nil {
-				return nil
-			}
-			for _, call := range calls {
-				if (call.MCPServer == "" || call.MCPServer == "history") && workingcontext.IsHistoryTool(call.Name) {
-					read, err := session.CreateContextBuilder(ctx, resumed)
-					if err != nil {
-						return err
-					}
-					msgs, refs, err := read()
-					if err != nil {
-						return err
-					}
-					return env.window.BindExisting(ctx, msgs, session.EngineRefs(refs), session.NewTranscript(refs, resumed))
-				}
-			}
-			return nil
+		resolution, err := resumed.ResolvePending(ctx, opts, logger.From(ctx), env.notifier, env.toolUI, env.approver, func(calls []core.ToolCall) error {
+			return bindPendingHistory(ctx, env, opts, resumed, calls)
 		})
 		if resolution.Committed {
 			out.Session = resumed
+			start = resumed.Ref()
 		}
-		resolvedPending = resolution.ResultsAwaitReply
 		if err != nil {
 			return out, err
 		}
-		plan, err = session.PrepareRequestAt(ctx, opts, env.notifier, env.toolUI, resumed, in.text, in.isRegeneration, env.pendingToolMode)
-		if err != nil {
-			return out, err
-		}
+	}
+	turn := session.Turn{Prompt: in.text, Images: opts.Images, Developer: opts.Developer}
+	var plan *session.Plan
+	if resumed != nil {
+		plan, err = resumed.Prepare(ctx, env.cfg.Change, turn, opts, env.pendingToolMode)
 	} else {
-		plan, err = prepareSessionRequestPlan(ctx, env.cfg, opts, env.notifier, env.toolUI, in.text, in.isRegeneration, env.pendingToolMode)
-		if err != nil {
-			return out, err
-		}
+		plan, err = env.store.Prepare(ctx, start, env.cfg.Change, turn, opts, env.pendingToolMode)
 	}
-	hasPendingTools := resolvedPending || (plan != nil && plan.HasPendingTools)
-	if !in.isRegeneration && in.text == "" && len(opts.Images) == 0 && !hasPendingTools {
-		return out, errors.WrapError("validate input", stdErrors.New("input cannot be empty"))
+	if err != nil {
+		return out, err
 	}
-
-	if env.cfg.PrintCurl {
-		rb, err := buildTurnRequest(ctx, env, opts, plan, in.text)
-		if err != nil {
-			return out, err
-		}
-		_, _ = fmt.Fprintln(env.stdout, renderCurlCommand(rb.Request, rb.Body))
-		return out, nil
-	}
-
-	executed, err := executeRequest(ctx, env, opts, in.text, plan)
+	opts = config.UseSystemPrompt(opts, plan.Settings)
+	executed, err := sendTurn(ctx, env, opts, in.text, plan)
 	if executed.Session != nil {
 		out.Session = executed.Session
 	}
@@ -230,41 +207,42 @@ func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in tur
 	return out, err
 }
 
-// resolvesPendingTools reports whether a turn resumes a session whose
-// pending tool calls it must resolve before preparing its request. -print-curl
-// previews them instead, and a resume by message reference branches.
-func resolvesPendingTools(env *turnEnv, opts core.RequestOptions, in turnInput) bool {
-	return !env.cfg.NoSession &&
-		env.pendingToolMode == session.PendingToolExecute &&
-		!in.isRegeneration &&
-		session.IsSessionResume(opts.Resume)
-}
-
-// collectConflictForks gathers the conflict forks of a turn's session values.
-// A system prompt fork replaces the value pending resolution worked with, so
-// both are read.
-func collectConflictForks(values ...*session.Session) []session.ConflictFork {
-	var forks []session.ConflictFork
-	seen := make(map[*session.Session]bool)
-	for _, value := range values {
-		if value == nil || seen[value] {
-			continue
+// sendTurn prints the curl command of a prepared request with -print-curl,
+// and sends it otherwise.
+func sendTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, input string, plan *session.Plan) (turnOutcome, error) {
+	if env.cfg.PrintCurl {
+		rb, err := buildTurnRequest(ctx, env, opts, plan, input)
+		if err != nil {
+			return turnOutcome{}, err
 		}
-		seen[value] = true
-		forks = append(forks, value.ConflictForks...)
+		_, _ = fmt.Fprintln(env.stdout, renderCurlCommand(rb.Request, rb.Body))
+		return turnOutcome{}, nil
 	}
-	return forks
+	return executeRequest(ctx, env, opts, input, plan)
 }
 
-// branchRegenerates reports whether -branch names an assistant message, which
-// regenerates that answer and sends no new user turn.
-func branchRegenerates(branch string) (bool, error) {
-	if branch == "" {
-		return false, nil
+// bindPendingHistory gives the history tools the history of the session a
+// pending history call was made in, before the call runs.
+func bindPendingHistory(ctx context.Context, env *turnEnv, opts core.RequestOptions, resumed *session.Session, calls []core.ToolCall) error {
+	if env.window == nil {
+		return nil
 	}
-	isAssistant, err := session.IsAssistantMessage(branch)
-	if err != nil {
-		return false, errors.WrapError("check branch message type", err)
+	for _, call := range calls {
+		if (call.MCPServer == "" || call.MCPServer == "history") && workingcontext.IsHistoryTool(call.Name) {
+			view, err := resumed.View(opts)
+			if err != nil {
+				return err
+			}
+			return env.window.BindExisting(ctx, view.Messages, view.Refs, view.Transcript)
+		}
 	}
-	return isAssistant, nil
+	return nil
+}
+
+// openStore returns the run's sessions directory, or nil with -no-session.
+func openStore(cfg *config.Config) *session.Store {
+	if cfg.NoSession {
+		return nil
+	}
+	return cfg.Store()
 }

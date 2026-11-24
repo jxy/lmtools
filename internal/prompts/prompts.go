@@ -41,5 +41,5 @@ const (
 	ErrEmbedWithTool = "invalid flag combination: embed mode cannot be used with tool"
 
 	// ErrEmbedWithSession is shown when trying to use embed mode with session flags
-	ErrEmbedWithSession = "invalid flag combination: embed mode cannot be used with session flags (-resume, -branch)"
+	ErrEmbedWithSession = "invalid flag combination: embed mode cannot be used with -resume"
 )

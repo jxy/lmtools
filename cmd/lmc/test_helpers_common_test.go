@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"lmtools/internal/mockserver"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,31 +141,14 @@ func hasLogDirArg(args []string) bool {
 	return false
 }
 
+// extractFirstSessionID returns the number of the first session that
+// -show-sessions lists.
 func extractFirstSessionID(output string) string {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, " • ") && strings.Contains(line, " messages • ") {
-			return strings.TrimSpace(strings.Split(line, " • ")[0])
+		if number, _, ok := strings.Cut(line, " • "); ok && strings.Contains(line, " message") && strings.Trim(number, "0123456789abcdef") == "" {
+			return number
 		}
 	}
 	return ""
-}
-
-func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
-	t.Helper()
-
-	tmpHome = t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	lmcDir := filepath.Join(tmpHome, ".lmc")
-	if err := os.MkdirAll(lmcDir, 0o755); err != nil {
-		t.Fatalf("Failed to create .lmc directory: %v", err)
-	}
-
-	server := mockserver.NewMockServer(
-		mockserver.WithDefaultResponse("Mock response for testing"),
-	)
-	t.Cleanup(server.Close)
-
-	return tmpHome, server.URL()
 }

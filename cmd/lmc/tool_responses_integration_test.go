@@ -3,11 +3,9 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -219,12 +217,7 @@ func assertStoredResponsesToolLoop(t *testing.T, sessionsDir string, rounds int)
 		t.Fatalf("session directories = %v from entries %v, want one", sessionDirs, entries)
 	}
 
-	manager := session.NewManager(sessionsDir)
-	sessionPath := filepath.Join(sessionsDir, sessionDirs[0].Name())
-	messages, err := session.BuildMessagesWithToolInteractionsWithManager(context.Background(), manager, sessionPath)
-	if err != nil {
-		t.Fatalf("build stored messages: %v", err)
-	}
+	_, messages := completionSession(t, sessionsDir)
 	if len(messages) != 2*rounds+3 {
 		t.Fatalf("stored messages = %d, want %d", len(messages), 2*rounds+3)
 	}

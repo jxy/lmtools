@@ -52,9 +52,35 @@ func Open(dir string) *Store {
 	return &Store{dir: dir}
 }
 
+// DefaultDir returns the sessions directory lmc uses without -sessions-dir:
+// .lmc/sessions in the home directory.
+func DefaultDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".lmc", "sessions")
+	}
+	return filepath.Join(home, ".lmc", "sessions")
+}
+
 // Dir returns the sessions directory.
 func (s *Store) Dir() string {
 	return s.dir
+}
+
+// Check reports whether the sessions directory can hold sessions: it is a
+// directory, or nothing is there yet and the first session creates it.
+func (s *Store) Check() error {
+	st, err := os.Stat(s.dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return lmerrors.WrapError("sessions directory", err)
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("sessions directory %s is not a directory", s.dir)
+	}
+	return nil
 }
 
 // SessionInfo describes a session.

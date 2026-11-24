@@ -11,9 +11,9 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/providerconfig"
 	"lmtools/internal/retry"
+	"lmtools/internal/session"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,21 +34,6 @@ func toolTestDirs(t *testing.T) (string, string, string) {
 		t.Fatal(err)
 	}
 	return tmpDir, sessionDir, logDir
-}
-
-// useTempSessionsDir points the process-global session state at dir for the
-// duration of the test. Redirecting the directory and skipping the flock check
-// are a pair, and so are their restores: a cleanup that forgets either half
-// leaks session state into whichever test runs next.
-func useTempSessionsDir(t *testing.T, dir string) {
-	t.Helper()
-	oldSessionsDir := session.GetSessionsDir()
-	session.SetSessionsDir(dir)
-	session.SetSkipFlockCheck(true)
-	t.Cleanup(func() {
-		session.SetSessionsDir(oldSessionsDir)
-		session.SetSkipFlockCheck(false)
-	})
 }
 
 func writeToolListFile(t *testing.T, dir, name string, commands ...string) string {
@@ -158,34 +143,15 @@ func TestToolIntegrationFlow(t *testing.T) {
 	}
 	log := logger.GetLogger()
 
-	// Set sessions directory and create session
-	useTempSessionsDir(t, cfg.SessionsDir)
-	sess, err := session.CreateSession("", log)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
-	// Save user message
+	// Create the session with the user message
 	userMsg := "Please run echo 'Hello from tools!'"
-	_, err = session.AppendMessageWithToolInteraction(context.Background(), sess, session.Message{
-		Role:    "user",
-		Content: userMsg,
-	}, nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to save user message: %v", err)
-	}
+	store := session.Open(cfg.SessionsDir)
+	sess := newTestSession(t, store, textEntry(core.RoleUser, userMsg))
 
 	// Create retry client
 	retryClient := retry.NewClientWithRetries(5*time.Second, 3, log)
 
-	msgs, err := session.GetLineage(sess.Path)
-	if err != nil {
-		t.Fatalf("Failed to load messages: %v", err)
-	}
-	typedMessages := make([]core.TypedMessage, len(msgs))
-	for i, msg := range msgs {
-		typedMessages[i] = core.NewTextMessage(string(msg.Role), msg.Content)
-	}
+	typedMessages := historyOf(t, sess)
 	rbReq, rbBody, err := core.BuildChatRequest(cfg.RequestOptions(), typedMessages, core.ChatBuildOptions{ToolDefs: core.GetBuiltinUniversalCommandTool()})
 	if err != nil {
 		t.Fatalf("Failed to build request: %v", err)
@@ -216,25 +182,9 @@ func TestToolIntegrationFlow(t *testing.T) {
 	}
 
 	// Save assistant response with tools
-	result, err := session.SaveAssistantResponseWithTools(context.Background(), sess, response.Text, response.ToolCalls, cfg.Model)
-	if err != nil {
-		t.Fatalf("Failed to save assistant response: %v", err)
-	}
-	sessionPath := result.Path
-	msgID := result.MessageID
-
-	// Verify files were created
-	files := []string{
-		msgID + ".json",       // metadata
-		msgID + ".txt",        // text content
-		msgID + ".tools.json", // tool calls
-	}
-
-	for _, file := range files {
-		fullPath := filepath.Join(sessionPath, file)
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			t.Errorf("Expected file %s to exist", file)
-		}
+	withCalls := saveToolCalls(t, sess, response.Text, response.ToolCalls)
+	if tools := newestTools(t, sess); tools == nil || len(tools.Calls) != 1 {
+		t.Fatalf("saved calls %+v, want the one call", tools)
 	}
 
 	// Create and execute tools
@@ -265,11 +215,9 @@ func TestToolIntegrationFlow(t *testing.T) {
 		additionalText = fmt.Sprintf("Note: Output for tool '%s' was truncated", response.ToolCalls[0].Name)
 	}
 
-	result2, err := session.SaveToolResults(context.Background(), sess, results, additionalText)
-	if err != nil {
+	if _, err := sess.SaveToolResults(context.Background(), results, additionalText); err != nil {
 		t.Fatalf("Failed to save tool results: %v", err)
 	}
-	resultMsgID := result2.MessageID
 
 	// Build follow-up request with tool results
 	// Create typed messages that include the full conversation context
@@ -341,52 +289,27 @@ func TestToolIntegrationFlow(t *testing.T) {
 	}
 
 	// Save final response
-	result3, err := session.SaveAssistantResponseWithTools(context.Background(), sess, finalResponse.Text, nil, cfg.Model)
-	if err != nil {
+	if _, err := sess.SaveReply(context.Background(), core.Response{Text: finalResponse.Text}, cfg.Model); err != nil {
 		t.Fatalf("Failed to save final response: %v", err)
 	}
-	finalMsgID := result3.MessageID
 
 	// Verify session has all messages
-	lineage, err := session.GetLineage(sess.Path)
-	if err != nil {
-		t.Fatalf("Failed to get lineage: %v", err)
+	h := historyAt(t, store, sess.Ref())
+	if len(h.Messages) != 4 {
+		t.Fatalf("lineage length = %d, want 4 messages", len(h.Messages))
 	}
-
-	if len(lineage) != 4 {
-		t.Fatalf("lineage length = %d, want 4 messages", len(lineage))
-	}
+	lineage := h.Messages
 	if lineage[0].Role != core.RoleUser || lineage[1].Role != core.RoleAssistant || lineage[2].Role != core.RoleUser || lineage[3].Role != core.RoleAssistant {
 		t.Fatalf("lineage roles = [%s %s %s %s], want [user assistant user assistant]", lineage[0].Role, lineage[1].Role, lineage[2].Role, lineage[3].Role)
 	}
-
-	// Load and verify tool interactions
-	toolInteraction1, err := session.LoadToolInteraction(sessionPath, msgID)
-	if err != nil {
-		t.Fatalf("Failed to load tool interaction: %v", err)
+	if lineage[1].ID != withCalls.ID || h.Contents[1].Tools == nil || len(h.Contents[1].Tools.Calls) != 1 {
+		t.Errorf("the reply with the call holds %+v", h.Contents[1].Tools)
 	}
-
-	if len(toolInteraction1.Calls) != 1 {
-		t.Errorf("Expected 1 tool call, got %d", len(toolInteraction1.Calls))
+	if h.Contents[2].Tools == nil || len(h.Contents[2].Tools.Results) != 1 {
+		t.Errorf("the results message holds %+v", h.Contents[2].Tools)
 	}
-
-	toolInteraction2, err := session.LoadToolInteraction(sessionPath, resultMsgID)
-	if err != nil {
-		t.Fatalf("Failed to load tool results: %v", err)
-	}
-
-	if len(toolInteraction2.Results) != 1 {
-		t.Errorf("Expected 1 tool result, got %d", len(toolInteraction2.Results))
-	}
-
-	// Verify final message has no tools
-	toolInteraction3, err := session.LoadToolInteraction(sessionPath, finalMsgID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if toolInteraction3 != nil {
-		// This is OK - the final message might have empty tool interactions
-		t.Logf("Final message has tool interaction (might be empty)")
+	if h.Contents[3].Tools != nil {
+		t.Errorf("the final answer holds tools %+v", h.Contents[3].Tools)
 	}
 }
 
@@ -520,13 +443,6 @@ func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 	ctx := context.Background()
 	log := core.NewTestLogger(false)
 
-	// Create session
-	useTempSessionsDir(t, sessionDir)
-	sess, err := session.CreateSession("", log)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
 	// Create notifier
 	notifier := core.NewTestNotifier()
 
@@ -564,20 +480,11 @@ func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 	}
 
 	// Save initial user message
-	userMessage := session.Message{
-		Role:      "user",
-		Content:   userMsg,
-		Timestamp: time.Now(),
-	}
-	_, err = session.AppendMessageWithToolInteraction(ctx, sess, userMessage, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create message builder
-	msgBuilder, err := session.CreateCachedMessageBuilder(ctx, sess.Path)
-	if err != nil {
-		t.Fatal(err)
+	store := session.Open(sessionDir)
+	sess := newTestSession(t, store, textEntry(core.RoleUser, userMsg))
+	msgBuilder := func(string) ([]core.TypedMessage, error) {
+		view, err := sess.View(cfg.RequestOptions())
+		return view.Messages, err
 	}
 
 	// Create tool context for execution. A one-round allowance requires two
@@ -590,7 +497,7 @@ func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 		Notifier: notifier,
 		Approver: approver,
 		ExecCfg: core.ToolExecutionConfig{
-			Store: session.NewStore(sess, log),
+			Store: sess.ToolStore(),
 			Send: func(ctx context.Context, req *http.Request, _ []byte) (*http.Response, error) {
 				return retryClient.Do(ctx, req, "lmc")
 			},
@@ -621,10 +528,7 @@ func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 		t.Fatalf("request count = %d, want 4", requestCount)
 	}
 
-	lineage, err := session.GetLineage(sess.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lineage := historyAt(t, store, sess.Ref()).Messages
 	if len(lineage) != 8 {
 		t.Fatalf("lineage length = %d, want 8", len(lineage))
 	}
@@ -639,12 +543,8 @@ func TestMultiRoundToolExecutionWithLimitResets(t *testing.T) {
 			t.Fatalf("lineage[%d].Role = %q, want %q", i, lineage[i].Role, want)
 		}
 	}
-	pending, err := session.CheckForPendingToolCalls(ctx, sess.Path)
-	if err != nil {
-		t.Fatalf("CheckForPendingToolCalls() error = %v", err)
-	}
-	if len(pending) != 0 {
-		t.Fatalf("pending tool calls = %#v, want none", pending)
+	if awaitsAnswer(t, sess) {
+		t.Fatal("the session awaits an answer, want none pending")
 	}
 }
 

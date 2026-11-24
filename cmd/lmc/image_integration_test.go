@@ -207,7 +207,9 @@ func TestImageFlagAcceptsImageOnlyInput(t *testing.T) {
 	}
 }
 
-func TestImageFlagRejectsRegenerationBranch(t *testing.T) {
+// Resumed at a question with -image and no text, a run sends a new user
+// turn holding the image after the question, without the question's answer.
+func TestImageWithoutTextIsAUserTurnAtAQuestion(t *testing.T) {
 	lmcBin := getLmcBinary(t)
 	server := newImageRecordingServer(t)
 	apiKeyFile := writeTestAPIKeyFile(t, "test-openai-key")
@@ -224,19 +226,20 @@ func TestImageFlagRejectsRegenerationBranch(t *testing.T) {
 		t.Fatalf("show-sessions failed: %v", err)
 	}
 	sessionID := extractFirstSessionID(listing)
-	assistantID := findMessageIDByRole(t, filepath.Join(sessionsDir, sessionID), "assistant")
+	questionID := findMessageIDByRole(t, filepath.Join(sessionsDir, sessionID), "user")
 
 	stdout, stderr, err = runLmcCommand(t, lmcBin,
-		imageArgs(server, apiKeyFile, "-sessions-dir", sessionsDir, "-branch", sessionID+"/"+assistantID, "-image", imagePath),
+		imageArgs(server, apiKeyFile, "-sessions-dir", sessionsDir, "-resume", sessionID+"/"+questionID, "-image", imagePath),
 		"")
-	if err == nil {
-		t.Fatalf("lmc succeeded regenerating with -image\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	if err != nil {
+		t.Fatalf("lmc failed sending the image: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "-image needs a user turn") {
-		t.Fatalf("stderr = %q, want the -image regeneration error", stderr)
+	if len(server.bodies) != 2 {
+		t.Fatalf("server saw %d requests, want two", len(server.bodies))
 	}
-	if len(server.bodies) != 1 {
-		t.Fatalf("server saw %d requests, want only the first turn", len(server.bodies))
+	second := string(server.bodies[1])
+	if !strings.Contains(second, "first question") || !strings.Contains(second, "data:image/png") || strings.Contains(second, "a picture") {
+		t.Fatalf("second request = %s, want the question and the image without the first answer", second)
 	}
 }
 

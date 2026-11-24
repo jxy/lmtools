@@ -9,7 +9,7 @@ import (
 	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"lmtools/internal/workingcontext"
 	"strconv"
 	"strings"
@@ -148,36 +148,43 @@ func sizingIdentity(opts core.RequestOptions, schemas []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func buildTurnRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, plan *session.RequestPlan, input string) (core.RequestBuild, error) {
-	if env.window == nil {
-		return buildHTTPRequest(ctx, env.cfg, opts, plan, input)
-	}
-	// The transcript comes from where the history came: a plan read from a
-	// saved session keeps its checkpoints there, although nothing of this
-	// run is written yet.
+// buildTurnRequest builds the request of a turn, through the context window
+// when the run has one. The transcript comes from where the history came: a
+// plan read from a saved session keeps its checkpoints there, although
+// nothing of this run is written yet.
+func buildTurnRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, plan *session.Plan, input string) (core.RequestBuild, error) {
 	var raw []core.TypedMessage
+	if plan != nil {
+		raw = plan.Messages
+	}
+	if env.window == nil {
+		return buildHTTPRequest(ctx, env.cfg, opts, raw, input)
+	}
 	var refs []contextstate.Ref
-	transcript := workingcontext.MemoryTranscript(nil)
+	var transcript workingcontext.Transcript
 	if plan == nil {
 		var err error
 		raw, err = core.NewMemorySessionStoreForRequest(opts, input).Messages("")
 		if err != nil {
 			return core.RequestBuild{}, err
 		}
+		transcript = workingcontext.MemoryTranscript(nil)
 	} else {
-		raw, refs = plan.Messages, session.EngineRefs(plan.Refs)
-		transcript = session.NewTranscript(plan.Refs, nil)
+		refs, transcript = plan.Refs, plan.Transcript
 	}
 	view, err := env.window.Project(ctx, raw, refs, transcript, env.cfg.PrintCurl)
 	if err != nil {
 		return core.RequestBuild{}, err
 	}
-	return buildHTTPRequest(ctx, env.cfg, opts, &session.RequestPlan{Messages: view}, input)
+	return buildHTTPRequest(ctx, env.cfg, opts, view, input)
 }
 
+// contextToolStore returns where the tool loop saves its rounds and how it
+// builds each follow-up request, through the context window when the run
+// has one.
 func contextToolStore(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, input string) (core.SessionStore, func(string) ([]core.TypedMessage, error), error) {
 	if env.window == nil {
-		store, build := createToolStoreAndMessageBuilder(ctx, opts, sess, input)
+		store, build := createToolStoreAndMessageBuilder(opts, sess, input)
 		return store, build, nil
 	}
 	if sess == nil {
@@ -197,22 +204,18 @@ func contextToolStore(ctx context.Context, env *turnEnv, opts core.RequestOption
 			return env.window.Project(ctx, msgs, refs, workingcontext.MemoryTranscript(refs), false)
 		}, nil
 	}
-	reader, err := session.CreateContextBuilder(ctx, sess)
+	view, err := sess.View(opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	msgs, refs, err := reader()
-	if err != nil {
+	if err = env.window.BindExisting(ctx, view.Messages, view.Refs, view.Transcript); err != nil {
 		return nil, nil, err
 	}
-	if err = env.window.BindExisting(ctx, msgs, session.EngineRefs(refs), session.NewTranscript(refs, sess)); err != nil {
-		return nil, nil, err
-	}
-	return session.NewStore(sess, logger.From(ctx)), func(string) ([]core.TypedMessage, error) {
-		msgs, refs, err := reader()
+	return sess.ToolStore(), func(string) ([]core.TypedMessage, error) {
+		view, err := sess.View(opts)
 		if err != nil {
 			return nil, err
 		}
-		return env.window.Project(ctx, msgs, session.EngineRefs(refs), session.NewTranscript(refs, sess), false)
+		return env.window.Project(ctx, view.Messages, view.Refs, view.Transcript, false)
 	}, nil
 }

@@ -147,14 +147,14 @@ func TestBuildRequestRejectsUnsupportedDeveloperHistory(t *testing.T) {
 func TestValidateDeveloperTurn(t *testing.T) {
 	cfg := newProviderSpecTestConfig("openai", "gpt5", "http://example.test/v1")
 	cfg.Developer = "Instruction"
-	if err := ValidateDeveloperTurn(cfg, "question", true); err == nil || !strings.Contains(err.Error(), "requires a new user turn") {
-		t.Fatalf("regeneration error=%v", err)
+	if err := ValidateDeveloperTurn(cfg, "question"); err != nil {
+		t.Fatalf("prompt turn error=%v", err)
 	}
-	if err := ValidateDeveloperTurn(cfg, "", false); err == nil || !strings.Contains(err.Error(), "requires prompt text or an -image") {
+	if err := ValidateDeveloperTurn(cfg, ""); err == nil || !strings.Contains(err.Error(), "requires prompt text or an -image") {
 		t.Fatalf("empty input error=%v", err)
 	}
 	cfg.Images = []ImageBlock{{URL: "data:image/png;base64,aGVsbG8="}}
-	if err := ValidateDeveloperTurn(cfg, "", false); err != nil {
+	if err := ValidateDeveloperTurn(cfg, ""); err != nil {
 		t.Fatalf("image turn error=%v", err)
 	}
 }

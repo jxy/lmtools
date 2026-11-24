@@ -158,7 +158,7 @@ func TestREPLInterruptedDraftDoesNotSendBufferedSuffix(t *testing.T) {
 	})
 	timer := time.AfterFunc(3*time.Second, func() { loop.signals.endProcess(context.DeadlineExceeded) })
 	defer timer.Stop()
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	if !exitSent || notes.count("Discarded the unfinished turn.") != 1 {

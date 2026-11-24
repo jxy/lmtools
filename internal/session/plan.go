@@ -10,11 +10,13 @@ import (
 
 // Turn is what a run adds to a conversation: a prompt with any images, and
 // a developer instruction sent with it. A turn without a prompt asks the
-// model to answer the end of the history.
+// model to answer the end of the history. A turn with a pin event adds that
+// event alone and sends nothing.
 type Turn struct {
 	Prompt    string
 	Images    []core.ImageBlock
 	Developer string
+	Pin       *Entry
 }
 
 func (t Turn) hasPrompt() bool {
@@ -34,10 +36,20 @@ type Plan struct {
 	// OldSessions, after a commit that created the sessions directory's
 	// first session, counts the sessions there in the old format.
 	OldSessions int
+	// SettingsRecord, after a commit, is the ID of the system record it
+	// saved, empty when it saved none.
+	SettingsRecord string
 
-	store     *Store
-	start     Ref
-	identity  string
+	store    *Store
+	start    Ref
+	identity string
+	// history is the start point's history, which the session the commit
+	// returns keeps. A plan made from a session's kept history holds that
+	// history and the length of the session's part of it instead, so the
+	// session the commit returns extends it as the session would.
+	history   History
+	kept      *keptHistory
+	keptLen   int
 	entries   []Entry
 	committed bool
 }
@@ -57,13 +69,11 @@ func (p *Plan) Start() Ref {
 //
 // A run whose start message is a developer message with the same text as
 // its instruction reuses that message. A run without a prompt answers the
-// start point, and is refused when the history ends with an answer.
+// start point, and is refused when the history ends with an answer. The
+// messages the commit saves are dated when the plan is made.
 func (s *Store) Prepare(ctx context.Context, start Ref, change Change, turn Turn, opts core.RequestOptions, mode PendingToolMode) (*Plan, error) {
-	if turn.Developer != "" && !turn.hasPrompt() {
-		return nil, errors.New("-developer needs a prompt to accompany")
-	}
-	p := &Plan{store: s}
 	var h History
+	var identity string
 	if start.Session != "" {
 		located, err := s.Locate(start)
 		if err != nil {
@@ -76,21 +86,45 @@ func (s *Store) Prepare(ctx context.Context, start Ref, change Change, turn Turn
 		if h, err = s.History(located); err != nil {
 			return nil, err
 		}
-		p.start, p.identity = located, info.Identity
+		start, identity = located, info.Identity
 	} else if start.Message != "" {
 		return nil, fmt.Errorf("message %s names no session", start.Message)
+	}
+	return s.prepare(start, identity, h, change, turn, opts, mode)
+}
+
+// prepare builds the plan of a run after start, whose history is h, in the
+// session identity names.
+func (s *Store) prepare(start Ref, identity string, h History, change Change, turn Turn, opts core.RequestOptions, mode PendingToolMode) (*Plan, error) {
+	if turn.Developer != "" && !turn.hasPrompt() {
+		return nil, errors.New("-developer needs a prompt to accompany")
+	}
+	if turn.Pin != nil && (turn.hasPrompt() || turn.Developer != "") {
+		return nil, errors.New("a pin event is added on its own")
 	}
 	if err := validateDeveloperHistory(opts, h); err != nil {
 		return nil, err
 	}
+	p := &Plan{store: s, start: start, identity: identity, history: h}
+	now := time.Now().UTC()
 
 	settings, changed := SettingsAt(h.Messages).Apply(change)
 	p.Changed = changed
-	if start.Session == "" || len(changed) > 0 {
+	// Each conversation begins with a record of its settings, also one
+	// whose first commit failed and left its session empty.
+	if len(h.Messages) == 0 || len(changed) > 0 {
 		recorded := settings
-		p.entries = append(p.entries, Entry{Role: core.RoleSystem, Settings: &recorded})
+		p.entries = append(p.entries, Entry{Role: core.RoleSystem, Time: now, Settings: &recorded})
 	}
 	p.View = s.view(h, p.identity, settings, opts, nil)
+	if turn.Pin != nil {
+		pin := *turn.Pin
+		if pin.Time.IsZero() {
+			pin.Time = now
+		}
+		p.entries = append(p.entries, pin)
+		return p, nil
+	}
 
 	if calls, _ := pendingCalls(h); len(calls) > 0 && mode != PendingToolSkip {
 		if !opts.ToolEnabled {
@@ -114,14 +148,14 @@ func (s *Store) Prepare(ctx context.Context, start Ref, change Change, turn Turn
 	if turn.Developer != "" && !reusesDeveloper(h, turn.Developer) {
 		p.Messages = append(p.Messages, core.NewTextMessage(string(core.RoleDeveloper), turn.Developer))
 		p.entries = append(p.entries, Entry{
-			Role:    core.RoleDeveloper,
+			Role: core.RoleDeveloper, Time: now,
 			Content: Content{Blocks: []core.Block{core.TextBlock{Text: turn.Developer}}},
 		})
 	}
 	if turn.hasPrompt() {
 		blocks := core.UserMessageBlocks(turn.Prompt, turn.Images)
 		p.Messages = append(p.Messages, core.TypedMessage{Role: string(core.RoleUser), Blocks: blocks})
-		p.entries = append(p.entries, Entry{Role: core.RoleUser, Content: Content{Blocks: blocks}})
+		p.entries = append(p.entries, Entry{Role: core.RoleUser, Time: now, Content: Content{Blocks: blocks}})
 	} else if !p.Pending && !awaitsAnswer(h) {
 		return nil, errors.New("nothing to answer: the conversation ends with an answer, so this run needs a prompt")
 	}
@@ -147,7 +181,8 @@ func reusesDeveloper(h History, text string) bool {
 // then a system record when the settings changed, the developer instruction
 // and the prompt, as one batch after the start point. It returns the session
 // the run continues in, at the last message saved, also beside an error; a
-// batch that stopped part way says where and how to retry.
+// batch that stopped part way says where and how to retry. The session
+// keeps the history the plan was made from.
 func (p *Plan) Commit(ctx context.Context) (*Session, error) {
 	if p.committed {
 		return nil, errors.New("request plan already committed")
@@ -160,13 +195,18 @@ func (p *Plan) Commit(ctx context.Context) (*Session, error) {
 			return nil, err
 		}
 		sess.Number, sess.Identity, p.OldSessions = info.Number, info.Identity, old
+		p.history = History{Session: info.Number}
 	}
-	now := time.Now().UTC()
-	for i := range p.entries {
-		p.entries[i].Time = now
+	if p.kept != nil {
+		sess.kept, sess.keptLen = p.kept, p.keptLen
+	} else {
+		sess.keep(p.history)
 	}
 	committed, err := sess.Append(ctx, p.entries...)
 	p.Transcript.live = sess
+	if len(committed) > 0 && p.entries[0].Settings != nil {
+		p.SettingsRecord = committed[0].ID
+	}
 	if err != nil {
 		if len(committed) == 0 {
 			return sess, err
@@ -185,7 +225,7 @@ type SaveError struct {
 }
 
 func (e *SaveError) Error() string {
-	return fmt.Sprintf("%v; saved through %s: %s", e.Err, e.Saved, e.Next)
+	return fmt.Sprintf("%v; saved through %s; %s", e.Err, e.Saved, e.Next)
 }
 
 func (e *SaveError) Unwrap() error {

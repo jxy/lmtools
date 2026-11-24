@@ -4,14 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
 	"lmtools/internal/prompts"
+	"os"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // lines writes each message as role:text, the text of its text blocks.
@@ -294,6 +299,18 @@ func TestSystemPromptFollowsTheRunsTools(t *testing.T) {
 	}
 }
 
+// A session whose first commit failed is empty, and the first commit that
+// succeeds there records the settings before its message, as a new
+// session's does.
+func TestAnEmptySessionGetsItsSettingsRecord(t *testing.T) {
+	s := newStore(t)
+	empty := create(t, s)
+	sess := commit(t, prepare(t, s, Ref{Session: empty.Number}, Change{}, Turn{Prompt: "q"}))
+	if got := strings.Join(roles(t, s, sess.Ref()), ","); got != "system,user" {
+		t.Fatalf("the first commit wrote %s", got)
+	}
+}
+
 // oneMCPTool is a connected server with one tool.
 type oneMCPTool struct{}
 
@@ -329,6 +346,207 @@ func TestPendingCallsAtTheStartPoint(t *testing.T) {
 	}
 }
 
+// The messages a commit saves are dated when the plan was made, before the
+// provider was asked.
+func TestCommitDatesTheTurnWhenItWasPrepared(t *testing.T) {
+	s := newStore(t)
+	sess := conversation(t, s)
+	p := prepare(t, s, sess.Ref(), Change{System: custom("other")}, Turn{Developer: "be brief", Prompt: "q2"})
+	prepared := time.Now().UTC()
+	time.Sleep(20 * time.Millisecond)
+	next := commit(t, p)
+	lineage, err := s.Lineage(next.Ref())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := lineage[len(lineage)-3:]
+	for _, m := range saved {
+		if m.Time.After(prepared) {
+			t.Errorf("%s message %s is dated %v, after the plan was made at %v", m.Role, m.ID, m.Time, prepared)
+		}
+	}
+	if got := []core.Role{saved[0].Role, saved[1].Role, saved[2].Role}; !reflect.DeepEqual(got, []core.Role{core.RoleSystem, core.RoleDeveloper, core.RoleUser}) {
+		t.Fatalf("the commit saved %v", got)
+	}
+}
+
+// The session a commit returns keeps the history its plan was made from,
+// with the messages it saves as the store reads them, so its views and
+// plans read no saved message again; once its head is deleted, it reads the
+// store and finds the message gone.
+func TestSessionKeepsItsHistory(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	sess := conversation(t, s)
+	question := Ref{Session: sess.Number, Message: "0002"}
+	saved, err := os.ReadFile(s.contentPath(question))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(s.contentPath(question)); err != nil {
+		t.Fatal(err)
+	}
+	image := core.ImageBlock{URL: "data:image/png;base64,aW1hZ2U=", Name: "shot.png"}
+	call := core.ToolCall{ID: "call_1", Name: "universal_command", Args: json.RawMessage(`{"command":["true"]}`)}
+	if _, err := sess.SaveReply(ctx, core.Response{Text: "running", ToolCalls: []core.ToolCall{call}}, "model"); err != nil {
+		t.Fatal(err)
+	}
+	results := []core.ToolResult{{ID: "call_1", Output: "done", Images: []core.ImageBlock{image}}}
+	if _, err := sess.SaveToolResults(ctx, results, "a note"); err != nil {
+		t.Fatal(err)
+	}
+	reply(t, sess, "a2")
+	view, err := sess.View(plainOpts())
+	if err != nil {
+		t.Fatalf("the session read its history again: %v", err)
+	}
+	if got := strings.Join(lines(view.Messages), "|"); !strings.HasPrefix(got, "system:sys|user:q1|assistant:a1|assistant:running") || !strings.HasSuffix(got, "assistant:a2") {
+		t.Fatalf("view %s", got)
+	}
+	if _, err := sess.Prepare(ctx, Change{}, Turn{Prompt: "q3"}, plainOpts(), PendingToolSkip); err != nil {
+		t.Fatalf("the session prepared from the store: %v", err)
+	}
+	if err := os.WriteFile(s.contentPath(question), saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := sess.History()
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.History(sess.Ref())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(kept, read) {
+		t.Fatalf("the kept history differs from the stored one:\n%+v\n%+v", kept, read)
+	}
+	if err := s.Delete(ctx, sess.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.History(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the history of a deleted head: %v", err)
+	}
+}
+
+// Copies of a session that write after the same head keep histories of
+// their own, whatever room the kept arrays have past their ends, and so
+// does a caller that appends to a history a session returned.
+func TestSessionCopiesKeepTheirOwnHistories(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	sess := conversation(t, s)
+	if _, err := sess.History(); err != nil {
+		t.Fatal(err)
+	}
+	sess.kept.messages = slices.Grow(sess.kept.messages, 4)
+	sess.kept.contents = slices.Grow(sess.kept.contents, 4)
+	returned, err := sess.History()
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned.Messages = append(returned.Messages, Message{ID: "ffff"})
+	other := *sess
+	if _, err := sess.Append(ctx, text("q0"), text("q1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Append(ctx, text("other q0")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		sess *Session
+		want string
+	}{{sess, "user:q0|user:q1"}, {&other, "user:other q0"}} {
+		view, err := c.sess.View(plainOpts())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(lines(view.Messages), "|"); !strings.HasSuffix(got, "assistant:a1|"+c.want) {
+			t.Errorf("history %s, want it to end with %s", got, c.want)
+		}
+	}
+	if id := returned.Messages[len(returned.Messages)-1].ID; id != "ffff" {
+		t.Errorf("the caller's history ends with %s", id)
+	}
+}
+
+// Extending a session's kept history by a message copies none of it while
+// no copy of the session has written after the same head.
+func TestExtendingAKeptHistoryCopiesNone(t *testing.T) {
+	s := newStore(t)
+	sess := conversation(t, s)
+	h, err := sess.History()
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := History{Session: h.Session}
+	for i := 0; i < 10000; i++ {
+		long.Messages = append(long.Messages, Message{ID: fmt.Sprintf("%04x", i+0x1000), Role: core.RoleUser})
+		long.Contents = append(long.Contents, Content{})
+	}
+	long.Messages = append(long.Messages, h.Messages...)
+	long.Contents = append(long.Contents, h.Contents...)
+	sess.keep(long)
+	extend := func(i int) {
+		m := Message{ID: fmt.Sprintf("%04x", i+0x9000), Parent: sess.Head, Role: core.RoleUser, Time: time.Now().UTC()}
+		sess.extend([]Message{m}, []Entry{text("more")})
+		sess.Head = m.ID
+	}
+	// The first extension grows the arrays the history was read into.
+	extend(0)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := 1; i <= 10; i++ {
+		extend(i)
+	}
+	runtime.ReadMemStats(&after)
+	if each := (after.TotalAlloc - before.TotalAlloc) / 10; each > 64<<10 {
+		t.Fatalf("each extension of a history of %d messages allocated %d bytes", len(long.Messages), each)
+	}
+	if got := sess.kept.prefix(sess.keptLen); len(got.Messages) != len(long.Messages)+11 || got.Messages[len(got.Messages)-1].ID != sess.Head {
+		t.Fatalf("the kept history has %d messages, ending with %s", len(got.Messages), got.Messages[len(got.Messages)-1].ID)
+	}
+}
+
+// A plan made from a session's kept history commits through it: the
+// session the commit returns extends the history in place, copying none of
+// it, while no other copy of the session has written after the same head.
+func TestCommitExtendsTheKeptHistoryInPlace(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	sess := conversation(t, s)
+	h, err := sess.History()
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := History{Session: h.Session}
+	for i := 0; i < 10000; i++ {
+		long.Messages = append(long.Messages, Message{ID: fmt.Sprintf("%04x", i+0x1000), Role: core.RoleUser})
+		long.Contents = append(long.Contents, Content{})
+	}
+	long.Messages = append(long.Messages, h.Messages...)
+	long.Contents = append(long.Contents, h.Contents...)
+	sess.keep(long)
+	// Room past the end, as earlier extensions leave it.
+	sess.kept.messages = slices.Grow(sess.kept.messages, 16)
+	sess.kept.contents = slices.Grow(sess.kept.contents, 16)
+	p, err := sess.Prepare(ctx, Change{}, Turn{Prompt: "q2"}, plainOpts(), PendingToolSkip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	next := commit(t, p)
+	runtime.ReadMemStats(&after)
+	if used := after.TotalAlloc - before.TotalAlloc; used > 256<<10 {
+		t.Fatalf("the commit after a history of %d messages allocated %d bytes", len(long.Messages), used)
+	}
+	if next.kept != sess.kept || next.keptLen != len(long.Messages)+1 {
+		t.Fatalf("the committed session keeps %d messages of its own history", next.keptLen)
+	}
+}
+
 // A reply records the receipt of the window its request used; the plan's
 // transcript hands the receipt to the session its commit makes.
 func TestReplyRecordsTheRequestsReceipt(t *testing.T) {
@@ -339,5 +557,28 @@ func TestReplyRecordsTheRequestsReceipt(t *testing.T) {
 	m := reply(t, sess, "a")
 	if m.Receipt == nil || m.Receipt.Tag != "ab" {
 		t.Fatalf("receipt %+v", m.Receipt)
+	}
+}
+
+// A pin event is added on its own: a turn with a pin and a prompt or an
+// instruction is refused, and a pin turn writes the run's settings record,
+// for a new session, before the event.
+func TestPinTurnsAddTheEventAlone(t *testing.T) {
+	s := newStore(t)
+	entry, err := PinEntry(contextstate.PinChange{Action: "add"}, "keep this", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range []Turn{{Pin: &entry, Prompt: "q"}, {Pin: &entry, Developer: "d", Prompt: "q"}} {
+		if _, err := s.Prepare(context.Background(), Ref{}, Change{}, turn, plainOpts(), PendingToolSkip); err == nil || !strings.Contains(err.Error(), "on its own") {
+			t.Fatalf("%+v: %v", turn, err)
+		}
+	}
+	sess := commit(t, prepare(t, s, Ref{}, Change{System: custom("sys")}, Turn{Pin: &entry}))
+	if got := strings.Join(roles(t, s, sess.Ref()), ","); got != "system,user" {
+		t.Fatalf("a pin turn wrote %s", got)
+	}
+	if m, err := s.Message(sess.Ref()); err != nil || m.Pin == nil {
+		t.Fatalf("the newest message %+v: %v", m, err)
 	}
 }

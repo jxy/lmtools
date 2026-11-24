@@ -5,7 +5,6 @@ package main
 import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/ptytest"
 	"os"
 	"strings"
@@ -32,11 +31,10 @@ func TestREPLRefusesATerminalItCannotReopen(t *testing.T) {
 	reopenTerminal = func(string) (int, error) {
 		return syscall.Open(other.Name, syscall.O_RDONLY|syscall.O_NOCTTY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	}
-	defer func(stdin *os.File, args []string, sessionsDir string) {
+	defer func(stdin *os.File, args []string) {
 		os.Stdin, os.Args = stdin, args
-		session.SetSessionsDir(sessionsDir)
 		logger.ResetForTesting()
-	}(os.Stdin, os.Args, session.GetSessionsDir())
+	}(os.Stdin, os.Args)
 	os.Stdin = pty.Slave
 	os.Args = []string{
 		"lmc", "-repl",

@@ -109,7 +109,7 @@ func TestREPLEditorRejectsPipesAndFormerResend(t *testing.T) {
 	loop, w, notes := newTestLoop(t, te)
 	loop.draft = "prior draft"
 	typeTurns(t, w, "/ed\n/ed 1\n/editor\n/again 1\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	if len(server.GetRequests()) != 0 || loop.draft != "prior draft" || len(loop.history.entries) != 0 {
@@ -133,7 +133,7 @@ func TestREPLDraftSubmissionAndAppend(t *testing.T) {
 			loop, w, _ := newTestLoop(t, te)
 			loop.draft = tc.draft
 			typeTurns(t, w, tc.input, true)
-			if err := loop.run(false); err != nil {
+			if err := loop.run(); err != nil {
 				t.Fatal(err)
 			}
 			requests := server.GetRequests()

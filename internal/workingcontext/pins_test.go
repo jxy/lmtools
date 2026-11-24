@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"lmtools/internal/contextcfg"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
-	session "lmtools/internal/oldsession"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,13 +17,13 @@ import (
 
 func TestPinsSurviveLossyHandoffAndKeepTheirUserRole(t *testing.T) {
 	e := testEngine(contextcfg.Handoff)
-	entry, err := session.PinEntry(session.PinChange{Action: "add"}, "Always use ALPHA.", nil)
+	change, blocks, err := contextstate.PinBlocks(contextstate.PinChange{Action: "add"}, "Always use ALPHA.", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []core.TypedMessage{{Role: "user", Blocks: entry.Blocks}, core.NewTextMessage("assistant", "understood"), core.NewTextMessage("user", strings.Repeat("older data ", 500)), core.NewTextMessage("assistant", "complete"), core.NewTextMessage("user", "answer exactly READY")}
+	raw := []core.TypedMessage{{Role: "user", Blocks: blocks}, core.NewTextMessage("assistant", "understood"), core.NewTextMessage("user", strings.Repeat("older data ", 500)), core.NewTextMessage("assistant", "complete"), core.NewTextMessage("user", "answer exactly READY")}
 	refs := MemoryRefs(raw[:4])
-	refs[0].Pin = entry.Message.Pin
+	refs[0].Pin = &change
 	e.Write = func(context.Context, string, string) (string, error) { return "work status", nil }
 	got, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestPinsSurviveLossyHandoffAndKeepTheirUserRole(t *testing.T) {
 	if n < 3 || got[n-2].Role != "user" || !strings.Contains(got[n-2].Blocks[0].(core.TextBlock).Text, "Always use ALPHA.") || got[n-1].Blocks[0].(core.TextBlock).Text != "answer exactly READY" {
 		t.Fatal(got)
 	}
-	if e.Receipt().PinDigest == "" || e.Receipt().PinDigest != session.PinDigest(e.current.Pins) {
+	if e.Receipt().PinDigest == "" || e.Receipt().PinDigest != contextstate.PinDigest(e.current.Pins) {
 		t.Fatal("missing pin receipt")
 	}
 }
@@ -43,13 +43,13 @@ func TestPinPlacementOnProviderWires(t *testing.T) {
 	if err := os.WriteFile(key, []byte("test-fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pin := session.StandingPin{ID: "one", Source: "user-source.0", End: 14, Text: "EXACT-PIN-TEXT"}
-	active := []session.StandingPin{pin}
-	replace, err := session.PinEntry(session.PinChange{Action: "replace", ID: pin.ID}, "UPDATED-USER-RULE", active)
+	pin := contextstate.StandingPin{ID: "one", Source: "user-source.0", End: 14, Text: "EXACT-PIN-TEXT"}
+	active := []contextstate.StandingPin{pin}
+	_, replaceBlocks, err := contextstate.PinBlocks(contextstate.PinChange{Action: "replace", ID: pin.ID}, "UPDATED-USER-RULE", active)
 	if err != nil {
 		t.Fatal(err)
 	}
-	remove, err := session.PinEntry(session.PinChange{Action: "remove", ID: pin.ID}, "", active)
+	_, removeBlocks, err := contextstate.PinBlocks(contextstate.PinChange{Action: "remove", ID: pin.ID}, "", active)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +57,12 @@ func TestPinPlacementOnProviderWires(t *testing.T) {
 		core.NewTextMessage("system", "System policy"),
 		core.NewTextMessage("user", "old request"),
 		core.NewTextMessage("assistant", "done"),
-		{Role: "user", Blocks: replace.Blocks},
-		{Role: "user", Blocks: remove.Blocks},
+		{Role: "user", Blocks: replaceBlocks},
+		{Role: "user", Blocks: removeBlocks},
 		core.NewTextMessage("user", "CURRENT-LIVE-REQUEST"),
 	}
-	view := project(raw, session.Checkpoint{Count: 3, Handoff: "historical summary", Tail: "RECENT-EVIDENCE", Catalog: "FROZEN-CATALOG", Pins: []session.StandingPin{pin}}, "", true)
+	withdrawal := removeBlocks[0].(core.TextBlock).Text
+	view := project(raw, contextstate.Checkpoint{Count: 3, Handoff: "historical summary", Tail: "RECENT-EVIDENCE", Catalog: "FROZEN-CATALOG", Pins: []contextstate.StandingPin{pin}}, "", true)
 	for _, tc := range []struct {
 		provider, model, field string
 		responses              bool
@@ -92,13 +93,13 @@ func TestPinPlacementOnProviderWires(t *testing.T) {
 						t.Fatal("pin has wrong role", string(b))
 					}
 				}
-				if (bytes.Contains(b, []byte("UPDATED-USER-RULE")) || bytes.Contains(b, []byte(remove.Message.Content))) && string(m["role"]) != `"user"` {
+				if (bytes.Contains(b, []byte("UPDATED-USER-RULE")) || bytes.Contains(b, []byte(withdrawal))) && string(m["role"]) != `"user"` {
 					t.Fatal("later pin change has wrong role", string(b))
 				}
 			}
 			pinned := bytes.Index(body, []byte(pin.Text))
 			replaced := bytes.Index(body, []byte("UPDATED-USER-RULE"))
-			withdrawn := bytes.Index(body, []byte(remove.Message.Content))
+			withdrawn := bytes.Index(body, []byte(withdrawal))
 			if seen != 1 || pinned < bytes.Index(body, []byte("RECENT-EVIDENCE")) || pinned < bytes.Index(body, []byte("FROZEN-CATALOG")) || replaced <= pinned || withdrawn <= replaced || bytes.Index(body, []byte("CURRENT-LIVE-REQUEST")) <= withdrawn {
 				t.Fatal("pin order or multiplicity", string(body))
 			}
@@ -167,8 +168,8 @@ func TestProtectedPinsTakePrecedenceOverCatalogAndRemainIdentifiable(t *testing.
 	e := testEngine(contextcfg.Handoff)
 	e.Binding.Window = 4096
 	raw := []core.TypedMessage{core.NewTextMessage("user", "start"), core.NewTextMessage("assistant", "done"), core.NewTextMessage("user", "next")}
-	pins := []session.StandingPin{{ID: "p1", Source: "user.0", Text: "Preserve this entire instruction."}}
-	cp := session.Checkpoint{Count: 2, Handoff: "handoff", Pins: pins, Catalog: strings.Repeat("b", 13000), Tail: strings.Repeat("x", 9000)}
+	pins := []contextstate.StandingPin{{ID: "p1", Source: "user.0", Text: "Preserve this entire instruction."}}
+	cp := contextstate.Checkpoint{Count: 2, Handoff: "handoff", Pins: pins, Catalog: strings.Repeat("b", 13000), Tail: strings.Repeat("x", 9000)}
 	without := cp
 	without.Pins = nil
 	if err := e.fitCheckpoint(context.Background(), raw, MemoryRefs(raw[:2]), &without, false); err != nil || without.Catalog != "" || without.Tail != "" || without.Handoff != "handoff" {

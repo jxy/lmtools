@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
+	"io"
 	"lmtools/internal/config"
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
+	"lmtools/internal/ui"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -57,9 +59,6 @@ func newTurnTestEnvAt(t *testing.T, baseURL string, extraFlags ...string) turnTe
 	t.Helper()
 
 	sessionsDir := t.TempDir()
-	oldDir := session.GetSessionsDir()
-	session.SetSessionsDir(sessionsDir)
-	t.Cleanup(func() { session.SetSessionsDir(oldDir) })
 
 	logDir := t.TempDir()
 	logger.ResetForTesting()
@@ -90,6 +89,7 @@ func newTurnTestEnvAt(t *testing.T, baseURL string, extraFlags ...string) turnTe
 	notifier := core.NewTestNotifier()
 	env := &turnEnv{
 		cfg:             &cfg,
+		store:           openStore(&cfg),
 		notifier:        notifier,
 		toolUI:          core.TestToolUI{},
 		logDir:          logDir,
@@ -163,11 +163,7 @@ func TestRunTurnCommitsAndSavesTheAnswer(t *testing.T) {
 		t.Fatalf("stdout = %q, want the answer", got)
 	}
 
-	messages, err := session.BuildMessagesWithToolInteractions(context.Background(), outcome.Session.Path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
-	}
-	lines := lmcTypedTextLines(messages)
+	lines := lmcTypedTextLines(historyOf(t, outcome.Session))
 	if len(lines) < 2 || lines[len(lines)-2] != "user:ping the mock" || lines[len(lines)-1] != "assistant:pong from the mock" {
 		t.Fatalf("session lines = %q, want the user turn followed by the answer", lines)
 	}
@@ -243,12 +239,7 @@ func TestRunTurnReportsAnAnswerItCouldNotSave(t *testing.T) {
 	// Replace the session directory with a file once the plan commits, so the
 	// answer is shown and its save fails.
 	afterTurnCommitForTest = func(sess *session.Session) {
-		if err := os.Rename(sess.Path, sess.Path+".moved"); err != nil {
-			t.Errorf("Rename() error = %v", err)
-		}
-		if err := os.WriteFile(sess.Path, nil, 0o600); err != nil {
-			t.Errorf("WriteFile() error = %v", err)
-		}
+		replaceWithFile(t, filepath.Join(te.sessionsDir, sess.Number))
 	}
 	t.Cleanup(func() { afterTurnCommitForTest = nil })
 
@@ -267,6 +258,72 @@ func TestRunTurnReportsAnAnswerItCouldNotSave(t *testing.T) {
 	}
 	if len(te.notifier.WarnMessages) == 0 || !strings.Contains(te.notifier.WarnMessages[0], "Failed to save response to session") {
 		t.Fatalf("warnings = %q, want the save failure warning a single run has always printed", te.notifier.WarnMessages)
+	}
+}
+
+// A turn reads each saved message once: its tool follow-ups and the next
+// turn from its session build their requests from the history the session
+// keeps. The tool here removes the question's content file, which a request
+// that read the history again could not send.
+func TestTurnsReadEachSavedMessageOnce(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	var question string
+	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(r *http.Request) (interface{}, int, error) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		bodies = append(bodies, string(body))
+		if len(bodies) > 1 {
+			return map[string]interface{}{
+				"id": "chatcmpl-text", "object": "chat.completion", "model": "gpt-test",
+				"choices": []map[string]interface{}{{
+					"index": 0, "finish_reason": "stop",
+					"message": map[string]interface{}{"role": "assistant", "content": fmt.Sprint("answer ", len(bodies))},
+				}},
+			}, http.StatusOK, nil
+		}
+		args, _ := json.Marshal(map[string]interface{}{"command": []string{"rm", question}})
+		return map[string]interface{}{
+			"id": "chatcmpl-tool", "object": "chat.completion", "model": "gpt-test",
+			"choices": []map[string]interface{}{{
+				"index": 0, "finish_reason": "tool_calls",
+				"message": map[string]interface{}{
+					"role": "assistant", "content": nil,
+					"tool_calls": []map[string]interface{}{{
+						"id": "call_rm", "type": "function",
+						"function": map[string]interface{}{"name": "universal_command", "arguments": string(args)},
+					}},
+				},
+			}},
+		}, http.StatusOK, nil
+	}))
+	defer server.Close()
+	te := newTurnTestEnv(t, server, "-tool", "-tool-auto-approve")
+	question = filepath.Join(te.sessionsDir, "0001", "0002.content.json")
+
+	first, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "remove the question"})
+	if err != nil {
+		t.Fatalf("the first turn: %v", err)
+	}
+	if _, err := os.Stat(question); !os.IsNotExist(err) {
+		t.Fatalf("the tool left the question's content: %v", err)
+	}
+	if _, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "and then", from: first.Session}); err != nil {
+		t.Fatalf("the next turn: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 3 {
+		t.Fatalf("%d requests, want the question, its follow-up and the next turn", len(bodies))
+	}
+	for i, body := range bodies[1:] {
+		if !strings.Contains(body, "remove the question") {
+			t.Errorf("request %d lacks the question: %s", i+2, body)
+		}
+	}
+	if !strings.Contains(bodies[2], "answer 2") || !strings.Contains(bodies[2], "and then") {
+		t.Errorf("the next turn's request: %s", bodies[2])
 	}
 }
 
@@ -313,10 +370,7 @@ func TestRunTurnToolRoundFailureKeepsTheAdvancedSession(t *testing.T) {
 		t.Fatal("outcome.Committed() = false, want the session the tool round advanced")
 	}
 
-	messages, err := session.BuildMessagesWithToolInteractions(context.Background(), outcome.Session.Path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
-	}
+	messages := historyOf(t, outcome.Session)
 	var roles []string
 	for _, msg := range messages {
 		roles = append(roles, msg.Role)
@@ -379,21 +433,9 @@ func TestRunTurnRetryAfterAProviderFailureDoesNotRunToolsAgain(t *testing.T) {
 		Name: "universal_command",
 		Args: json.RawMessage(fmt.Sprintf(`{"command":["sh","-c","echo run >> \"$1\"; echo ran","sh",%q]}`, counter)),
 	}}
-	core.AssignInvocationIDs(calls)
-	claim, err := session.NewToolJournal().Claim(calls)
-	if err != nil {
-		t.Fatalf("Claim() error = %v", err)
-	}
-	claim.Release()
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleUser, "count once")
-	if _, err := session.SaveAssistantResponseWithTools(context.Background(), sess, "counting", calls, "gpt-test"); err != nil {
-		t.Fatalf("SaveAssistantResponseWithTools() error = %v", err)
-	}
-	te.opts.Resume = session.GetSessionID(sess.Path)
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "count once"))
+	saveToolCalls(t, sess, "counting", claimedCalls(t, te.store(), calls))
+	te.env.cfg.Start = sess.Ref()
 
 	outcome, err := runTurn(context.Background(), te.env, te.opts, turnInput{})
 	if err == nil {
@@ -402,10 +444,11 @@ func TestRunTurnRetryAfterAProviderFailureDoesNotRunToolsAgain(t *testing.T) {
 	if !outcome.Committed() {
 		t.Fatal("first turn committed nothing, want the pending call's result committed before the request")
 	}
-	if pending, err := session.CheckForPendingToolCalls(context.Background(), outcome.Session.Path); err != nil || len(pending) != 0 {
-		t.Fatalf("pending after the failed request = %v (err %v), want none", pending, err)
+	if tools := newestTools(t, outcome.Session); tools == nil || len(tools.Results) != 1 {
+		t.Fatalf("newest message after the failed request holds %+v, want the call's result", tools)
 	}
 
+	te.env.cfg.Start = outcome.Session.Ref()
 	if _, err := runTurn(context.Background(), te.env, te.opts, turnInput{}); err != nil {
 		t.Fatalf("retry error = %v", err)
 	}
@@ -422,21 +465,20 @@ func TestRunTurnRetryAfterAProviderFailureDoesNotRunToolsAgain(t *testing.T) {
 	}
 }
 
-// Another writer appends to the session between the plan's commit and the
-// answer save. The answer lands in a fork through the head the turn knew,
-// and the turn reports the move.
-func TestRunTurnReportsAConflictFork(t *testing.T) {
+// Another writer appends after the turn's question between the plan's
+// commit and the answer save. The answer still follows the question, as an
+// alternative to the other writer's message, and the turn's history holds
+// none of the other writer's.
+func TestRunTurnWritesAfterItsOwnMessages(t *testing.T) {
 	server := mockserver.NewMockServer(mockserver.WithDefaultResponse("pong from the mock"))
 	defer server.Close()
 	te := newTurnTestEnv(t, server)
 
+	var question session.Ref
 	afterTurnCommitForTest = func(sess *session.Session) {
-		other, err := session.LoadSession(sess.Path)
-		if err != nil {
-			t.Errorf("LoadSession() error = %v", err)
-			return
-		}
-		appendTestSessionMessage(t, context.Background(), other, core.RoleAssistant, "someone else's answer")
+		question = sess.Ref()
+		other := *sess
+		appendTestSessionMessage(t, context.Background(), &other, core.RoleAssistant, "someone else's answer")
 	}
 	t.Cleanup(func() { afterTurnCommitForTest = nil })
 
@@ -444,29 +486,16 @@ func TestRunTurnReportsAConflictFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runTurn() error = %v", err)
 	}
-	if len(outcome.ConflictForks) != 1 {
-		t.Fatalf("ConflictForks = %+v, want one", outcome.ConflictForks)
-	}
-	noted := false
-	for _, message := range te.notifier.InfoMessages {
-		noted = noted || strings.Contains(message, "changed while this turn ran")
-	}
-	if !noted {
-		t.Fatalf("notes = %q, want the fork reported", te.notifier.InfoMessages)
-	}
-	for _, message := range te.notifier.InfoMessages {
-		if strings.Contains(message, "sibling branch") {
-			t.Fatalf("notes = %q, want the fork reported as a fork, not a sibling branch", te.notifier.InfoMessages)
-		}
-	}
-	messages, err := session.BuildMessagesWithToolInteractions(context.Background(), outcome.Session.Path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
-	}
-	lines := lmcTypedTextLines(messages)
-	joined := strings.Join(lines, "|")
+	joined := strings.Join(lmcTypedTextLines(historyOf(t, outcome.Session)), "|")
 	if !strings.HasSuffix(joined, "user:ping the mock|assistant:pong from the mock") || strings.Contains(joined, "someone else") {
-		t.Fatalf("fork lineage = %q, want this turn without the other writer's answer", lines)
+		t.Fatalf("lineage = %q, want this turn without the other writer's answer", joined)
+	}
+	tree, err := te.store().Tree(question.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if children := tree.Children[question.Message]; len(children) != 2 {
+		t.Fatalf("the question has children %v, want both answers", children)
 	}
 }
 
@@ -513,7 +542,7 @@ func TestRunTurnReportsAToolBearingAnswerItCouldNotSave(t *testing.T) {
 	defer server.Close()
 	te := newTurnTestEnv(t, server, "-tool", "-tool-auto-approve")
 
-	afterTurnCommitForTest = func(sess *session.Session) { replaceWithFile(t, sess.Path) }
+	afterTurnCommitForTest = func(sess *session.Session) { replaceWithFile(t, filepath.Join(te.sessionsDir, sess.Number)) }
 	t.Cleanup(func() { afterTurnCommitForTest = nil })
 
 	outcome, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "run the tool"})
@@ -525,83 +554,51 @@ func TestRunTurnReportsAToolBearingAnswerItCouldNotSave(t *testing.T) {
 	}
 }
 
-func TestPostCommitContextFailuresPreserveAnswerAndUnstartedCalls(t *testing.T) {
-	for _, failure := range []string{"cancel", "binding", "binding-text"} {
-		t.Run(failure, func(t *testing.T) {
-			marker := filepath.Join(t.TempDir(), "ran")
-			server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
-				if failure == "binding-text" {
-					return openAITextResponse("record this answer"), http.StatusOK, nil
-				}
-				return toolCallResponse("touch", marker), http.StatusOK, nil
-			}))
-			defer server.Close()
-			te := newTurnTestEnv(t, server, "-notebook", t.TempDir(), "-context-window", "8192", "-tool", "-tool-auto-approve")
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			other := te.opts.Context
-			other.Notebook = t.TempDir()
-			afterTurnCommitForTest = func(s *session.Session) {
-				if failure == "cancel" {
-					cancel()
-					return
-				}
-				if err := session.BindContext(ctx, s, other); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Cleanup(func() { afterTurnCommitForTest = nil })
-			out, err := runTurn(ctx, te.env, te.opts, turnInput{text: "test setup"})
-			if err == nil || out.UnsavedAnswer != nil || !out.PlanCommitted || out.Session == nil {
-				t.Fatalf("outcome %+v, error %v", out, err)
-			}
-			if failure == "cancel" && !stdErrors.Is(err, context.Canceled) || failure != "cancel" && !strings.Contains(err.Error(), "binding changed") {
-				t.Fatal(err)
-			}
-			lineage, err := session.GetLineage(out.Session.Path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if failure == "binding-text" {
-				last := lineage[len(lineage)-1]
-				if last.Role != core.RoleAssistant || last.Content != "record this answer" {
-					t.Fatal(last)
-				}
-				return
-			}
-			assistant, result := lineage[len(lineage)-2], lineage[len(lineage)-1]
-			if assistant.Content != "running it" || assistant.Role != core.RoleAssistant || !strings.Contains(te.stdout.String(), assistant.Content) {
-				t.Fatal(assistant)
-			}
-			calls, err := session.LoadToolInteraction(out.Session.Path, assistant.ID)
-			if err != nil || calls == nil || len(calls.Calls) != 1 || calls.Calls[0].InvocationID == "" {
-				t.Fatal(calls, err)
-			}
-			results, err := session.LoadToolInteraction(out.Session.Path, result.ID)
-			if err != nil || results == nil || len(results.Results) != 1 || !results.Results[0].NotRun || results.Results[0].ID != calls.Calls[0].ID {
-				t.Fatal(results, err)
-			}
-			pending, err := session.CheckForPendingToolCalls(context.Background(), out.Session.Path)
-			if err != nil || len(pending) != 0 {
-				t.Fatal(pending, err)
-			}
-			// A fork at the call sees the durable journal outcome even without the result message.
-			fork, err := session.ForkThroughHead(context.Background(), session.DefaultManager(), out.Session.Path, session.MessageRef{Path: out.Session.Path, ID: assistant.ID, Revision: assistant.Revision})
-			if err != nil {
-				t.Fatal(err)
-			}
-			recovered, err := session.ResolvePendingToolCalls(context.Background(), fork, te.opts, core.NewTestLogger(false), te.notifier, core.TestToolUI{}, nil)
-			if err != nil || !recovered.Committed {
-				t.Fatal(recovered, err)
-			}
-			saved, err := session.LoadToolInteraction(fork.Path, fork.Head.ID)
-			if err != nil || saved == nil || len(saved.Results) != 1 || saved.Results[0].Error != results.Results[0].Error || !saved.Results[0].NotRun {
-				t.Fatal(saved, err)
-			}
-			if _, err := os.Stat(marker); !stdErrors.Is(err, os.ErrNotExist) {
-				t.Fatal("command ran", err)
-			}
-		})
+// A run cancelled after its commit saves the answer with its calls, which
+// did not start, and their results saying so; a run that later continues at
+// the call finds that outcome in the journal and runs nothing.
+func TestCancelAfterCommitPreservesAnswerAndUnstartedCalls(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
+		return toolCallResponse("touch", marker), http.StatusOK, nil
+	}))
+	defer server.Close()
+	te := newTurnTestEnv(t, server, "-notebook", t.TempDir(), "-context-window", "8192", "-tool", "-tool-auto-approve")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	afterTurnCommitForTest = func(*session.Session) { cancel() }
+	t.Cleanup(func() { afterTurnCommitForTest = nil })
+	out, err := runTurn(ctx, te.env, te.opts, turnInput{text: "test setup"})
+	if err == nil || out.UnsavedAnswer != nil || !out.PlanCommitted || out.Session == nil || !stdErrors.Is(err, context.Canceled) {
+		t.Fatalf("outcome %+v, error %v", out, err)
+	}
+	h := historyAt(t, te.store(), out.Session.Ref())
+	n := len(h.Messages)
+	assistant, result := h.Contents[n-2], h.Contents[n-1]
+	if h.Messages[n-2].Role != core.RoleAssistant || assistant.Tools == nil || len(assistant.Tools.Calls) != 1 || assistant.Tools.Calls[0].InvocationID == "" {
+		t.Fatalf("assistant %+v", assistant)
+	}
+	if result.Tools == nil || len(result.Tools.Results) != 1 || !result.Tools.Results[0].NotRun || result.Tools.Results[0].ID != assistant.Tools.Calls[0].ID {
+		t.Fatalf("results %+v", result.Tools)
+	}
+	if awaitsAnswer(t, out.Session) != true {
+		t.Fatal("the saved results do not await an answer")
+	}
+	// A branch at the call sees the journal's outcome without the result message.
+	at, err := te.store().Session(h.Ref(n - 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := at.ResolvePending(context.Background(), te.opts, core.NewTestLogger(false), te.notifier, core.TestToolUI{}, nil, nil)
+	if err != nil || !recovered.Committed {
+		t.Fatal(recovered, err)
+	}
+	saved := newestTools(t, at)
+	if saved == nil || len(saved.Results) != 1 || saved.Results[0].Error != result.Tools.Results[0].Error || !saved.Results[0].NotRun {
+		t.Fatal(saved)
+	}
+	if _, err := os.Stat(marker); !stdErrors.Is(err, os.ErrNotExist) {
+		t.Fatal("command ran", err)
 	}
 }
 
@@ -654,7 +651,7 @@ func TestRunTurnReportsAnAnswerShownBeforeTheCommitFailed(t *testing.T) {
 	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	session.SetSessionsDir(blocked)
+	te.env.store = session.Open(blocked)
 
 	outcome, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "ping the mock"})
 	if err == nil || outcome.UnsavedAnswer == nil {
@@ -757,5 +754,104 @@ func TestRunTurnLogsTheErrorItEndsWith(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "[ERROR]") || !regexp.MustCompile(`Request failed after \S+: read response stream: unexpected EOF`).MatchString(logged.String()) {
 		t.Fatalf("log files = %q, want the turn's error at ERROR", logged.String())
+	}
+}
+
+// The first session written in a directory of old sessions comes with a
+// notice naming how many there are and how to remove them; later runs say
+// nothing more.
+func TestFirstWriteReportsOldSessions(t *testing.T) {
+	server := mockserver.NewMockServer(mockserver.WithDefaultResponse("pong"))
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	old := filepath.Join(te.sessionsDir, "0001")
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "0001.json"), []byte(`{"role":"user"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The first commit fails after its session is made; the notice comes
+	// all the same, and only once.
+	commitForTest = func(ctx context.Context, plan *session.Plan) (*session.Session, error) {
+		sess, err := plan.Commit(ctx)
+		if err == nil {
+			err = stdErrors.New("disk full")
+		}
+		return sess, err
+	}
+	t.Cleanup(func() { commitForTest = nil })
+	if _, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "ping"}); err == nil {
+		t.Fatal("the failed commit succeeded")
+	}
+	commitForTest = nil
+	for i := 0; i < 2; i++ {
+		if _, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "ping"}); err != nil {
+			t.Fatalf("turn %d: %v", i, err)
+		}
+	}
+	notices := 0
+	for _, warning := range te.notifier.WarnMessages {
+		if strings.Contains(warning, "written by an older lmc") && strings.Contains(warning, "-delete") {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("warnings %q, want one upgrade notice", te.notifier.WarnMessages)
+	}
+}
+
+// A commit that saves nothing in a resumed session leaves the turn with no
+// session to report: the answer shown is unsaved, and nothing moved.
+func TestRunTurnCommitThatSavesNothingReportsNoSession(t *testing.T) {
+	server := mockserver.NewMockServer(mockserver.WithDefaultResponse("pong"))
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "q1"), textEntry(core.RoleAssistant, "a1"))
+	te.env.cfg.Start = sess.Ref()
+	if err := os.MkdirAll(filepath.Join(te.sessionsDir, sess.Number, "0003.content.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runTurn(context.Background(), te.env, te.opts, turnInput{text: "q2"})
+	if err == nil || outcome.UnsavedAnswer == nil || outcome.Session != nil {
+		t.Fatalf("outcome %+v, error %v", outcome, err)
+	}
+	if newest, _ := te.store().Newest(sess.Number); newest != sess.Head {
+		t.Fatalf("the failed commit left %s", newest)
+	}
+}
+
+// A single run reports where it saved, and after a failure that left a
+// question unanswered, how to get the answer; a commit that stopped part
+// way says so in its own error.
+func TestReportSavedNamesTheRecovery(t *testing.T) {
+	store := session.Open(t.TempDir())
+	answered := newTestSession(t, store, textEntry(core.RoleUser, "q"), textEntry(core.RoleAssistant, "partial"))
+	asked := newTestSession(t, store, textEntry(core.RoleUser, "q"))
+	partial := &session.SaveError{Saved: asked.Ref(), Next: "resume there with the same prompt to retry", Err: stdErrors.New("disk full")}
+	results := newTestSession(t, store, textEntry(core.RoleUser, "q"))
+	saveToolCalls(t, results, "", []core.ToolCall{{ID: "call", Name: "universal_command"}})
+	if _, err := results.SaveToolResults(context.Background(), []core.ToolResult{{ID: "call", Output: "ran"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		out      turnOutcome
+		err      error
+		prompted bool
+		want     string
+	}{
+		{turnOutcome{Session: answered, PlanCommitted: true}, nil, true, "Note: Saved at 0001/0002.\n"},
+		{turnOutcome{Session: answered, PlanCommitted: true}, stdErrors.New("incomplete answer"), true, "Note: Saved at 0001/0002.\n"},
+		{turnOutcome{Session: asked, PlanCommitted: true}, stdErrors.New("provider down"), true, "Note: Saved through 0002/0001, your question; resume there with empty input to get its answer.\n"},
+		{turnOutcome{Session: results}, stdErrors.New("provider down"), true, "Note: Saved through 0003/0003, 1 tool result; resume there with the same prompt to retry.\n"},
+		{turnOutcome{Session: results}, stdErrors.New("provider down"), false, "Note: Saved through 0003/0003, 1 tool result; resume there with empty input to get its answer.\n"},
+		{turnOutcome{Session: asked}, fmt.Errorf("commit session: %w", partial), true, ""},
+		{turnOutcome{}, stdErrors.New("provider down"), true, ""},
+	} {
+		var out bytes.Buffer
+		reportSaved(ui.NewNotifierWithWriter(&out), tc.out, tc.err, tc.prompted)
+		if out.String() != tc.want {
+			t.Errorf("after %v: %q, want %q", tc.err, out.String(), tc.want)
+		}
 	}
 }

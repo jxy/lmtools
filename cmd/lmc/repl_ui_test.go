@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"lmtools/internal/config"
@@ -248,7 +249,7 @@ func TestREPLDisplayTogglesLeaveRequestsAndStdoutUnchanged(t *testing.T) {
 	loop.env.notifier = ui.NewREPLNotifier(&diagnostics)
 	loop.env.stderr, loop.diag = &diagnostics, &diagnostics
 	typeTurns(t, input, "/thinking on\n/usage off\nfirst\n/thinking off\n/usage on\nsecond\n/show\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(diagnostics.String(), "--- thinking ---") != 1 || strings.Count(diagnostics.String(), "Tokens:") != 1 {
@@ -311,7 +312,37 @@ func TestREPLIncompleteResponseReportsWhatWasSaved(t *testing.T) {
 	if err == nil || !out.PartialAnswer || out.Session == nil || te.stdout.String() != "partial answer" {
 		t.Fatalf("incomplete outcome=%+v err=%v answer=%q", out, err, te.stdout.String())
 	}
-	if saved := describeSaved(out); !strings.HasPrefix(saved, "partial assistant response saved through message ") {
+	if saved := describeSaved(out); !strings.HasSuffix(saved, ", partial assistant response") || !strings.HasPrefix(saved, "saved through ") {
 		t.Fatalf("saved status=%q", saved)
+	}
+}
+
+// /info names the session and the current message, and the alternatives of
+// the current message.
+func TestREPLInfoNamesTheMessageAndItsAlternatives(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "q1"))
+	other := *sess
+	appendTestSessionMessage(t, context.Background(), sess, core.RoleAssistant, "a1")
+	appendTestSessionMessage(t, context.Background(), &other, core.RoleAssistant, "other a1")
+	te.env.cfg.Start = sess.Ref()
+	var out bytes.Buffer
+	loop := &replLoop{base: te.opts, env: te.env}
+	te.env.notifier = ui.NewREPLNotifier(&out)
+	loop.showInfo()
+	for _, want := range []string{"Session: " + sess.Number + "\n", "Current message: " + sess.Ref().String() + "\n", "Alternatives: " + other.Head + "\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("/info lacks %q:\n%s", want, out.String())
+		}
+	}
+	if err := te.store().Delete(context.Background(), sess.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	loop.showInfo()
+	if !strings.Contains(out.String(), "Current message: "+sess.Ref().String()+", deleted\n") || strings.Contains(out.String(), "\nAlternatives:") {
+		t.Fatalf("/info after the message was deleted:\n%s", out.String())
 	}
 }

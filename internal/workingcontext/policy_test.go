@@ -10,7 +10,7 @@ import (
 	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"math"
 	"os"
 	"path/filepath"
@@ -27,55 +27,29 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 			ctx := context.Background()
 			e := testEngine(contextcfg.Handoff)
 			e.CanReadHistory = true
-			var s *session.Session
+			var c *storedConversation
 			var raw []core.TypedMessage
-			var refs []session.ContextRef
 			var memory []contextstate.Ref
 			if mode != "memory" {
-				old := session.GetSessionsDir()
-				session.SetSessionsDir(t.TempDir())
-				t.Cleanup(func() { session.SetSessionsDir(old) })
-				var err error
-				s, err = session.CreateSession("", core.NewTestLogger(false))
-				if err != nil {
-					t.Fatal(err)
-				}
+				c = newStoredConversation(t)
 			}
-			exchange := func(question, answer string, receipt *session.WindowReceipt) {
+			exchange := func(question, answer string, receipt *contextstate.Receipt) {
 				t.Helper()
-				if s == nil {
+				if c == nil {
 					raw = append(raw, core.NewTextMessage("user", question), core.NewTextMessage("assistant", answer))
 					memory = MemoryRefs(raw)
 					return
 				}
-				if _, err := session.AppendMessageWithToolInteraction(ctx, s, session.Message{Role: core.RoleUser, Content: question}, nil, nil); err != nil {
-					t.Fatal(err)
-				}
-				s.WindowUsed = receipt
-				if _, err := session.SaveAssistantResponse(ctx, s, core.Response{Text: answer}, "model"); err != nil {
-					t.Fatal(err)
-				}
-				var err error
-				s, err = session.OpenSession(ctx, s.Path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				read, err := session.CreateContextBuilder(ctx, s)
-				if err != nil {
-					t.Fatal(err)
-				}
-				raw, refs, err = read()
-				if err != nil {
-					t.Fatal(err)
-				}
+				c.exchange(question, answer, receipt)
 			}
 			projectNext := func(engine *Engine) {
 				t.Helper()
-				engineRefs, transcript := memory, MemoryTranscript(memory)
-				if s != nil {
-					engineRefs, transcript = saved(refs, s)
+				var err error
+				if c != nil {
+					_, err = c.next(engine)
+				} else {
+					_, err = engine.Project(ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), memory, MemoryTranscript(memory), false)
 				}
-				_, err := engine.Project(ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), engineRefs, transcript, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -95,9 +69,8 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 				t.Fatal(e.current)
 			}
 			used := e.Receipt()
-			if s != nil {
-				ref := refs[used.Count-1]
-				if _, ok, err := session.CandidateCheckpoint(ctx, ref, e.tag(), used.Prefix); err != nil || ok {
+			if c != nil {
+				if _, ok, err := c.tr.Checkpoint(ctx, used.Count, e.tag()); err != nil || ok {
 					t.Fatal("fallback occupied the writer slot", ok, err)
 				}
 				retry := testEngine(contextcfg.Handoff)
@@ -108,7 +81,7 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 				if writes == 0 || retry.current.Fallback || retry.current.Handoff != "recovered on retry" {
 					t.Fatal("cached a failure", retry.current, writes)
 				}
-				preserved, ok, err := session.CandidateCheckpoint(ctx, ref, used.Tag, used.Prefix)
+				preserved, ok, err := c.tr.Checkpoint(ctx, used.Count, used.Tag)
 				if err != nil || !ok || !preserved.Fallback || preserved.Handoff != e.current.Handoff {
 					t.Fatal("retry changed the active fallback", preserved, err)
 				}
@@ -120,7 +93,7 @@ func TestHandoffRecoversEarlierWriterAndMissedRecords(t *testing.T) {
 				}
 			}
 			exchange("continue", "LATEST-EVIDENCE "+strings.Repeat("c", 3500), used)
-			if s != nil {
+			if c != nil {
 				e = testEngine(contextcfg.Handoff)
 				e.CanReadHistory = true
 			}
@@ -150,7 +123,7 @@ func TestAdjustedCheckpointKeepsItsWritingBudget(t *testing.T) {
 		e := testEngine(contextcfg.Handoff)
 		raw := []core.TypedMessage{core.NewTextMessage("user", "VERY-FIRST"), core.NewTextMessage("assistant", "done"), core.NewTextMessage("user", "next"), core.NewTextMessage("assistant", "UNSUMMARIZED "+strings.Repeat("a", 16000)), core.NewTextMessage("user", "continue")}
 		refs := MemoryRefs(raw[:4])
-		cp := session.Checkpoint{Window: e.Binding.Window, Threshold: e.Binding.Threshold(), Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF"}
+		cp := contextstate.Checkpoint{Window: e.Binding.Window, Threshold: e.Binding.Threshold(), Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF"}
 		cp.Tag = derivedCheckpointTag(e.tag(), cp)
 		if view != "" {
 			e.Binding.Notebook, e.Binding.View = "notes", view
@@ -202,7 +175,7 @@ func TestToolsViewLeavesOutASavedCatalog(t *testing.T) {
 	for _, view := range []string{"catalog", "tools"} {
 		e := testEngine(contextcfg.Handoff)
 		e.Binding.Notebook, e.Binding.View = "notes", view
-		e.current = session.Checkpoint{Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "OLD-CATALOG", Notebook: "notes", View: "catalog"}
+		e.current = contextstate.Checkpoint{Count: 2, Prefix: contextstate.PrefixKeys(refs)[1], Handoff: "PRIOR-HANDOFF", Catalog: "OLD-CATALOG", Notebook: "notes", View: "catalog"}
 		e.loaded = true
 		visible, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false)
 		b, _ := json.Marshal(visible)
@@ -242,20 +215,6 @@ func TestLocalHistoryRoutingTimeoutAndRawPages(t *testing.T) {
 	if len(Records(raw[0], refs[0].Source, 0)) != 1 || IsHistoryTool(remote) || !IsHistoryTool("mcp__history__read") {
 		t.Fatal(remote)
 	}
-	dir := t.TempDir()
-	head := &session.Session{Path: dir, Head: &session.MessageRef{Path: dir, ID: "0001"}}
-	h.History.Bind(raw, refs, 2, session.NewTranscript(nil, head))
-	if err := session.WithSessionLock(dir, time.Second, func() error {
-		parent, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
-		_, err := h.Call(parent, "mcp__history__read", json.RawMessage(fmt.Sprintf(`{"ref":"%s"}`, ref)))
-		if !errors.Is(err, context.DeadlineExceeded) || parent.Err() != nil {
-			t.Fatalf("history missed its own deadline: %v, parent %v", err, parent.Err())
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestHistoryMatchAcrossSearchChunkBoundary(t *testing.T) {
@@ -271,37 +230,24 @@ func TestHistoryMatchAcrossSearchChunkBoundary(t *testing.T) {
 }
 
 func TestSavedAudioUsesDurationOrMediaEstimate(t *testing.T) {
-	old := session.GetSessionsDir()
-	session.SetSessionsDir(t.TempDir())
-	t.Cleanup(func() { session.SetSessionsDir(old) })
 	ctx := context.Background()
-	s, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newStoredConversation(t)
 	tone, err := os.ReadFile(filepath.Join("..", "..", "testdata", "api-fixtures", "cases", "openai-chat-audio-input", "fixtures", "tone.wav"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	audio := core.AudioBlock{Data: base64.StdEncoding.EncodeToString(tone), Format: "wav"}
-	if _, err := session.AppendMessageWithBlocks(ctx, s, session.Message{Role: core.RoleUser}, nil, nil, []core.Block{audio}); err != nil {
+	if _, err := c.s.Append(ctx, session.Entry{Role: core.RoleUser, Content: session.Content{Blocks: []core.Block{audio}}}); err != nil {
 		t.Fatal(err)
 	}
-	s, err = session.OpenSession(ctx, s.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	read, err := session.CreateContextBuilder(ctx, s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, refs, err := read()
-	if err != nil || len(raw) != 1 || !reflect.DeepEqual(raw[0].Blocks, []core.Block{audio}) {
-		t.Fatal("saved audio failed to round-trip", err)
+	c.reload()
+	raw := c.raw
+	if len(raw) != 1 || !reflect.DeepEqual(raw[0].Blocks, []core.Block{audio}) {
+		t.Fatal("saved audio failed to round-trip")
 	}
 	e := testEngine(contextcfg.Full)
 	e.Binding.Window = 4096
-	engineRefs, transcript := saved(refs, s)
+	engineRefs, transcript := c.refs, c.tr
 	view, err := e.Project(ctx, raw, engineRefs, transcript, false)
 	if err != nil || !reflect.DeepEqual(raw, view) {
 		t.Fatal("audio without a duration failed admission or changed on resume", err)
@@ -407,64 +353,35 @@ func TestFrozenCatalogAndCheckpointRenderAcrossWires(t *testing.T) {
 }
 
 func TestFrozenHistoryRejectsDeletedHead(t *testing.T) {
-	old := session.GetSessionsDir()
-	session.SetSessionsDir(t.TempDir())
-	t.Cleanup(func() { session.SetSessionsDir(old) })
 	ctx := context.Background()
-	s, err := session.CreateSession("initial", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err = session.OpenSession(ctx, s.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newStoredConversation(t)
+	c.exchange("source", "answer", nil)
 	h := &History{}
-	msg := []core.TypedMessage{core.NewTextMessage("user", "source")}
-	h.Bind(msg, MemoryRefs(msg), 0, session.NewTranscript(nil, s))
-	if err = session.DeleteNode(s.Path); err != nil {
+	h.Bind(c.raw, c.refs, len(c.raw), c.tr)
+	if _, err := h.CallTool(ctx, "search", json.RawMessage(`{"query":"source"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.CallTool(ctx, "search", json.RawMessage(`{"query":"source"}`)); err == nil {
+	if err := c.s.Store.Delete(ctx, c.s.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.CallTool(ctx, "search", json.RawMessage(`{"query":"source"}`)); err == nil {
 		t.Fatal("served deleted scope")
 	}
 }
 
 func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
-	old := session.GetSessionsDir()
-	session.SetSessionsDir(t.TempDir())
-	t.Cleanup(func() { session.SetSessionsDir(old) })
 	ctx := context.Background()
-	s, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err = session.OpenSession(ctx, s.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newStoredConversation(t)
 	question := "original evidence " + strings.Repeat("x", 48000)
-	if _, err := session.AppendMessageWithToolInteraction(ctx, s, session.Message{Role: core.RoleUser, Content: question}, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := session.SaveAssistantResponse(ctx, s, core.Response{Text: "finished"}, "model"); err != nil {
-		t.Fatal(err)
-	}
-	read, err := session.CreateContextBuilder(ctx, s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, refs, err := read()
-	if err != nil {
-		t.Fatal(err)
-	}
+	c.exchange(question, "finished", nil)
+	raw, refs, earlier := c.raw, c.refs, c.tr
 	pending := core.NewTextMessage("user", "continue")
 	raw = append(raw, pending)
 	large := testEngine(contextcfg.Handoff)
 	large.Binding.Window, large.Binding.Trigger = 65536, 22000
 	oldMemo := strings.Repeat("large draft ", 500)
 	large.Write = func(context.Context, string, string) (string, error) { return oldMemo, nil }
-	engineRefs, transcript := saved(refs, nil)
+	engineRefs, transcript := refs, earlier
 	if _, err := large.Project(ctx, raw, engineRefs, transcript, false); err != nil || large.Receipt().Count == 0 {
 		t.Fatal("initial checkpoint", err)
 	}
@@ -487,28 +404,20 @@ func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
 	}
 	// Commit an actual reply under the old receipt, then resume with a budget
 	// too small for even that receipt's handoff. Its original evidence still exists.
-	if _, err := session.AppendMessageWithToolInteraction(ctx, s, session.Message{Role: core.RoleUser, Content: "continue"}, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	s.WindowUsed = large.Receipt()
+	c.ask("continue")
+	used := *large.Receipt()
 	// A committed receipt loads its checkpoint by the tag it recorded, which
 	// can differ from the current settings tag.
-	s.WindowUsed.Tag = "a9c3"
-	if _, err = session.PublishCheckpoint(ctx, refs[s.WindowUsed.Count-1], s.WindowUsed.Tag, large.current); err != nil {
+	used.Tag = "a9c3"
+	if _, err := earlier.Publish(ctx, used.Count, used.Tag, large.current); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.SaveAssistantResponse(ctx, s, core.Response{Text: "continued"}, "model"); err != nil {
-		t.Fatal(err)
-	}
-	raw, refs, err = read()
-	if err != nil {
-		t.Fatal(err)
-	}
+	c.answer("continued", &used)
+	raw = c.raw
 	resumed := testEngine(contextcfg.Handoff)
 	resumed.Binding.Window, resumed.Binding.Trigger = 65536, 60000
 	continued := append(slices.Clone(raw), core.NewTextMessage("user", "a new task"))
-	engineRefs, transcript = saved(refs, s)
-	view, err := resumed.Project(ctx, continued, engineRefs, transcript, true)
+	view, err := resumed.Project(ctx, continued, c.refs, c.tr, true)
 	if err != nil || resumed.Receipt().Tag != "a9c3" || len(view) == 0 || !strings.Contains(view[0].Blocks[0].(core.TextBlock).Text, strings.TrimSpace(oldMemo)) {
 		t.Fatal("a fitting committed checkpoint must be usable in an offline preview", err)
 	}
@@ -522,8 +431,7 @@ func TestCheckpointCandidateAndReceiptAfterBudgetChange(t *testing.T) {
 		sawOriginal = sawOriginal || strings.Contains(source, "original evidence")
 		return "short memo", nil
 	}
-	engineRefs, transcript = saved(refs, nil)
-	if _, err := small.Project(ctx, append(raw, pending), engineRefs, transcript, false); err != nil || !sawOriginal {
+	if _, err := small.Project(ctx, append(slices.Clone(raw), pending), c.refs, c.tr, false); err != nil || !sawOriginal {
 		t.Fatal("failed to rebuild active handoff from original records", err)
 	}
 }

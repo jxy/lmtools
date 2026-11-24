@@ -70,7 +70,7 @@ func getProviderWithDefault(cfg RequestOptions, defaultProvider string) string {
 
 // BuildRequest builds an HTTP request based on configuration and input
 func BuildRequest(cfg RequestOptions, input string) (*http.Request, []byte, error) {
-	if err := ValidateDeveloperTurn(cfg, input, false); err != nil {
+	if err := ValidateDeveloperTurn(cfg, input); err != nil {
 		return nil, nil, err
 	}
 	provider := getProviderWithDefault(cfg, constants.ProviderArgo)

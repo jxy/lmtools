@@ -4,13 +4,12 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,31 +84,27 @@ func completionArgs(t *testing.T, url, sessionsDir string, responses, stream boo
 	return append(args, extra...)
 }
 
+// completionSession returns the one session in dir at its newest message,
+// with the history there.
 func completionSession(t *testing.T, dir string) (*session.Session, []core.TypedMessage) {
 	t.Helper()
-	useTempSessionsDir(t, dir)
-	entries, err := os.ReadDir(dir)
+	store := session.Open(dir)
+	sessions, err := store.Sessions()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var roots []string
-	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-			roots = append(roots, filepath.Join(dir, entry.Name()))
-		}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %+v, want one", sessions)
 	}
-	if len(roots) != 1 {
-		t.Fatalf("session roots = %q, want one", roots)
-	}
-	sess, err := session.OpenSession(context.Background(), roots[0])
+	newest, err := store.Newest(sessions[0].Number)
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages, err := session.BuildMessagesForSession(context.Background(), sess)
+	sess, err := store.Session(session.Ref{Session: sessions[0].Number, Message: newest})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sess, messages
+	return sess, historyOf(t, sess)
 }
 
 func assertCompletionError(t *testing.T, err error, stderr, want string) {
@@ -299,11 +294,10 @@ func TestCLIIncompleteToolsNeverExecuteOnResume(t *testing.T) {
 				if savedThinking != "partial reasoning" {
 					t.Fatalf("saved thinking=%q, want partial reasoning retained", savedThinking)
 				}
-				pending, err := session.CheckForPendingToolCalls(context.Background(), sess.Path)
-				if err != nil || len(pending) != 0 {
-					t.Fatalf("pending=%v, err=%v; want no resumable incomplete tool", pending, err)
+				if awaitsAnswer(t, sess) {
+					t.Fatal("the session awaits an answer; want no resumable incomplete tool")
 				}
-				stdout, stderr, err = runLmcCommand(t, getLmcBinary(t), append(args, "-resume", session.GetSessionID(sess.Path)), "Continue")
+				stdout, stderr, err = runLmcCommand(t, getLmcBinary(t), append(args, "-resume", sess.Number), "Continue")
 				if err != nil || stdout != "recovered" || len(requests()) != 2 {
 					t.Fatalf("resume stdout=%q, err=%v, inferences=%d; stderr:\n%s", stdout, err, len(requests()), stderr)
 				}
@@ -373,11 +367,10 @@ func TestCLIToolFollowupCompletionPersistsWithoutRerunning(t *testing.T) {
 					if results != 1 || !strings.HasSuffix(strings.Join(lmcTypedTextLines(messages), "|"), "assistant:"+text) {
 						t.Fatalf("saved results=%d, messages=%q, want one result and final answer", results, lmcTypedTextLines(messages))
 					}
-					pending, err := session.CheckForPendingToolCalls(context.Background(), sess.Path)
-					if err != nil || len(pending) != 0 {
-						t.Fatalf("pending=%v, err=%v, want none", pending, err)
+					if awaitsAnswer(t, sess) {
+						t.Fatal("the session awaits an answer, want none pending")
 					}
-					stdout, stderr, err = runLmcCommand(t, getLmcBinary(t), append(args, "-resume", session.GetSessionID(sess.Path)), "Continue")
+					stdout, stderr, err = runLmcCommand(t, getLmcBinary(t), append(args, "-resume", sess.Number), "Continue")
 					if err != nil || stdout != `{"answer":437}` || len(requests()) != 3 {
 						t.Fatalf("resume stdout=%q, err=%v, inferences=%d; stderr:\n%s", stdout, err, len(requests()), stderr)
 					}

@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"strconv"
 	"strings"
 	"unicode"
@@ -23,23 +24,32 @@ func pinField(line string) (string, string) {
 
 func (l *replLoop) pinCommand(ctx context.Context, command, argument string) error {
 	opts := l.base
-	if opts.Context.Notebook == "" || l.env.cfg.NoSession {
+	if opts.Context.Notebook == "" {
 		return errors.New("standing pins require a saved session with -notebook DIR")
 	}
 	// A local command doesn't consume the next turn's developer text or images.
 	opts.Developer, opts.Images = "", nil
-	var plan *session.RequestPlan
-	var err error
+	start := l.current()
+	// at is the session the pin follows, a copy of the loop's, which keeps
+	// the history it reads for the plan as well.
+	var at *session.Session
 	if l.from != nil {
-		pinned := *l.from
-		plan, err = session.PrepareRequestAt(ctx, opts, l.env.notifier, l.env.toolUI, &pinned, "", false, session.PendingToolPreview)
-	} else {
-		plan, err = session.PrepareRequest(ctx, opts, l.env.notifier, l.env.toolUI, "", false, session.PendingToolPreview)
+		copied := *l.from
+		at = &copied
+	} else if start.Session != "" {
+		var err error
+		if at, err = l.env.store.Session(start); err != nil {
+			return err
+		}
 	}
-	if err != nil {
-		return err
+	var view session.View
+	if at != nil {
+		var err error
+		if view, err = at.View(opts); err != nil {
+			return err
+		}
 	}
-	pins, err := session.ActivePins(plan.Messages, plan.Refs)
+	pins, err := contextstate.ActivePins(view.Messages, view.Refs)
 	if err != nil {
 		return err
 	}
@@ -50,21 +60,18 @@ func (l *replLoop) pinCommand(ctx context.Context, command, argument string) err
 		if len(pins) == 0 {
 			l.env.notifier.Infof("No active user instructions.")
 		} else {
-			l.env.notifier.Infof("%s", session.RenderPins(pins))
+			l.env.notifier.Infof("%s", contextstate.RenderPins(pins))
 		}
 		return nil
 	}
-	if plan.HasPendingTools {
-		return errors.New("finish the pending tool exchange before changing standing instructions")
-	}
-	if n := len(plan.Refs); n > 0 && plan.Messages[n-1].Role == "assistant" {
-		for _, b := range plan.Messages[n-1].Blocks {
+	if n := len(view.Messages); n > 0 && view.Messages[n-1].Role == "assistant" {
+		for _, b := range view.Messages[n-1].Blocks {
 			if _, ok := b.(core.ToolUseBlock); ok {
 				return errors.New("finish the pending tool exchange before changing standing instructions")
 			}
 		}
 	}
-	change := session.PinChange{Action: "add"}
+	change := contextstate.PinChange{Action: "add"}
 	text := argument
 	first, rest := pinField(argument)
 	switch {
@@ -89,7 +96,7 @@ func (l *replLoop) pinCommand(ctx context.Context, command, argument string) err
 			}
 			span = append(span, n)
 		}
-		text, change.Start, err = session.UserPinText(plan.Messages, plan.Refs, change.Source, span)
+		text, change.Start, err = contextstate.UserPinText(view.Messages, view.Refs, change.Source, span)
 		if err != nil {
 			return err
 		}
@@ -106,20 +113,26 @@ func (l *replLoop) pinCommand(ctx context.Context, command, argument string) err
 	if err != nil {
 		return err
 	}
-	sess, err := plan.Commit(ctx)
-	if sess != nil {
-		l.from = sess
+	turn := session.Turn{Pin: &entry}
+	var plan *session.Plan
+	if at != nil {
+		plan, err = at.Prepare(ctx, l.env.cfg.Change, turn, opts, session.PendingToolSkip)
+	} else {
+		plan, err = l.env.store.Prepare(ctx, start, l.env.cfg.Change, turn, opts, session.PendingToolSkip)
 	}
 	if err != nil {
 		return err
 	}
-	if err = session.BindContext(ctx, sess, opts.Context); err != nil {
+	sess, err := plan.Commit(ctx)
+	announceOldSessions(l.env, plan)
+	if sess != nil && sess.Head != start.Message {
+		l.from, l.saved = sess, true
+	}
+	if err != nil {
 		return err
 	}
-	if _, err = session.AppendMessageWithBlocks(ctx, sess, entry.Message, nil, nil, entry.Blocks); err != nil {
-		return err
-	}
+	announceCommit(l.env, plan, sess)
 	l.showSession(sess)
-	l.env.notifier.Infof("Pin %s: %s.", entry.Message.Pin.ID, change.Action)
+	l.env.notifier.Infof("Pin %s: %s.", entry.Pin.ID, change.Action)
 	return nil
 }

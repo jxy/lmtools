@@ -8,7 +8,8 @@ import (
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/logger"
+	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
 	"os"
@@ -17,7 +18,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 )
 
 // The prompts a loop shows when standard input is a terminal: one for a
@@ -399,7 +399,7 @@ func continuationMarker(text string) (string, bool) {
 
 // runREPL connects the MCP servers, sets up the loop's streams, ends the
 // startup phase, and holds the conversation.
-func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *config.Config, opts core.RequestOptions, input *inputOwner, logDir string, isRegeneration bool) (retErr error) {
+func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *config.Config, opts core.RequestOptions, input *inputOwner, logDir string) (retErr error) {
 	stream, closeDiag := replDiagnostics(input.terminal)
 	defer closeDiag()
 	screen := &replScreen{}
@@ -430,6 +430,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 	// approval stream the same choice picks.
 	env := &turnEnv{
 		cfg:             cfg,
+		store:           openStore(cfg),
 		notifier:        notifier,
 		toolUI:          tools.NewCLIToolUIWithOptions(notifier, tools.Options{ShowPrograms: true}),
 		logDir:          logDir,
@@ -489,7 +490,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		}
 		input.onInterruptEcho(loop.interruptEchoed.Store)
 		// Recall reaches the prompts and commands of earlier REPLs.
-		loadHistoryFile(&loop.history, session.GetSessionsDir(), notifier.Warnf)
+		loadHistoryFile(&loop.history, env.store.Dir(), notifier.Warnf)
 	}
 	screen.inlineStatus = input.editing
 	if approver, ok := env.approver.(*cliApprover); ok {
@@ -506,7 +507,7 @@ func runREPL(ctx context.Context, endStartup func(), signals *replSignals, cfg *
 		env.stdout = loop.answers
 		env.answersOnScreen = false
 	}
-	return loop.run(isRegeneration)
+	return loop.run()
 }
 
 // replLoop is a conversation held by one process: turns read from standard
@@ -527,10 +528,17 @@ type replLoop struct {
 	// screen follows what diag showed last, and the answers too when stdout
 	// shares diag's terminal.
 	screen *replScreen
-	// from is the session the first commit established, holding the head
-	// the last turn left; nil until then, while the options still name the
-	// starting point.
+	// from is the session the loop continues, at the message its next turn
+	// follows, and keeps the history it has read; nil while the loop has no
+	// session yet.
 	from *session.Session
+	// saved reports that the loop saved a message, which the notice at its
+	// end names.
+	saved bool
+	// awaiting reports that the message the loop continues from awaits an
+	// answer, at the start or after a turn that failed to get it, and no
+	// turn has been sent since: an empty line asks for the answer.
+	awaiting bool
 	// images are the -image attachments, kept until a turn's user message
 	// carries them into the session.
 	images []core.ImageBlock
@@ -575,29 +583,19 @@ func (l *replLoop) echoInterrupt() {
 	}
 }
 
-// run holds the conversation: a regeneration first, when -branch names an
-// assistant message, or the pending tool calls of a resumed session; then a
-// turn for every line read, until the end of input or a second interrupt at
-// an idle prompt. It returns an error when the loop cannot go on.
-func (l *replLoop) run(isRegeneration bool) (err error) {
+// run holds the conversation: the tool calls pending where it starts are
+// resolved first, then a turn is sent for every line read, until the end of
+// input or a second interrupt at an idle prompt. When the start point awaits
+// an answer, an empty first line asks for it. It returns an error when the
+// loop cannot go on.
+func (l *replLoop) run() (err error) {
 	defer func() {
 		if err == nil && !l.terminal && l.failedTurns > 0 {
 			err = fmt.Errorf("%d REPL turn(s) failed; see diagnostics above", l.failedTurns)
 		}
 	}()
 	l.showStartup()
-	if isRegeneration {
-		out, err := l.runTurn(turnInput{isRegeneration: true}, nil)
-		if err != nil && out.Session == nil {
-			// Nothing a prompt could send fits a regeneration, so a
-			// regeneration that saved nothing ends the loop as it ends a
-			// single run.
-			return err
-		}
-		if stop := l.finishTurn(out, err); stop != nil {
-			return stop
-		}
-	} else if err := l.recoverPendingTools(); err != nil {
+	if err := l.prepareStart(); err != nil {
 		return err
 	}
 
@@ -677,13 +675,33 @@ func (l *replLoop) run(isRegeneration bool) (err error) {
 		}
 		action.text = l.draft + action.text
 		l.draft = ""
-		if strings.TrimSpace(action.text) == "" && len(l.images) == 0 {
-			continue
+		if strings.TrimSpace(action.text) == "" {
+			if l.awaiting {
+				// The first input decides: an empty line asks for the
+				// answer the start point awaits, and a queued instruction
+				// and images wait for the first new user turn.
+				l.awaiting = false
+				out, err := l.runTurn(turnInput{}, nil)
+				if stop := l.finishTurn(out, err); stop != nil {
+					return stop
+				}
+				if err != nil {
+					l.awaitAgain()
+				}
+				continue
+			}
+			if len(l.images) == 0 {
+				continue
+			}
 		}
+		l.awaiting = false
 		l.history.add(action.text)
 		out, err := l.runTurn(turnInput{text: action.text}, l.images)
 		if stop := l.finishTurn(out, err); stop != nil {
 			return stop
+		}
+		if err != nil {
+			l.awaitAgain()
 		}
 	}
 }
@@ -697,7 +715,7 @@ func (l *replLoop) readTurn() (string, turnRead, error) {
 	ctx, end := l.signals.begin()
 	defer end()
 	// Every line read disarms an interrupt, whether it is sent or not.
-	return readTurn(ctx, l.input, l.showPrompt, l.env.notifier.Infof, func() { l.armed = false }, len(l.images) > 0 || strings.TrimSpace(l.draft) != "")
+	return readTurn(ctx, l.input, l.showPrompt, l.env.notifier.Infof, func() { l.armed = false }, l.awaiting || len(l.images) > 0 || strings.TrimSpace(l.draft) != "")
 }
 
 func (l *replLoop) showPrompt(prompt string) {
@@ -731,30 +749,45 @@ func (l *replLoop) closePromptLine() {
 	}
 }
 
-// recoverPendingTools resolves the tool calls a resumed session left
-// pending before the first prompt, the way a single run with empty input
-// does, and sends their results. A failure is reported and leaves the
-// session for the first prompt to resolve again.
-func (l *replLoop) recoverPendingTools() error {
-	// A new developer instruction belongs to the first new user turn.
-	// That turn also resolves pending tools through the existing turn path.
-	if l.base.Developer != "" || !session.IsSessionResume(l.base.Resume) {
+// prepareStart resolves the tool calls pending where the loop starts and
+// saves their results before the first prompt, then says when the start
+// point awaits an answer, which an empty first line asks for. A failure to
+// resolve is reported, and the first turn resolves the calls again.
+func (l *replLoop) prepareStart() error {
+	start := l.env.cfg.Start
+	if start.Session == "" {
 		return nil
 	}
 	ctx, end := l.signals.begin()
-	sess, err := session.OpenSession(ctx, l.base.Resume)
-	var calls []core.ToolCall
-	if err == nil {
-		l.showSession(sess)
-		calls, err = session.CheckForPendingToolCalls(ctx, sess.Path)
+	defer end()
+	sess, err := l.env.store.Session(start)
+	if err != nil {
+		return err
 	}
-	end()
-	if err != nil || len(calls) == 0 {
-		// The first turn resolves the session itself and reports what fails.
-		return l.signals.ended()
+	l.showSession(sess)
+	l.env.window = newContextWindow(l.env, l.base)
+	resolution, err := sess.ResolvePending(ctx, l.base, logger.From(ctx), l.env.notifier, l.env.toolUI, l.env.approver, func(calls []core.ToolCall) error {
+		return bindPendingHistory(ctx, l.env, l.base, sess, calls)
+	})
+	// The first turn continues the session read here, without reading it
+	// again.
+	l.from = sess
+	l.saved = resolution.Committed
+	if err != nil {
+		l.failedTurns++
+		l.env.notifier.Errorf("%v", err)
 	}
-	out, err := l.runTurn(turnInput{}, nil)
-	return l.finishTurn(out, err)
+	if ended := l.signals.ended(); ended != nil {
+		return ended
+	}
+	awaits, err := sess.AwaitsAnswer()
+	if err != nil {
+		return err
+	}
+	if l.awaiting = awaits; awaits {
+		l.env.notifier.Infof("Message %s awaits an answer: an empty first line asks for it, and text starts a new turn after it.", sess.Ref())
+	}
+	return nil
 }
 
 // runTurn runs one turn in a phase of its own, continuing from the session
@@ -767,11 +800,13 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 	l.showTurn(in, images)
 	opts := l.base
 	opts.Images = images
+	if in.text == "" && len(images) == 0 {
+		// A queued instruction waits for the first new user turn.
+		opts.Developer = ""
+	}
 	if l.from != nil {
 		from := *l.from
-		from.ConflictForks = nil
 		in.from = &from
-		opts.Resume, opts.Branch = "", ""
 	}
 	ctx, end := l.signals.begin()
 	l.interruptEchoed.Store(false)
@@ -793,10 +828,13 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 		l.answers.endTurn()
 	}
 	if out.Session != nil {
-		l.from = out.Session
+		l.from, l.saved = out.Session, true
 	}
 	if out.PlanCommitted {
-		l.base.Developer = ""
+		// The new user turn carried the queued instruction and images.
+		if opts.Developer != "" {
+			l.base.Developer = ""
+		}
 		if len(images) > 0 {
 			l.images = nil
 		}
@@ -810,7 +848,11 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 	if out.UnsavedAnswer != nil {
 		l.separateAnswer()
-		return fmt.Errorf("answer could not be saved; stopped to keep the next turn from losing context: %w", out.UnsavedAnswer)
+		var partial *session.SaveError
+		if out.Session == nil || errors.As(out.UnsavedAnswer, &partial) {
+			return fmt.Errorf("answer could not be saved; stopped to keep the next turn from losing context: %w", out.UnsavedAnswer)
+		}
+		return fmt.Errorf("answer could not be saved; stopped to keep the next turn from losing context: %w; saved through %s; resume there with empty input to get its answer", out.UnsavedAnswer, describeHead(out.Session))
 	}
 	if err != nil {
 		l.failedTurns++
@@ -845,22 +887,34 @@ func (l *replLoop) finishTurn(out turnOutcome, err error) error {
 	return l.signals.ended()
 }
 
+// awaitAgain makes an empty line ask again for an answer a failed turn did
+// not get, when the message the loop continues from still awaits one.
+func (l *replLoop) awaitAgain() {
+	at := l.current()
+	if at.Message == "" {
+		return
+	}
+	sess := l.from
+	if sess == nil {
+		var err error
+		if sess, err = l.env.store.Session(at); err != nil {
+			return
+		}
+	}
+	if awaits, err := sess.AwaitsAnswer(); err == nil && awaits {
+		l.awaiting = true
+		l.env.notifier.Infof("Message %s still awaits an answer: an empty line asks for it.", at)
+	}
+}
+
 // describeSaved says what a turn left in the session.
 func describeSaved(out turnOutcome) string {
 	if out.Session == nil {
 		return "nothing was saved"
 	}
-	if head := out.Session.Head; head != nil && head.ID != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		kind, err := session.SavedHeadKind(ctx, out.Session)
-		if err != nil {
-			return fmt.Sprintf("saved through message %s/%s (details unavailable: %v)", session.GetSessionID(head.Path), head.ID, err)
-		}
-		if out.PartialAnswer && kind == "assistant response" {
-			kind = "partial assistant response"
-		}
-		return fmt.Sprintf("%s saved through message %s/%s", kind, session.GetSessionID(head.Path), head.ID)
+	saved := describeHead(out.Session)
+	if out.PartialAnswer {
+		saved = strings.Replace(saved, ", assistant response", ", partial assistant response", 1)
 	}
-	return fmt.Sprintf("records saved in session %s", session.GetSessionID(out.Session.Path))
+	return "saved through " + saved
 }

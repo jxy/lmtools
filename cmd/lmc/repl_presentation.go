@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/providers"
+	"lmtools/internal/session"
 	"os"
 	"strings"
 )
@@ -111,10 +111,8 @@ func (l *replLoop) showTurn(in turnInput, images []core.ImageBlock) {
 	}
 	l.separateAnswer()
 	switch {
-	case in.isRegeneration:
-		l.env.notifier.Promptf("Regenerating the selected answer.\n")
 	case in.text == "" && len(images) == 0:
-		l.env.notifier.Promptf("Recovering pending tools.\n")
+		l.env.notifier.Promptf("Asking for the answer the conversation awaits.\n")
 	default:
 		// Without the editor the terminal echoed each line as typed; a turn
 		// of several lines is shown once more as one.
@@ -154,26 +152,22 @@ func (l *replLoop) reportUnsent() {
 	}
 }
 
-// leave reports, as the loop ends, what was left unsent and where the
-// conversation is saved, with the flag that continues it.
+// leave reports, as the loop ends, what was left unsent and, when the loop
+// saved anything, where, with the flag that continues the conversation.
 func (l *replLoop) leave() {
 	l.reportUnsent()
-	if !l.terminal || l.from == nil {
+	if !l.saved || l.from == nil || l.from.Head == "" {
 		return
 	}
-	id := session.GetSessionID(l.from.Path)
-	l.env.notifier.Infof("Saved in session %s; continue it with -resume %s.", id, id)
+	l.env.notifier.Infof("Saved in session %s at message %s; continue it with -resume %s.", l.from.Number, l.from.Head, l.from.Ref())
 }
 
+// showSession names the session a terminal loop continues, once.
 func (l *replLoop) showSession(sess *session.Session) {
-	if !l.terminal || sess == nil {
-		return
-	}
-	id := session.GetSessionID(sess.Path)
-	if id == "" || id == l.shownSession {
+	if !l.terminal || sess == nil || sess.Number == l.shownSession {
 		return
 	}
 	l.separateAnswer()
-	l.env.notifier.Infof("Session: %s", id)
-	l.shownSession = id
+	l.env.notifier.Infof("Session: %s", sess.Number)
+	l.shownSession = sess.Number
 }

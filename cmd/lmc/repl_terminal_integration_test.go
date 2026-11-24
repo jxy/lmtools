@@ -3,11 +3,9 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/ptytest"
 	"net/http"
 	"os"
@@ -310,32 +308,15 @@ func testTerminalREPLTerminationDuringAToolRun(t *testing.T, sig syscall.Signal)
 	}
 	r.expect(t, "\x1b[?2004l")
 
-	defer func(dir string) { session.SetSessionsDir(dir) }(session.GetSessionsDir())
-	session.SetSessionsDir(r.sessionsDir)
-	entries, err := os.ReadDir(r.sessionsDir)
-	if err != nil {
-		t.Fatalf("ReadDir() error = %v", err)
+	sess, messages := completionSession(t, r.sessionsDir)
+	if awaits := awaitsAnswer(t, sess); !awaits {
+		t.Fatalf("the session ends with %s, want the interrupted call's result awaiting an answer", fmt.Sprint(lmcTypedTextLines(messages)))
 	}
-	var sessions []string
-	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-			sessions = append(sessions, entry.Name())
-		}
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("sessions = %q, want the turn's", sessions)
-	}
-	path := filepath.Join(r.sessionsDir, sessions[0])
-	pending, err := session.CheckForPendingToolCalls(context.Background(), path)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending calls after termination = %v (err %v), want the interrupted call's outcome recorded", pending, err)
-	}
-	messages, err := session.BuildMessagesWithToolInteractions(context.Background(), path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
-	}
-	if last := messages[len(messages)-1]; last.Role != "user" && last.Role != "tool" {
+	if last := messages[len(messages)-1]; last.Role != "user" {
 		t.Fatalf("the session ends with %s, want the tool result: %s", last.Role, fmt.Sprint(lmcTypedTextLines(messages)))
+	}
+	if tools := newestTools(t, sess); tools == nil || len(tools.Results) == 0 {
+		t.Fatalf("the newest message holds %+v, want the interrupted call's outcome recorded", tools)
 	}
 }
 

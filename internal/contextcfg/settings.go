@@ -76,14 +76,29 @@ func (s Settings) Validate() error {
 	return nil
 }
 
+// Capacity is a model's context capacity in tokens, with the model and the
+// endpoint it was found for.
+type Capacity struct {
+	Tokens   int    `json:"tokens"`
+	Model    string `json:"model"`
+	Endpoint string `json:"endpoint"`
+}
+
+// Binding is the context configuration of one run: the settings in force,
+// with the window the run resolved.
 type Binding struct {
 	Settings
-	// NotebookDefault records the user's implicit policy choice, including
-	// when this particular model has no discoverable window.
-	NotebookDefault bool   `json:"notebook_default,omitempty"`
-	WindowModel     string `json:"window_model,omitempty"`
-	WindowProvider  string `json:"window_provider,omitempty"`
-	WindowCap       int    `json:"window_cap,omitempty"`
-	// Initial is the actual background text sent in the first context window.
-	Initial string `json:"initial,omitempty"`
+	// NotebookDefault records that the policy is the default of a notebook
+	// conversation: handoff when a window is known, full replay otherwise.
+	NotebookDefault bool
+	// WindowCap is the operator's cap on the window, zero for none. The
+	// run's window, Settings.Window, is the smaller of the cap and the
+	// capacity when both are known, and the one known otherwise.
+	WindowCap int
+	// Capacity is the model's capacity the run found, which its replies
+	// record for later runs.
+	Capacity Capacity
+	// Initial is the notebook catalog a window starting at the beginning of
+	// the conversation sends.
+	Initial string
 }

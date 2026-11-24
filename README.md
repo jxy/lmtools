@@ -113,41 +113,87 @@ print nothing. REPL tool follow-ups are labeled `Tokens (response N)`, and
 
 ### Sessions
 
-`lmc` stores each exchange in a session tree under `~/.lmc/sessions`. A path
-addresses either a session (`0001`) or one message inside it (`0001/0002`).
+`lmc` saves each conversation as a session under `~/.lmc/sessions`. A
+session is a tree of messages: each message has one parent, and a message
+with several children starts alternatives. A reference names a session by
+its number (`0001`), or one message in it (`0001/0004`).
 
 ```bash
-# List saved sessions.
+# List saved sessions with their message trees.
 lmc -show-sessions
 
-# Show a session or a single message.
+# Print the history ending at the newest message, or at a given message.
 lmc -show 0001
-lmc -show 0001/0002
+lmc -show 0001/0004
 
-# Continue a session.
+# Continue after the newest message, or after a given message.
 echo "Continue" | lmc -argo-user "$USER" -resume 0001
+echo "Continue" | lmc -argo-user "$USER" -resume 0001/0005
 
-# Branch from a message.
-echo "Try a different answer" | lmc -argo-user "$USER" -branch 0001/0002
-
-# Delete a session, branch, or message together with its descendants.
+# Delete a session, or a message with every message after it.
 lmc -delete 0001
+lmc -delete 0001/0004
 
 # Answer once without writing session files.
 echo "One-off question" | lmc -argo-user "$USER" -no-session
 ```
 
+`-resume 0001/0005` continues with the history ending at `0005`, and
+`-resume 0001` with the history ending at the newest message of `0001`, on
+whichever branch it is. The input decides what happens there. With session
+`0001` holding `0002` (first question), `0003` (first answer), `0004` (second
+question) and `0005` (second answer):
+
+| Intent | Command | Input |
+| --- | --- | --- |
+| Continue after the second answer | `lmc -resume 0001/0005` | next question |
+| Answer the second question again | `lmc -resume 0001/0004` | empty stdin |
+| Ask an edited second question | `lmc -resume 0001/0003` | edited question |
+
+A prompt after a message that already has a child starts another branch,
+and both branches keep their messages. Empty input answers the end of the
+history when that is a question or saved tool results; after a completed
+answer, a run needs a prompt. A `-developer` instruction is saved right
+before the question it came with, so it is that question's parent, and
+resuming there to edit the question keeps the instruction. `-show` labels
+each message with its ID and its parent's, since messages of other branches
+can fall between them, and names a message's alternatives.
+
+Every run that saves reports where, as in `Saved at 0001/0006.` A run that
+fails after saving part of its turn says where it stopped and how to go on:
+resume there with the same prompt when its question was not saved, or with
+empty input when the question was saved without its answer.
+
 `-show-sessions`, `-show`, and `-delete` touch only local files, so they need no
 provider credentials.
 
-A resumed session keeps the system prompt it started with, and a branch keeps
-the prompt of the session it branched from. A different `-s` forks the
-conversation into a new session under that prompt. So does `-tool` on a
-session that uses one of the built-in prompts when this run advertises a
-different tool set, because the built-in tool prompt follows the tools.
+#### Settings and run options
 
-An image attached with `-image` is saved inline in the session, so resuming or
-branching the session sends it to the provider again. `-show` lists each one
+The system prompt, the notebook and the context settings belong to the
+conversation. A session records them when it starts, and a run that changes
+them records the change before its first message, so they apply from that
+turn on, and a branch has the settings in force at its parent. `lmc` names
+the settings a run changed and the message they apply from.
+
+| Flag | Sets | Clears |
+| --- | --- | --- |
+| `-s TEXT` | a custom system prompt; `-s ''` an empty one | `-builtin-system` restores the built-in prompt |
+| `-notebook DIR` | the notebook | `-notebook ''` detaches it, with its view and catalog |
+| `-notebook-view`, `-context-policy`, `-context-format` | the named value | each has a default |
+| `-context-window N` | a cap on the context window | `-context-window 0` removes the cap |
+| `-context-trigger N` | the compaction trigger | `-context-trigger 0` restores the default |
+| `-context-early-cuts=BOOL` | early cuts | |
+
+A new `-context-policy` also returns the format and early cuts to their
+defaults, and clears a trigger the policy cannot use. Every other flag
+applies to one run: the provider, model, effort, reasoning, tools, MCP
+servers and approvals. The built-in system prompt follows the tools a run
+advertises: the default prompt without tools, or the tool prompt with them,
+followed by what the run's MCP servers add. A custom prompt gets that too,
+`-s ''` included.
+
+An image attached with `-image` is saved inline in the session, so a later
+run on that history sends it to the provider again. `-show` lists each one
 as `[image: name (media type, size)]` after the message text and never prints
 the image bytes. An image the model loaded with `view_image` is saved the same
 way, inside its tool result, and listed under that result.
@@ -156,9 +202,15 @@ A call the model made to an MCP server is recorded with the server and tool
 name, which `-show` prints under the call. Resuming a session with such a
 call pending needs the `-mcp-config` that defines the server.
 
+This version stores sessions in a format older versions did not write, and
+cannot read the sessions an older `lmc` saved. The first time it writes into
+a sessions directory that holds them, it prints how many there are.
+`-show-sessions` lists them, and `-delete` or moving the numbered
+directories out of the sessions directory removes them.
+
 #### Project notebooks and long conversations
 
-Use `-notebook DIR` to bind a project notebook to a session. The model can list
+Use `-notebook DIR` to attach a project notebook to a conversation. The model can list
 notes, search them by words, read them by ID, and create or revise them. Each
 Markdown file has a title, a short catalog description, a body, and source
 references. A write names the revision it read so two cooperating writers can
@@ -209,8 +261,9 @@ lmc -repl -provider openai -api-key-file ~/.lmc/alcf/inference.key \
   -model inkling-2-small -effort max -notebook ./project-notes
 ```
 
-`-resume` and `-branch` inherit the notebook binding and the initial context
-settings. The notebook tools stay in the prompt across ordinary turns. The
+A resumed conversation keeps its notebook and context settings, and
+`-notebook DIR` on a later turn attaches another notebook from that turn on.
+The notebook tools stay in the prompt across ordinary turns. The
 default notebook view supplies a bounded snapshot of note IDs, summaries, and
 revisions at the start of a window. A window keeps its snapshot until the next
 checkpoint. If a request cannot fit the snapshot, nothing before it can be
@@ -225,11 +278,16 @@ Edits become visible through tool results or the next window's snapshot.
 An explicitly selected notebook supplies its requested snapshot even when the
 tool selector limits which subsequent reads and writes the model can request.
 
-A new notebook session uses a prose handoff with the session's model and
-effort. `lmc` looks up the selected model's capacity. An explicit
-`-context-window N` supplies a limit or a smaller local cap. If capacity is
-unknown, the CLI reports that it is using full replay and explains how to set
-the window. Use `/info` to see the effective policy, trigger and ceiling.
+A notebook conversation uses a prose handoff with the run's model and
+effort. The window of a run with context settings is the smaller of the cap
+that `-context-window N` sets and the model's capacity when both are known,
+and the one known otherwise.
+The capacity comes from the newest reply in the history made with the same
+model and endpoint, which records it, else from the provider's model
+catalog. With a cap of 8,192 and a capacity of 4,096 the window is 4,096. If
+neither is known, a notebook conversation under the default policy uses full
+replay and says how to set the window, and an explicit compacting policy is
+refused. Use `/info` to see the effective policy, trigger and ceiling.
 
 To carry a standing user instruction through every cut, enter
 `/pin Start each ordinary response with the project release number.` in the
@@ -239,7 +297,7 @@ from START through the byte before END. Use `/pin --replace ID TEXT` to
 revise it and `/unpin ID` to withdraw it. The commands save user events
 locally and work in a piped REPL. Each new window places the exact active
 text after its historical evidence, in the user role. A later user request can
-override a rule for one reply. Forks inherit the pins at their branch point.
+override a rule for one reply. A branch has the pins in force at its parent.
 Sharing a notebook directory shares the project notes.
 
 At a cut, the session model writes a prose handoff from completed exchanges.
@@ -250,13 +308,16 @@ text-only session. Ordinary sessions without a notebook default to full replay.
 
 For a session saved with an experimental writer or cut policy, specify
 `-resume ID -context-policy handoff` to continue with prose, or use
-`-context-policy full` for full replay. The option applies to that invocation.
+`-context-policy full` for full replay. The new policy applies from that
+turn on.
 A prose continuation reuses the committed checkpoint while it fits. An
 executable built by the companion `lmc-context-bench` repository can continue
 the original experiment. Earlier command
 lines that specify `-context-format prose` select the same writer.
 
-A compacting policy needs a known window. Supply `-context-window N` for text-only compaction or when the notebook cannot discover one. The portable estimator
+A compacting policy needs a known window. Supply `-context-window N` when
+neither the history nor the provider's model catalog gives the model's
+capacity. The portable estimator
 uses framed content size, including tools and retained reasoning. It allows
 2,048 tokens for each attached image, including images returned by tools.
 For a saved audio block it allows 32 tokens per second of recorded duration,
@@ -294,9 +355,9 @@ A protected request too large for the configured input ceiling reports its
 estimate. A model-written checkpoint must already exist for an exact
 `-print-curl` preview that needs it. A preview also reports when admission
 would need a live input measurement. A `-print-curl` preview stays offline
-and cannot look up the model's window. For a new notebook session, or after
-changing the model or provider, pass `-context-window` with the model's
-limit, or preview full replay with `-context-policy full`.
+and cannot look up the model's window. When no reply in the history records
+the capacity of the model at its endpoint, pass `-context-window` with the
+model's limit, or preview full replay with `-context-policy full`.
 
 Pending checkpoint candidates are keyed by the context window and effective
 trigger, the selected writer, covered source and marked instructions. A
@@ -323,14 +384,15 @@ The local `history/search` and `history/read` tools retrieve bounded excerpts
 from the active branch across prior windows. A note can cite an exact block
 reference, including a captured tool result. To add only these tools to a
 saved conversation, use `-resume ID -context-policy full -tool-include history`.
-You can attach its first notebook later with `-resume ID -notebook DIR`.
+You can attach a notebook later with `-resume ID -notebook DIR`, and detach
+it with `-notebook ''`.
 Search reports its scope and
 whether more matches exist. A retrieved result can recover only the bytes
 captured at execution. Set `-tool-max-output-bytes` before the tool runs
 when the project needs more than the default 1 MiB per result.
 An unrelated session can use the shared notes. To
-resolve a citation into the original conversation, resume or branch from the
-session that contains it. History returns visible text and attachment metadata.
+resolve a citation into the original conversation, resume the session that
+contains it. History returns visible text and attachment metadata.
 Compaction also works in ordinary text chat, without a
 notebook or tool flag. With `-no-session`, history and checkpoints live in
 memory for that invocation. An explicitly named project notebook is shared
@@ -366,8 +428,9 @@ sent:
   Without a terminal, or with `-tool-non-interactive`, the model is told
   the outcome is unknown.
 
-If the request that follows fails, run the same `-resume` again. It sends
-the saved results and runs nothing, and it accepts empty input for that. If
+The results are saved before the request that follows them. If that
+request fails, `lmc` names the saved results; resuming there with empty
+input sends them and runs nothing. If
 `lmc` cannot write one of the records described next, it still saves the
 results, then stops with an error naming the call: another copy of the
 session would find that call's outcome unknown.
@@ -380,10 +443,9 @@ can grow large, and `-delete` leaves them in place. Older `lmc` builds
 ignore them, so an older build should not resume a session whose pending
 tool calls a newer build handles.
 
-If another run adds messages to a session while a turn is running, the turn
-keeps its messages apart from them. It continues in a new session copied
-from the conversation it had seen, and `lmc` prints a note naming the new
-session.
+A run writes each message after its own previous one. If another run writes
+after the same message meanwhile, the two make separate branches, and both
+keep their messages.
 
 ### Conversation Loop
 
@@ -463,16 +525,18 @@ lmc -argo-user "$USER" -repl < questions.txt > answers.txt
   the next, the answers of a turn's tool rounds included. This is formatting
   for a reader, not a record format, since an answer can hold empty lines
   itself; the session holds both sides, and `-show` prints them.
-- The first turn that saves anything settles where the conversation goes:
-  a new session, or the one `-resume` or `-branch` names. A turn that fails
-  before saving anything leaves that choice for the next turn. `-branch` on
-  an assistant message regenerates it before the first prompt, and a resumed
-  session with pending tool calls resolves them first. Images from `-image`
-  go with the first turn whose prompt is saved, so unlike a single run,
-  `-repl` accepts them with a regeneration, which goes out without them.
-- If another run changes the session, the loop continues in a fork, as a
-  single run does, and names it. If an answer that was shown could not be
-  saved, the loop stops rather than continue from a session without it.
+- The loop continues where `-resume` points, or starts a new session, and
+  each turn continues after the loop's last saved message. Tool calls
+  pending there are resolved and their results saved before the first
+  prompt. When that point awaits an answer, the loop says so, and the first
+  input decides: an empty line asks for the answer, and text is a new user
+  turn after it. A `-developer` instruction and `-image` attachments wait for
+  the first new user turn.
+- If another run writes after the loop's last message, the two make
+  separate branches. If an answer that was shown could not be saved, the
+  loop stops rather than continue from a session without it.
+- At exit, the loop says where it saved, as in `Saved in session 0001 at
+  message 000c; continue it with -resume 0001/000c.`
 - `-repl` streams as a single run does, so `-no-stream` keeps
   streaming off. It cannot be used with `-e`, `-print-curl`,
   `-show-sessions`, `-show`, `-delete`, `-list-models`, or `-no-session`.
@@ -1010,8 +1074,7 @@ pending in a resumed session, is an error result. The rule files stay the
 permission layer: a withheld tool needs no rule.
 
 A run that withholds `universal_command` gets a shorter tool system prompt
-without the command rules, and a resumed session on the other prompt forks,
-as it does when MCP servers change. A selector naming nothing the run has, a
+without the command rules. A selector naming nothing the run has, a
 selection that leaves no tool at all, and an MCP server named
 `universal_command` or `view_image` are errors at startup.
 
@@ -1049,7 +1112,7 @@ Mode and model:
 - `-model string`: Model name. The default depends on the provider.
 - `-e`: Generate embeddings instead of chat. Embed mode turns off sessions,
   does not stream or use the Responses API, and rejects `-tool`, `-resume`,
-  `-branch`, and the output controls.
+  and the output controls.
 - `-list-models`: List the models the provider reports. When the provider
   describes its models, as Anthropic, Google, and the ALCF inference gateway
   do, a line under each gives what it reports of the context and output
@@ -1065,13 +1128,16 @@ Mode and model:
   their usual routing. The other providers, `-argo-legacy`, and embed mode
   keep their own API, and the flag changes nothing there.
 - `-print-curl`: Print the equivalent `curl` command and exit without sending
-  the request. With `-resume` or `-branch`, `lmc` reads session history and
-  writes nothing back. With `-resume -tool`, it substitutes placeholder results
+  the request. With `-resume`, `lmc` reads session history and writes
+  nothing back. With `-resume -tool`, it substitutes placeholder results
   for pending tool calls.
 
 Output controls:
 
-- `-s string`: System prompt.
+- `-s string`: Custom system prompt, kept for the turns that follow; `-s ''`
+  sets an empty one. See [Settings and run options](#settings-and-run-options).
+- `-builtin-system`: Restore the built-in system prompt. Each run builds it
+  from the tools it advertises. Not with `-s`.
 - `-developer string`: Add a developer instruction immediately before the
   invocation's first new user turn. Supports `-provider openai`, and Argo
   `gpt*` models on the Responses API, which `-chat-completions` turns off. The
@@ -1163,9 +1229,8 @@ Images:
   compressed pixel data remains the provider's responsibility.
   The image is read when the flags are parsed, base64-encoded into the
   request, and saved inline in the session. Empty stdin is accepted when an
-  image is attached. Not available in embed mode, with `-argo-legacy`, or
-  with `-branch` from an assistant message, which regenerates that answer
-  without a new user turn.
+  image is attached, and the image alone is the new user turn. Not available
+  in embed mode or with `-argo-legacy`.
 - `-image-detail string`: OpenAI detail hint for every attached image: `auto`,
   `low`, or `high`. Requires `-image` or `-repl`; in a REPL it also applies to
   later `/image` commands. Other providers ignore it.
@@ -1216,10 +1281,15 @@ Tools:
 
 Sessions:
 
-- `-resume string`, `-branch string`, `-show-sessions`, `-show string`, `-delete string`
+- `-resume string`: Continue after the newest message of a session, or after
+  a message with `S/M`.
+- `-show string`: Print the history ending at the newest message of a
+  session, or at a message with `S/M`.
+- `-show-sessions`: List sessions with their message trees.
+- `-delete string`: Delete a session, or a message with `S/M` and every
+  message after it.
 - `-no-session`: Send the request without writing session files.
 - `-sessions-dir string`: Default `~/.lmc/sessions`.
-- `-skip-flock-check`: Skip the session file lock check.
 
 Requests and logging:
 

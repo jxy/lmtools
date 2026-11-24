@@ -393,30 +393,26 @@ func TestE2E_BranchingConversation(t *testing.T) {
 		t.Fatalf("Failed to add message: %v", err)
 	}
 
-	// Branch from first message (stdout not used)
-	_, _, err = runLmcCommand(t, lmcBin,
-		[]string{"-argo-user", "bob", "-model", "gpt4o", "-branch", sessionID + "/0001", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
+	// Ask another second question after the first answer, which makes an
+	// alternative to the second message.
+	_, stderr, err := runLmcCommand(t, lmcBin,
+		[]string{"-argo-user", "bob", "-model", "gpt4o", "-resume", sessionID + "/0003", "-provider-url", server.URL, "-sessions-dir", sessionsDir},
 		"Alternative second message")
 	if err != nil {
-		t.Fatalf("Failed to create branch: %v", err)
+		t.Fatalf("Failed to create branch: %v\n%s", err, stderr)
 	}
 
-	// Check if we're in a sibling branch
-	// stderr is not deterministically used here; rely on output validation
-	// if strings.Contains(stderr, "sibling branch") {
-	t.Log("Successfully created sibling branch")
-	// }
-
-	// Show sessions to see the tree; capture new output for validation
+	// The tree shows both second questions as alternatives after the first answer.
 	treeOut, _, err := runLmcCommand(t, lmcBin,
 		[]string{"-argo-user", "bob", "-show-sessions", "-sessions-dir", sessionsDir},
 		"")
 	if err != nil {
 		t.Fatalf("Failed to show sessions: %v", err)
 	}
-
-	if !strings.Contains(treeOut, sessionID) {
-		t.Errorf("Expected session tree to contain %s, got:\n%s", sessionID, treeOut)
+	for _, want := range []string{sessionID + " • ", "├─ 0004 user: Second message", "└─ 0006 user: Alternative second message"} {
+		if !strings.Contains(treeOut, want) {
+			t.Errorf("Expected session tree to contain %q, got:\n%s", want, treeOut)
+		}
 	}
 }
 

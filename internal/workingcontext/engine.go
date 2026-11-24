@@ -541,11 +541,15 @@ func shortTail(raw []core.TypedMessage, refs []contextstate.Ref, end, limit int)
 // Receipt is committed with the assistant reply under this projection.
 func (e *Engine) Receipt() *contextstate.Receipt {
 	first := e.current.Count == 0
-	return &contextstate.Receipt{
+	r := &contextstate.Receipt{
 		Count: e.current.Count, Prefix: e.current.Prefix, Tag: e.current.Tag, PinDigest: e.current.PinDigest, Deferred: e.deferred,
 		CatalogSent: first && e.sentInitial, CatalogOmitted: first && e.omitInitial,
 		Notebook: e.Binding.Notebook, View: e.Binding.NotebookView(),
 	}
+	if c := e.Binding.Capacity; c.Tokens > 0 {
+		r.Capacity = &c
+	}
+	return r
 }
 
 func (e *Engine) shorten(ctx context.Context, draft string, limit int) (string, error) {

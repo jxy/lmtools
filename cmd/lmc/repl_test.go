@@ -11,7 +11,7 @@ import (
 	"lmtools/internal/core"
 	"lmtools/internal/logger"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -305,11 +305,7 @@ func sessionLines(t *testing.T, sess *session.Session) []string {
 	if sess == nil {
 		t.Fatal("the loop holds no session")
 	}
-	messages, err := session.BuildMessagesForSession(context.Background(), sess)
-	if err != nil {
-		t.Fatalf("BuildMessagesForSession() error = %v", err)
-	}
-	return lmcTypedTextLines(messages)
+	return lmcTypedTextLines(historyOf(t, sess))
 }
 
 // Consecutive turns continue one session: the second request carries the
@@ -321,7 +317,7 @@ func TestREPLConsecutiveTurnsShareOneSession(t *testing.T) {
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "first question\nsecond question\n", true)
 
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	requests := server.GetRequests()
@@ -362,17 +358,12 @@ func TestREPLFailedTurnKeepsTheStartingPoint(t *testing.T) {
 	}))
 	defer server.Close()
 	te := newTurnTestEnv(t, server)
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleUser, "earlier question")
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleAssistant, "earlier answer")
-	te.opts.Resume = session.GetSessionID(sess.Path)
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "earlier question"), textEntry(core.RoleAssistant, "earlier answer"))
+	te.env.cfg.Start = sess.Ref()
 	loop, w, notifier := newTestLoop(t, te)
 	typeTurns(t, w, "first try\nsecond try\n", true)
 
-	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+	if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatalf("run() error = %v, want aggregate failure", err)
 	}
 	if notifier.count("Error: ") != 1 {
@@ -386,8 +377,8 @@ func TestREPLFailedTurnKeepsTheStartingPoint(t *testing.T) {
 		t.Fatalf("%d sessions, want the resumed one alone", count)
 	}
 	if got := strings.Join(sessionLines(t, loop.from), "|"); !strings.HasSuffix(got, "user:second try|assistant:answer after the failure") ||
-		!strings.Contains(got, "earlier answer") || session.GetRootSession(loop.from.Path) != session.GetRootSession(sess.Path) {
-		t.Fatalf("session %s = %q, want the resumed session continued", loop.from.Path, got)
+		!strings.Contains(got, "earlier answer") || loop.from.Number != sess.Number {
+		t.Fatalf("session %s = %q, want the resumed session continued", loop.from.Ref(), got)
 	}
 }
 
@@ -399,22 +390,11 @@ var replPNG = func() []byte {
 }()
 
 // A resumed session holds a pending call. Before the first prompt the loop
-// runs it and commits its result, and the request that follows fails. The
-// first prompt then continues from the head that commit left, runs nothing
-// again, and still carries the -image attachment, which only a committed
-// user message consumes.
+// runs it and saves its result without a request. The first input, text,
+// is a new turn after the result: its request carries the result and the
+// -image attachment, which only a committed user message consumes.
 func TestREPLStartupRecoveryKeepsTheImagesForThePrompt(t *testing.T) {
-	var mu sync.Mutex
-	attempts := 0
-	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		attempts++
-		if attempts == 1 {
-			return nil, http.StatusInternalServerError, errors.New("provider down")
-		}
-		return openAITextResponse("saw the picture"), http.StatusOK, nil
-	}))
+	server := mockserver.NewMockServer(mockserver.WithDefaultResponse("saw the picture"))
 	defer server.Close()
 	image := filepath.Join(t.TempDir(), "picture.png")
 	if err := os.WriteFile(image, replPNG, 0o600); err != nil {
@@ -428,37 +408,22 @@ func TestREPLStartupRecoveryKeepsTheImagesForThePrompt(t *testing.T) {
 		Name: "universal_command",
 		Args: json.RawMessage(fmt.Sprintf(`{"command":["sh","-c","echo run >> \"$1\"; echo ran","sh",%q]}`, counter)),
 	}}
-	core.AssignInvocationIDs(calls)
-	claim, err := session.NewToolJournal().Claim(calls)
-	if err != nil {
-		t.Fatalf("Claim() error = %v", err)
-	}
-	claim.Release()
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleUser, "count once")
-	if _, err := session.SaveAssistantResponseWithTools(context.Background(), sess, "counting", calls, "gpt-test"); err != nil {
-		t.Fatalf("SaveAssistantResponseWithTools() error = %v", err)
-	}
-	te.opts.Resume = session.GetSessionID(sess.Path)
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "count once"))
+	saveToolCalls(t, sess, "counting", claimedCalls(t, te.store(), calls))
+	te.env.cfg.Start = sess.Ref()
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "what is in the picture?\n", true)
 
-	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+	if err := loop.run(); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	requests := server.GetRequests()
-	if len(requests) != 2 {
-		t.Fatalf("%d requests, want the recovery's and the prompt's", len(requests))
-	}
-	if !strings.Contains(requests[0].Body, "ran") || strings.Contains(requests[0].Body, "data:image/png") {
-		t.Fatalf("the recovery's request = %s, want the call's result without the image", requests[0].Body)
+	if len(requests) != 1 {
+		t.Fatalf("%d requests, want the prompt's alone", len(requests))
 	}
 	for _, want := range []string{"ran", "what is in the picture?", "data:image/png"} {
-		if !strings.Contains(requests[1].Body, want) {
-			t.Fatalf("the prompt's request lacks %q: %s", want, requests[1].Body)
+		if !strings.Contains(requests[0].Body, want) {
+			t.Fatalf("the prompt's request lacks %q: %s", want, requests[0].Body)
 		}
 	}
 	data, err := os.ReadFile(counter)
@@ -494,7 +459,7 @@ func TestREPLSeparatesAnswersOnARedirectedStdout(t *testing.T) {
 	te.env.answersOnScreen = false
 	typeTurns(t, w, "a\nb\nc\nd\n", true)
 
-	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+	if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatalf("run() error = %v", err)
 	}
 	if got, want := file.String(), "one\n\ntwo\n\nthree\n\n"; got != want {
@@ -509,18 +474,13 @@ func TestREPLStopsAfterAnAnswerItCouldNotSave(t *testing.T) {
 	defer server.Close()
 	te := newTurnTestEnv(t, server)
 	afterTurnCommitForTest = func(sess *session.Session) {
-		if err := os.Rename(sess.Path, sess.Path+".moved"); err != nil {
-			t.Errorf("Rename() error = %v", err)
-		}
-		if err := os.WriteFile(sess.Path, nil, 0o600); err != nil {
-			t.Errorf("WriteFile() error = %v", err)
-		}
+		replaceWithFile(t, filepath.Join(te.sessionsDir, sess.Number))
 	}
 	t.Cleanup(func() { afterTurnCommitForTest = nil })
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "first\nsecond\n", true)
 
-	err := loop.run(false)
+	err := loop.run()
 	if err == nil || !strings.Contains(err.Error(), "answer could not be saved") {
 		t.Fatalf("run() error = %v, want the loop stopped over the unsaved answer", err)
 	}
@@ -545,7 +505,7 @@ func TestREPLInterruptCancelsTheTurnAndASecondExits(t *testing.T) {
 	typeTurns(t, w, "slow question\n", false)
 
 	result := make(chan error, 1)
-	go func() { result <- loop.run(false) }()
+	go func() { result <- loop.run() }()
 	notifier.waitFor(t, "Turn cancelled; nothing was saved.")
 	loop.signals.interrupt()
 	select {
@@ -627,7 +587,7 @@ func TestREPLIdleInterrupt(t *testing.T) {
 			loop.terminal, loop.diag = true, prompts
 
 			result := make(chan error, 1)
-			go func() { result <- loop.run(false) }()
+			go func() { result <- loop.run() }()
 			prompts.waitFor(t, 1)
 			loop.signals.interrupt()
 			prompts.waitFor(t, 2)
@@ -668,7 +628,7 @@ func TestREPLTerminationStopsTheLoop(t *testing.T) {
 	loop, w, notifier := newTestLoop(t, te)
 	typeTurns(t, w, "question\nnever sent\n", true)
 
-	err := loop.run(false)
+	err := loop.run()
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run() error = %v, want the stop", err)
 	}
@@ -680,98 +640,233 @@ func TestREPLTerminationStopsTheLoop(t *testing.T) {
 	}
 }
 
-// Another writer appends to the session while a turn runs. The turn's
-// writes move to a fork through the head the loop kept, the loop reports it
-// and continues there, and the other writer's message stays out of every
-// later request.
-func TestREPLContinuesInAConflictFork(t *testing.T) {
+// Another writer appends after the loop's last message while a turn runs.
+// The turn's messages follow the loop's own, as an alternative to the other
+// writer's, and the other writer's line stays out of every later request.
+func TestREPLContinuesAfterItsOwnMessages(t *testing.T) {
 	var mu sync.Mutex
 	count := 0
-	var sessionsDir string
+	var store *session.Store
 	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		count++
 		if count == 2 {
-			entries, err := os.ReadDir(sessionsDir)
-			if err != nil || len(entries) == 0 {
-				return nil, http.StatusInternalServerError, fmt.Errorf("no session to append to: %v", err)
-			}
-			other, err := session.LoadSession(filepath.Join(sessionsDir, entries[0].Name()))
+			newest, err := store.Newest("0001")
 			if err != nil {
 				return nil, http.StatusInternalServerError, err
 			}
-			appendTestSessionMessage(t, context.Background(), other, core.RoleUser, "someone else's line")
+			if _, err := store.Append(context.Background(), session.Ref{Session: "0001", Message: newest}, textEntry(core.RoleUser, "someone else's line")); err != nil {
+				return nil, http.StatusInternalServerError, err
+			}
 		}
 		return openAITextResponse(fmt.Sprintf("answer %d", count)), http.StatusOK, nil
 	}))
 	defer server.Close()
 	te := newTurnTestEnv(t, server)
-	sessionsDir = te.sessionsDir
-	loop, w, notifier := newTestLoop(t, te)
+	store = te.store()
+	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "one\ntwo\nthree\n", true)
 
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatalf("run() error = %v", err)
-	}
-	if notifier.count("changed while this turn ran") != 1 {
-		t.Fatalf("messages = %q, want the fork reported once", notifier.all())
 	}
 	requests := server.GetRequests()
 	if len(requests) != 3 || strings.Contains(requests[2].Body, "someone else") || !strings.Contains(requests[2].Body, "answer 2") {
-		t.Fatalf("third request = %v, want it in the fork, without the other writer's line", requests)
+		t.Fatalf("third request = %v, want the loop's history without the other writer's line", requests)
 	}
 	want := "user:one|assistant:answer 1|user:two|assistant:answer 2|user:three|assistant:answer 3"
 	if got := strings.Join(sessionLines(t, loop.from), "|"); !strings.HasSuffix(got, want) || strings.Contains(got, "someone else") {
-		t.Fatalf("fork = %q, want the loop's turns alone", got)
+		t.Fatalf("lineage = %q, want the loop's turns alone", got)
 	}
 }
 
-// -branch naming an assistant message regenerates it before the first
-// prompt, and the prompts continue from the regenerated answer. A
-// regeneration that saves nothing ends the loop with its error.
-func TestREPLRegeneratesBeforeTheFirstPrompt(t *testing.T) {
-	makeSession := func(t *testing.T) string {
-		sess, err := session.CreateSession("", core.NewTestLogger(false))
-		if err != nil {
-			t.Fatalf("CreateSession() error = %v", err)
-		}
-		appendTestSessionMessage(t, context.Background(), sess, core.RoleUser, "the question")
-		appendTestSessionMessage(t, context.Background(), sess, core.RoleAssistant, "the old answer")
-		return session.GetSessionID(sess.Path) + "/0001"
+// Resumed at a question, the loop says the question awaits an answer. An
+// empty first line asks for it, and the prompts continue from the new
+// answer; text as the first line is a new turn after the question instead.
+func TestREPLFirstInputDecidesAtAQuestion(t *testing.T) {
+	question := func(t *testing.T, te turnTestEnv) {
+		t.Helper()
+		sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "the question"), textEntry(core.RoleAssistant, "the old answer"))
+		te.env.cfg.Start = sess.Ref().At("0001")
 	}
-	t.Run("then the prompts continue", func(t *testing.T) {
+	t.Run("an empty line answers", func(t *testing.T) {
 		server := mockserver.NewMockServer(numberedAnswers())
 		defer server.Close()
 		te := newTurnTestEnv(t, server)
-		te.opts.Branch = makeSession(t)
-		loop, w, _ := newTestLoop(t, te)
-		typeTurns(t, w, "follow up\n", true)
-		if err := loop.run(true); err != nil {
+		question(t, te)
+		loop, w, notes := newTestLoop(t, te)
+		typeTurns(t, w, "\nfollow up\n", true)
+		if err := loop.run(); err != nil {
 			t.Fatalf("run() error = %v", err)
+		}
+		if !strings.Contains(strings.Join(notes.all(), "\n"), "0001/0001 awaits an answer") {
+			t.Fatalf("notes = %q", notes.all())
 		}
 		requests := server.GetRequests()
 		if len(requests) != 2 || strings.Contains(requests[0].Body, "the old answer") ||
 			!strings.Contains(requests[1].Body, "answer 1") || !strings.Contains(requests[1].Body, "follow up") {
-			t.Fatalf("requests = %v, want the regeneration and then the prompt after the new answer", requests)
+			t.Fatalf("requests = %v, want the answer and then the prompt after it", requests)
+		}
+		want := "user:the question|assistant:answer 1|user:follow up|assistant:answer 2"
+		if got := strings.Join(sessionLines(t, loop.from), "|"); got != want {
+			t.Fatalf("lineage = %q, want %q", got, want)
 		}
 	})
-	t.Run("a regeneration that saves nothing", func(t *testing.T) {
-		server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
-			return nil, http.StatusInternalServerError, errors.New("provider down")
-		}))
+	t.Run("a queued instruction waits for a new turn", func(t *testing.T) {
+		server := mockserver.NewMockServer(numberedAnswers())
+		defer server.Close()
+		te := newTurnTestEnv(t, server, "-developer", "Use short answers.")
+		question(t, te)
+		loop, w, _ := newTestLoop(t, te)
+		typeTurns(t, w, "\nfollow up\n", true)
+		if err := loop.run(); err != nil {
+			t.Fatalf("run() error = %v", err)
+		}
+		requests := server.GetRequests()
+		if len(requests) != 2 || strings.Contains(requests[0].Body, "Use short answers.") || !strings.Contains(requests[1].Body, "Use short answers.") {
+			t.Fatalf("requests = %v, want the instruction with the new turn alone", requests)
+		}
+	})
+	t.Run("text is a new turn", func(t *testing.T) {
+		server := mockserver.NewMockServer(numberedAnswers())
 		defer server.Close()
 		te := newTurnTestEnv(t, server)
-		te.opts.Branch = makeSession(t)
+		question(t, te)
 		loop, w, _ := newTestLoop(t, te)
-		typeTurns(t, w, "never sent\n", true)
-		if err := loop.run(true); err == nil {
-			t.Fatal("run() error = nil, want the regeneration's failure")
+		typeTurns(t, w, "more detail\n", true)
+		if err := loop.run(); err != nil {
+			t.Fatalf("run() error = %v", err)
 		}
-		if requests := server.GetRequests(); len(requests) != 1 {
-			t.Fatalf("%d requests, want the regeneration's alone", len(requests))
+		want := "user:the question|user:more detail|assistant:answer 1"
+		if got := strings.Join(sessionLines(t, loop.from), "|"); got != want {
+			t.Fatalf("lineage = %q, want %q", got, want)
 		}
 	})
+}
+
+// A turn that fails at a start point awaiting an answer, the empty line
+// that asks for the answer or text that starts a new turn after it, leaves
+// the answer awaited: the next empty line asks for it again.
+func TestREPLEmptyLineRetriesAFailedAnswer(t *testing.T) {
+	for _, first := range []string{"", "more detail"} {
+		t.Run(fmt.Sprintf("after %q", first), func(t *testing.T) {
+			var mu sync.Mutex
+			count := 0
+			server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				count++
+				if count == 1 {
+					return nil, http.StatusInternalServerError, errors.New("provider down")
+				}
+				return openAITextResponse(fmt.Sprintf("answer %d", count)), http.StatusOK, nil
+			}))
+			defer server.Close()
+			te := newTurnTestEnv(t, server)
+			sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "the question"), textEntry(core.RoleAssistant, "the old answer"))
+			te.env.cfg.Start = sess.Ref().At("0001")
+			loop, w, notes := newTestLoop(t, te)
+			typeTurns(t, w, first+"\n\n", true)
+			if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+				t.Fatalf("run() error = %v, want the failed turn counted", err)
+			}
+			if !strings.Contains(strings.Join(notes.all(), "\n"), "0001/0001 still awaits an answer") {
+				t.Fatalf("notes = %q", notes.all())
+			}
+			if requests := server.GetRequests(); len(requests) != 2 {
+				t.Fatalf("%d requests, want the failed turn and the answer", len(requests))
+			}
+			if got := strings.Join(sessionLines(t, loop.from), "|"); got != "user:the question|assistant:answer 2" {
+				t.Fatalf("lineage = %q", got)
+			}
+		})
+	}
+}
+
+// A failed turn after an answer leaves nothing awaited, so an empty line
+// after it sends nothing.
+func TestREPLEmptyLineAfterAFailedTurnAtAnAnswer(t *testing.T) {
+	server := mockserver.NewMockServer(mockserver.WithResponseFunc(func(*http.Request) (interface{}, int, error) {
+		return nil, http.StatusInternalServerError, errors.New("provider down")
+	}))
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "the question"), textEntry(core.RoleAssistant, "the answer"))
+	te.env.cfg.Start = sess.Ref()
+	loop, w, notes := newTestLoop(t, te)
+	typeTurns(t, w, "more\n\n", true)
+	if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+		t.Fatalf("run() error = %v, want the failed turn counted", err)
+	}
+	if requests := server.GetRequests(); len(requests) != 1 || strings.Contains(strings.Join(notes.all(), "\n"), "awaits an answer") {
+		t.Fatalf("%d requests, notes %q", len(requests), notes.all())
+	}
+}
+
+// startAtAnswered starts te's runs at a session whose question is answered,
+// and returns the content file of the question.
+func startAtAnswered(t *testing.T, te turnTestEnv) string {
+	t.Helper()
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "the question"), textEntry(core.RoleAssistant, "the answer"))
+	te.env.cfg.Start = sess.Ref()
+	return filepath.Join(te.sessionsDir, sess.Number, "0001.content.json")
+}
+
+// A loop reads the session it resumes once: its first turn and a pin
+// continue from the history the startup read. The question's content file
+// is removed once the startup has read it, which a turn reading the history
+// again could not send.
+func TestREPLReadsTheSessionItResumesOnce(t *testing.T) {
+	t.Run("a turn", func(t *testing.T) {
+		server := mockserver.NewMockServer(numberedAnswers())
+		defer server.Close()
+		te := newTurnTestEnv(t, server)
+		question := startAtAnswered(t, te)
+		loop, _, _ := newTestLoop(t, te)
+		if err := loop.prepareStart(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(question); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loop.runTurn(turnInput{text: "next"}, nil); err != nil {
+			t.Fatalf("the first turn: %v", err)
+		}
+		if requests := server.GetRequests(); len(requests) != 1 || !strings.Contains(requests[0].Body, "the question") {
+			t.Fatalf("requests = %v", requests)
+		}
+	})
+	t.Run("a pin", func(t *testing.T) {
+		te := newTurnTestEnvAt(t, "http://127.0.0.1:1", "-notebook", t.TempDir(), "-context-window", "8192")
+		question := startAtAnswered(t, te)
+		loop, _, _ := newTestLoop(t, te)
+		if err := loop.prepareStart(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(question); err != nil {
+			t.Fatal(err)
+		}
+		if action := loop.interpretInput("/pin keep this"); action.send || loop.failedTurns != 0 || !loop.saved {
+			t.Fatalf("the pin: %+v, %d failed turns, saved %t", action, loop.failedTurns, loop.saved)
+		}
+	})
+}
+
+// A loop that saved nothing names no saved position as it ends.
+func TestREPLThatSavedNothingNamesNoPosition(t *testing.T) {
+	server := mockserver.NewMockServer(numberedAnswers())
+	defer server.Close()
+	te := newTurnTestEnv(t, server)
+	startAtAnswered(t, te)
+	loop, w, notes := newTestLoop(t, te)
+	typeTurns(t, w, "", true)
+	if err := loop.run(); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if strings.Contains(strings.Join(notes.all(), "\n"), "Saved in session") {
+		t.Fatalf("notes = %q", notes.all())
+	}
 }
 
 // runWithArgs runs lmc's run in process with args and stdin, its stdout
@@ -783,32 +878,23 @@ func runWithArgs(t *testing.T, stdin *os.File, args ...string) error {
 		t.Fatalf("Create() error = %v", err)
 	}
 	defer stdout.Close()
-	defer func(oldStdin, oldStdout *os.File, oldArgs []string, sessionsDir string) {
+	defer func(oldStdin, oldStdout *os.File, oldArgs []string) {
 		os.Stdin, os.Stdout, os.Args = oldStdin, oldStdout, oldArgs
-		session.SetSessionsDir(sessionsDir)
 		logger.ResetForTesting()
-	}(os.Stdin, os.Stdout, os.Args, session.GetSessionsDir())
+	}(os.Stdin, os.Stdout, os.Args)
 	os.Stdin, os.Stdout = stdin, stdout
 	os.Args = append([]string{"lmc"}, args...)
 	return run(core.NewTestNotifier())
 }
 
-// -branch on an assistant message regenerates it without the images, and a
-// loop keeps -image for its first prompt, so -repl accepts the pair a single
-// run refuses: the regeneration goes out first, and the typed prompt
-// carries the image.
-func TestREPLRegenerationLeavesTheImagesForThePrompt(t *testing.T) {
+// Resumed at a question, an empty first line of a piped loop asks for its
+// answer without the -image attachment, which the typed prompt that follows
+// carries. A single run with the same input sends the image with no text.
+func TestREPLAnswerLeavesTheImagesForThePrompt(t *testing.T) {
 	server := mockserver.NewMockServer(numberedAnswers())
 	defer server.Close()
 	sessionsDir := t.TempDir()
-	defer func(dir string) { session.SetSessionsDir(dir) }(session.GetSessionsDir())
-	session.SetSessionsDir(sessionsDir)
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleUser, "the question")
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleAssistant, "the old answer")
+	sess := newTestSession(t, session.Open(sessionsDir), textEntry(core.RoleUser, "the question"), textEntry(core.RoleAssistant, "the old answer"))
 	image := filepath.Join(t.TempDir(), "picture.png")
 	if err := os.WriteFile(image, replPNG, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -818,7 +904,7 @@ func TestREPLRegenerationLeavesTheImagesForThePrompt(t *testing.T) {
 		t.Fatalf("os.Pipe() error = %v", err)
 	}
 	defer r.Close()
-	if _, err := w.WriteString("what is in the picture?\n"); err != nil {
+	if _, err := w.WriteString("\nwhat is in the picture?\n"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	_ = w.Close()
@@ -826,20 +912,17 @@ func TestREPLRegenerationLeavesTheImagesForThePrompt(t *testing.T) {
 	args := []string{
 		"-provider", "openai", "-provider-url", server.URL() + "/v1", "-chat-completions", "-model", "gpt-test",
 		"-log-dir", t.TempDir(), "-sessions-dir", sessionsDir,
-		"-branch", session.GetSessionID(sess.Path) + "/0001", "-image", image,
-	}
-	if err := runWithArgs(t, r, args...); err == nil || !strings.Contains(err.Error(), "-image needs a user turn") {
-		t.Fatalf("single run error = %v, want the image refused", err)
+		"-resume", sess.Ref().At("0001").String(), "-image", image,
 	}
 	if err := runWithArgs(t, r, append([]string{"-repl", "-no-stream"}, args...)...); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	requests := server.GetRequests()
 	if len(requests) != 2 {
-		t.Fatalf("%d requests, want the regeneration's and the prompt's", len(requests))
+		t.Fatalf("%d requests, want the answer's and the prompt's", len(requests))
 	}
 	if strings.Contains(requests[0].Body, "data:image/png") || strings.Contains(requests[0].Body, "the old answer") {
-		t.Fatalf("the regeneration's request = %s, want the question alone", requests[0].Body)
+		t.Fatalf("the answer's request = %s, want the question alone", requests[0].Body)
 	}
 	for _, want := range []string{"answer 1", "what is in the picture?", "data:image/png"} {
 		if !strings.Contains(requests[1].Body, want) {
@@ -857,7 +940,7 @@ func TestREPLInteractiveFailureStillAllowsCleanExit(t *testing.T) {
 	loop, w, _ := newTestLoop(t, te)
 	loop.terminal = true
 	typeTurns(t, w, "first\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatalf("interactive exit: %v", err)
 	}
 	if loop.failedTurns != 1 {

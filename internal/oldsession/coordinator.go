@@ -71,7 +71,7 @@ func (p *RequestPlan) Commit(ctx context.Context) (*Session, error) {
 
 // PrepareRequest builds request messages without committing new session state.
 func (c *requestPreparer) PrepareRequest(ctx context.Context, inputStr string, isRegeneration bool, pendingTools PendingToolMode) (*RequestPlan, error) {
-	if err := core.ValidateDeveloperTurn(c.cfg, inputStr, isRegeneration); err != nil {
+	if err := validateDeveloperTurn(c.cfg, inputStr, isRegeneration); err != nil {
 		return nil, err
 	}
 	if resume := c.cfg.Resume; resume != "" {
@@ -154,7 +154,7 @@ func PrepareRequestAt(ctx context.Context, cfg core.RequestOptions, notifier cor
 // placeholders for -print-curl, and must otherwise have been resolved first
 // by ResolvePendingToolCalls.
 func (c *requestPreparer) prepareSessionAt(ctx context.Context, sess *Session, head *MessageRef, inputStr string, isRegeneration bool, pendingTools PendingToolMode) (*RequestPlan, error) {
-	if err := core.ValidateDeveloperTurn(c.cfg, inputStr, isRegeneration); err != nil {
+	if err := validateDeveloperTurn(c.cfg, inputStr, isRegeneration); err != nil {
 		return nil, err
 	}
 	var (
@@ -513,4 +513,16 @@ func (c *requestPreparer) saveUserMessage(ctx context.Context, sess *Session, in
 	}
 
 	return nil
+}
+
+// validateDeveloperTurn refuses a developer instruction without a new user
+// turn, a regeneration included.
+func validateDeveloperTurn(cfg core.RequestOptions, input string, isRegeneration bool) error {
+	if err := core.ValidateDeveloperInstructions(cfg); err != nil || cfg.Developer == "" {
+		return err
+	}
+	if isRegeneration {
+		return fmt.Errorf("-developer requires a new user turn; branch from a user message or resume with prompt text instead of regenerating an assistant answer")
+	}
+	return core.ValidateDeveloperTurn(cfg, input)
 }

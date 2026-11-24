@@ -7,7 +7,7 @@ import (
 	"io"
 	"lmtools/internal/apifixtures"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -52,17 +52,7 @@ func TestGoogleThoughtSignatureRoundTripFromCapture_Streaming(t *testing.T) {
 
 func testGoogleThoughtSignatureRoundTripFromCapture(t *testing.T, stream bool) {
 	t.Helper()
-	oldSessionsDir := session.GetSessionsDir()
-	testSessionsDir := filepath.Join(t.TempDir(), "sessions")
-	if err := os.MkdirAll(testSessionsDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll(test sessions) error = %v", err)
-	}
-	session.SetSessionsDir(testSessionsDir)
-	session.SetSkipFlockCheck(true)
-	t.Cleanup(func() {
-		session.SetSessionsDir(oldSessionsDir)
-		session.SetSkipFlockCheck(false)
-	})
+	store := session.Open(filepath.Join(t.TempDir(), "sessions"))
 
 	suite, err := apifixtures.LoadSuite()
 	if err != nil {
@@ -102,35 +92,28 @@ func testGoogleThoughtSignatureRoundTripFromCapture(t *testing.T, stream bool) {
 		t.Fatal("parsed.ThoughtSignature is empty")
 	}
 
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
+	info, _, err := store.Create(ctx)
 	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
-
-	if _, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
-		Role:      core.RoleUser,
-		Content:   "Hello",
-		Timestamp: time.Now(),
-	}, nil, nil); err != nil {
-		t.Fatalf("AppendMessageWithToolInteraction(user) error = %v", err)
+	sess := &session.Session{Store: store, Number: info.Number, Identity: info.Identity}
+	text := func(text string) session.Entry {
+		return session.Entry{Role: core.RoleUser, Time: time.Now().UTC(), Content: session.Content{Blocks: []core.Block{core.TextBlock{Text: text}}}}
 	}
-
-	if _, err := session.SaveAssistantResponseWithMetadata(ctx, sess, parsed.Text, parsed.ToolCalls, cfg.Model, parsed.ThoughtSignature); err != nil {
-		t.Fatalf("SaveAssistantResponseWithMetadata() error = %v", err)
+	if _, err := sess.Append(ctx, text("Hello")); err != nil {
+		t.Fatalf("Append(user) error = %v", err)
 	}
-
-	if _, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
-		Role:      core.RoleUser,
-		Content:   "Follow up",
-		Timestamp: time.Now().Add(time.Second),
-	}, nil, nil); err != nil {
-		t.Fatalf("AppendMessageWithToolInteraction(follow-up) error = %v", err)
+	if _, err := sess.SaveReply(ctx, parsed, cfg.Model); err != nil {
+		t.Fatalf("SaveReply() error = %v", err)
 	}
-
-	typedMessages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
+	if _, err := sess.Append(ctx, text("Follow up")); err != nil {
+		t.Fatalf("Append(follow-up) error = %v", err)
+	}
+	h, err := sess.History()
 	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
+		t.Fatalf("History() error = %v", err)
 	}
+	typedMessages := h.Typed()
 
 	_, body, err := core.BuildChatRequest(cfg, typedMessages, core.ChatBuildOptions{ModelOverride: cfg.Model})
 	if err != nil {

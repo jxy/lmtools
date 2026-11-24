@@ -42,10 +42,9 @@ func GetBuiltinTools(cfg RequestOptions) []ToolDefinition {
 // which is the order -tool-include and -tool-exclude report them in.
 var BuiltinToolNames = []string{UniversalCommandToolName, ViewImageToolName}
 
-// ToolSystemPromptFor is the system prompt a tool run writes on its own:
-// the command prompt, or the shorter one when universal_command is among
-// the excluded tools. The config layer picks the effective prompt with it
-// and the resume policy decides a fork with it, so the two agree.
+// ToolSystemPromptFor is the built-in system prompt of a run with tools: the
+// command prompt, or the shorter one when universal_command is among the
+// excluded tools.
 func ToolSystemPromptFor(excluded []string) string {
 	for _, name := range excluded {
 		if name == UniversalCommandToolName {

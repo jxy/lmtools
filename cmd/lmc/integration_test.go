@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"lmtools/internal/mockserver"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -187,75 +189,23 @@ func TestCrossProcessLockExclusion(t *testing.T) {
 	}
 }
 
-// TestCrossProcessSiblingCreation tests concurrent sibling creation
-func TestCrossProcessSiblingCreation(t *testing.T) {
-	lmcBin := getLmcBinary(t)
-	_, mockURL := setupTestEnvironment(t)
+// setupTestEnvironment gives the test a home directory with an .lmc
+// directory and a mock provider, returning both.
+func setupTestEnvironment(t *testing.T) (tmpHome string, mockServerURL string) {
+	t.Helper()
 
-	// Create custom sessions directory
-	sessionsDir := t.TempDir()
+	tmpHome = t.TempDir()
+	t.Setenv("HOME", tmpHome)
 
-	// Create initial session with a few messages
-	_, _, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-provider-url", mockURL, "-sessions-dir", sessionsDir}, "Message 1")
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+	lmcDir := filepath.Join(tmpHome, ".lmc")
+	if err := os.MkdirAll(lmcDir, 0o755); err != nil {
+		t.Fatalf("Failed to create .lmc directory: %v", err)
 	}
 
-	// Get session ID using -show-sessions
-	stdout, _, err := runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-show-sessions", "-sessions-dir", sessionsDir}, "")
-	if err != nil {
-		t.Fatalf("Failed to show sessions: %v", err)
-	}
+	server := mockserver.NewMockServer(
+		mockserver.WithDefaultResponse("Mock response for testing"),
+	)
+	t.Cleanup(server.Close)
 
-	sessionID := extractFirstSessionID(stdout)
-
-	// Add another message
-	_, _, err = runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-model", "gpt4o", "-resume", sessionID, "-provider-url", mockURL, "-sessions-dir", sessionsDir}, "Message 2")
-	if err != nil {
-		t.Fatalf("Failed to add message: %v", err)
-	}
-
-	// Now have multiple processes try to branch from message 0001
-	const numProcesses = 3
-	var wg sync.WaitGroup
-	results := make(chan error, numProcesses)
-
-	wg.Add(numProcesses)
-
-	for i := 0; i < numProcesses; i++ {
-		go func(id int) {
-			defer wg.Done()
-
-			_, stderr, err := runLmcCommand(t, lmcBin,
-				[]string{"-argo-user", "testuser", "-model", "gpt4o", "-branch", sessionID + "/0001", "-provider-url", mockURL, "-sessions-dir", sessionsDir},
-				fmt.Sprintf("Branch %d response", id))
-			if err != nil {
-				t.Logf("Process %d stderr: %s", id, stderr)
-			}
-			results <- err
-		}(i)
-	}
-
-	wg.Wait()
-	close(results)
-
-	// Check results
-	successCount := 0
-	for err := range results {
-		if err == nil {
-			successCount++
-		} else {
-			t.Errorf("Branch creation failed: %v", err)
-		}
-	}
-
-	t.Logf("Successfully created %d/%d branches", successCount, numProcesses)
-
-	// Show session tree
-	stdout, _, err = runLmcCommand(t, lmcBin, []string{"-argo-user", "testuser", "-show-sessions", "-sessions-dir", sessionsDir}, "")
-	if err != nil {
-		t.Errorf("Failed to show sessions: %v", err)
-	} else {
-		t.Logf("\nSession tree:\n%s", stdout)
-	}
+	return tmpHome, server.URL()
 }

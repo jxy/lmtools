@@ -26,15 +26,12 @@ func ValidateDeveloperRole(cfg RequestOptions) error {
 
 // ValidateDeveloperTurn requires a new user turn for a new instruction. The
 // instruction is staged with that user message and consumed after commit.
-func ValidateDeveloperTurn(cfg RequestOptions, input string, isRegeneration bool) error {
+func ValidateDeveloperTurn(cfg RequestOptions, input string) error {
 	if err := ValidateDeveloperInstructions(cfg); err != nil || cfg.Developer == "" {
 		return err
 	}
-	if isRegeneration {
-		return fmt.Errorf("-developer requires a new user turn; branch from a user message or resume with prompt text instead of regenerating an assistant answer")
-	}
 	if input == "" && len(cfg.Images) == 0 {
-		return fmt.Errorf("-developer requires prompt text or an -image for its first turn; supply input when resuming pending tools")
+		return fmt.Errorf("-developer requires prompt text or an -image for its turn; a run without a prompt answers the end of the history and adds no instruction")
 	}
 	return nil
 }

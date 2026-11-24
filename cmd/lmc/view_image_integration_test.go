@@ -227,7 +227,7 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 		t.Fatal("-show printed image bytes")
 	}
 
-	// The bytes are stored once, in the blocks file of the results message.
+	// The bytes are stored once, in the content file of the results message.
 	sessionDir := filepath.Join(sessionsDir, sessionID)
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
@@ -240,8 +240,8 @@ func TestViewImageToolOnChatWireSendsTheFileBackAndTheSessionKeepsIt(t *testing.
 			continue
 		}
 		occurrences := strings.Count(string(data), wantURL)
-		if occurrences > 0 && !strings.HasSuffix(entry.Name(), ".blocks.json") {
-			t.Errorf("%s holds the image bytes; only .blocks.json should", entry.Name())
+		if occurrences > 0 && !strings.HasSuffix(entry.Name(), ".content.json") {
+			t.Errorf("%s holds the image bytes; only a .content.json should", entry.Name())
 		}
 		stored += occurrences
 	}

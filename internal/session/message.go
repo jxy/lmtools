@@ -64,6 +64,12 @@ type History struct {
 	Contents []Content
 }
 
+// clipped returns h with slices that end at their length, so appending to
+// them leaves h's arrays alone.
+func (h History) clipped() History {
+	return History{Session: h.Session, Messages: slices.Clip(h.Messages), Contents: slices.Clip(h.Contents)}
+}
+
 // Ref names message i of the history.
 func (h History) Ref(i int) Ref {
 	return Ref{Session: h.Session, Message: h.Messages[i].ID}

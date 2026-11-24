@@ -8,10 +8,11 @@ import (
 	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	"lmtools/internal/mcp"
-	"lmtools/internal/prompts"
 	"lmtools/internal/providerconfig"
 	"lmtools/internal/retry"
+	"lmtools/internal/session"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -40,22 +41,31 @@ type Config struct {
 	ImageDetail      string            // OpenAI detail hint applied to every -image
 	Images           []core.ImageBlock // -image files loaded at parse time as data URLs
 	providerconfig.Options
-	OpenAIResponses     bool          // chat through the provider's Responses API where the model has one; ParseFlags derives it from ChatCompletions
-	System              string        // system prompt for chat
-	SystemExplicitlySet bool          // whether -s flag was explicitly provided
-	Developer           string        // pending developer instruction for the first new user turn
-	Timeout             time.Duration // HTTP request timeout
-	Retries             int           // number of retry attempts
-	Resume              string        // session ID or path to continue
-	Branch              string        // message ID to branch from
-	ShowSessions        bool          // display conversation trees
-	NoSession           bool          // disable session creation
-	Delete              string        // node path to delete
-	Show                string        // show session or message by ID/path
-	SessionsDir         string        // custom sessions directory
-	LogDir              string        // custom log directory
-	LogLevel            string        // log level (DEBUG, INFO, WARN, ERROR)
-	SkipFlockCheck      bool          // skip file locking check
+	OpenAIResponses bool          // chat through the provider's Responses API where the model has one; ParseFlags derives it from ChatCompletions
+	System          string        // -s: the custom system prompt this run sets
+	BuiltinSystem   bool          // -builtin-system: restore the built-in system prompt
+	Developer       string        // pending developer instruction for the first new user turn
+	Timeout         time.Duration // HTTP request timeout
+	Retries         int           // number of retry attempts
+	Resume          string        // -resume: the session or message to continue after
+	ShowSessions    bool          // list sessions with their message trees
+	NoSession       bool          // disable session creation
+	Delete          string        // the session, or message with its descendants, to delete
+	Show            string        // the session or message whose history to print
+	SessionsDir     string        // custom sessions directory
+	LogDir          string        // custom log directory
+	LogLevel        string        // log level (DEBUG, INFO, WARN, ERROR)
+
+	// Start is the message a chat run continues after, resolved once from
+	// -resume; with no message named, a run in an empty session continues
+	// at its root, and with no session named, a run starts a new one.
+	Start session.Ref
+	// Change is what the run's settings flags set, which its commit records
+	// when it differs from the settings at Start.
+	Change session.Change
+	// Settings are the settings the run runs under: those at Start with
+	// Change applied.
+	Settings session.Settings
 
 	ListModels bool // list available models from provider
 	Version    bool // print version information and exit
@@ -110,6 +120,9 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	explicit := applyExplicitFlags(fs, &cfg)
+	if err := validateSystemFlags(fs, cfg); err != nil {
+		return cfg, err
+	}
 	if err := validateREPLFlags(cfg); err != nil {
 		return cfg, err
 	}
@@ -136,6 +149,13 @@ func ParseFlags(args []string) (Config, error) {
 
 	if err := cfg.Normalize(); err != nil {
 		return cfg, err
+	}
+	if cfg.SessionsDir != "" {
+		abs, err := filepath.Abs(cfg.SessionsDir)
+		if err != nil {
+			return cfg, fmt.Errorf("-sessions-dir: %w", err)
+		}
+		cfg.SessionsDir = abs
 	}
 	if err := validateDeveloperFlags(cfg); err != nil {
 		return cfg, err
@@ -175,7 +195,8 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.REPL, "repl", false, "read one turn per line from stdin until it ends, continuing one session")
 	fs.BoolVar(&cfg.PrintCurl, "print-curl", false, "print the equivalent curl command and exit without sending the request")
 	fs.BoolVar(&cfg.HideThinking, "hide-thinking", false, "hide the provider-returned thinking summaries lmc prints to stderr; the request and its reasoning are unchanged")
-	fs.StringVar(&cfg.System, "s", prompts.DefaultSystemPrompt, "system prompt for chat mode")
+	fs.StringVar(&cfg.System, "s", "", "custom system prompt, kept for the turns that follow; -s '' sends none")
+	fs.BoolVar(&cfg.BuiltinSystem, "builtin-system", false, "Restore the built-in system prompt. Each run builds it from the tools it advertises.")
 	fs.StringVar(&cfg.Developer, "developer", "", "developer instruction saved before the first new user turn (OpenAI, or Argo gpt* without -chat-completions)")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort hint: none, minimal, low, medium, high, xhigh, max")
 	fs.StringVar(&cfg.ReasoningMode, "reasoning-mode", "", "Responses API reasoning mode: standard, pro (pro is GPT-5.6 only)")
@@ -214,16 +235,14 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.IntVar(&cfg.Retries, "retries", retry.DefaultMaxRetries, "number of retry attempts for failed requests")
 
 	// Session Options
-	fs.StringVar(&cfg.Resume, "resume", "", "resume session or branch by ID/path")
-	fs.StringVar(&cfg.Branch, "branch", "", "create branch from message ID")
-	fs.BoolVar(&cfg.ShowSessions, "show-sessions", false, "display all conversation trees")
+	fs.StringVar(&cfg.Resume, "resume", "", "continue session S after its newest message, or after message M with S/M")
+	fs.BoolVar(&cfg.ShowSessions, "show-sessions", false, "list sessions with their message trees")
 	fs.BoolVar(&cfg.NoSession, "no-session", false, "disable session creation")
-	fs.StringVar(&cfg.Delete, "delete", "", "delete node and its descendants")
-	fs.StringVar(&cfg.Show, "show", "", "show session or message by ID/path")
+	fs.StringVar(&cfg.Delete, "delete", "", "delete session S, or message M with S/M and every message after it")
+	fs.StringVar(&cfg.Show, "show", "", "print the history ending at the newest message of session S, or at message M with S/M")
 	fs.StringVar(&cfg.SessionsDir, "sessions-dir", "", "custom sessions directory (default: ~/.lmc/sessions)")
 	fs.StringVar(&cfg.LogDir, "log-dir", "", "custom log directory (default: ~/.lmc/logs)")
 	fs.StringVar(&cfg.LogLevel, "log-level", "INFO", "log level (DEBUG, INFO, WARN, ERROR)")
-	fs.BoolVar(&cfg.SkipFlockCheck, "skip-flock-check", false, "skip file locking check")
 }
 
 // printUsage prints a custom usage message
@@ -263,8 +282,9 @@ Examples:
   # Ask about an image (repeat -image to attach several)
   echo "What is in this picture?" | %s -argo-user myuser -image photo.png
 
-  # Resume a session
+  # Continue a session after its newest message, or after message 000c
   echo "Continue from where we left off" | %s -argo-user myuser -resume 001a
+  echo "Ask this instead" | %s -argo-user myuser -resume 001a/000c
 
   # Hold a conversation, one turn per line, until Ctrl-D
   %s -argo-user myuser -repl
@@ -272,29 +292,31 @@ Examples:
   # Show all conversation trees
   %s -argo-user myuser -show-sessions
 `,
-		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+		os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+}
+
+// Store opens the sessions directory the run uses.
+func (c Config) Store() *session.Store {
+	if c.SessionsDir != "" {
+		return session.Open(c.SessionsDir)
+	}
+	return session.Open(session.DefaultDir())
 }
 
 // RequestOptions converts parsed CLI flags into the concrete value consumed by
-// core/session code.
+// core/session code. The system prompt is the one the run's settings call
+// for, empty included: the custom prompt, or the built-in prompt for the
+// tools the run advertises.
 func (c Config) RequestOptions() core.RequestOptions {
-	effectiveSystem := c.System
-	if c.EnableTool && !c.SystemExplicitlySet {
-		effectiveSystem = core.ToolSystemPromptFor(c.ExcludedTools)
-	}
-
 	argoEnv := c.ArgoEnv
 	if argoEnv == "" {
 		argoEnv = providerconfig.ResolveArgoEnvironment(c.ArgoDev, c.ArgoTest)
 	}
 
-	return core.RequestOptions{
+	opts := core.RequestOptions{
 		Context:               c.Context,
 		User:                  c.ArgoUser,
 		Model:                 c.Model,
-		System:                c.System,
-		EffectiveSystem:       effectiveSystem,
-		SystemExplicitlySet:   c.SystemExplicitlySet,
 		Developer:             c.Developer,
 		Env:                   argoEnv,
 		ArgoLegacy:            c.ArgoLegacy,
@@ -321,11 +343,18 @@ func (c Config) RequestOptions() core.RequestOptions {
 		MaxToolRounds:         c.MaxToolRounds,
 		MaxToolParallel:       c.MaxToolParallel,
 		ToolMaxOutputBytes:    c.ToolMaxOutputBytes,
-		Resume:                c.Resume,
-		Branch:                c.Branch,
 		Images:                append([]core.ImageBlock(nil), c.Images...),
 		ExcludedTools:         append([]string(nil), c.ExcludedTools...),
 	}
+	return UseSystemPrompt(opts, c.Settings)
+}
+
+// UseSystemPrompt makes the prompt settings call for, empty included, the
+// one a request with opts sends.
+func UseSystemPrompt(opts core.RequestOptions, settings session.Settings) core.RequestOptions {
+	prompt := session.SystemPrompt(settings, opts)
+	opts.System, opts.EffectiveSystem, opts.SystemExplicitlySet = prompt, prompt, true
+	return opts
 }
 
 // removedFlags answers the mode flags lmc replaced when their modes became

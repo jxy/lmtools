@@ -6,7 +6,7 @@ import (
 	"io"
 	"lmtools/internal/core"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"net/http"
 	"os"
@@ -126,9 +126,9 @@ func TestREPLPersistenceFailureStopsWithReadableDiagnostic(t *testing.T) {
 				if err := os.WriteFile(blocked, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				session.SetSessionsDir(blocked)
+				te.env.store = session.Open(blocked)
 			case "assistant save":
-				afterTurnCommitForTest = func(sess *session.Session) { replaceWithFile(t, sess.Path) }
+				afterTurnCommitForTest = func(sess *session.Session) { replaceWithFile(t, filepath.Join(te.sessionsDir, sess.Number)) }
 				t.Cleanup(func() { afterTurnCommitForTest = nil })
 			}
 			loop, input, _ := newTestLoop(t, te)
@@ -140,7 +140,7 @@ func TestREPLPersistenceFailureStopsWithReadableDiagnostic(t *testing.T) {
 			te.env.stderr, te.env.answersOnScreen = diag, true
 			te.env.notifier = ui.NewREPLNotifier(diag)
 			typeTurns(t, input, "first\nsecond\n", true)
-			stop := loop.run(false)
+			stop := loop.run()
 			if stop == nil || !strings.Contains(stop.Error(), "answer could not be saved") {
 				t.Fatalf("REPL did not stop on failed persistence: %v", stop)
 			}

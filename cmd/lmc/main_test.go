@@ -7,15 +7,14 @@ import (
 	"lmtools/internal/config"
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/providerconfig"
 	"lmtools/internal/providerrequest"
+	"lmtools/internal/session"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestMainHelpFlags(t *testing.T) {
@@ -88,7 +87,7 @@ func TestPersistAssistantOnlyWarnsButDoesNotFailOnSaveError(t *testing.T) {
 	err := persistAssistantOnly(
 		context.Background(),
 		core.Response{Text: "assistant text"},
-		&session.Session{Path: filepath.Join(t.TempDir(), "missing-session")},
+		&session.Session{Store: session.Open(filepath.Join(t.TempDir(), "sessions")), Number: "0001"},
 		&config.Config{},
 		notifier,
 		"gpt-test",
@@ -330,23 +329,15 @@ func writeTestAPIKeyFile(t *testing.T, key string) string {
 
 func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testing.T) {
 	ctx := context.Background()
-	oldDir := session.GetSessionsDir()
-	session.SetSessionsDir(t.TempDir())
-	t.Cleanup(func() { session.SetSessionsDir(oldDir) })
-
-	sess, err := session.CreateSession("session system", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
-	appendTestSessionMessage(t, ctx, sess, core.RoleUser, "hello")
-	appendTestSessionMessage(t, ctx, sess, core.RoleAssistant, "hi")
+	dir := t.TempDir()
+	sess := newTestSession(t, session.Open(dir), textEntry(core.RoleUser, "hello"), textEntry(core.RoleAssistant, "hi"))
 
 	cfg, err := config.ParseFlags([]string{
 		"-provider", "openai",
 		"-provider-url", "http://example.test/v1",
 		"-chat-completions",
-		"-resume", session.GetSessionID(sess.Path),
-		"-sessions-dir", session.GetSessionsDir(),
+		"-resume", sess.Number,
+		"-sessions-dir", dir,
 		"-print-curl",
 	})
 	if err != nil {
@@ -354,11 +345,11 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	}
 
 	opts := cfg.RequestOptions()
-	plan, err := prepareSessionRequestPlan(ctx, &cfg, opts, core.NewTestNotifier(), core.TestToolUI{}, "preview question", false, session.PendingToolPreview)
+	plan, err := cfg.Store().Prepare(ctx, cfg.Start, cfg.Change, session.Turn{Prompt: "preview question"}, opts, session.PendingToolPreview)
 	if err != nil {
-		t.Fatalf("prepareSessionRequestPlan() error = %v", err)
+		t.Fatalf("Prepare() error = %v", err)
 	}
-	rb, err := buildHTTPRequest(ctx, &cfg, opts, plan, "preview question")
+	rb, err := buildHTTPRequest(ctx, &cfg, opts, plan.Messages, "preview question")
 	if err != nil {
 		t.Fatalf("buildHTTPRequest() error = %v", err)
 	}
@@ -378,21 +369,14 @@ func TestBuildPrintCurlRequestResumeAppendsInputWithoutMutatingSession(t *testin
 	if last["role"] != "user" || last["content"] != "preview question" {
 		t.Fatalf("last message = %#v, want preview user input", last)
 	}
-	if _, err := os.Stat(filepath.Join(sess.Path, "0003.json")); !os.IsNotExist(err) {
-		t.Fatalf("print-curl preview mutated session, 0003.json stat err = %v", err)
+	if newest, err := cfg.Store().Newest(sess.Number); err != nil || newest != sess.Head {
+		t.Fatalf("print-curl preview mutated the session: newest %s, err %v", newest, err)
 	}
 }
 
 func TestPersistAssistantOnlyPersistsWithoutPrinting(t *testing.T) {
 	ctx := context.Background()
-	oldDir := session.GetSessionsDir()
-	session.SetSessionsDir(t.TempDir())
-	t.Cleanup(func() { session.SetSessionsDir(oldDir) })
-
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatalf("CreateSession() error = %v", err)
-	}
+	sess := newTestSession(t, session.Open(t.TempDir()))
 	response := core.Response{Text: "assistant answer"}
 	out, err := captureStdout(t, func() error {
 		return persistAssistantOnly(ctx, response, sess, &config.Config{}, core.NewTestNotifier(), "test-model")
@@ -403,11 +387,7 @@ func TestPersistAssistantOnlyPersistsWithoutPrinting(t *testing.T) {
 	if out != "" {
 		t.Fatalf("stdout = %q, want presentation to remain owned by responsePresenter", out)
 	}
-	messages, err := session.BuildMessagesWithToolInteractions(ctx, sess.Path)
-	if err != nil {
-		t.Fatalf("BuildMessagesWithToolInteractions() error = %v", err)
-	}
-	if got := strings.Join(lmcTypedTextLines(messages), "\n"); got != "assistant:assistant answer" {
+	if got := strings.Join(lmcTypedTextLines(historyOf(t, sess)), "\n"); got != "assistant:assistant answer" {
 		t.Fatalf("session messages = %q, want saved assistant response", got)
 	}
 }
@@ -565,18 +545,6 @@ func (e testError) Error() string {
 
 func errorf(format string, args ...interface{}) error {
 	return testError{msg: format}
-}
-
-func appendTestSessionMessage(t *testing.T, ctx context.Context, sess *session.Session, role core.Role, content string) {
-	t.Helper()
-	_, err := session.AppendMessageWithToolInteraction(ctx, sess, session.Message{
-		Role:      role,
-		Content:   content,
-		Timestamp: time.Now(),
-	}, nil, nil)
-	if err != nil {
-		t.Fatalf("AppendMessageWithToolInteraction(%s, %q) error = %v", role, content, err)
-	}
 }
 
 func captureStdout(t *testing.T, fn func() error) (string, error) {

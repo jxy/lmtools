@@ -7,6 +7,7 @@ import (
 	"io"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
+	"lmtools/internal/session"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -191,27 +192,13 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 				t.Fatalf("provider did not receive explicit user denial and attribution: %s", captured[1])
 			}
 
-			files, err := filepath.Glob(filepath.Join(r.sessionsDir, "*", "*.tools.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
 			found = false
-			for _, path := range files {
-				data, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var interaction core.ToolInteraction
-				if err := json.Unmarshal(data, &interaction); err != nil {
-					t.Fatal(err)
-				}
-				for _, result := range interaction.Results {
-					if result.ID == "denied-1" {
-						if test.approved {
-							found = !result.NotRun && result.Error == "" && result.Reason == ""
-						} else {
-							found = result.NotRun && result.Code == lmerrors.ErrCodeNotApproved && result.Error == denial && result.Reason == denial
-						}
+			for _, result := range allToolResults(t, r.sessionsDir) {
+				if result.ID == "denied-1" {
+					if test.approved {
+						found = !result.NotRun && result.Error == "" && result.Reason == ""
+					} else {
+						found = result.NotRun && result.Code == lmerrors.ErrCodeNotApproved && result.Error == denial && result.Reason == denial
 					}
 				}
 			}
@@ -220,4 +207,32 @@ func testApprovalDraftRoundTrip(t *testing.T, test approvalDraftCase) {
 			}
 		})
 	}
+}
+
+// allToolResults returns every tool result saved in the sessions directory
+// dir, on every branch.
+func allToolResults(t *testing.T, dir string) []core.ToolResult {
+	t.Helper()
+	store := session.Open(dir)
+	sessions, err := store.Sessions()
+	if err != nil {
+		t.Fatalf("Sessions() error = %v", err)
+	}
+	var results []core.ToolResult
+	for _, info := range sessions {
+		tree, err := store.Tree(info.Number)
+		if err != nil {
+			t.Fatalf("Tree(%s) error = %v", info.Number, err)
+		}
+		for id := range tree.Messages {
+			c, err := store.Content(session.Ref{Session: info.Number, Message: id})
+			if err != nil {
+				t.Fatalf("Content(%s/%s) error = %v", info.Number, id, err)
+			}
+			if c.Tools != nil {
+				results = append(results, c.Tools.Results...)
+			}
+		}
+	}
+	return results
 }

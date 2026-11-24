@@ -45,8 +45,8 @@ func TestREPLInterruptedAnswerKeepsWhatWasRead(t *testing.T) {
 	typeTurns(t, w, "tell a story\n", false)
 
 	result := make(chan error, 1)
-	go func() { result <- loop.run(false) }()
-	notifier.waitFor(t, "Turn cancelled; partial assistant response saved through message")
+	go func() { result <- loop.run() }()
+	notifier.waitFor(t, "Turn cancelled; saved through 0001/0003, partial assistant response.")
 	typeTurns(t, w, "continue\n", true)
 	select {
 	case <-result:

@@ -45,7 +45,10 @@ type Change struct {
 	Window *int
 	// Trigger sets the trigger; zero restores the default.
 	Trigger *int
-	Early   *bool
+	// Early sets early cuts; DefaultEarly returns them to their default,
+	// which each run resolves from the notebook and the policy.
+	Early        *bool
+	DefaultEarly bool
 	// Catalog is the snapshot the caller took of the notebook, which a
 	// record keeps when the notebook or the view changes.
 	Catalog *string
@@ -83,6 +86,8 @@ func (s Settings) Apply(c Change) (Settings, []string) {
 	if c.Early != nil {
 		early := *c.Early
 		next.Early = &early
+	} else if c.DefaultEarly {
+		next.Early = nil
 	}
 	if next.Notebook == "" {
 		next.View, next.Catalog = "", ""
@@ -116,6 +121,22 @@ func SettingsAt(lineage []Message) Settings {
 		}
 	}
 	return Settings{}
+}
+
+// SettingsAt returns the settings in force at the message at names, or the
+// defaults for a session without messages.
+func (s *Store) SettingsAt(at Ref) (Settings, error) {
+	if at.Message == "" {
+		if _, err := s.Locate(at); err != nil {
+			return Settings{}, err
+		}
+		return Settings{}, nil
+	}
+	lineage, err := s.Lineage(at)
+	if err != nil {
+		return Settings{}, err
+	}
+	return SettingsAt(lineage), nil
 }
 
 // SystemPrompt returns the system prompt a request under s sends: the custom

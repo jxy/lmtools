@@ -100,7 +100,7 @@ func TestREPLFullSizeDraftCanBeRecalledUnchanged(t *testing.T) {
 			owner.term.(*terminalReader).held = []byte("\n" + recall + "/exit\n")
 			timer := time.AfterFunc(3*time.Second, func() { loop.signals.endProcess(context.DeadlineExceeded) })
 			defer timer.Stop()
-			if err := loop.run(false); err != nil {
+			if err := loop.run(); err != nil {
 				t.Fatal(err)
 			}
 			requests := server.GetRequests()

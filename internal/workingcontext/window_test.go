@@ -9,7 +9,7 @@ import (
 	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
 	lmerrors "lmtools/internal/errors"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"net/http"
 	"slices"
 	"strings"
@@ -17,29 +17,36 @@ import (
 )
 
 // storedConversation is a saved session that a test extends one exchange
-// at a time.
+// at a time, read back as a request's history. Its requests send no system
+// prompt.
 type storedConversation struct {
 	t    *testing.T
 	ctx  context.Context
 	s    *session.Session
 	raw  []core.TypedMessage
-	refs []session.ContextRef
+	refs []contextstate.Ref
+	tr   Transcript
 }
 
 func newStoredConversation(t *testing.T) *storedConversation {
 	t.Helper()
-	old := session.GetSessionsDir()
-	session.SetSessionsDir(t.TempDir())
-	t.Cleanup(func() { session.SetSessionsDir(old) })
-	s, err := session.CreateSession("", core.NewTestLogger(false))
+	ctx := context.Background()
+	store := session.Open(t.TempDir())
+	info, _, err := store.Create(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &storedConversation{t: t, ctx: context.Background(), s: s}
+	none := ""
+	c := &storedConversation{t: t, ctx: ctx, s: &session.Session{Store: store, Number: info.Number, Identity: info.Identity}}
+	if _, err := c.s.Append(ctx, session.Entry{Role: core.RoleSystem, Settings: &session.Settings{System: &none}}); err != nil {
+		t.Fatal(err)
+	}
+	c.reload()
+	return c
 }
 
 // exchange saves a question and an answer produced under receipt.
-func (c *storedConversation) exchange(question, answer string, receipt *session.WindowReceipt) {
+func (c *storedConversation) exchange(question, answer string, receipt *contextstate.Receipt) {
 	c.t.Helper()
 	c.ask(question)
 	c.answer(answer, receipt)
@@ -47,16 +54,16 @@ func (c *storedConversation) exchange(question, answer string, receipt *session.
 
 func (c *storedConversation) ask(question string) {
 	c.t.Helper()
-	if _, err := session.AppendMessageWithToolInteraction(c.ctx, c.s, session.Message{Role: core.RoleUser, Content: question}, nil, nil); err != nil {
+	if _, err := c.s.Append(c.ctx, session.Entry{Role: core.RoleUser, Content: session.Content{Blocks: []core.Block{core.TextBlock{Text: question}}}}); err != nil {
 		c.t.Fatal(err)
 	}
 }
 
 // answer saves a final answer produced under receipt.
-func (c *storedConversation) answer(text string, receipt *session.WindowReceipt) {
+func (c *storedConversation) answer(text string, receipt *contextstate.Receipt) {
 	c.t.Helper()
-	c.s.WindowUsed = receipt
-	if _, err := session.SaveAssistantResponse(c.ctx, c.s, core.Response{Text: text}, "model"); err != nil {
+	c.s.UseReceipt(receipt)
+	if _, err := c.s.SaveReply(c.ctx, core.Response{Text: text}, "model"); err != nil {
 		c.t.Fatal(err)
 	}
 	c.reload()
@@ -66,10 +73,10 @@ func (c *storedConversation) answer(text string, receipt *session.WindowReceipt)
 func (c *storedConversation) toolTurn(question, tool, output string) {
 	c.t.Helper()
 	c.ask(question)
-	if _, err := session.SaveAssistantResponseWithTools(c.ctx, c.s, "", []core.ToolCall{{ID: "call", Name: tool, Args: json.RawMessage(`{}`)}}, "model"); err != nil {
+	if _, err := c.s.SaveReply(c.ctx, core.Response{ToolCalls: []core.ToolCall{{ID: "call", Name: tool, Args: json.RawMessage(`{}`)}}}, "model"); err != nil {
 		c.t.Fatal(err)
 	}
-	if _, err := session.SaveToolResults(c.ctx, c.s, []core.ToolResult{{ID: "call", Output: output}}, ""); err != nil {
+	if _, err := c.s.SaveToolResults(c.ctx, []core.ToolResult{{ID: "call", Output: output}}, ""); err != nil {
 		c.t.Fatal(err)
 	}
 	c.reload()
@@ -77,17 +84,11 @@ func (c *storedConversation) toolTurn(question, tool, output string) {
 
 func (c *storedConversation) reload() {
 	c.t.Helper()
-	var err error
-	if c.s, err = session.OpenSession(c.ctx, c.s.Path); err != nil {
-		c.t.Fatal(err)
-	}
-	read, err := session.CreateContextBuilder(c.ctx, c.s)
+	view, err := c.s.View(core.RequestOptions{})
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	if c.raw, c.refs, err = read(); err != nil {
-		c.t.Fatal(err)
-	}
+	c.raw, c.refs, c.tr = view.Messages, view.Refs, view.Transcript
 }
 
 // next projects the request that a further question would send.
@@ -97,8 +98,7 @@ func (c *storedConversation) next(e *Engine) ([]core.TypedMessage, error) {
 
 // request projects the saved conversation followed by pending input.
 func (c *storedConversation) request(e *Engine, pending ...core.TypedMessage) ([]core.TypedMessage, error) {
-	refs, transcript := saved(c.refs, c.s)
-	return e.Project(c.ctx, append(slices.Clone(c.raw), pending...), refs, transcript, false)
+	return e.Project(c.ctx, append(slices.Clone(c.raw), pending...), c.refs, c.tr, false)
 }
 
 func recordNotices(e *Engine) *[]string {
@@ -563,8 +563,7 @@ func TestPreviewNeedsTheMeasurementTheRunWouldMake(t *testing.T) {
 		e := testEngine(contextcfg.Handoff)
 		e.Write = func(context.Context, string, string) (string, error) { return "HANDOFF", nil }
 		e.CountText = func(_ context.Context, text string) (int, error) { return countQuestions(text), nil }
-		refs, transcript := saved(c.refs, c.s)
-		view, err := e.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", question)), refs, transcript, preview)
+		view, err := e.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", question)), c.refs, c.tr, preview)
 		b, _ := json.Marshal(view)
 		return e, string(b), err
 	}
@@ -639,20 +638,18 @@ func TestDeferredRecoveryUsesAHandoffAnotherRunPublished(t *testing.T) {
 	if _, err := c.next(failing); err != nil || !failing.current.Fallback || failing.deferred == "" {
 		t.Fatal(failing.current, err)
 	}
-	raw, refs := c.raw, c.refs
+	raw, refs, earlier := c.raw, c.refs, c.tr
 	c.exchange("continue", "answer under the archive note", failing.Receipt())
 	preview := testEngine(contextcfg.Handoff)
 	preview.Write = refuse
-	previewRefs, previewTranscript := saved(c.refs, c.s)
-	view, err := preview.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", "continue")), previewRefs, previewTranscript, true)
+	view, err := preview.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", "continue")), c.refs, c.tr, true)
 	b, _ := json.Marshal(view)
 	if err != nil || !strings.Contains(string(b), "history tools are unavailable now") {
 		t.Fatal("preview of the deferred recovery:", err)
 	}
 	other := testEngine(contextcfg.Handoff)
 	other.Write = func(context.Context, string, string) (string, error) { return "REBUILT-HANDOFF", nil }
-	otherRefs, otherTranscript := saved(refs, nil)
-	if _, err := other.Project(c.ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), otherRefs, otherTranscript, false); err != nil || other.current.Fallback {
+	if _, err := other.Project(c.ctx, append(slices.Clone(raw), core.NewTextMessage("user", "continue")), refs, earlier, false); err != nil || other.current.Fallback {
 		t.Fatal(other.current, err)
 	}
 	later := testEngine(contextcfg.Handoff)
@@ -662,12 +659,6 @@ func TestDeferredRecoveryUsesAHandoffAnotherRunPublished(t *testing.T) {
 	if err != nil || later.current.Fallback || !strings.Contains(string(b), "REBUILT-HANDOFF") {
 		t.Fatalf("fallback %t: %v", later.current.Fallback, err)
 	}
-}
-
-// saved returns the engine's refs and the transcript of a history read from
-// a saved session.
-func saved(refs []session.ContextRef, s *session.Session) ([]contextstate.Ref, Transcript) {
-	return session.EngineRefs(refs), session.NewTranscript(refs, s)
 }
 
 // savedInMemory is a memory transcript that reports its history saved, for

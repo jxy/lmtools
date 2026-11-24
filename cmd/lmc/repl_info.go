@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/providers"
+	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
 	"lmtools/internal/version"
@@ -17,8 +18,6 @@ import (
 )
 
 func (l *replLoop) showInfo() {
-	ctx, end := l.commandContext()
-	defer end()
 	n := l.env.notifier
 	model := core.EffectiveChatModel(l.base)
 	modelLabel := model
@@ -72,16 +71,24 @@ func (l *replLoop) showInfo() {
 			n.Promptf("Notebook: %s (%s)\n", settings.Notebook, settings.NotebookView())
 		}
 	}
-	sess, err := l.currentSession(ctx)
-	switch {
-	case err != nil:
-		n.Promptf("Session: unavailable (%v)\n", err)
-	case sess == nil:
+	at := l.current()
+	if at.Session == "" {
 		n.Promptf("Session: not created yet\n")
-	default:
-		n.Promptf("Session: %s\n", session.GetSessionID(sess.Path))
-		if sess.Head != nil {
-			n.Promptf("Current message: %s/%s\n", session.GetSessionID(sess.Head.Path), sess.Head.ID)
+	} else {
+		n.Promptf("Session: %s\n", at.Session)
+		if at.Message != "" {
+			others, err := l.alternatives(at)
+			switch {
+			case errors.Is(err, session.ErrNotFound):
+				n.Promptf("Current message: %s, deleted\n", at)
+			case err != nil:
+				n.Promptf("Current message: %s\nAlternatives: unavailable (%v)\n", at, err)
+			default:
+				n.Promptf("Current message: %s\n", at)
+				if len(others) > 0 {
+					n.Promptf("Alternatives: %s\n", strings.Join(others, ", "))
+				}
+			}
 		}
 	}
 	pending := l.pendingDescription()
@@ -124,14 +131,32 @@ func (l *replLoop) showInfo() {
 	}
 }
 
-func (l *replLoop) currentSession(ctx context.Context) (*session.Session, error) {
+// current names where the conversation is: the message the loop's next
+// turn follows.
+func (l *replLoop) current() session.Ref {
 	if l.from != nil {
-		return l.from, nil
+		return l.from.Ref()
 	}
-	if session.IsSessionResume(l.base.Resume) {
-		return session.OpenSession(ctx, l.base.Resume)
+	return l.env.cfg.Start
+}
+
+// alternatives lists the other children of the parent of the message at.
+func (l *replLoop) alternatives(at session.Ref) ([]string, error) {
+	tree, err := l.env.store.Tree(at.Session)
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	m, ok := tree.Messages[at.Message]
+	if !ok {
+		return nil, fmt.Errorf("message %s: %w", at, session.ErrNotFound)
+	}
+	var others []string
+	for _, id := range tree.Children[m.Parent] {
+		if id != at.Message {
+			others = append(others, id)
+		}
+	}
+	return others, nil
 }
 
 // showConversation prints the saved conversation: all of it with the system
@@ -170,17 +195,13 @@ func (l *replLoop) showConversation(argument string) {
 	}
 	ctx, end := l.commandContext()
 	defer end()
-	sess, err := l.currentSession(ctx)
-	if err != nil {
-		l.env.notifier.Errorf("Read session: %v", err)
-		return
-	}
-	if sess == nil {
+	at := l.current()
+	if at.Session == "" {
 		l.env.notifier.Infof("No saved conversation yet.")
 		return
 	}
 	var b strings.Builder
-	err = session.ShowSessionWithOptions(ctx, &b, sess, l.env.notifier, options)
+	err := l.env.store.Show(ctx, &b, at, options)
 	l.view(ctx, b.String())
 	if err != nil {
 		l.env.notifier.Errorf("Show conversation: %v", err)

@@ -6,6 +6,7 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/prompts"
+	"lmtools/internal/session"
 	"strconv"
 	"strings"
 	"unicode"
@@ -273,9 +274,17 @@ func (l *replLoop) setModel(model string) {
 	}
 	next := l.base
 	next.Model = model
-	if next.Context.Notebook != "" {
+	if next.Context.Enabled() {
+		var lineage []session.Message
+		if at := l.current(); at.Message != "" {
+			var err error
+			if lineage, err = l.env.store.Lineage(at); err != nil {
+				l.env.notifier.Errorf("%v", err)
+				return
+			}
+		}
 		ctx, end := l.commandContext()
-		err := resolveNotebookWindow(ctx, l.env.cfg, &next, l.env.notifier, l.env.logDir)
+		err := resolveWindow(ctx, l.env.cfg, &next, l.env.notifier, l.env.logDir, lineage)
 		end()
 		if err != nil {
 			l.env.notifier.Errorf("%v", err)

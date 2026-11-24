@@ -16,10 +16,10 @@ import (
 	"lmtools/internal/logger"
 	"lmtools/internal/mcp"
 	"lmtools/internal/modelcatalog"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/providerrequest"
 	"lmtools/internal/providers"
 	"lmtools/internal/retry"
+	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"lmtools/internal/version"
 	"lmtools/internal/workingcontext"
@@ -44,7 +44,7 @@ const (
 // commits once the response parses, then either the tool loop or the answer
 // save writes the rest. The outcome records how far the writes got on every
 // exit.
-func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, inputStr string, plan *session.RequestPlan) (out turnOutcome, err error) {
+func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions, inputStr string, plan *session.Plan) (out turnOutcome, err error) {
 	ctx = logger.WithNewRequestCounter(ctx)
 	start := time.Now()
 	defer func() { logRequestEnd(ctx, start, err) }()
@@ -89,26 +89,20 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		env.served = response.Model
 	}
 
-	failSetup := func(cause error) (turnOutcome, error) {
-		if out.Session == nil {
-			return out, cause
-		}
-		log := logger.From(ctx)
-		result := core.PersistUnstartedResponse(ctx, response, core.ToolExecutionConfig{
-			Store: session.NewStore(out.Session, log), Journal: session.NewToolJournal(), ActualModel: rb.Model,
-		}, log, cause)
-		out.UnsavedAnswer = result.UnsavedAnswer
-		return out, result.Error
-	}
 	if plan != nil {
 		// The response has arrived, so its turn is recorded even if the run
 		// is being cancelled.
 		commitCtx, cancel := core.PersistenceContext(ctx)
-		committed, err := plan.Commit(commitCtx)
+		commit := plan.Commit
+		if commitForTest != nil {
+			commit = func(ctx context.Context) (*session.Session, error) { return commitForTest(ctx, plan) }
+		}
+		committed, err := commit(commitCtx)
 		cancel()
-		if committed != nil {
-			// Set even on failure: a commit that fails part way returns
-			// the session its writes reached.
+		announceOldSessions(env, plan)
+		if committed != nil && (err == nil || committed.Head != plan.Start().Message) {
+			// Set on a failure too when the commit saved part of its
+			// batch: it returns the session at the last message it saved.
 			out.Session = committed
 		}
 		if err != nil {
@@ -121,19 +115,9 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 			return out, err
 		}
 		out.PlanCommitted = true
+		announceCommit(env, plan, committed)
 		if afterTurnCommitForTest != nil {
 			afterTurnCommitForTest(committed)
-		}
-		if opts.Context.Enabled() {
-			if env.window != nil {
-				committed.WindowUsed = env.window.Receipt()
-			}
-			bindCtx, done := core.PersistenceContext(ctx)
-			err = session.BindContext(bindCtx, committed, opts.Context)
-			done()
-			if err != nil {
-				return failSetup(fmt.Errorf("save session context settings: %w", err))
-			}
 		}
 	}
 
@@ -145,7 +129,15 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		logger.From(ctx).Infof("Handling tool execution with %d tool calls", len(response.ToolCalls))
 		tc, err := newToolContext(ctx, env, opts, out.Session, &response, rb, inputStr, presenter)
 		if err != nil {
-			return failSetup(err)
+			if out.Session == nil {
+				return out, err
+			}
+			log := logger.From(ctx)
+			result := core.PersistUnstartedResponse(ctx, response, core.ToolExecutionConfig{
+				Store: out.Session.ToolStore(), Journal: env.store.Journal(), ActualModel: rb.Model,
+			}, log, err)
+			out.UnsavedAnswer = result.UnsavedAnswer
+			return out, result.Error
 		}
 		result := core.HandleToolExecution(tc)
 		out.UnsavedAnswer = result.UnsavedAnswer
@@ -154,6 +146,37 @@ func executeRequest(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 
 	out.UnsavedAnswer = persistAssistantOnly(ctx, response, out.Session, env.cfg, env.notifier, rb.Model)
 	return out, nil
+}
+
+// commitForTest, when set, commits a turn's plan in place of Plan.Commit.
+var commitForTest func(context.Context, *session.Plan) (*session.Session, error)
+
+// announceOldSessions tells, after the commit that made the first session
+// in a directory of old sessions, whether it succeeded or not, how many old
+// sessions the directory holds and how to remove them.
+func announceOldSessions(env *turnEnv, plan *session.Plan) {
+	if plan.OldSessions > 0 {
+		env.notifier.Warnf("%s holds %s written by an older lmc, which this version cannot read. -show-sessions lists them; move the numbered directories out of %s, or delete them with -delete.", env.store.Dir(), core.Plural(plan.OldSessions, "session"), env.store.Dir())
+	}
+}
+
+// announceCommit names the settings a commit changed in a resumed
+// conversation and the message they apply from.
+func announceCommit(env *turnEnv, plan *session.Plan, sess *session.Session) {
+	if plan.Start().Session != "" && len(plan.Changed) > 0 && plan.SettingsRecord != "" {
+		env.notifier.Infof("Changed the %s from message %s on.", joinNames(plan.Changed), sess.Ref().At(plan.SettingsRecord))
+	}
+}
+
+// joinNames lists names in a sentence: a, b and c.
+func joinNames(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions, sess *session.Session, response *core.Response, rb core.RequestBuild, inputStr string, output core.ResponseOutput) (core.ToolContext, error) {
@@ -173,7 +196,7 @@ func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 		ActualModel: rb.Model,
 	}
 	if sess != nil {
-		execCfg.Journal = session.NewToolJournal()
+		execCfg.Journal = env.store.Journal()
 	}
 
 	return core.ToolContext{
@@ -192,26 +215,19 @@ func newToolContext(ctx context.Context, env *turnEnv, opts core.RequestOptions,
 	}, nil
 }
 
-func createToolStoreAndMessageBuilder(ctx context.Context, opts core.RequestOptions, sess *session.Session, inputStr string) (core.SessionStore, func(string) ([]core.TypedMessage, error)) {
+// createToolStoreAndMessageBuilder returns where a tool loop saves its rounds
+// and how it builds each follow-up request: through the session's head,
+// which every save moves, or in memory with -no-session.
+func createToolStoreAndMessageBuilder(opts core.RequestOptions, sess *session.Session, inputStr string) (core.SessionStore, func(string) ([]core.TypedMessage, error)) {
 	if sess != nil {
-		return session.NewStore(sess, logger.From(ctx)), createMessageBuilder(ctx, sess)
+		return sess.ToolStore(), func(string) ([]core.TypedMessage, error) {
+			view, err := sess.View(opts)
+			return view.Messages, err
+		}
 	}
 
 	store := core.NewMemorySessionStoreForRequest(opts, inputStr)
 	return store, store.Messages
-}
-
-// createMessageBuilder builds each follow-up request through the session's
-// pinned head, so a message another writer appended cannot enter it.
-func createMessageBuilder(ctx context.Context, sess *session.Session) func(string) ([]core.TypedMessage, error) {
-	cached, err := session.CreateCachedMessageBuilderForSession(ctx, sess)
-	if err == nil {
-		return cached
-	}
-	logger.From(ctx).Warnf("Failed to create cached message builder: %v", err)
-	return func(string) ([]core.TypedMessage, error) {
-		return session.BuildMessagesForSession(ctx, sess)
-	}
 }
 
 func finishToolExecution(result core.ToolExecutionResult) error {
@@ -288,9 +304,8 @@ func run(notifier core.Notifier) error {
 	}
 	defer logger.Close()
 
-	// Setup sessions directory and configuration
-	if err := setupSessionsConfig(ctx, cfg); err != nil {
-		return err
+	if cfg.SessionsDir != "" {
+		logger.From(ctx).Infof("Using custom sessions directory: %s", cfg.SessionsDir)
 	}
 
 	// Handle special flags that don't require full processing
@@ -298,20 +313,21 @@ func run(notifier core.Notifier) error {
 		return err
 	}
 
-	if err := resolveNotebookWindow(ctx, &cfg, &opts, notifier, logDir); err != nil {
-		return err
-	}
-
-	isRegeneration, err := branchRegenerates(cfg.Branch)
-	if err != nil {
-		return err
-	}
-	// A loop keeps the images for its first prompt, and sends none with a
-	// regeneration; a single run has no other turn to give them.
-	if !cfg.REPL {
-		if err := validateImageTurn(isRegeneration, opts.Images); err != nil {
+	// A run saves its session once the provider has answered, so a
+	// sessions directory that cannot hold sessions is refused before then.
+	if !cfg.NoSession {
+		if err := cfg.Store().Check(); err != nil {
 			return err
 		}
+	}
+	var lineage []session.Message
+	if !cfg.NoSession && cfg.Start.Message != "" {
+		if lineage, err = cfg.Store().Lineage(cfg.Start); err != nil {
+			return err
+		}
+	}
+	if err := resolveWindow(ctx, &cfg, &opts, notifier, logDir, lineage); err != nil {
+		return err
 	}
 
 	// One reader owns standard input from here on: the prompt, and the
@@ -327,11 +343,11 @@ func run(notifier core.Notifier) error {
 		logger.From(ctx).Debugf("Reading the terminal on standard input as a stream: %v", input.termErr)
 	}
 	if cfg.REPL {
-		return runREPL(ctx, endStartup, signals, &cfg, opts, input, logDir, isRegeneration)
+		return runREPL(ctx, endStartup, signals, &cfg, opts, input, logDir)
 	}
 
 	// Read and validate input
-	inputStr, err := readAndValidateInput(ctx, input, isRegeneration)
+	inputStr, err := readAndValidateInput(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -350,11 +366,60 @@ func run(notifier core.Notifier) error {
 	if approver, ok := env.approver.(*cliApprover); ok {
 		approver.stop = stop
 	}
-	_, err = runTurn(ctx, env, opts, turnInput{text: inputStr, isRegeneration: isRegeneration})
+	out, err := runTurn(ctx, env, opts, turnInput{text: inputStr})
+	reportSaved(notifier, out, err, inputStr != "" || len(opts.Images) > 0)
 	if cause := context.Cause(ctx); stdErrors.Is(cause, errEditorTerminal) {
 		return cause
 	}
 	return err
+}
+
+// reportSaved says where a single run's writes ended and, when the run
+// failed after a write, how to continue: a commit that stopped part way says
+// so in its error; a prompt that was not saved, after the results of
+// pending calls were, is sent again from there; and a saved question, tool
+// results or pending calls without an answer are answered by resuming there
+// with empty input. prompted reports that the run had a prompt to save.
+func reportSaved(notifier core.Notifier, out turnOutcome, err error, prompted bool) {
+	if out.Session == nil {
+		return
+	}
+	var partial *session.SaveError
+	switch {
+	case stdErrors.As(err, &partial):
+	case err == nil && out.UnsavedAnswer == nil:
+		notifier.Infof("Saved at %s.", out.Session.Ref())
+	case prompted && !out.PlanCommitted:
+		notifier.Infof("Saved through %s; resume there with the same prompt to retry.", describeHead(out.Session))
+	default:
+		if awaits, _ := out.Session.AwaitsAnswer(); awaits {
+			notifier.Infof("Saved through %s; resume there with empty input to get its answer.", describeHead(out.Session))
+		} else {
+			notifier.Infof("Saved at %s.", out.Session.Ref())
+		}
+	}
+}
+
+// describeHead names the message a session's head is at and what it holds,
+// such as "0001/000e, your question".
+func describeHead(sess *session.Session) string {
+	ref := sess.Ref()
+	if ref.Message == "" {
+		return ref.String()
+	}
+	m, err := sess.Store.Message(ref)
+	if err != nil {
+		return ref.String()
+	}
+	c, err := sess.Store.Content(ref)
+	if err != nil {
+		return ref.String()
+	}
+	kind := session.Kind(m, c)
+	if kind == "user input" {
+		kind = "your question"
+	}
+	return ref.String() + ", " + kind
 }
 
 // warnUnusedReasoningControls warns when reasoning.mode/context are set but the
@@ -440,28 +505,33 @@ func connectMCPServers(ctx context.Context, cfg *config.Config, opts *core.Reque
 	return host, nil
 }
 
-func prepareSessionRequestPlan(ctx context.Context, cfg *config.Config, opts core.RequestOptions, notifier core.Notifier, toolUI core.ToolUI, inputStr string, isRegeneration bool, pendingToolMode session.PendingToolMode) (*session.RequestPlan, error) {
-	if cfg.NoSession {
-		return nil, nil
-	}
-	return session.PrepareRequest(ctx, opts, notifier, toolUI, inputStr, isRegeneration, pendingToolMode)
-}
-
 // handleSpecialFlags handles flags that don't require the full request processing
 func handleSpecialFlags(ctx context.Context, cfg *config.Config, notifier core.Notifier, logDir string) (bool, error) {
-	// Handle show-sessions flag
+	store := cfg.Store()
 	if cfg.ShowSessions {
-		return true, session.ShowSessions(notifier)
+		return true, store.List(os.Stdout)
 	}
-
-	// Handle show flag
 	if cfg.Show != "" {
-		return true, session.ShowDispatcher(cfg.Show, notifier)
+		at, err := resolveShown(store, cfg.Show)
+		if err != nil {
+			return true, err
+		}
+		return true, store.Show(ctx, os.Stdout, at, session.ShowOptions{})
 	}
-
-	// Handle delete flag
 	if cfg.Delete != "" {
-		return true, session.DeleteNode(cfg.Delete)
+		at, err := session.ParseRef(cfg.Delete)
+		if err != nil {
+			return true, err
+		}
+		if err := store.Delete(ctx, at); err != nil {
+			return true, err
+		}
+		if at.Message == "" {
+			notifier.Infof("Deleted session %s.", at)
+		} else {
+			notifier.Infof("Deleted message %s and every message after it.", at)
+		}
+		return true, nil
 	}
 
 	// Handle list-models flag
@@ -507,58 +577,36 @@ func setupLogging(cfg config.Config, notifier core.Notifier) (string, error) {
 	return logDir, nil
 }
 
-// setupSessionsConfig sets up the sessions directory and configuration
-func setupSessionsConfig(ctx context.Context, cfg config.Config) error {
-	managerCfg := session.ManagerConfig{
-		SkipFlockCheck: cfg.SkipFlockCheck,
+// resolveShown resolves a -show reference: a message, or a session's newest
+// message.
+func resolveShown(store *session.Store, text string) (session.Ref, error) {
+	at, err := session.ParseRef(text)
+	if err != nil {
+		return at, err
 	}
-
-	// Set custom sessions directory if provided
-	if cfg.SessionsDir != "" {
-		absDir, err := ensureDirectoryPath(cfg.SessionsDir, "sessions directory")
-		if err != nil {
-			return err
-		}
-
-		managerCfg.SessionsDir = absDir
-		logger.From(ctx).Infof("Using custom sessions directory: %s", absDir)
+	if at, err = store.Locate(at); err != nil {
+		return at, err
 	}
-
-	session.ConfigureDefaultManager(managerCfg)
-
-	return nil
-}
-
-// validateImageTurn refuses -image when the run has no user turn to attach it
-// to. -branch from an assistant message regenerates that answer and sends no
-// new user message, so the images would be read and then dropped without a
-// word; an error names the mismatch instead.
-func validateImageTurn(isRegeneration bool, images []core.ImageBlock) error {
-	if !isRegeneration || len(images) == 0 {
-		return nil
+	if at.Message == "" {
+		at.Message, err = store.Newest(at.Session)
 	}
-	return errors.WrapError("validate input", stdErrors.New("-image needs a user turn; -branch from an assistant message regenerates its answer without one"))
+	return at, err
 }
 
 // readAndValidateInput reads the prompt of a single run, all of standard
 // input up to its end. On a terminal, Ctrl-C ends the read.
-func readAndValidateInput(ctx context.Context, input *inputOwner, isRegeneration bool) (string, error) {
-	// Only read stdin if not regenerating
-	var inputStr string
-	if !isRegeneration {
-		// Read stdin with size limit to prevent DoS
-		inputBytes, err := input.readAll(ctx, constants.MaxCLIInputSize)
-		if err != nil {
-			return "", errors.WrapError("read stdin", err)
-		}
-
-		inputStr = strings.TrimSpace(string(inputBytes))
+func readAndValidateInput(ctx context.Context, input *inputOwner) (string, error) {
+	// Read stdin with size limit to prevent DoS
+	inputBytes, err := input.readAll(ctx, constants.MaxCLIInputSize)
+	if err != nil {
+		return "", errors.WrapError("read stdin", err)
 	}
-	return inputStr, nil
+	return strings.TrimSpace(string(inputBytes)), nil
 }
 
-// buildHTTPRequest builds the HTTP request based on configuration.
-func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, plan *session.RequestPlan, inputStr string) (core.RequestBuild, error) {
+// buildHTTPRequest builds the HTTP request of a turn from its messages, or
+// from the prompt alone when it has none.
+func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.RequestOptions, messages []core.TypedMessage, inputStr string) (core.RequestBuild, error) {
 	var req *http.Request
 	var body []byte
 	var model string
@@ -569,9 +617,9 @@ func buildHTTPRequest(ctx context.Context, cfg *config.Config, opts core.Request
 	actualModel := actualModelForConfig(cfg, opts)
 	logger.From(ctx).Infof("Starting request | Model: %s | Provider: %s", actualModel, cfg.Provider)
 
-	if plan != nil {
+	if messages != nil {
 		toolDefs = toolDefinitionsForOptions(opts)
-		req, body, err = core.BuildChatRequest(opts, plan.Messages, core.ChatBuildOptions{
+		req, body, err = core.BuildChatRequest(opts, messages, core.ChatBuildOptions{
 			ToolDefs: toolDefs,
 			Stream:   opts.StreamChat,
 		})
@@ -827,23 +875,14 @@ func persistAssistantOnly(ctx context.Context, response core.Response, sess *ses
 	// cancelled.
 	ctx, cancel := core.PersistenceContext(ctx)
 	defer cancel()
-	store := session.NewStore(sess, logger.From(ctx))
-	previousPath := sess.Path
-	forksBefore := len(sess.ConflictForks)
-	path, messageID, err := store.SaveAssistantResponse(ctx, response, model)
+	saved, err := sess.SaveReply(ctx, response, model)
 	if err != nil {
 		if !cfg.REPL {
 			notifier.Warnf("Failed to save response to session: %v", err)
 		}
 		return err
 	}
-	// A move to a conflict fork is reported by the turn, as a fork.
-	if path != previousPath && len(sess.ConflictForks) == forksBefore {
-		notifier.Infof("Response saved to sibling branch %s as message %s",
-			session.GetSessionID(path), messageID)
-	} else {
-		logger.From(ctx).Debugf("Response saved to session %s as message %s", session.GetSessionID(path), messageID)
-	}
+	logger.From(ctx).Debugf("Response saved as message %s", sess.Ref().At(saved.ID))
 	return nil
 }
 

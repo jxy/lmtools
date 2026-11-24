@@ -5,6 +5,8 @@ import (
 	"lmtools/internal/contextcfg"
 	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -77,15 +79,44 @@ func TestProjectRecordsTheReceiptForTheNextReply(t *testing.T) {
 	c := newStoredConversation(t)
 	c.exchange("q", "a", nil)
 	e := testEngine(contextcfg.Full)
-	c.s.WindowUsed = nil
-	refs, transcript := saved(c.refs, c.s)
-	if _, err := e.Project(c.ctx, append(c.raw, core.NewTextMessage("user", "next")), refs, transcript, true); err != nil || c.s.WindowUsed != nil {
-		t.Fatalf("a preview recorded %+v: %v", c.s.WindowUsed, err)
+	reply := func() *contextstate.Receipt {
+		t.Helper()
+		m, err := c.s.SaveReply(c.ctx, core.Response{Text: "reply"}, "model")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.Receipt
 	}
+	if _, err := e.Project(c.ctx, append(slices.Clone(c.raw), core.NewTextMessage("user", "next")), c.refs, c.tr, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := reply(); got != nil {
+		t.Fatalf("a preview recorded %+v", got)
+	}
+	c.reload()
 	if _, err := c.next(e); err != nil {
 		t.Fatal(err)
 	}
-	if c.s.WindowUsed == nil || *c.s.WindowUsed != *e.Receipt() {
-		t.Fatalf("recorded %+v, want %+v", c.s.WindowUsed, e.Receipt())
+	if got := reply(); got == nil || !reflect.DeepEqual(*got, *e.Receipt()) {
+		t.Fatalf("recorded %+v, want %+v", got, e.Receipt())
+	}
+}
+
+// A receipt records the model's capacity the run found, with the model and
+// endpoint it belongs to, so a later run with them can take it.
+func TestReceiptRecordsTheCapacity(t *testing.T) {
+	e := testEngine(contextcfg.Full)
+	e.Binding.Capacity = contextcfg.Capacity{Tokens: 4096, Model: "small", Endpoint: "here"}
+	raw := []core.TypedMessage{core.NewTextMessage("user", "q")}
+	refs := MemoryRefs(raw)
+	if _, err := e.Project(context.Background(), raw, refs, MemoryTranscript(refs), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Receipt().Capacity; got == nil || *got != e.Binding.Capacity {
+		t.Fatalf("receipt capacity %+v", got)
+	}
+	e.Binding.Capacity = contextcfg.Capacity{}
+	if got := e.Receipt().Capacity; got != nil {
+		t.Fatalf("an unknown capacity was recorded as %+v", got)
 	}
 }

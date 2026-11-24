@@ -46,7 +46,7 @@ func TestCLIThinkingContentHistoryAndThinking(t *testing.T) {
 				if thoughts != 2 {
 					t.Fatalf("saved thoughts=%d", thoughts)
 				}
-				args = completionArgs(t, server.URL, dir, false, stream, "-log-dir", t.TempDir(), "-resume", sess.Path)
+				args = completionArgs(t, server.URL, dir, false, stream, "-log-dir", t.TempDir(), "-resume", sess.Ref().String())
 				stdout, stderr, err = runLmcCommand(t, getLmcBinary(t), args, "third")
 				if err != nil || stdout != "AUDIT_OK" {
 					t.Fatalf("resume stdout=%q stderr=%s err=%v", stdout, stderr, err)

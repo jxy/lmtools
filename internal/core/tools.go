@@ -107,13 +107,10 @@ type ToolCall struct {
 	// The executor routes by Name; these are what a person reads.
 	MCPServer string `json:"mcp_server,omitempty"`
 	MCPTool   string `json:"mcp_tool,omitempty"`
-	// InvocationID identifies this invocation across every copy of the
-	// transcript that carries it: a sibling branch shares the message and a
-	// fork copies it, and both keep the identity, so they resolve to the
-	// same ownership and outcome records. It is assigned when the message
-	// holding the call first commits, kept in .tools.json, and rendered to
-	// no wire. A call without one was written before invocations were
-	// recorded.
+	// InvocationID identifies this invocation in every branch that carries
+	// the message holding it, so they all resolve to the same ownership and
+	// outcome records. It is assigned when that message first commits, kept
+	// with the message's tool calls, and rendered to no wire.
 	InvocationID string `json:"invocation_id,omitempty"`
 }
 
@@ -140,8 +137,9 @@ type ToolResult struct {
 	TruncatedTo int `json:"truncated_to_bytes,omitempty"`
 	// Images are what a view_image call loaded. They travel with the result
 	// in memory and into the tool_result block the round's message carries;
-	// the JSON tag keeps them out of .tools.json, so a session holds the bytes
-	// once, in .blocks.json, and Output stays the text description.
+	// the JSON tag keeps them out of the stored tool results, so a session
+	// holds the bytes once, in that block, and Output stays the text
+	// description.
 	Images []ImageBlock `json:"-"`
 }
 

@@ -4,15 +4,21 @@ import (
 	"context"
 	"io"
 	"lmtools/internal/config"
+	"lmtools/internal/contextcfg"
+	"lmtools/internal/contextstate"
 	"lmtools/internal/core"
-	session "lmtools/internal/oldsession"
+	"lmtools/internal/session"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestNotebookResolvesSelectedModelAndOperatorCap(t *testing.T) {
+// The window is the smaller of the operator's cap and the model's capacity
+// when both are known, and the one known otherwise. The capacity comes from
+// the newest reply made with the same model and endpoint, else from the
+// catalog; an offline preview reads only the replies.
+func TestNotebookWindowFromCapAndCapacity(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -23,54 +29,77 @@ func TestNotebookResolvesSelectedModelAndOperatorCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := cfg.RequestOptions()
-	resolve := func(model string) {
+	base := cfg.RequestOptions()
+	resolve := func(model string, limit int, lineage ...session.Message) (contextcfg.Binding, error) {
 		t.Helper()
+		opts := base
 		opts.Model = model
-		if err := resolveNotebookWindow(context.Background(), &cfg, &opts, core.NewTestNotifier(), ""); err != nil {
-			t.Fatal(err)
-		}
+		opts.Context.WindowCap = limit
+		err := resolveWindow(context.Background(), &cfg, &opts, core.NewTestNotifier(), "", lineage)
+		return opts.Context, err
 	}
-	resolve("big")
-	if opts.Context.Policy != "handoff" || opts.Context.Window != 1048576 || !opts.Context.Early {
-		t.Fatal(opts.Context)
+	b, err := resolve("big", 0)
+	if err != nil || b.Policy != "handoff" || b.Window != 1048576 || !b.Early || b.Capacity.Tokens != 1048576 || calls != 1 {
+		t.Fatal(b, calls, err)
 	}
-	resolve("big")
-	if calls != 1 {
-		t.Fatal("catalog fetched again", calls)
+	found := b.Capacity
+	reply := session.Message{Role: core.RoleAssistant, Receipt: &contextstate.Receipt{Capacity: &found}}
+	if b, err = resolve("big", 0, reply); err != nil || b.Window != 1048576 || calls != 1 {
+		t.Fatal("the recorded capacity was not used", b, calls, err)
+	}
+	other := reply
+	other.Receipt = &contextstate.Receipt{Capacity: &contextcfg.Capacity{Tokens: 8192, Model: "big", Endpoint: "elsewhere"}}
+	if b, err = resolve("big", 0, other); err != nil || b.Window != 1048576 || calls != 2 {
+		t.Fatal("a capacity found at another endpoint was used", b, calls, err)
+	}
+	if b, err = resolve("small", 8192); err != nil || b.Window != 4096 || b.Policy != "handoff" {
+		t.Fatal("the smaller capacity did not bound the window", b, err)
+	}
+	if b, err = resolve("big", 8192); err != nil || b.Window != 8192 {
+		t.Fatal("the smaller cap did not bound the window", b, err)
+	}
+	if b, err = resolve("unknown", 0); err != nil || b.Policy != "full" || b.Window != 0 || b.Capacity.Tokens != 0 {
+		t.Fatal("no window did not replay in full", b, err)
+	}
+	if b, err = resolve("unknown", 8192); err != nil || b.Policy != "handoff" || b.Window != 8192 {
+		t.Fatal("the cap alone did not set the window", b, err)
+	}
+	// /model resolves again on the options it already resolved: a model
+	// without a known capacity keeps none of the earlier model's.
+	switched := base
+	switched.Model = "small"
+	if err := resolveWindow(context.Background(), &cfg, &switched, core.NewTestNotifier(), "", nil); err != nil || switched.Context.Capacity.Tokens != 4096 {
+		t.Fatal(switched.Context, err)
+	}
+	switched.Model = "unknown"
+	if err := resolveWindow(context.Background(), &cfg, &switched, core.NewTestNotifier(), "", nil); err != nil || switched.Context.Capacity.Tokens != 0 {
+		t.Fatal("the earlier model's capacity stayed", switched.Context, err)
+	}
+	// The rule holds without a notebook: text-only compaction takes the
+	// capacity, and full replay under a cap takes the smaller.
+	textCfg, err := config.ParseFlags([]string{"-provider", "openai", "-api-key-file", writeTestAPIKeyFile(t, "fixture"), "-models-url", server.URL, "-model", "small", "-sessions-dir", t.TempDir(), "-context-policy", "handoff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textCfg.RequestOptions()
+	if err := resolveWindow(context.Background(), &textCfg, &text, core.NewTestNotifier(), "", nil); err != nil || text.Context.Window != 4096 || text.Context.Policy != "handoff" {
+		t.Fatal("text-only compaction", text.Context, err)
+	}
+	replayCfg, err := config.ParseFlags([]string{"-provider", "openai", "-api-key-file", writeTestAPIKeyFile(t, "fixture"), "-models-url", server.URL, "-model", "small", "-sessions-dir", t.TempDir(), "-context-policy", "full", "-context-window", "200000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay := replayCfg.RequestOptions()
+	if err := resolveWindow(context.Background(), &replayCfg, &replay, core.NewTestNotifier(), "", nil); err != nil || replay.Context.Window != 4096 {
+		t.Fatal("full replay under a cap", replay.Context, err)
 	}
 	cfg.PrintCurl = true
-	resolve("big")
-	opts.Model = "small"
-	if err := resolveNotebookWindow(context.Background(), &cfg, &opts, core.NewTestNotifier(), ""); err == nil || !strings.Contains(err.Error(), "-context-window") {
-		t.Fatal("offline preview silently selected a projection for another model", err)
+	before := calls
+	if b, err = resolve("big", 0, reply); err != nil || b.Window != 1048576 || calls != before {
+		t.Fatal("an offline preview did not use the recorded capacity", b, calls, err)
 	}
-	if calls != 1 || opts.Context.WindowModel != "big" {
-		t.Fatal("preview changed the saved selection", calls, opts.Context)
-	}
-	explicit := opts
-	explicit.Context.WindowModel, explicit.Context.WindowProvider = "", ""
-	explicit.Context.WindowCap, explicit.Context.Window = 4096, 4096
-	if err := resolveNotebookWindow(context.Background(), &cfg, &explicit, core.NewTestNotifier(), ""); err != nil || explicit.Context.Window != 4096 || !explicit.Context.Compacts() || calls != 1 {
-		t.Fatal(explicit.Context, calls, err)
-	}
-	cfg.PrintCurl = false
-	resolve("small")
-	if cfg.Context.Window != 4096 {
-		t.Fatal(cfg.Context)
-	}
-	resolve("unknown")
-	if cfg.Context.Policy != "full" || cfg.Context.Window != 0 {
-		t.Fatal(cfg.Context)
-	}
-	opts.Context.WindowCap = 8192
-	resolve("big")
-	if cfg.Context.Policy != "handoff" || cfg.Context.Window != 8192 {
-		t.Fatal(cfg.Context)
-	}
-	resolve("small")
-	if cfg.Context.Window != 4096 {
-		t.Fatal(cfg.Context)
+	if _, err = resolve("small", 0); err == nil || !strings.Contains(err.Error(), "-context-window") || calls != before {
+		t.Fatal("an offline preview without a window", calls, err)
 	}
 }
 
@@ -89,17 +118,13 @@ func TestREPLPinsCommitLocallyAndPreserveLiteralWhitespace(t *testing.T) {
 	if action.send || loop.from == nil || loop.failedTurns != 0 {
 		t.Fatal(action, loop.from, loop.failedTurns)
 	}
-	read := func() []session.StandingPin {
+	read := func() []contextstate.StandingPin {
 		t.Helper()
-		reader, err := session.CreateContextBuilder(context.Background(), loop.from)
+		view, err := loop.from.View(loop.base)
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, refs, err := reader()
-		if err != nil {
-			t.Fatal(err)
-		}
-		pins, err := session.ActivePins(raw, refs)
+		pins, err := contextstate.ActivePins(view.Messages, view.Refs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,10 +135,10 @@ func TestREPLPinsCommitLocallyAndPreserveLiteralWhitespace(t *testing.T) {
 		t.Fatal(pins)
 	}
 	id := pins[0].ID
-	old := *loop.from.Head
+	old := loop.from.Head
 	loop.interpretInput("/pins")
 	loop.interpretInput("/pin --from nowhere.0")
-	if *loop.from.Head != old || loop.failedTurns != 1 {
+	if loop.from.Head != old || loop.failedTurns != 1 {
 		t.Fatal("list or invalid operation changed history")
 	}
 	loop.interpretInput("/pin --replace " + id + "  New literal.  ")

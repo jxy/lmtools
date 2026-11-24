@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	"time"
 )
@@ -45,6 +46,10 @@ type Receipt struct {
 	CatalogOmitted bool   `json:"catalog_omitted,omitempty"`
 	Notebook       string `json:"catalog_notebook,omitempty"`
 	View           string `json:"catalog_view,omitempty"`
+	// Capacity is the model's context capacity the request knew, with the
+	// model and endpoint it was found for. A later run with the same model
+	// and endpoint takes it from the newest reply that records it.
+	Capacity *contextcfg.Capacity `json:"capacity,omitempty"`
 }
 
 // Checkpoint replaces the first Count messages of a history with a handoff.

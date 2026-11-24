@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"lmtools/internal/constants"
 	"lmtools/internal/core"
 	"lmtools/internal/mockserver"
-	session "lmtools/internal/oldsession"
 	"lmtools/internal/ui"
 	"lmtools/internal/ui/tools"
 	"net/http"
@@ -28,7 +26,7 @@ func TestREPLCommandsAndLiteralSlash(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, notes := newTestLoop(t, te)
 	typeTurns(t, w, "/help\n/history\n/unknown argument\n/again 1\n/exit arg\nfirst\\\nsecond\n/history\n//help\n/exit\nnever sent\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -117,7 +115,7 @@ func TestREPLImageCommandsRetainUntilCommit(t *testing.T) {
 	loop, w, notes := newTestLoop(t, te)
 	input := fmt.Sprintf("/image %s\n/image %s\n/image %s\n\n\nfollow-up\n/exit\n", image, filepath.Join(dir, "missing.png"), invalid)
 	typeTurns(t, w, input, true)
-	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+	if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -150,7 +148,7 @@ func TestREPLClearImagesAndImageCommandValidation(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, notes := newTestLoop(t, te)
 	typeTurns(t, w, fmt.Sprintf("/image\n/image %s\n/clear-images\n\nquestion\n/exit\n", image), true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -176,10 +174,10 @@ func TestREPLPresentationStaysOnDiagnostics(t *testing.T) {
 	// Without the editor the terminal echoed each line; only a turn of
 	// several lines is shown again as one.
 	typeTurns(t, w, "one\ntwo\\\nmore\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"model: gpt-test", "buffered | thinking display: off", "/help commands", "| two\n", "| more\n", "Session: ", "Saved in session 0001; continue it with -resume 0001."} {
+	for _, text := range []string{"model: gpt-test", "buffered | thinking display: off", "/help commands", "| two\n", "| more\n", "Session: ", "Saved in session 0001 at message 0005; continue it with -resume 0001/0005."} {
 		if notes.count(text) != 1 {
 			t.Fatalf("notes = %q, want %q once", notes.all(), text)
 		}
@@ -244,7 +242,7 @@ func TestREPLDeveloperInstructionIsCommittedOnce(t *testing.T) {
 	te := newTurnTestEnv(t, server, "-developer", "Use short answers.")
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "failed\nfirst\nsecond\n/exit\n", true)
-	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+	if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -264,27 +262,33 @@ func TestREPLDeveloperInstructionIsCommittedOnce(t *testing.T) {
 	}
 }
 
-func TestREPLPendingDeveloperDefersStartupRecovery(t *testing.T) {
+// Calls pending where the loop starts are resolved before the first prompt
+// and their results saved, without a request; a queued developer
+// instruction waits for the first new user turn.
+func TestREPLStartupResolvesPendingCallsAndKeepsTheInstruction(t *testing.T) {
 	server := mockserver.NewMockServer(numberedAnswers())
 	defer server.Close()
 	te := newTurnTestEnv(t, server, "-developer", "Use short answers.", "-tool", "-tool-auto-approve")
-	sess, err := session.CreateSession("", core.NewTestLogger(false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	appendTestSessionMessage(t, context.Background(), sess, core.RoleUser, "Earlier question")
-	if _, err := session.SaveAssistantResponseWithTools(context.Background(), sess, "", []core.ToolCall{{
+	sess := newTestSession(t, te.store(), textEntry(core.RoleUser, "Earlier question"))
+	saveToolCalls(t, sess, "", claimedCalls(t, te.store(), []core.ToolCall{{
 		ID: "call_deferred", Name: "universal_command", Args: json.RawMessage(`{"command":["printf","recovered"]}`),
-	}}, "gpt-test"); err != nil {
-		t.Fatal(err)
-	}
-	te.opts.Resume = session.GetSessionID(sess.Path)
+	}}))
+	te.env.cfg.Start = sess.Ref()
 	loop, _, notes := newTestLoop(t, te)
-	if err := loop.recoverPendingTools(); err != nil {
+	if err := loop.prepareStart(); err != nil {
 		t.Fatal(err)
 	}
-	if len(server.GetRequests()) != 0 || len(notes.all()) != 0 {
-		t.Fatalf("startup recovered before a new user turn: requests=%v, notes=%q", server.GetRequests(), notes.all())
+	if len(server.GetRequests()) != 0 {
+		t.Fatalf("startup sent requests: %v", server.GetRequests())
+	}
+	if loop.from == nil || !loop.awaiting {
+		t.Fatalf("startup saved %+v and awaits %t", loop.from, loop.awaiting)
+	}
+	if tools := newestTools(t, loop.from); tools == nil || len(tools.Results) != 1 || !strings.Contains(tools.Results[0].Output, "recovered") {
+		t.Fatalf("saved results %+v", tools)
+	}
+	if !strings.Contains(strings.Join(notes.all(), "\n"), "awaits an answer") {
+		t.Fatalf("notes = %q, want the start point's question named", notes.all())
 	}
 	if loop.base.Developer == "" {
 		t.Fatal("startup consumed the pending developer instruction")
@@ -323,7 +327,7 @@ func TestREPLDeveloperCommandsQueueReplaceAndClearWithoutSending(t *testing.T) {
 	image := core.ImageBlock{URL: core.ImageDataURL("image/png", replPNG), Name: "pending.png"}
 	loop.images = []core.ImageBlock{image}
 	typeTurns(t, w, "/developer   \n/clear-developer extra\n/developer first\n/developer second\\\nline\n/history\n/help\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := loop.base.Developer, "second\nline"; got != want {
@@ -392,7 +396,7 @@ func TestREPLDeveloperCommandPersistsWithNextTurnAfterRetry(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "first\n/developer stale\n/developer First line\\\nSecond line\nfailed\nfailed\nthird\n/developer throwaway\n/clear-developer\n//developer literal\n/exit\n", true)
-	if err := loop.run(false); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
+	if err := loop.run(); err == nil || !strings.Contains(err.Error(), "1 REPL turn(s) failed") {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -428,7 +432,7 @@ func TestREPLDeveloperCommandSupportsImageOnlyTurn(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, _ := newTestLoop(t, te)
 	typeTurns(t, w, "/image "+path+"\n/developer cleared\n/clear-developer\n/developer Image instruction\n\nfollow-up\n/exit\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()
@@ -512,7 +516,7 @@ func TestREPLModelAndEffortChangeTheNextTurn(t *testing.T) {
 	te := newTurnTestEnv(t, server)
 	loop, w, notes := newTestLoop(t, te)
 	typeTurns(t, w, "first\n/model gpt-other\n/effort high\nsecond\n/effort default\n/effort bogus\n/model\nthird\n", true)
-	if err := loop.run(false); err != nil {
+	if err := loop.run(); err != nil {
 		t.Fatal(err)
 	}
 	requests := server.GetRequests()

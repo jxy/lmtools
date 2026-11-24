@@ -21,15 +21,21 @@ func applyExplicitFlags(fs *flag.FlagSet, cfg *Config) explicitFlagState {
 	var explicit explicitFlagState
 
 	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "s":
-			cfg.SystemExplicitlySet = true
-		case "no-session":
+		if f.Name == "no-session" {
 			explicit.noSession = true
 		}
 	})
 
 	return explicit
+}
+
+// validateSystemFlags refuses -builtin-system beside -s, -s ” included,
+// since the two select different prompts.
+func validateSystemFlags(fs *flag.FlagSet, cfg Config) error {
+	if cfg.BuiltinSystem && explicitFlags(fs)["s"] {
+		return fmt.Errorf("invalid flag combination: -builtin-system restores the built-in system prompt, and -s sets a custom one; use one of them")
+	}
+	return nil
 }
 
 func applyEmbedModeDefaults(cfg *Config, explicit explicitFlagState) error {
@@ -86,7 +92,7 @@ func validateModeFlagCombinations(cfg Config) error {
 	if cfg.Embed && cfg.EnableTool {
 		return fmt.Errorf(prompts.ErrEmbedWithTool)
 	}
-	if cfg.Embed && (cfg.Resume != "" || cfg.Branch != "") {
+	if cfg.Embed && cfg.Resume != "" {
 		return fmt.Errorf(prompts.ErrEmbedWithSession)
 	}
 	return nil
@@ -157,24 +163,20 @@ func isValidReasoningContextFlag(value string) bool {
 }
 
 func validateSessionFlagCombinations(cfg Config) error {
-	if cfg.ShowSessions && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession || cfg.Delete != "" || cfg.Show != "") {
+	if cfg.ShowSessions && (cfg.Resume != "" || cfg.NoSession || cfg.Delete != "" || cfg.Show != "") {
 		return fmt.Errorf("invalid flag combination: -show-sessions cannot be used with other session flags")
 	}
 
-	if cfg.Delete != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.NoSession || cfg.Show != "") {
+	if cfg.Delete != "" && (cfg.Resume != "" || cfg.NoSession || cfg.Show != "") {
 		return fmt.Errorf("invalid flag combination: -delete cannot be used with other session flags")
 	}
 
-	if cfg.Show != "" && (cfg.Resume != "" || cfg.Branch != "" || cfg.Delete != "" || cfg.ShowSessions || cfg.NoSession || cfg.Embed) {
+	if cfg.Show != "" && (cfg.Resume != "" || cfg.Delete != "" || cfg.ShowSessions || cfg.NoSession || cfg.Embed) {
 		return fmt.Errorf("invalid flag combination: -show cannot be used with other session or operation flags")
 	}
 
-	if cfg.Resume != "" && cfg.Branch != "" {
-		return fmt.Errorf("invalid flag combination: -resume and -branch cannot be used together")
-	}
-
-	if cfg.NoSession && (cfg.Resume != "" || cfg.Branch != "") {
-		return fmt.Errorf("invalid flag combination: -no-session cannot be used with -resume or -branch")
+	if cfg.NoSession && cfg.Resume != "" {
+		return fmt.Errorf("invalid flag combination: -no-session cannot be used with -resume")
 	}
 
 	return nil
