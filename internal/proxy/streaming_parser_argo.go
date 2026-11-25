@@ -72,6 +72,10 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 		case event := <-events:
 			if len(event.data) > 0 {
 				lastActivity = time.Now()
+				// Restart the ping period so the next ping comes one full
+				// interval after this chunk. Since Go 1.23, Reset also drops
+				// any tick already pending.
+				pingTicker.Reset(pingInterval)
 				text := string(event.data)
 				logger.From(p.handler.ctx).Debugf("Argo Stream Chunk: %q", text)
 				if err := p.handler.SendTextDelta(text); err != nil {
@@ -88,12 +92,10 @@ func (p *ArgoStreamParser) ParseWithPingInterval(reader io.Reader, pingInterval 
 			}
 
 		case <-pingTicker.C:
-			if time.Since(lastActivity) >= pingInterval {
-				logger.From(p.handler.ctx).Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
-				if err := p.handler.SendPing(); err != nil {
-					return handleStreamError(p.handler.ctx, p.handler, "ArgoStreamParser:ping",
-						fmt.Errorf("client disconnected: %w", err))
-				}
+			logger.From(p.handler.ctx).Debugf("Sending ping after %v of inactivity", time.Since(lastActivity))
+			if err := p.handler.SendPing(); err != nil {
+				return handleStreamError(p.handler.ctx, p.handler, "ArgoStreamParser:ping",
+					fmt.Errorf("client disconnected: %w", err))
 			}
 		}
 	}

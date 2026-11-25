@@ -75,7 +75,7 @@ func TestArgoStreamingWithPings(t *testing.T) {
 			chunks:           []string{"Start", "Middle", "End"},
 			chunkDelay:       70 * time.Millisecond, // Reduced from 110ms, increased from 50ms for stability
 			pingInterval:     30 * time.Millisecond,
-			expectedMinPings: 3, // At least one ping between each chunk
+			expectedMinPings: 3, // Pings at 30ms and 60ms into each gap; one may lose to the next chunk
 			expectedMaxPings: 6, // Allow for timing variations
 		},
 	}
