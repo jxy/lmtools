@@ -18,7 +18,9 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          # Go 1.24 or later stamps the tag into the binary; go.mod names 1.21.
+          # The newest patch of the oldest Go release go.mod accepts, which
+          # still gets security fixes; Go 1.24 or later stamps the tag into
+          # the binary.
           go-version: '1.26'
           cache-dependency-path: go.mod
 

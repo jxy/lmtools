@@ -16,7 +16,9 @@ to production.
 
 ## Install
 
-Requires Go 1.21.13 or later.
+Requires Go 1.26.11 or later. lmtools supports only the Go releases that
+still get security fixes, the two newest, and raises this version when a
+release stops getting them.
 
 ```bash
 make build
