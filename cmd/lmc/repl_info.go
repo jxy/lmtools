@@ -72,6 +72,10 @@ func (l *replLoop) showInfo() {
 		}
 	}
 	at := l.current()
+	if cp := l.base.Context.ManualCheckpoint; cp != nil {
+		_, id, _ := strings.Cut(cp.Prefix, "/")
+		n.Promptf("Manual context checkpoint: through %s/%s\n", at.Session, id)
+	}
 	if at.Session == "" {
 		n.Promptf("Session: not created yet\n")
 	} else {

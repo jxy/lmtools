@@ -124,8 +124,9 @@ func runBinding(next, at session.Settings, explicit map[string]bool) (contextcfg
 			Notebook: next.Notebook, View: next.View, Policy: next.Policy, Format: next.Format,
 			Window: next.Window, Trigger: next.Trigger,
 		},
-		WindowCap: next.Window,
-		Initial:   next.Catalog,
+		WindowCap:        next.Window,
+		Initial:          next.Catalog,
+		ManualCheckpoint: next.ManualCheckpoint,
 	}
 	if b.Policy == "" && b.Notebook != "" {
 		b.Policy, b.NotebookDefault = contextcfg.Handoff, true

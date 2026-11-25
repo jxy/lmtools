@@ -9,6 +9,7 @@ import (
 var replCommands = []struct{ usage, effect string }{
 	{"/help [input|history|tools]", "Show these commands, or help on a topic."},
 	{"/info", "Show the model, endpoint, session, tools, and settings."},
+	{"/compact", "Update the attached notebook first, then shorten the context on this branch. Works without a notebook."},
 	{"/handoff [versions]", "Update project notes for the next operator or preserve the project's supported versions."},
 	{"/pin TEXT", "Keep this user instruction across context windows on this branch."},
 	{"/pin --from REF [START END]", "Mark original user text, optionally selecting a UTF-8 byte range."},

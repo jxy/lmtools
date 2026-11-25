@@ -32,10 +32,14 @@ func (n checkpointNotifier) ReportUsage(u *core.Usage, _ bool) {
 	}
 }
 
-func newContextWindow(env *turnEnv, opts core.RequestOptions) *workingcontext.Engine {
-	if !opts.Context.Enabled() {
+func turnContextWindow(env *turnEnv, opts core.RequestOptions) *workingcontext.Engine {
+	if !opts.Context.Enabled() && opts.Context.ManualCheckpoint == nil {
 		return nil
 	}
+	return newContextWindow(env, opts)
+}
+
+func newContextWindow(env *turnEnv, opts core.RequestOptions) *workingcontext.Engine {
 	history := &workingcontext.History{}
 	canRead := false
 	if host, ok := opts.MCP.(*workingcontext.Tools); ok {

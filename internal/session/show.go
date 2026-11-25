@@ -198,6 +198,10 @@ func showMessage(w io.Writer, m Message, c Content, tree Tree, knownCalls map[st
 
 // showSettings lists what a settings record sets.
 func showSettings(w io.Writer, s Settings, options ShowOptions) {
+	if cp := s.ManualCheckpoint; cp != nil {
+		_, id, _ := strings.Cut(cp.Prefix, "/")
+		fmt.Fprintf(w, "context compacted through message %s\n", id)
+	}
 	switch {
 	case s.System == nil:
 		fmt.Fprintln(w, "system prompt: built-in")

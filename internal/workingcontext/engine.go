@@ -14,6 +14,7 @@ import (
 	"lmtools/internal/mcp"
 	"lmtools/internal/notebook"
 	"math"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -77,7 +78,7 @@ func (e *Engine) BindExisting(ctx context.Context, messages []core.TypedMessage,
 		return errors.New("context engine bound without a transcript")
 	}
 	e.t = t
-	if !e.Binding.Compacts() {
+	if !e.Binding.Compacts() && e.Binding.ManualCheckpoint == nil {
 		e.History.Bind(messages, refs, 0, t)
 		return nil
 	}
@@ -96,42 +97,72 @@ func (e *Engine) checkpoint(ctx context.Context, raw []core.TypedMessage, refs [
 	}
 	cp = contextstate.Checkpoint{}
 	if len(refs) > 0 && e.t.Stored(len(refs)) {
+		latest := e.readReceipt(refs)
 		var err error
-		cp, err = activeCheckpoint(ctx, refs, e.t, len(refs))
+		cp, err = e.storedCheckpoint(ctx, raw, refs, keys, latest)
 		if err != nil {
 			return cp, err
 		}
-		if cp.Count > 0 {
-			pins, err := contextstate.ActivePins(raw[:cp.Count], refs[:cp.Count])
-			if err != nil {
-				return cp, err
-			}
-			if contextstate.PinDigest(pins) != cp.PinDigest {
-				return cp, errors.New("saved checkpoint does not match its user pin events")
-			}
-		}
-		e.readReceipt(refs)
 	}
 	e.current = cp
 	e.loaded = true
 	return cp, nil
 }
 
+// Use the manual cut until a reply made under that selection records the
+// actual window. With automatic cuts off, the manual selection stays in use.
+func (e *Engine) storedCheckpoint(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, keys []string, latest *contextstate.Receipt) (contextstate.Checkpoint, error) {
+	var cp contextstate.Checkpoint
+	manual := e.Binding.ManualCheckpoint
+	var used *contextcfg.CheckpointRef
+	if latest != nil {
+		used = latest.ManualCheckpoint
+	}
+	if manual != nil && (!e.Binding.Compacts() || used == nil || *used != *manual) {
+		end := slices.Index(keys, manual.Prefix) + 1
+		if end == 0 {
+			return cp, errors.New("manual checkpoint belongs to a different history")
+		}
+		saved, ok, err := e.savedCheckpoint(ctx, raw, refs, keys, end, manual.Tag)
+		if err == nil && !ok {
+			err = errors.New("saved manual checkpoint is missing")
+		}
+		return saved, err
+	}
+	if !e.Binding.Compacts() {
+		return cp, nil
+	}
+	cp, err := activeCheckpoint(ctx, refs, e.t, len(refs))
+	if err != nil || cp.Count == 0 {
+		return cp, err
+	}
+	pins, err := contextstate.ActivePins(raw[:cp.Count], refs[:cp.Count])
+	if err != nil {
+		return cp, err
+	}
+	if contextstate.PinDigest(pins) != cp.PinDigest {
+		return cp, errors.New("saved checkpoint does not match its user pin events")
+	}
+	return cp, nil
+}
+
 // readReceipt restores what the latest reply's window recorded: a deferred
 // checkpoint, and whether a window starting at the beginning of the branch
 // carried the notebook catalog or left it out.
-func (e *Engine) readReceipt(refs []contextstate.Ref) {
+func (e *Engine) readReceipt(refs []contextstate.Ref) *contextstate.Receipt {
 	for i := len(refs) - 1; i >= 0; i-- {
 		if refs[i].Role == core.RoleAssistant {
-			if w := refs[i].Receipt; w != nil {
+			w := refs[i].Receipt
+			if w != nil {
 				e.deferred = w.Deferred
 				sameCatalog := w.Notebook == e.Binding.Notebook && w.View == e.Binding.NotebookView()
 				e.sentInitial = w.Count == 0 && w.CatalogSent && sameCatalog
 				e.omitInitial = w.Count == 0 && w.CatalogOmitted && sameCatalog
 			}
-			return
+			return w
 		}
 	}
+	return nil
 }
 
 // Image inputs consume visual tokens. Their compressed or base64 byte length
@@ -399,7 +430,17 @@ func MemoryRefs(raw []core.TypedMessage) []contextstate.Ref {
 
 // chunkSize is the most original record text one writer request carries.
 // It leaves room for the previous handoff, output and dense tokenization.
-func (e *Engine) chunkSize() int { return max(768, e.Binding.Window/2) }
+func (e *Engine) chunkSize() int { return max(768, e.writerBudget().Window/2) }
+
+// A manual cut can run without a known model capacity. Bound the writer's
+// chunks and summary in that case without imposing a window on ordinary turns.
+func (e *Engine) writerBudget() contextcfg.Settings {
+	settings := e.Binding.Settings
+	if settings.Window == 0 {
+		settings.Window = 8192
+	}
+	return settings
+}
 
 func (e *Engine) lengthNote() string {
 	return fmt.Sprintf("\nThe resulting handoff must fit in %d UTF-8 bytes.", e.handoffLimit())
@@ -421,14 +462,11 @@ func priorHandoff(base contextstate.Checkpoint) string {
 // starts from base: the writer's instructions, base's handoff, and a full
 // chunk of original records.
 func (e *Engine) writerTakes(base contextstate.Checkpoint) bool {
-	if e.Binding.Window == 0 {
-		return true
-	}
 	request := []core.TypedMessage{
 		core.NewTextMessage("system", handoffPrompt+e.lengthNote()),
 		core.NewTextMessage("user", writerSource(priorHandoff(base), "")),
 	}
-	return estimate(request, (e.chunkSize()+1)/2) <= e.Binding.Ceiling()
+	return estimate(request, (e.chunkSize()+1)/2) <= e.writerBudget().Ceiling()
 }
 
 func (e *Engine) summarize(ctx context.Context, previous string, raw []core.TypedMessage, refs []contextstate.Ref, begin, end int) (string, error) {
@@ -543,7 +581,8 @@ func (e *Engine) Receipt() *contextstate.Receipt {
 	first := e.current.Count == 0
 	r := &contextstate.Receipt{
 		Count: e.current.Count, Prefix: e.current.Prefix, Tag: e.current.Tag, PinDigest: e.current.PinDigest, Deferred: e.deferred,
-		CatalogSent: first && e.sentInitial, CatalogOmitted: first && e.omitInitial,
+		ManualCheckpoint: e.Binding.ManualCheckpoint,
+		CatalogSent:      first && e.sentInitial, CatalogOmitted: first && e.omitInitial,
 		Notebook: e.Binding.Notebook, View: e.Binding.NotebookView(),
 	}
 	if c := e.Binding.Capacity; c.Tokens > 0 {
@@ -556,7 +595,7 @@ func (e *Engine) shorten(ctx context.Context, draft string, limit int) (string, 
 	return e.Write(ctx, fmt.Sprintf("Shorten this session handoff. Keep distinct facts, current corrections, failures, source references and the next action. Remove repetition. Return only the replacement.\nThe resulting handoff must fit in %d UTF-8 bytes.", limit), draft)
 }
 
-func (e *Engine) handoffLimit() int { return min(32768, max(768, e.Binding.Threshold()/3)) }
+func (e *Engine) handoffLimit() int { return min(32768, max(768, e.writerBudget().Threshold()/3)) }
 
 func (e *Engine) newHandoff(ctx context.Context, previous contextstate.Checkpoint, raw []core.TypedMessage, refs []contextstate.Ref, end int, preview bool) (string, error) {
 	if e.Binding.ArchiveOnly() {
@@ -712,6 +751,20 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 	end := cut.end
 	stored := e.t.Stored(end)
 	tag, prefix := e.tag(), keys[end-1]
+	manual := cut.manualCatalog != nil
+	before := 0
+	if manual {
+		// A handoff can revise notes while another branch compacts the
+		// same exchanges. Reuse only a candidate with the same catalog.
+		hash := sha256.Sum256([]byte("manual:" + tag + *cut.manualCatalog))
+		tag = hex.EncodeToString(hash[:12])
+		before = estimate(e.projection(raw, previous), e.ExtraTokens)
+	}
+	// Other runs can reach this boundary using a different starting
+	// checkpoint. Every candidate for a manual cut must shorten this run.
+	shortEnough := func(cp contextstate.Checkpoint) bool {
+		return !manual || estimate(e.projection(raw, cp), e.ExtraTokens) < before
+	}
 	key := tag + ":" + prefix
 	pins, err := contextstate.ActivePins(raw[:end], refs[:end])
 	if err != nil {
@@ -724,7 +777,7 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 		if err != nil {
 			return previous, err
 		}
-		if ok {
+		if ok && shortEnough(saved) {
 			cp, fits, err := e.reuse(ctx, raw, end, tag, saved, true, preview)
 			if err != nil {
 				return previous, err
@@ -737,19 +790,23 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 	}
 	replay := func() error { return e.admit(ctx, e.projection(raw, previous), preview) }
 	if !cached {
-		if e.deferred == key {
+		if !manual && e.deferred == key {
 			if err := replay(); err == nil {
 				return previous, nil
 			} else if !exceedsBudget(err) {
 				return previous, err
 			}
 		}
-		next.Catalog, err = notebook.Snapshot(ctx, e.Binding.Notebook, e.Binding.View)
-		if err != nil {
-			return previous, err
+		if manual {
+			next.Catalog = *cut.manualCatalog
+		} else {
+			next.Catalog, err = notebook.Snapshot(ctx, e.Binding.Notebook, e.Binding.View)
+			if err != nil {
+				return previous, err
+			}
 		}
 		next.Notebook, next.View = e.Binding.Notebook, e.Binding.NotebookView()
-		if !cut.mid {
+		if !cut.mid && !manual {
 			next.Tail = shortTail(raw, refs, end, min(8192, e.Binding.Threshold()/8))
 		}
 		if e.Write == nil && !preview && !e.Binding.ArchiveOnly() {
@@ -783,7 +840,7 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 		if ctx.Err() != nil {
 			return previous, ctx.Err()
 		}
-		if preview || credentialRefusal(err) || errors.Is(err, context.Canceled) {
+		if manual || preview || credentialRefusal(err) || errors.Is(err, context.Canceled) {
 			return previous, err
 		}
 		replayErr := replay()
@@ -810,6 +867,11 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 		}
 	}
 	e.deferred = ""
+	if !shortEnough(next) {
+		// Report the size, but leave this candidate unpublished so the
+		// operator can retry a writer that produced an oversized summary.
+		return next, nil
+	}
 	if stored && !preview {
 		if !cached && !next.Fallback {
 			winner, err := e.t.Publish(ctx, end, tag, next)
@@ -819,12 +881,14 @@ func (e *Engine) writeCheckpoint(ctx context.Context, raw []core.TypedMessage, r
 			// Another run may have published first. Its checkpoint serves
 			// this request when it fits, its result whole if this request's
 			// own handoff kept the result whole.
-			cp, fits, err := e.reuse(ctx, raw, end, tag, winner, next.PagedResult != "", false)
-			if err != nil {
-				return previous, err
-			}
-			if fits {
-				return cp, nil
+			if shortEnough(winner) {
+				cp, fits, err := e.reuse(ctx, raw, end, tag, winner, next.PagedResult != "", false)
+				if err != nil {
+					return previous, err
+				}
+				if fits {
+					return cp, nil
+				}
 			}
 		}
 		// A concurrent writer can have a smaller incoming request. Keep
@@ -839,6 +903,9 @@ type checkpointCut struct {
 	end       int
 	mid       bool
 	requested bool
+	// A manual cut snapshots the notebook after its handoff. An empty
+	// snapshot is valid, including when the run has no notebook.
+	manualCatalog *string
 	// overflow identifies the request a cut during a tool turn measured too
 	// large.
 	overflow string
@@ -950,7 +1017,7 @@ func (e *Engine) recoverHandoff(ctx context.Context, raw []core.TypedMessage, re
 }
 
 func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs []contextstate.Ref, preview bool) ([]core.TypedMessage, contextstate.Checkpoint, error) {
-	if !e.Binding.Compacts() {
+	if !e.Binding.Compacts() && e.Binding.ManualCheckpoint == nil {
 		if !e.loaded && len(refs) > 0 && e.t.Stored(len(refs)) {
 			e.readReceipt(refs)
 		}
@@ -972,6 +1039,9 @@ func (e *Engine) selectWindow(ctx context.Context, raw []core.TypedMessage, refs
 		}
 	}
 	visible := e.projection(raw, cp)
+	if !e.Binding.Compacts() {
+		return visible, cp, nil
+	}
 	est := estimate(visible, e.ExtraTokens)
 	// A receipt identifies the projection a previous reply actually saw.
 	// Keep that prefix while it fits. If a changed budget can no longer

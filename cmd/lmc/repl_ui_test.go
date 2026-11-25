@@ -11,6 +11,7 @@ import (
 	"lmtools/internal/mockserver"
 	"lmtools/internal/providers"
 	"lmtools/internal/retry"
+	"lmtools/internal/session"
 	"lmtools/internal/ui"
 	"net/http"
 	"strings"
@@ -308,7 +309,7 @@ func TestREPLIncompleteResponseReportsWhatWasSaved(t *testing.T) {
 	defer server.Close()
 	te := newTurnTestEnv(t, server)
 	loop, _, _ := newTestLoop(t, te)
-	out, err := loop.runTurn(turnInput{text: "question"}, nil)
+	out, err := loop.runTurn(t.Context(), session.Turn{Prompt: "question"})
 	if err == nil || !out.PartialAnswer || out.Session == nil || te.stdout.String() != "partial answer" {
 		t.Fatalf("incomplete outcome=%+v err=%v answer=%q", out, err, te.stdout.String())
 	}

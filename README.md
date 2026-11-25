@@ -202,12 +202,25 @@ input. Ctrl-R searches it. A turn can contain up to 10 MiB of text. With
 piped input, each line starts a turn unless continued. The loop processes
 later turns after an error and exits nonzero if any turn failed.
 
-Pin commands require an attached notebook. `/handoff` requires its `put` tool.
+To make room for the rest of this conversation, type `/compact`. With a
+notebook attached, it runs `/handoff` first. Review any notebook writes
+at the usual approval prompts. Without a notebook it goes straight to the
+summary. If the summary reduces the estimated input size, `lmc` saves it
+and reports the reduction. Type your next prompt at `you>`. Resuming the
+branch uses the shorter context, and `/show` still displays the original
+messages.
+
+Use `/handoff` on its own to prepare **project notes for a fresh session**.
+It runs as an ordinary turn and asks the model to update the notebook using `put`.
+You can keep typing in this conversation or start a new REPL with the same
+`-notebook` directory and ask it to read the notes. Pin commands also
+require a notebook.
 
 | Command | What it does |
 | --- | --- |
 | `/help [input\|history\|tools]` | List commands or open help for a topic. |
 | `/info` | Show the model, endpoint, session, tools, context, and display settings. |
+| `/compact` | Update the attached notebook first, then shorten this branch's context. Works without a notebook. |
 | `/handoff [versions]` | Update project notes for the next operator or record how to reconstruct supported versions. |
 | `/pin TEXT` | Keep a user instruction across context windows on this branch. |
 | `/pin --from REF [START END]` | Pin saved user text, optionally selecting a range of UTF-8 bytes. |

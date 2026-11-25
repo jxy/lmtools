@@ -101,9 +101,10 @@ func isREPLCommand(text string) bool {
 }
 
 type replAction struct {
-	text string
-	send bool
-	exit bool
+	text    string
+	send    bool
+	exit    bool
+	compact bool
 }
 
 // interpretInput handles commands after the existing input owner has read a
@@ -139,30 +140,15 @@ func (l *replLoop) interpretInput(text string) replAction {
 		}
 	case "/info":
 		l.showInfo()
-	case "/handoff":
-		writeEnabled := false
-		for _, d := range core.AdvertisedTools(l.base) {
-			if d.MCPServer == "notebook" && d.MCPTool == "put" {
-				writeEnabled = true
-				break
-			}
-		}
-		// A handoff that never starts counts as a failed turn, so a piped
-		// REPL exits nonzero.
-		if !writeEnabled {
-			l.env.notifier.Errorf("/handoff requires the notebook put tool")
+	case "/compact":
+		if argument != "" {
+			l.env.notifier.Errorf("/compact: use /compact without arguments")
 			l.failedTurns++
 			return replAction{}
 		}
-		switch argument {
-		case "":
-			return replAction{text: strings.TrimSpace(prompts.NotebookHandoff), send: true}
-		case "versions":
-			return replAction{text: strings.TrimSpace(prompts.NotebookVersions), send: true}
-		default:
-			l.env.notifier.Errorf("Use /handoff or /handoff versions.")
-			l.failedTurns++
-		}
+		return replAction{compact: true}
+	case "/handoff":
+		return l.handoffAction(argument)
 	case "/show":
 		l.showConversation(argument)
 	case "/model":
@@ -238,6 +224,26 @@ func (l *replLoop) interpretInput(text string) replAction {
 	default:
 		l.env.notifier.Errorf("Unknown REPL command %q. Use /help, or start with // to send a literal /.", command)
 	}
+	return replAction{}
+}
+
+func (l *replLoop) handoffAction(argument string) replAction {
+	for _, tool := range core.AdvertisedTools(l.base) {
+		if tool.MCPServer == "notebook" && tool.MCPTool == "put" {
+			switch argument {
+			case "":
+				return replAction{text: strings.TrimSpace(prompts.NotebookHandoff), send: true}
+			case "versions":
+				return replAction{text: strings.TrimSpace(prompts.NotebookVersions), send: true}
+			default:
+				l.env.notifier.Errorf("Use /handoff or /handoff versions.")
+				l.failedTurns++
+				return replAction{}
+			}
+		}
+	}
+	l.env.notifier.Errorf("/handoff requires the notebook put tool")
+	l.failedTurns++
 	return replAction{}
 }
 

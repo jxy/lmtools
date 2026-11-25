@@ -830,7 +830,7 @@ func TestREPLReadsTheSessionItResumesOnce(t *testing.T) {
 		if err := os.Remove(question); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loop.runTurn(turnInput{text: "next"}, nil); err != nil {
+		if _, err := loop.runTurn(t.Context(), session.Turn{Prompt: "next"}); err != nil {
 			t.Fatalf("the first turn: %v", err)
 		}
 		if requests := server.GetRequests(); len(requests) != 1 || !strings.Contains(requests[0].Body, "the question") {

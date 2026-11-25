@@ -142,7 +142,7 @@ var afterTurnCommitForTest func(*session.Session)
 // equivalent curl command or send it and handle the response. opts is the
 // turn's own copy of the options; nothing here mutates the caller's.
 func runTurn(ctx context.Context, env *turnEnv, opts core.RequestOptions, in turnInput) (out turnOutcome, err error) {
-	env.window = newContextWindow(env, opts)
+	env.window = turnContextWindow(env, opts)
 	if err := core.ValidateDeveloperTurn(opts, in.text); err != nil {
 		return out, err
 	}

@@ -37,6 +37,10 @@ type Receipt struct {
 	Tag       string `json:"tag,omitempty"`
 	PinDigest string `json:"pin_digest,omitempty"`
 	Deferred  string `json:"deferred_checkpoint,omitempty"`
+	// ManualCheckpoint identifies the operator's selection in force when the
+	// reply was made. A later automatic cut can use a different checkpoint
+	// even at the same boundary, for example under a smaller window.
+	ManualCheckpoint *contextcfg.CheckpointRef `json:"manual_checkpoint,omitempty"`
 	// CatalogSent and CatalogOmitted record whether a window starting at
 	// the beginning of the branch carried the notebook catalog or left it
 	// out. Later requests in that window make the same choice, which keeps

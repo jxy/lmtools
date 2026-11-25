@@ -204,11 +204,21 @@ func (s *Session) AwaitsAnswer() (bool, error) {
 // View returns the history at the head as a request with opts carries it,
 // under the settings in force there.
 func (s *Session) View(opts core.RequestOptions) (View, error) {
+	return s.ViewWithChange(opts, Change{})
+}
+
+// ViewWithChange includes settings chosen at startup even when the REPL
+// runs a local command before its first new turn commits those settings.
+func (s *Session) ViewWithChange(opts core.RequestOptions, change Change) (View, error) {
 	h, err := s.History()
 	if err != nil {
 		return View{}, err
 	}
-	return s.Store.view(h, s.Identity, SettingsAt(h.Messages), opts, s), nil
+	settings := SettingsAt(h.Messages)
+	if change != (Change{}) {
+		settings, _ = settings.Apply(change)
+	}
+	return s.Store.view(h, s.Identity, settings, opts, s), nil
 }
 
 // UseReceipt makes receipt the window the next reply records.

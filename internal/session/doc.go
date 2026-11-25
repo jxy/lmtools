@@ -86,6 +86,10 @@
 //
 // # Checkpoints
 //
+// A manual compaction selects a published checkpoint in a new settings
+// record. Descendants inherit that choice, even before another reply
+// records a receipt. Selecting full replay explicitly clears the choice.
+//
 // The context engine reaches checkpoints through a Transcript. A checkpoint
 // is saved beside the message its boundary follows and keyed by that message
 // and a tag naming the settings that shaped it. Checkpoints and receipts

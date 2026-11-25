@@ -79,10 +79,42 @@ user turn. For batch use, feed the corresponding prompt to `lmc`.
 
 ## Context windows
 
+At `you>`, type `/compact` to shorten the branch through its latest
+completed exchange. If there is new work to summarize and a notebook is
+attached, `lmc` first runs the same notebook update as `/handoff`. Its tool
+calls use the usual approvals. Draft text, queued images, and a pending
+developer instruction wait for your next prompt. When the handoff completes,
+the checkpoint writer summarizes the saved history and the new window uses
+the updated notebook catalog when the catalog view is enabled and fits.
+
+If the handoff is interrupted, returns no final answer, lacks the `put`
+tool, or leaves a failed note write unresolved, `lmc` reports the error
+and skips the manual checkpoint. Completed note writes are saved. If only
+the checkpoint fails, retrying `/compact` at the same place in this REPL
+reuses the completed handoff. If an exchange is unfinished, `lmc` saves
+the notebook handoff on another branch so you can finish the original
+exchange.
+
+Without a notebook, `/compact` goes directly to the writer. The command
+also works below the automatic trigger and with early cuts off.
+If the model's capacity is unknown, the writer reads the history in bounded
+chunks. `lmc` reports the estimated input tokens before and after the cut.
+Continue at the same prompt. If the writer fails, there is nothing new to
+summarize, or the summary would use as much space as the current context,
+`lmc` reports the reason and keeps the current context.
+
+The checkpoint is saved on this branch. Resuming at the reported message
+uses it immediately, even if you exited before sending another prompt.
+System and developer instructions, standing pins, and any unfinished exchange
+carry forward. `/show` displays the full transcript. To replay it in a new
+run, resume with `-context-policy full`. A manual cut leaves the automatic
+trigger settings in force. `/handoff` updates project notebook files for
+other sessions and returns to the current conversation.
+
 | Setting | What goes into the request |
 | --- | --- |
-| Ordinary chat | Full history of the selected branch. |
-| `-context-policy full` | Full branch, with the selected notebook view if attached. |
+| Ordinary chat | The branch's history. After a manual cut, the summary and subsequent messages. |
+| `-context-policy full` on resume | Full branch, including the exchanges covered by a previous manual cut. |
 | `-notebook DIR` with the default policy | Handoffs when a window size is known. Otherwise `lmc` reports that it will use full replay. |
 | `-context-policy handoff` | The run's model and effort produce a prose checkpoint from completed exchanges. Requires a known window size. |
 

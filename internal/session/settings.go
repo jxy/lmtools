@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"lmtools/internal/contextcfg"
 	"lmtools/internal/core"
 	"lmtools/internal/prompts"
 )
@@ -27,6 +28,8 @@ type Settings struct {
 	// Catalog is the notebook catalog snapshot a window that starts at the
 	// beginning of the conversation sends.
 	Catalog string `json:"catalog,omitempty"`
+	// ManualCheckpoint selects the shortened context from this record on.
+	ManualCheckpoint *contextcfg.CheckpointRef `json:"manual_checkpoint,omitempty"`
 }
 
 // Change is what a run's settings flags set. A nil field leaves its setting
@@ -72,6 +75,9 @@ func (s Settings) Apply(c Change) (Settings, []string) {
 	set(&next.Notebook, c.Notebook)
 	set(&next.View, c.View)
 	set(&next.Policy, c.Policy)
+	if c.Policy != nil && *c.Policy == contextcfg.Full {
+		next.ManualCheckpoint = nil
+	}
 	set(&next.Format, c.Format)
 	if next.Notebook != s.Notebook || next.View != s.View {
 		next.Catalog = ""
@@ -109,6 +115,9 @@ func (s Settings) Apply(c Change) (Settings, []string) {
 	differs("context window cap", s.Window, next.Window)
 	differs("context trigger", s.Trigger, next.Trigger)
 	differs("early cuts", s.Early, next.Early)
+	if s.ManualCheckpoint != next.ManualCheckpoint {
+		changed = append(changed, "manual checkpoint")
+	}
 	return next, changed
 }
 

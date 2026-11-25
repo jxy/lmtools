@@ -532,6 +532,9 @@ type replLoop struct {
 	// follows, and keeps the history it has read; nil while the loop has no
 	// session yet.
 	from *session.Session
+	// compactHandoff names the head whose notebook handoff finished. A
+	// retry there can retry the checkpoint without updating the notes again.
+	compactHandoff session.Ref
 	// saved reports that the loop saved a message, which the notice at its
 	// end names.
 	saved bool
@@ -666,6 +669,12 @@ func (l *replLoop) run() (err error) {
 			l.leave()
 			return nil
 		}
+		if action.compact {
+			if stop := l.runCompact(); stop != nil {
+				return stop
+			}
+			continue
+		}
 		if !action.send {
 			continue
 		}
@@ -675,33 +684,23 @@ func (l *replLoop) run() (err error) {
 		}
 		action.text = l.draft + action.text
 		l.draft = ""
+		turn := session.Turn{Prompt: action.text, Images: l.images, Developer: l.base.Developer}
 		if strings.TrimSpace(action.text) == "" {
 			if l.awaiting {
 				// The first input decides: an empty line asks for the
 				// answer the start point awaits, and a queued instruction
 				// and images wait for the first new user turn.
-				l.awaiting = false
-				out, err := l.runTurn(turnInput{}, nil)
-				if stop := l.finishTurn(out, err); stop != nil {
-					return stop
-				}
-				if err != nil {
-					l.awaitAgain()
-				}
-				continue
-			}
-			if len(l.images) == 0 {
+				turn = session.Turn{}
+			} else if len(l.images) == 0 {
 				continue
 			}
 		}
-		l.awaiting = false
-		l.history.add(action.text)
-		out, err := l.runTurn(turnInput{text: action.text}, l.images)
-		if stop := l.finishTurn(out, err); stop != nil {
+		l.history.add(turn.Prompt)
+		ctx, end := l.signals.begin()
+		_, stop := l.submitTurn(ctx, turn)
+		end()
+		if stop != nil {
 			return stop
-		}
-		if err != nil {
-			l.awaitAgain()
 		}
 	}
 }
@@ -765,7 +764,7 @@ func (l *replLoop) prepareStart() error {
 		return err
 	}
 	l.showSession(sess)
-	l.env.window = newContextWindow(l.env, l.base)
+	l.env.window = turnContextWindow(l.env, l.base)
 	resolution, err := sess.ResolvePending(ctx, l.base, logger.From(ctx), l.env.notifier, l.env.toolUI, l.env.approver, func(calls []core.ToolCall) error {
 		return bindPendingHistory(ctx, l.env, l.base, sess, calls)
 	})
@@ -790,25 +789,35 @@ func (l *replLoop) prepareStart() error {
 	return nil
 }
 
-// runTurn runs one turn in a phase of its own, continuing from the session
-// the loop holds once there is one, and records what the turn left: the
-// session to continue from, and whether the images went with it.
-func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome, error) {
+// submitTurn reports whether the turn succeeded and whether the
+// loop must stop. A recoverable failure returns to the prompt.
+func (l *replLoop) submitTurn(ctx context.Context, turn session.Turn) (bool, error) {
+	l.awaiting = false
+	out, err := l.runTurn(ctx, turn)
+	if stop := l.finishTurn(out, err); stop != nil {
+		return false, stop
+	}
+	if err != nil {
+		l.awaitAgain()
+		return false, nil
+	}
+	return true, nil
+}
+
+// runTurn continues from the session the loop holds and records what the
+// turn saved, including whether it consumed queued images or instructions.
+func (l *replLoop) runTurn(ctx context.Context, turn session.Turn) (turnOutcome, error) {
 	if notifier, ok := l.env.notifier.(interface{ BeginTurn() }); ok {
 		notifier.BeginTurn()
 	}
-	l.showTurn(in, images)
+	in := turnInput{text: turn.Prompt}
+	l.showTurn(in, turn.Images)
 	opts := l.base
-	opts.Images = images
-	if in.text == "" && len(images) == 0 {
-		// A queued instruction waits for the first new user turn.
-		opts.Developer = ""
-	}
+	opts.Developer, opts.Images = turn.Developer, turn.Images
 	if l.from != nil {
 		from := *l.from
 		in.from = &from
 	}
-	ctx, end := l.signals.begin()
 	l.interruptEchoed.Store(false)
 	l.turnMu.Lock()
 	l.turnCtx = ctx
@@ -820,7 +829,6 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 	l.turnMu.Lock()
 	l.turnCtx = nil
 	l.turnMu.Unlock()
-	end()
 	if l.bell && l.terminal {
 		l.env.notifier.Promptf("\a")
 	}
@@ -835,7 +843,7 @@ func (l *replLoop) runTurn(in turnInput, images []core.ImageBlock) (turnOutcome,
 		if opts.Developer != "" {
 			l.base.Developer = ""
 		}
-		if len(images) > 0 {
+		if len(turn.Images) > 0 {
 			l.images = nil
 		}
 	}

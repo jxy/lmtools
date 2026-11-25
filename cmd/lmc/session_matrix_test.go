@@ -33,12 +33,13 @@ type matrix struct {
 	server *httptest.Server
 	store  *session.Store
 
-	mu       sync.Mutex
-	bodies   []string
-	answers  int
-	writers  int
-	replies  []func() (map[string]any, int)
-	failNext int
+	mu         sync.Mutex
+	bodies     []string
+	answers    int
+	writers    int
+	replies    []func() (map[string]any, int)
+	failNext   int
+	failWriter bool
 }
 
 // matrixBinary copies the lmc binary to a directory beside a notebook
@@ -93,6 +94,11 @@ func (m *matrix) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(systemOf(string(body)), "Write a handoff"):
 		m.writers++
+		if m.failWriter {
+			m.failWriter = false
+			http.Error(w, "checkpoint writer unavailable", http.StatusInternalServerError)
+			return
+		}
 		message["content"] = "HANDOFF-TEXT"
 	case m.failNext > 0:
 		m.failNext--
@@ -107,7 +113,10 @@ func (m *matrix) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":{"message":"refused"}}`, status)
 			return
 		}
-		message, finish = reply, "tool_calls"
+		message = reply
+		if _, ok := reply["tool_calls"]; ok {
+			finish = "tool_calls"
+		}
 	default:
 		m.bodies = append(m.bodies, string(body))
 		m.answers++
@@ -227,6 +236,203 @@ func requireLacks(t *testing.T, body string, unwanted ...string) {
 			t.Fatalf("request carries %q:\n%s", u, body)
 		}
 	}
+}
+
+// A manual cut is a branch choice made at the prompt. Both the next turn
+// and a new process resumed at the cut must see it, including under the
+// default full replay policy with no notebook or known window.
+func TestMatrixREPLCompact(t *testing.T) {
+	m := newMatrix(t)
+	old := strings.Repeat("original project detail ", 50) + "end of evidence"
+	start := m.ok(old, "-system", "Standing system instruction.")
+	stdout, stderr, err := m.run("/developer Instruction for the next turn.\n/compact\n/compact\ncontinue the work\n/exit\n",
+		"-repl", "-no-stream", "-resume", start.String(), "-context-policy", "full")
+	if err != nil {
+		t.Fatalf("compact in REPL: %v\n%s", err, stderr)
+	}
+	requireContains(t, stderr, "Context compacted from", "No new completed exchange to compact")
+	requireLacks(t, stdout, "Context compacted", "HANDOFF-TEXT")
+	requireContains(t, m.last(), "Standing system instruction.", "HANDOFF-TEXT", "Instruction for the next turn.", "continue the work")
+	requireLacks(t, m.last(), "original project detail", "/compact")
+	cut := savedAt(t, stderr)
+	if cut.Session != start.Session || m.parent(cut) != start.Message || m.requests() != 2 {
+		t.Fatalf("cut %s after %s, %d conversation requests", cut, start, m.requests())
+	}
+	m.ok("fresh process", "-resume", cut.String(), "-system", "")
+	requireContains(t, m.last(), "HANDOFF-TEXT", "fresh process")
+	requireLacks(t, m.last(), old, "Standing system instruction.")
+	m.ok("sibling", "-resume", start.String())
+	requireContains(t, m.last(), old)
+	requireLacks(t, m.last(), "HANDOFF-TEXT")
+	m.ok("replay", "-resume", cut.String(), "-context-policy", "full")
+	requireContains(t, m.last(), old)
+	requireLacks(t, m.last(), "HANDOFF-TEXT")
+	shown, _, err := m.run("", "-show", cut.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, shown, old, "context compacted through message")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.writers != 1 {
+		t.Fatalf("wrote %d checkpoints, want one", m.writers)
+	}
+}
+
+func (m *matrix) queueNotebookPut(id, expected string) {
+	m.t.Helper()
+	args, err := json.Marshal(map[string]any{
+		"id": id, "expected_revision": expected, "title": "Build decision",
+		"summary": "Use the staging directory.", "body": "Place artifacts in staging.",
+		"sources": []string{"project decision"},
+	})
+	if err != nil {
+		m.t.Fatal(err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.replies = append(m.replies, func() (map[string]any, int) {
+		return map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{
+			"id": "put-" + id + "-" + expected, "type": "function",
+			"function": map[string]any{"name": "mcp__notebook__put", "arguments": string(args)},
+		}}}, http.StatusOK
+	})
+}
+
+func TestMatrixREPLCompactAndHandoff(t *testing.T) {
+	m := newMatrix(t)
+	book := t.TempDir()
+	old := strings.Repeat("completed notebook work ", 50) + "end of evidence"
+	start := m.ok(old, "-notebook", book, "-context-window", "32768", "-context-early-cuts=false")
+	rules := filepath.Join(t.TempDir(), "rules")
+	if err := os.WriteFile(rules, []byte(`{"mcp":"notebook","tool":"put"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// An initial revision conflict is resolved by the model's second put.
+	m.queueNotebookPut("build", "outdated")
+	m.queueNotebookPut("build", "new")
+	image := writeIntegrationImage(t, "queued.png")
+	stdout, stderr, err := m.run("/developer NEXT-USER-ONLY\n/image "+image+"\n/compact\n/compact\nnext task\n/exit\n",
+		"-repl", "-no-stream", "-resume", start.String(), "-tool-whitelist", rules, "-tool-non-interactive")
+	if err != nil {
+		t.Fatalf("notebook REPL: %v\n%s", err, stderr)
+	}
+	requireContains(t, stderr, "Updating the project notebook", "Context compacted from", "No new completed exchange")
+	requireLacks(t, stdout, "HANDOFF-TEXT", "Context compacted")
+	if _, body, err := (notebook.Store{Root: book}).Read("build"); err != nil || !strings.Contains(body, "Place artifacts in staging.") {
+		t.Fatalf("notebook update: %q, %v", body, err)
+	}
+	if m.requests() != 5 {
+		t.Fatalf("sent %d conversation requests, want the original, the handoff with two tool results, and the next turn", m.requests())
+	}
+	requireContains(t, m.last(), "HANDOFF-TEXT", "Build decision", "NEXT-USER-ONLY", "data:image/png", "next task")
+	requireLacks(t, m.last(), old)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	requireContains(t, m.bodies[1], old, string(mustJSON(t, strings.TrimSpace(prompts.NotebookHandoff))))
+	for _, body := range m.bodies[1:4] {
+		requireLacks(t, body, "NEXT-USER-ONLY", "data:image/png")
+	}
+	if m.writers != 1 {
+		t.Fatalf("wrote %d checkpoints, want one", m.writers)
+	}
+}
+
+func TestMatrixREPLCompactNotebookFailures(t *testing.T) {
+	m := newMatrix(t)
+	book := t.TempDir()
+	old := strings.Repeat("original decisions ", 70) + "end"
+	start := m.ok(old, "-notebook", book, "-context-window", "32768")
+	flags := []string{"-repl", "-no-stream", "-resume", start.String()}
+	_, stderr, err := m.run("/compact\n/exit\n", append(flags, "-tool-include", "notebook/read")...)
+	if err == nil || m.requests() != 1 {
+		t.Fatalf("missing put: %v, with %d requests", err, m.requests())
+	}
+	requireContains(t, stderr, "requires the notebook put tool", "1 REPL turn(s) failed")
+
+	// Without a whitelist, piped input cannot approve the write. Even a
+	// final model answer after that tool error must not activate a checkpoint.
+	m.queueNotebookPut("build", "new")
+	_, stderr, err = m.run("/compact\nnext question\n/exit\n", flags...)
+	if err == nil {
+		t.Fatal("a denied notebook write did not fail the piped command")
+	}
+	requireContains(t, stderr, `could not write note "build"`, "1 REPL turn(s) failed")
+	requireContains(t, m.last(), old, "next question")
+	requireLacks(t, m.last(), "HANDOFF-TEXT")
+	if _, err := os.Stat(filepath.Join(book, "build.md")); !os.IsNotExist(err) {
+		t.Fatalf("denied put: %v", err)
+	}
+
+	// A successful HTTP request can leave only the handoff prompt saved.
+	// The REPL must let an empty line retry the missing answer.
+	before := m.requests()
+	m.mu.Lock()
+	m.replies = append(m.replies, func() (map[string]any, int) {
+		return map[string]any{"role": "assistant", "content": ""}, http.StatusOK
+	})
+	m.mu.Unlock()
+	_, stderr, err = m.run("/compact\n\n/exit\n", flags...)
+	if err == nil || m.requests() != before+2 {
+		t.Fatalf("empty handoff: %v, %d additional requests\n%s", err, m.requests()-before, stderr)
+	}
+	requireContains(t, stderr, "notebook handoff returned no final answer", "still awaits an answer", "1 REPL turn(s) failed")
+	requireContains(t, m.last(), old, string(mustJSON(t, strings.TrimSpace(prompts.NotebookHandoff))))
+	requireLacks(t, m.last(), "HANDOFF-TEXT")
+
+	m.mu.Lock()
+	m.failNext = 1
+	m.mu.Unlock()
+	_, stderr, err = m.run("/compact\nnext after failure\n/exit\n", flags...)
+	if err == nil {
+		t.Fatal("failed handoff request did not fail the piped command")
+	}
+	requireContains(t, stderr, "Notebook handoff stopped before compaction", "1 REPL turn(s) failed")
+	requireContains(t, m.last(), old, "next after failure")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.writers != 0 {
+		t.Fatalf("started %d checkpoint writers after failed handoffs", m.writers)
+	}
+}
+
+func TestMatrixREPLCompactRetriesWriterWithoutRepeatingHandoff(t *testing.T) {
+	m := newMatrix(t)
+	m.mu.Lock()
+	m.failWriter = true
+	m.mu.Unlock()
+	stdout, stderr, err := m.run("/compact\n"+strings.Repeat("project context ", 50)+"\n/compact\n/compact\nnext task\n/exit\n",
+		"-repl", "-no-stream", "-notebook", t.TempDir(), "-context-window", "32768")
+	if err == nil {
+		t.Fatal("the initial checkpoint failure should count at EOF")
+	}
+	requireContains(t, stderr, "No completed exchange to compact.", "1 REPL turn(s) failed", "Context compacted from")
+	requireLacks(t, stdout, "HANDOFF-TEXT")
+	requireContains(t, m.last(), "HANDOFF-TEXT", "next task")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.bodies) != 3 || m.writers != 2 {
+		t.Fatalf("got %d conversation requests and %d writer calls", len(m.bodies), m.writers)
+	}
+}
+
+func TestMatrixREPLCompactNotebookPreservesAnAwaitedReply(t *testing.T) {
+	m := newMatrix(t)
+	old := strings.Repeat("completed project phase ", 50) + "end"
+	first := m.ok(old, "-notebook", t.TempDir(), "-context-window", "32768")
+	second := m.ok("unanswered question", "-resume", first.String())
+	question := second.At(m.parent(second))
+	_, stderr, err := m.run("/compact\n\n/exit\n", "-repl", "-no-stream", "-resume", question.String())
+	if err != nil {
+		t.Fatalf("compact before answering %s: %v\n%s", question, err, stderr)
+	}
+	cut := savedAt(t, stderr)
+	if m.parent(cut) != question.Message {
+		t.Fatalf("cut %s did not continue the unanswered question %s", cut, question)
+	}
+	requireContains(t, stderr, "Notebook handoff at", "Continuing the unfinished branch")
+	requireContains(t, m.last(), "HANDOFF-TEXT", "unanswered question")
+	requireLacks(t, m.last(), "Prepare this project's notebook", old)
 }
 
 // 1. Two turns, then -resume S, which reports the saved S/M.

@@ -84,10 +84,20 @@ type Capacity struct {
 	Endpoint string `json:"endpoint"`
 }
 
+// CheckpointRef identifies a saved checkpoint by the message it covers
+// through and the tag under which it was published.
+type CheckpointRef struct {
+	Prefix string `json:"prefix"`
+	Tag    string `json:"tag"`
+}
+
 // Binding is the context configuration of one run: the settings in force,
 // with the window the run resolved.
 type Binding struct {
 	Settings
+	// ManualCheckpoint is the checkpoint the operator selected on this branch.
+	// It supplies a starting context even when automatic cuts are off.
+	ManualCheckpoint *CheckpointRef
 	// NotebookDefault records that the policy is the default of a notebook
 	// conversation: handoff when a window is known, full replay otherwise.
 	NotebookDefault bool
