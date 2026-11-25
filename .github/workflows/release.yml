@@ -45,11 +45,12 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
+          git ls-files -z -- docs/ examples/lmc/ 'internal/prompts/notebook_*.txt' > "$RUNNER_TEMP/lmtools-doc-files"
           for dir in bin/*-*/; do
             platform=$(basename "$dir")
             tar -czf "dist/lmtools-$GITHUB_REF_NAME-$platform.tar.gz" \
-              -C "$dir" lmc apiproxy alcfauth notebook \
-              -C "$GITHUB_WORKSPACE" LICENSE README.md
+              --null -T "$RUNNER_TEMP/lmtools-doc-files" LICENSE README.md \
+              -C "$dir" lmc apiproxy alcfauth notebook
           done
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist
