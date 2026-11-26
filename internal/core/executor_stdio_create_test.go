@@ -23,10 +23,8 @@ func newExecutableScript(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// The call from issue 165: an approved command whose stdout file did not exist
-// and whose stderr file could not be opened. Setup created the first, failed on
-// the second, and left an empty file for a command that never ran — which a
-// later read of that path reports as a successful read of nothing.
+// If opening stderr fails after setup creates the stdout file, remove that
+// file so a later reader cannot mistake it for output from the command.
 func TestCreatedOutputFileIsRemovedWhenSetupFails(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "test-count.log")

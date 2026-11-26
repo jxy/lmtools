@@ -31,9 +31,8 @@ func requireCharacterDevice(t *testing.T, path string) {
 	}
 }
 
-// The redirection that started issue 164: an approved command whose stderr goes
-// to /dev/null. It never ran, and the model was told a stream had failed rather
-// than that nothing had happened.
+// Redirecting stderr to /dev/null discards that stream and lets the caller
+// read the command's stdout.
 func TestRedirectionToPermittedDeviceRuns(t *testing.T) {
 	requireCharacterDevice(t, "/dev/null")
 
