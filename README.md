@@ -19,7 +19,8 @@
 Download the archive for Linux/amd64, FreeBSD/amd64, or macOS/arm64. Verify it
 against the release's `SHA256SUMS`, extract it, and put the four executables
 on your `PATH`. Each `lmtools-<tag>-<goos>-<goarch>.tar.gz` includes
-`LICENSE`, this README, and the guides and examples it links to.
+`LICENSE`, this README, the public guides in `docs/`, the examples in
+`examples/lmc/`, and both notebook handoff prompts in `internal/prompts/`.
 [GitHub releases](https://github.com/jxy/lmtools/releases)
 
 To build from a checkout, use Go 1.26.11 or later and BSD or GNU make.

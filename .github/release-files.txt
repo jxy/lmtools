@@ -1,0 +1,12 @@
+LICENSE
+README.md
+docs/alcf-inference.md
+docs/api-support-matrix.md
+docs/codex.md
+docs/context-and-notebooks.md
+docs/tool-approval.md
+examples/lmc/mcp-config.json
+examples/lmc/tool-blacklist.txt
+examples/lmc/tool-whitelist.txt
+internal/prompts/notebook_handoff.txt
+internal/prompts/notebook_versions.txt

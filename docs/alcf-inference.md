@@ -54,6 +54,7 @@ refreshes before expiry, and reports progress on stderr. The default refresh
 margin is one hour. For a custom margin, use `alcfauth token -watch -min-valid 2h`.
 The watch retries transient refresh failures and exits when a new login is
 required. Run `alcfauth login` and start it again.
+[ALCF token lifetime and login policy](https://docs.alcf.anl.gov/services/inference-endpoints/#2-authenticate)
 
 `-cache FILE` selects the token cache and `-key-file FILE` selects the file
 holding just the bearer token. Both default to paths under `~/.lmc/alcf/`.

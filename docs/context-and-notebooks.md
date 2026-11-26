@@ -103,8 +103,9 @@ Continue at the same prompt. If the writer fails, there is nothing new to
 summarize, or the summary would use as much space as the current context,
 `lmc` reports the reason and keeps the current context.
 
-The checkpoint is saved on this branch. Resuming at the reported message
-uses it immediately, even if you exited before sending another prompt.
+The reference printed by `/compact` names the settings record that selects
+the checkpoint on this branch. Use it with `-resume` even if you exited
+before sending another prompt.
 System and developer instructions, standing pins, and any unfinished exchange
 carry forward. `/show` displays the full transcript. To replay it in a new
 run, resume with `-context-policy full`. A manual cut leaves the automatic

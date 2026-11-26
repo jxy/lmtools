@@ -43,14 +43,23 @@ jobs:
           done
 
       - name: Package
+        shell: bash
         run: |
           mkdir -p dist
-          git ls-files -z -- docs/ examples/lmc/ 'internal/prompts/notebook_*.txt' > "$RUNNER_TEMP/lmtools-doc-files"
+          export LC_ALL=C
+          # Add a guide, example, or prompt to the manifest to ship it in releases.
+          manifest=.github/release-files.txt
+          files=()
+          while IFS= read -r file || [[ -n "$file" ]]; do
+            files+=("$file")
+          done < "$manifest"
+          programs=(lmc apiproxy alcfauth notebook)
+          { printf '%s\n' "${programs[@]}"; cat "$manifest"; } | sort -u > "$RUNNER_TEMP/lmtools-expected-files"
           for dir in bin/*-*/; do
             platform=$(basename "$dir")
-            tar -czf "dist/lmtools-$GITHUB_REF_NAME-$platform.tar.gz" \
-              --null -T "$RUNNER_TEMP/lmtools-doc-files" LICENSE README.md \
-              -C "$dir" lmc apiproxy alcfauth notebook
+            archive="dist/lmtools-$GITHUB_REF_NAME-$platform.tar.gz"
+            tar -czf "$archive" "${files[@]}" -C "$dir" "${programs[@]}"
+            tar -tzf "$archive" | sort | diff -u "$RUNNER_TEMP/lmtools-expected-files" -
           done
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist

@@ -1,13 +1,20 @@
 # API Support Matrix
 
-Use the section for the endpoint your client calls. Direct Responses requests
-preserve unknown fields in the raw body. On converted routes the proxy
-reports unknown fields at WARN and omits them from the provider request.
+Use the section for the endpoint your client calls. The field lists describe
+what `apiproxy` decodes. The configured backend and mapped model determine
+what goes upstream. For an unknown field path the proxy logs WARN the first
+time it sees it from a given source, then DEBUG on repeats. Direct Responses
+requests preserve unknown fields in the raw body. Chat and Messages handlers
+omit unknown top-level fields when they encode the parsed request.
 [Endpoint list and examples](../README.md#supported-endpoints)
+
+For a required tool call, Messages and Responses conversions send `"any"`
+to OpenAI Chat and `AUTO` to Google. Streamed Chat requests to Google also
+use `AUTO` for `tool_choice: "required"`, allowing a reply without a tool call.
 
 ## Canonical Internal Request Fields
 
-The current canonical request model preserved by `TypedRequest` is:
+`TypedRequest` carries these fields between provider formats.
 
 - `system`
 - `developer`
@@ -29,14 +36,16 @@ The current canonical request model preserved by `TypedRequest` is:
 - `metadata`
 - `service_tier`
 
-Anything outside that set must either be direct-provider-only or logged as a warning when it is dropped during conversion.
+Individual routes also handle fields outside this list. For example, Messages
+passes `top_k` separately to the Google renderer, and Responses handles
+`previous_response_id` while preparing the conversation.
 
 ## `/v1/messages`
 
-Accepted top-level fields:
+**Recognized request fields**
 
 - `model`: required
-- `messages`: required
+- `messages`: required, nonempty array
 - `system`
 - `max_tokens`
 - `stop_sequences`
@@ -57,75 +66,89 @@ Accepted top-level fields:
 - `cache_control`
 - `mcp_servers`
 
-Behavior by configured provider:
+**Provider behavior**
 
-- Preserved broadly: `model`, `messages`, `system`, `max_tokens`, `temperature`, `top_p`, `stream`, `tools`
-- Streaming responses use Anthropic SSE events. After upstream streaming HTTP 200, the proxy emits `ping` keepalives when the downstream client stream is idle for the ping interval.
-- Preserved or normalized on supported routes: `tool_choice`
-- Anthropic or Google only: `top_k`; OpenAI/Argo OpenAI conversion logs a warning and drops it
-- Anthropic only: `container`, `context_management`, `inference_geo`, `speed`, `cache_control`, and `mcp_servers`; other provider conversions log warnings when these are dropped
-- Anthropic-wire routes (`-provider anthropic`, and `-provider argo` with a
-  `claude*` model in native mode) forward the parsed Anthropic request directly,
-  so tool entries keep `type`, `cache_control`, `strict`, and `defer_loading`,
-  including server-tool definitions such as the tool-search tools. Converted
-  routes rebuild the tool array from `TypedRequest` and carry only client
-  function and custom tools; the dropped `tools[].<type>`,
-  `tools[].cache_control`, and `tools[].defer_loading` are logged as warnings.
-  `defer_loading` is warned once per request rather than once per tool, and only
-  when a tool sets it to `true` — an explicit `false` is the API default and
-  loses nothing. `/v1/messages/count_tokens` reports the same drops on its Google
-  branch, and warns that its local estimator counts deferred tools as if loaded.
-  Legacy Argo (`-argo-legacy`) is a converted route for every model and does not
-  yet warn per tool field.
-- `metadata` is preserved for Anthropic and OpenAI conversions, and warned/dropped for Google
-- Anthropic-compatible routes preserve `thinking.type`, `thinking.display`, and
-  `output_config.effort`. `thinking.display` accepts `summarized` and `omitted`;
-  `display` is invalid with `thinking.type="disabled"`. The configured upstream
-  remains authoritative about which thinking modes a particular model accepts.
-- Portable OpenAI/Responses reasoning effort converted to Anthropic wire also
-  emits `thinking:{"type":"adaptive","display":"summarized"}`. Effort and
-  thinking activation are separate Anthropic controls, and the explicit display
-  keeps newer models from returning signature-only thinking blocks by default.
-- Accepted `output_config.effort` values are `low`, `medium`, `high`, `xhigh`,
-  and `max`. For OpenAI/Argo OpenAI conversion, efforts map to `reasoning_effort`
-  one-to-one, including `max`. For Google conversion, efforts map to Gemini
-  thinking configuration where possible (`xhigh` and `max` both map to the
-  highest Gemini thinking tier).
-- `output_config.format` is converted to OpenAI `response_format` or Google JSON response configuration when it is a supported JSON schema/object shape.
-- Anthropic request normalization prefers `temperature` when both `temperature` and `top_p` are present; `top_p` is omitted in that case because current Anthropic models reject both together
-- `tool_choice` is converted to Google `functionCallingConfig` when tools are present.
-- Content blocks without a target equivalent, such as Anthropic thinking blocks on OpenAI request output or server-tool/document/search-result blocks on non-Anthropic output, are logged as warnings when dropped. A thinking block whose signature starts with `lmtools-chat-reasoning:` is one apiproxy made from Chat Completions reasoning; on OpenAI output it goes back in the Chat field it came from (`reasoning_content`, or `reasoning`), with no warning.
-- Chat Completions reasoning (`reasoning_content`, or `reasoning` from newer vLLM) reaches Anthropic clients as a thinking block ahead of the text, buffered or streamed, signed with that marker. On a stream, the block ends with a `signature_delta` before the text or the first tool call starts; reasoning that arrives after either has no block to go in and is dropped.
-- Image blocks convert between the Anthropic `image` source, the OpenAI `image_url` part, and the Responses `input_image` part, as URL or base64 data URL. On Google output a base64 image becomes an `inlineData` part; a URL image has no Gemini request equivalent and is rendered as the text mention `[Image: url]` rather than dropped.
-- Tool results carry images. On input, an Anthropic `tool_result` whose `content` is an array yields its text blocks joined as the result text and its image blocks as images, and a Responses `function_call_output` whose `output` is a content list yields its `input_image` parts as images; a block of any other type keeps its JSON in the text. On output the images render as the Anthropic `tool_result` content array, the Responses `function_call_output` content list, an `inlineData` part nested under the Google `functionResponse` (`parts`, accepted by Gemini 3 and later), and, on Chat Completions where a `tool` message is text only, a `user` message with `image_url` parts placed right after the round's tool messages.
-- Assistant `thinking` content blocks that arrive with only a `signature` (no `thinking` field) are normalized to include an empty `"thinking":""` so Anthropic and Argo Anthropic-wire endpoints accept them, and each insertion is logged at WARN level. `redacted_thinking` blocks and blocks that already include `thinking` are left unchanged.
+- With `-provider anthropic`, or native Argo and a mapped `claude*` model,
+  the proxy forwards the parsed Messages request and the `anthropic-beta`
+  header. Both `temperature` and `top_p` reach the backend if supplied.
+  Set a positive `max_tokens` here. Omitting it sends `0`. The Claude
+  defaults described below apply when the proxy converts another API to Messages.
+- Direct Messages routes preserve `container` (a string), `context_management`,
+  `inference_geo`, `speed`, `cache_control`, and `mcp_servers`. The OpenAI
+  and Google conversions omit those fields. `top_k` passes through to
+  Anthropic and becomes `generationConfig.topK` on Google. Google omits
+  request `metadata` and `service_tier`. Legacy Argo sends `metadata` in
+  the request even though it logs a warning about dropping it.
+- Direct Messages routes preserve server tool definitions and tool fields
+  such as `type`, `cache_control`, `strict`, and `defer_loading`. When
+  converting to OpenAI or Google, a server tool without an `input_schema`
+  is omitted. A named tool with a schema can become a client function,
+  losing its server behavior. Conversion omits tool cache and deferred
+  loading settings and warns once per request if any tool defers loading.
+  Legacy Argo runs the per-tool OpenAI drop warnings for non-Claude models.
+- Direct Messages routes preserve `thinking.type`, `thinking.display`, and
+  `output_config.effort`. The proxy accepts `summarized` or `omitted` for
+  `display`. Providing a display with disabled thinking or a nonzero
+  `budget_tokens` with adaptive thinking returns HTTP 400.
+- The proxy accepts `low`, `medium`, `high`, `xhigh`, and `max` for
+  `output_config.effort`. OpenAI and native Argo Chat receive these values
+  as `reasoning_effort`. For `xhigh` and `max`, a Google model name containing
+  `gemini-2.5` gets a thinking budget of 24576. Other Google names get
+  `thinkingLevel: "high"`. A supported JSON object or schema in
+  `output_config.format` maps to OpenAI or Google JSON output controls.
+- For a function tool, a named Messages `tool_choice` selects that
+  function on Chat and sets Google's mode to `ANY` with that one allowed
+  function. Messages `{"type":"any"}` reaches Chat as the literal string
+  `"any"` and Google as `AUTO`.
+- Streaming responses use Anthropic SSE events. On native streaming routes
+  the proxy starts idle pings once the upstream returns HTTP 200. The
+  default interval is 15 seconds. Legacy Argo streams text directly and
+  simulates a stream from the buffered response when tools are present.
+- Chat reasoning (`reasoning_content` or `reasoning`) reaches Messages
+  clients as a thinking block before the answer. Its `lmtools-chat-reasoning:`
+  signature lets the proxy replay it in the original Chat field. On a stream
+  the proxy sends the signature before starting text or a tool call and drops
+  reasoning received after that point. Conversion warns about unsupported
+  blocks such as documents and server tool results.
+- An image URL or base64 data URL can travel as an Anthropic `image` source,
+  a Chat `image_url`, or a Responses `input_image`. On Google, base64 data
+  becomes `inlineData` and a remote image becomes the text `[Image: url]`.
+- For tool results, Anthropic `tool_result.content` and Responses
+  `function_call_output.output` can contain text and image parts. Conversion
+  joins the text and carries unrecognized structured parts as JSON text.
+  Google places image bytes under `functionResponse.parts`. For Chat, a
+  user message with the images follows the round's tool messages.
+- On Messages and Messages token-count ingress, the proxy adds
+  `"thinking":""` to a `thinking` block missing that field and logs the
+  insertion. The signature travels with the block.
 
 ## `/v1/messages/count_tokens`
 
-Accepted top-level fields:
+**Recognized request fields**
 
 - `model`: optional for local estimation, required for native provider counting
-- `messages`: required
+- `messages`: required, nonempty array
 - `system`
 - `tools`
 
-Behavior by configured provider:
+**Provider behavior**
 
-- Anthropic backends forward to Anthropic `count_tokens`. An HTTP 404 there,
-  from an Anthropic-compatible server without the route such as the ALCF
-  inference gateway, falls back to the local estimator with a WARN.
-- Argo native mode forwards to Anthropic `count_tokens` only for Claude-routed
-  models. Non-Claude Argo models and legacy Argo mode use the local estimator.
-- Google backends convert the Anthropic-shaped request through `TypedRequest` and
-  call Gemini `countTokens`.
-- OpenAI and unsupported providers use the local estimator.
+- With a model, Anthropic and native Argo `claude*` routes call
+  `/messages/count_tokens`. Google calls Gemini `countTokens` with a
+  `generateContentRequest` and returns its `totalTokens` as `input_tokens`.
+- Without a model, or on OpenAI, other Argo models, or legacy Argo, the
+  proxy estimates locally. A native counter returning HTTP 404 also selects
+  the local estimator. Other native errors reach the client.
+- The Google route reports the tool fields that conversion drops. The
+  local estimator counts deferred tools as loaded and warns when
+  `defer_loading` is true.
 
 ## `/v1/chat/completions`
 
-Accepted top-level fields:
+**Recognized request fields**
 
 - `model`: required
-- `messages`: required
+- `messages`: required, nonempty array
 - `temperature`
 - `top_p`
 - `n`
@@ -159,31 +182,61 @@ Accepted top-level fields:
 - `top_logprobs`
 - `extra_body`
 
-Behavior by configured provider:
+**Provider behavior**
 
-- Preserved broadly: `model`, `messages`, `temperature`, `top_p`, `stream`, `stop`, `max_tokens`, `tools`, `tool_choice`, `reasoning_effort`
-- For OpenAI-compatible Chat Completions upstreams (OpenAI and Argo non-Claude routes), client `stop` values are intentionally omitted from the upstream request and enforced locally by the proxy on returned text. This applies to direct `/v1/chat/completions` pass-through and to `/v1/messages` requests converted to OpenAI-compatible Chat Completions. Native Anthropic `stop_sequences` and Google `stopSequences` are still forwarded to those providers.
-- OpenAI Chat Completions accepts `developer` messages. On Argo Chat
-  Completions the proxy sends these as `system`. On Anthropic and Google
-  it puts leading system and developer instructions in the system field.
-- The proxy forwards `reasoning_effort`, `response_format`, and `verbosity`
-  to OpenAI and native Argo Chat Completions. Portable effort levels are
-  `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. On Anthropic
-  routes `minimal` maps to `low` and `none` omits the effort and thinking
-  controls. Google uses `thinkingConfig` where supported. Conversion to
-  Anthropic or Google drops `verbosity` with a warning.
-- `response_format.json_schema` and `response_format.json_object` convert to Anthropic `output_config.format` and Google JSON response generation configuration.
-- `metadata`, `service_tier`, and OpenAI `user`/`safety_identifier` are converted where the target has matching request metadata. `stream_options.include_usage` is preserved through the internal metadata flag used by OpenAI-format streaming responses.
-- OpenAI-direct only, with warning on conversion: `n`, `presence_penalty`, `frequency_penalty`, `logit_bias`, `store`, `seed`, `modalities`, `audio`, `prediction`, `web_search_options`, `prompt_cache_key`, `prompt_cache_retention`, `parallel_tool_calls`, `logprobs`, `top_logprobs`, `stream_options.include_obfuscation`, `messages[].name`, response-only message metadata, and custom tool types without a target equivalent.
-- Chat reasoning fields, `reasoning_content` and the `reasoning` that newer vLLM sends, stay on direct OpenAI-compatible routes: in buffered answers, in streams the proxy decodes to enforce stop sequences, and on the assistant messages of a client's history.
-- Direct OpenAI and native Argo Chat Completions routes forward `input_audio`.
-  The backend model determines whether it accepts audio. Conversion to
-  Anthropic Messages or legacy Argo rejects audio input blocks.
-- Unknown top-level fields are logged at WARN and ignored.
+- Before routing, the proxy checks that each assistant tool call has a
+  distinct ID within its batch and that subsequent tool messages answer
+  every ID before another role appears. An orphan tool message, a missing
+  result, or an unmatched ID returns HTTP 400.
+- OpenAI and native Argo with a non-Claude model both forward the recognized
+  Chat fields. These include `n`, penalties, `seed`, `parallel_tool_calls`,
+  `extra_body`, cache controls, audio controls, and logprobs. The upstream
+  decides which its model accepts. Both routes preserve the Chat reasoning
+  fields `reasoning_content` and `reasoning` in replies and client history.
+  Native Argo sends `developer` messages as `system`.
+- On those two routes, the proxy removes `stop` from the upstream request
+  and enforces it on returned text, including streamed text. This also
+  applies to Messages requests sent to those Chat endpoints. Anthropic
+  and Google receive `stop_sequences` and `stopSequences`, respectively.
+- Direct Chat routes omit nonpositive token limits and forward positive
+  limits under their supplied names. On conversion, a positive `max_tokens`
+  takes precedence over `max_completion_tokens`. A converted request sent
+  to Chat uses `max_completion_tokens`.
+- Conversion to Anthropic or Google combines leading text instructions in
+  the system field and sends later system or developer messages as user
+  messages. On conversion to Anthropic, `temperature` takes precedence
+  over `top_p`. For `claude-opus-4-7` and its dated IDs, the renderer
+  drops `temperature` and forwards `top_p` only if no temperature was supplied.
+- OpenAI and native Argo Chat forward `reasoning_effort`, `response_format`,
+  and `verbosity`. On conversion to Anthropic, `minimal` maps to `low`,
+  and `low`, `medium`, `high`, `xhigh`, and `max` keep their names.
+  These set `output_config.effort` and adaptive thinking with summarized
+  display. `none` omits both controls. Anthropic and Google omit `verbosity`.
+- For `response_format.type` of `json_object` or `json_schema`, Anthropic
+  receives `output_config.format`. In schema mode it carries the schema
+  itself. OpenAI's wrapper name, description, and strict flag are omitted.
+  Google receives `responseMimeType: "application/json"` and, for a supplied
+  schema, `responseJsonSchema`.
+- Google buffered Chat requests use the Google renderer directly. Streamed
+  Chat requests first pass through the Anthropic renderer. For example, on
+  a Gemini 2.5 model, buffered `reasoning_effort: "none"` sends a zero
+  thinking budget. The streamed request omits `thinkingConfig`. With both
+  sampling controls supplied, the buffered request carries both and the
+  streamed request carries `temperature`. A Chat `tool_choice` of
+  `"required"` selects `ANY` on buffered Google requests and `AUTO`
+  on streamed requests.
+- Direct Chat routes forward `input_audio` to the backend. The Google
+  buffered route represents it as a text placeholder. Conversion to
+  Anthropic, legacy Argo, or streaming Google Chat rejects audio input.
+- Anthropic conversion maps `user`, or `safety_identifier` when `user` is
+  empty, to `metadata.user_id`. It maps service tier `default` to
+  `standard_only` and `priority` to `auto`. Google omits request metadata,
+  user identifiers, and service tier. On converted Chat streams,
+  `stream_options.include_usage` controls the final usage chunk.
 
 ## `/v1/responses`
 
-Accepted top-level fields:
+**Recognized fields for creating a response**
 
 - `model`: required
 - `input`: required unless `previous_response_id` or `prompt` is set
@@ -214,24 +267,20 @@ Accepted top-level fields:
 - `truncation`
 - `top_logprobs`
 
-Behavior by configured provider:
+### Forwarding and conversion
 
-- Direct OpenAI provider requests are forwarded to `/v1/responses` unless
-  `-chat-completions` is set, which converts them to OpenAI Chat Completions;
-  non-stream responses are parsed only to restore the client-requested model name. Direct passthrough
-  preserves valid OpenAI Responses fields that are not represented by the proxy's
-  typed compatibility struct.
+- OpenAI and native Argo with a mapped `gpt*` model forward create requests
+  to the backend's Responses API by default. The original request bytes,
+  including hosted tools and unknown fields, go upstream unless a model map
+  or encrypted-state recovery changes them. Where the response carries a
+  model name, the proxy restores the client's alias. `-chat-completions`
+  selects conversion.
 - `-strip-encrypted-reasoning` is an opt-in recovery exception on direct
   Responses paths. It drops every reasoning and compaction input item carrying
   `encrypted_content`. Both go whole, because `encrypted_content` is the item's
   content and the `id` left behind names state the backend could not resolve.
   Reasoning items without `encrypted_content`, all other input items, and
-  unknown top-level fields remain present. The default leaves the original
-  request untouched.
-- With `-provider argo`, requests whose backend model starts with `gpt` are
-  forwarded the same way to Argo's `/argoapi/v1/responses` using Argo bearer
-  auth, unless `-chat-completions` or `-argo-legacy` is set. Argo serves the
-  Responses API for those models only, so all other Argo models still convert.
+  unknown top-level fields remain present.
 - Converted routes return a request error for `prompt` templates,
   `max_tool_calls`, or `top_logprobs`. Use direct Responses forwarding
   with a backend that implements these fields.
@@ -239,11 +288,11 @@ Behavior by configured provider:
   `prompt_cache_key` have no portable effect. An `include` request cannot
   add data the target never returned. The proxy does not generate output
   images, files, audio, annotations, or logprobs during conversion.
-- For Anthropic, Google, `-chat-completions`, and non-passthrough Argo routes, the proxy converts Responses
-  `input` message/function-call/function-call-output items through `TypedRequest`, forwards
-  through the existing provider path, and returns a Responses-shaped object.
-  Converted provider paths preserve only fields with a supported compatibility
-  mapping.
+- Anthropic, Google, other Argo models, legacy Argo, and
+  `-chat-completions` use conversion. A string `input` becomes a user
+  message. Arrays can carry messages, function and custom calls, results,
+  reasoning, and compaction items. The proxy skips unsupported item types
+  with a warning.
 - Direct Responses requests preserve the `developer` role. Conversion to
   native Argo Chat Completions sends developer messages as `system`. With
   `-provider openai -chat-completions`, the proxy combines leading system
@@ -253,10 +302,28 @@ Behavior by configured provider:
   and `json_schema`. Direct Responses routes pass `text.verbosity` through.
   Native Argo Chat Completions receives it as `verbosity`. Other converted
   routes omit it, including `-provider openai -chat-completions`.
+- Direct Responses routes preserve `reasoning.mode`, `reasoning.context`,
+  and `reasoning.summary`. On conversion, those settings have no upstream
+  equivalent. Native Argo Chat Completions receives `reasoning.effort` as
+  supplied. The `-provider openai -chat-completions` path goes through the
+  Anthropic renderer, so `minimal` becomes `low` and `none` is omitted.
 - Converted Claude Anthropic-wire paths forward `max_output_tokens` when it is
   provided. When it is omitted, the proxy supplies the required
   Anthropic `max_tokens` field as `128000` for Opus models and `64000` for other
   Claude models.
+- Converted requests support function, custom, and namespace tools. On
+  routes that require functions, custom input is wrapped in an object and
+  its grammar is not enforced. The proxy merges top-level `tools` with
+  definitions from `additional_tools` input items, in that order. Duplicate
+  names after namespace flattening return HTTP 400. Unsupported hosted
+  tools such as `web_search_preview` and `file_search` are dropped with a warning.
+- With a function tool present, converted `tool_choice: "required"` sends
+  `{"type":"any"}` to Anthropic and `"required"` to native Argo Chat.
+  On the OpenAI Chat conversion it sends `"any"`, and on Google it sends
+  `AUTO`. This applies to both buffered and streamed Responses requests.
+
+### Stored responses and conversations
+
 - On converted provider paths, `store` defaults to true. Stored response and
   conversation state is written under `~/.apiproxy/sessions` unless apiproxy is
   started with `-sessions-dir`. Give each proxy process its own directory.
@@ -264,62 +331,49 @@ Behavior by configured provider:
   returned ID then cannot be retrieved or used as `previous_response_id`.
   Continuing from a stored response with an existing successor starts a
   branch. Both responses remain retrievable.
-- `previous_response_id` reloads the stored session history, preserving
+- `background:true` returns a queued response and creates local state for
+  polling and cancellation, including with `store:false`. Combining
+  background execution with `stream:true` on a converted route returns
+  HTTP 400.
+- `previous_response_id` reloads a completed response's history, preserving
   `reasoning`, `function_call`, and `function_call_output` items in order for
-  tool-call follow-ups. OpenAI reasoning items and converted Anthropic thinking
-  blocks are stored as `ReasoningBlock` sidecars rather than being flattened
-  into text. Chat Completions reasoning is stored as such and goes back to an
-  OpenAI-compatible backend in the field it came in, also through the Anthropic
-  request the converted `-provider openai` path is built from.
-- Local lifecycle endpoints are implemented for converted providers:
-  `GET /v1/responses/{id}`, `POST /v1/responses/{id}/cancel`,
-  `DELETE /v1/responses/{id}`, `GET /v1/responses/{id}/input_items`, and
-  `POST /v1/responses/input_tokens`. `POST /v1/responses/compact` is
-  implemented for direct pass-through and emulated for converted
-  providers by asking the configured backend for a compact summary and returning
-  a Responses-shaped `compaction` input item for the client to carry forward.
-  Response and conversation item list endpoints support the official `after`,
-  `limit`, and `order` pagination parameters; `include` is accepted but only
-  affects fields already present in local state.
-- Converted `/v1/responses/input_tokens` resolves stored response/conversation
-  context without mutating state. Anthropic backends use native Anthropic
-  `count_tokens`; Argo uses native Anthropic count only for Claude-routed
-  models; Google uses Gemini `countTokens`; other converted paths use the local
-  estimator.
-- Local conversation endpoints are implemented for converted providers:
-  create/retrieve/update/delete operations under `/v1/conversations`, plus
-  create/retrieve/delete/list item operations under
-  `/v1/conversations/{id}/items`. `GET /v1/conversations` is not implemented
-  because it is not part of the official OpenAI Conversations API.
-- When a direct pass-through backend is configured (`-provider=openai`, or
-  `-provider=argo`, without `-chat-completions` or `-argo-legacy`), these
-  lifecycle and conversation requests
-  resolve local state first and are forwarded upstream on a miss, so
-  passed-through and converted responses can coexist in one process.
-  `POST /v1/conversations` carries no id and is always forwarded. Lifecycle
-  retrieval returns the upstream model field unchanged when there is no client
-  request model to restore.
-- Responses function tools (`{"type":"function","name":...}`), custom tools,
-  and namespace tools map to the portable `ToolDefinition` shape. Direct
-  pass-through preserves OpenAI-only tool types. Converted provider paths log a
-  warning and drop unsupported hosted Responses tool types such as
-  `web_search_preview` and `file_search`, then continue without those tools.
-- Responses tools are read from both the top-level `tools` field and any
-  `additional_tools` input items (the Codex/GPT-5 mechanism that carries
-  developer tools inside the `input` array). Tools from both sources are merged
-  (top-level first) and converted through the same pipeline; the
-  `additional_tools` container item itself contributes no message content.
+  tool-call follow-ups. Stored Chat reasoning goes back to a Chat backend
+  in the field it came from.
+- Retrieval, deletion, cancellation, input item listing, and conversation
+  operations use local records for converted responses. With direct
+  Responses forwarding enabled, the proxy looks up the ID locally first
+  and forwards a miss upstream. `POST /v1/conversations` has no ID and goes
+  upstream in this configuration. The local `/v1/conversations` collection
+  supports `POST` and returns 405 for `GET`. The process remembers model
+  aliases by response ID for upstream retrievals. [Lifecycle endpoints](../README.md#supported-endpoints)
+- Local input item and conversation item lists support `after`, `limit`
+  (1–100, default 20), and `order` (`asc` or `desc`, default `desc`).
+  The local list handler ignores `include`. Direct lifecycle forwarding
+  passes the query string upstream.
+- The mapped model also determines where `POST /v1/responses/input_tokens`
+  and `POST /v1/responses/compact` go. Both accept a model from a locally
+  stored `previous_response_id` when it is omitted. On converted routes
+  both read any referenced history without advancing it.
+- For converted `input_tokens`, Anthropic and native Argo `claude*` use the
+  Anthropic counter, Google uses Gemini `countTokens`, and the other routes
+  estimate locally. An error from a selected native counter, including HTTP
+  404, reaches the client. The 404 fallback applies to `/v1/messages/count_tokens`.
+- Converted `compact` asks the backend for a summary with tools disabled.
+  Its output includes a `compaction` item whose `encrypted_content` field
+  holds **plain text**. Send the item back as input to carry the summary
+  into the next converted request.
+
+### Output and streams
+
 - Read converted answer text in `output[].content[]` with content type
   `output_text`.
-- `reasoning.effort` maps to portable `reasoning_effort`. Direct Responses
-  routes preserve `reasoning.mode` (`standard`, `pro`) and `reasoning.context`
-  (`auto`, `current_turn`, `all_turns`). Converted routes omit both controls.
-- Converted streaming responses are emitted as Responses SSE events after the
-  upstream provider returns. Direct Responses streams are passed through. An
-  upstream SSE `event: error` is terminal even when its JSON data does not repeat
-  `"type":"error"`; it is forwarded without a synthetic `response.failed`.
-  Converted paths that render through OpenAI-compatible Chat Completions inherit
-  the proxy's local stop enforcement for those Chat Completions streams.
+- Converted streams emit Responses SSE events as upstream chunks arrive.
+  A failure after the stream starts produces `response.failed` while the
+  client connection is writable. Direct Responses streams forward provider
+  events. An upstream `event: error` is terminal even if the data omits
+  `"type":"error"`. If a started direct stream ends without a terminal
+  Responses event, the proxy emits `response.failed` before `[DONE]` when
+  that sentinel is present.
 - Converted `reasoning` output items come from Anthropic thinking and from Chat
   Completions reasoning. A stream sends their summary as
   `response.reasoning_summary_part.added`,
@@ -353,14 +407,14 @@ curl -sS http://127.0.0.1:8082/v1/responses \
 ```
 
 If the response contains a `function_call`, use its `name` and `arguments`
-to run the function in your client. To continue a stored response, send its
-`id` as `previous_response_id` in the next request. Include an input item of
-type `function_call_output` with the original `call_id` and the result in
-`output`.
+to run the function in your client. To continue a stored response, send
+the model name in `model` and the response ID in `previous_response_id`.
+Include a `function_call_output` item with the original `call_id` and
+the result in `output`.
 
 ## Responses And Streams
 
-The fixture corpus covers the following behavior.
+The offline fixtures and proxy tests cover the following behavior.
 
 - OpenAI JSON responses with tool calls
 - OpenAI Responses JSON responses with text and function calls
